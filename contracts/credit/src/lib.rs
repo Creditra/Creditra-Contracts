@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
+};
 
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,6 +23,20 @@ pub struct CreditLineData {
     pub status: CreditStatus,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DataKey {
+    Admin,
+}
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    Unauthorized = 1,
+    AlreadyInitialized = 2,
+}
+
 /// Event emitted when a credit line lifecycle event occurs
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,14 +52,27 @@ pub struct CreditLineEvent {
 #[contract]
 pub struct Credit;
 
+fn read_admin(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("admin not set")
+}
+
+fn require_admin(env: &Env) {
+    read_admin(env).require_auth();
+}
+
 #[contractimpl]
 impl Credit {
     /// Initialize the contract (admin).
-    pub fn init(env: Env, admin: Address) -> () {
-        env.storage()
-            .instance()
-            .set(&Symbol::new(&env, "admin"), &admin);
-        ()
+    pub fn init(env: Env, admin: Address) -> Result<(), ContractError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        Ok(())
     }
 
     /// Open a new credit line for a borrower (called by backend/risk engine).
@@ -127,19 +156,30 @@ impl Credit {
 
     /// Update risk parameters (admin/risk engine).
     pub fn update_risk_parameters(
-        _env: Env,
-        _borrower: Address,
-        _credit_limit: i128,
-        _interest_rate_bps: u32,
-        _risk_score: u32,
-    ) -> () {
-        // TODO: update stored CreditLineData
-        ()
+        env: Env,
+        borrower: Address,
+        credit_limit: i128,
+        interest_rate_bps: u32,
+        risk_score: u32,
+    ) -> Result<(), ContractError> {
+        require_admin(&env);
+
+        let mut credit_line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("Credit line not found");
+        credit_line.credit_limit = credit_limit;
+        credit_line.interest_rate_bps = interest_rate_bps;
+        credit_line.risk_score = risk_score;
+        env.storage().persistent().set(&borrower, &credit_line);
+        Ok(())
     }
 
     /// Suspend a credit line (admin).
     /// Emits a CreditLineSuspended event.
-    pub fn suspend_credit_line(env: Env, borrower: Address) -> () {
+    pub fn suspend_credit_line(env: Env, borrower: Address) -> Result<(), ContractError> {
+        require_admin(&env);
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -161,7 +201,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
+        Ok(())
     }
 
     /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
@@ -176,14 +216,13 @@ impl Credit {
     ///   borrower closes while `utilized_amount != 0`.
     ///
     /// Emits a CreditLineClosed event.
-    pub fn close_credit_line(env: Env, borrower: Address, closer: Address) -> () {
+    pub fn close_credit_line(
+        env: Env,
+        borrower: Address,
+        closer: Address,
+    ) -> Result<(), ContractError> {
         closer.require_auth();
-
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&Symbol::new(&env, "admin"))
-            .expect("admin not set");
+        let admin = read_admin(&env);
 
         let mut credit_line: CreditLineData = env
             .storage()
@@ -192,7 +231,7 @@ impl Credit {
             .expect("Credit line not found");
 
         if credit_line.status == CreditStatus::Closed {
-            return ();
+            return Ok(());
         }
 
         let allowed = closer == admin || (closer == borrower && credit_line.utilized_amount == 0);
@@ -201,7 +240,7 @@ impl Credit {
             if closer == borrower {
                 panic!("cannot close: utilized amount not zero");
             }
-            panic!("unauthorized");
+            return Err(ContractError::Unauthorized);
         }
 
         credit_line.status = CreditStatus::Closed;
@@ -218,12 +257,13 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
+        Ok(())
     }
 
     /// Mark a credit line as defaulted (admin).
     /// Emits a CreditLineDefaulted event.
-    pub fn default_credit_line(env: Env, borrower: Address) -> () {
+    pub fn default_credit_line(env: Env, borrower: Address) -> Result<(), ContractError> {
+        require_admin(&env);
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -245,19 +285,27 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
+        Ok(())
     }
 
     /// Get credit line data for a borrower (view function).
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
     }
+
+    /// Get current admin.
+    pub fn get_admin(env: Env) -> Address {
+        read_admin(&env)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{
+        testutils::{Address as _, MockAuth, MockAuthInvoke},
+        IntoVal,
+    };
 
     #[test]
     fn test_init_and_open_credit_line() {
@@ -401,6 +449,7 @@ mod test {
     #[should_panic(expected = "Credit line not found")]
     fn test_suspend_nonexistent_credit_line() {
         let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
 
@@ -430,6 +479,7 @@ mod test {
     #[should_panic(expected = "Credit line not found")]
     fn test_default_nonexistent_credit_line() {
         let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
 
@@ -620,7 +670,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "unauthorized")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn test_close_credit_line_unauthorized_closer() {
         let env = Env::default();
         env.mock_all_auths();
@@ -662,5 +712,204 @@ mod test {
             client.get_credit_line(&borrower).unwrap().utilized_amount,
             500
         );
+    }
+
+    #[test]
+    fn non_admin_cannot_update_risk_params() {
+        let env = Env::default();
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: (&admin,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+        let non_admin_result = client
+            .mock_auths(&[MockAuth {
+                address: &non_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "update_risk_parameters",
+                    args: (&borrower, &2000_i128, &450_u32, &75_u32).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_update_risk_parameters(&borrower, &2000_i128, &450_u32, &75_u32);
+        assert!(non_admin_result.is_err());
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "update_risk_parameters",
+                    args: (&borrower, &2000_i128, &450_u32, &75_u32).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .update_risk_parameters(&borrower, &2000_i128, &450_u32, &75_u32);
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.credit_limit, 2000);
+        assert_eq!(credit_line.interest_rate_bps, 450);
+        assert_eq!(credit_line.risk_score, 75);
+    }
+
+    #[test]
+    fn non_admin_cannot_suspend() {
+        let env = Env::default();
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: (&admin,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+        let non_admin_result = client
+            .mock_auths(&[MockAuth {
+                address: &non_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "suspend_credit_line",
+                    args: (&borrower,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_suspend_credit_line(&borrower);
+        assert!(non_admin_result.is_err());
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "suspend_credit_line",
+                    args: (&borrower,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .suspend_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
+    }
+
+    #[test]
+    fn non_admin_cannot_admin_close() {
+        let env = Env::default();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: (&admin,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.mock_all_auths().draw_credit(&borrower, &250_i128);
+
+        let non_admin_close = client
+            .mock_auths(&[MockAuth {
+                address: &non_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "close_credit_line",
+                    args: (&borrower, &non_admin).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_close_credit_line(&borrower, &non_admin);
+        assert_eq!(non_admin_close, Err(Ok(ContractError::Unauthorized)));
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "close_credit_line",
+                    args: (&borrower, &admin).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .close_credit_line(&borrower, &admin);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
+    }
+
+    #[test]
+    fn init_cannot_change_admin_after_deployment() {
+        let env = Env::default();
+        let admin_a = Address::generate(&env);
+        let admin_b = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin_a,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: (&admin_a,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .init(&admin_a);
+
+        let second_init = client
+            .mock_auths(&[MockAuth {
+                address: &admin_b,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: (&admin_b,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_init(&admin_b);
+        assert_eq!(second_init, Err(Ok(ContractError::AlreadyInitialized)));
+        assert_eq!(client.get_admin(), admin_a);
     }
 }
