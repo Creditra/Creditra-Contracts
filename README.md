@@ -4,14 +4,14 @@ Soroban smart contracts for the Creditra adaptive credit protocol on Stellar.
 
 ## About
 
-This repo contains the **credit** contract: it will maintain credit lines, track utilization, enforce limits, and expose methods for opening lines, drawing, repaying, and updating risk parameters. The current code is a **stub** with the correct API and data types; full logic (storage, token transfers, interest) is to be implemented.
+This repo contains the **credit** contract: it maintains credit lines, tracks utilization, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. `repay_credit` integrates the Stellar token contract: the borrower must approve the credit contract and transfer the repayment amount to the contract (via `transfer_from`) before `utilized_amount` is decreased.
 
 **Contract data model:**
 
 - `CreditStatus`: Active, Suspended, Defaulted, Closed
 - `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
 
-**Methods:** `init`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
+**Methods:** `init(admin, token)`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`. `init` stores the Stellar token address used for repayments.
 
 ## Tech Stack
 
