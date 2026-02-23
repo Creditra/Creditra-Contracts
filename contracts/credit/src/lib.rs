@@ -18,7 +18,7 @@
 //! - **Validation**: Applied in `open_credit_line` and `update_risk_parameters`
 //!
 //! ### Interest Rate (in basis points)
-//! - **Minimum**: 0 bps (0%)
+//! - **Minimum**: 0 bps (0%) - implicit as u32 type
 //! - **Maximum**: 10,000 bps (100%)
 //! - **Note**: 1 basis point = 0.01%
 //! - **Validation**: Applied in `open_credit_line` and `update_risk_parameters`
@@ -28,7 +28,7 @@
 //! All input parameters are validated before storage. Invalid parameters will cause
 //! the transaction to revert with a clear error message indicating the validation failure.
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
 
 mod events;
 mod types;
@@ -44,11 +44,26 @@ use types::{CreditLineData, CreditStatus};
 /// Maximum credit limit allowed (100 million units)
 const MAX_CREDIT_LIMIT: i128 = 100_000_000;
 
-/// Minimum interest rate in basis points (0.01% = 1 bps)
-const MIN_INTEREST_RATE_BPS: u32 = 0;
-
 /// Maximum interest rate in basis points (100% = 10,000 bps)
+/// Note: Minimum is 0 bps (implicit, as interest_rate_bps is u32)
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
+
+/// Validate credit limit bounds
+fn validate_credit_limit(credit_limit: i128) {
+    if credit_limit <= 0 {
+        panic!("Credit limit must be greater than 0");
+    }
+    if credit_limit > MAX_CREDIT_LIMIT {
+        panic!("Credit limit exceeds maximum allowed");
+    }
+}
+
+/// Validate interest rate bounds (u32 is always >= 0)
+fn validate_interest_rate(interest_rate_bps: u32) {
+    if interest_rate_bps > MAX_INTEREST_RATE_BPS {
+        panic!("Interest rate exceeds maximum allowed");
+    }
+}
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
@@ -118,7 +133,7 @@ impl Credit {
     /// # Parameters
     /// - `borrower`: Address of the borrower
     /// - `credit_limit`: Credit limit in base units (must be > 0 and <= MAX_CREDIT_LIMIT)
-    /// - `interest_rate_bps`: Interest rate in basis points (must be >= MIN_INTEREST_RATE_BPS and <= MAX_INTEREST_RATE_BPS)
+    /// - `interest_rate_bps`: Interest rate in basis points (must be <= MAX_INTEREST_RATE_BPS, min is 0 as u32)
     /// - `risk_score`: Risk score for the borrower
     /// 
     /// # Panics
@@ -138,22 +153,8 @@ impl Credit {
     ) {
         require_admin_auth(&env);
         
-        // Validate credit_limit
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
-        assert!(
-            credit_limit <= MAX_CREDIT_LIMIT,
-            "credit_limit exceeds maximum allowed"
-        );
-        
-        // Validate interest_rate_bps
-        assert!(
-            interest_rate_bps >= MIN_INTEREST_RATE_BPS,
-            "interest_rate_bps below minimum allowed"
-        );
-        assert!(
-            interest_rate_bps <= MAX_INTEREST_RATE_BPS,
-            "interest_rate_bps cannot exceed 10000 (100%)"
-        );
+        validate_credit_limit(credit_limit);
+        validate_interest_rate(interest_rate_bps);
         
         assert!(risk_score <= 100, "risk_score must be between 0 and 100");
 
@@ -317,7 +318,7 @@ impl Credit {
     /// # Parameters
     /// - `borrower`: Address of the borrower
     /// - `credit_limit`: New credit limit in base units (must be > 0 and <= MAX_CREDIT_LIMIT)
-    /// - `interest_rate_bps`: New interest rate in basis points (must be >= MIN_INTEREST_RATE_BPS and <= MAX_INTEREST_RATE_BPS)
+    /// - `interest_rate_bps`: New interest rate in basis points (must be <= MAX_INTEREST_RATE_BPS, min is 0 as u32)
     /// - `risk_score`: New risk score for the borrower
     /// 
     /// # Panics
@@ -337,22 +338,8 @@ impl Credit {
     ) {
         require_admin_auth(&env);
         
-        // Validate credit_limit
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
-        assert!(
-            credit_limit <= MAX_CREDIT_LIMIT,
-            "credit_limit exceeds maximum allowed"
-        );
-
-        // Validate interest_rate_bps
-        assert!(
-            interest_rate_bps >= MIN_INTEREST_RATE_BPS,
-            "interest_rate_bps below minimum allowed"
-        );
-        assert!(
-            interest_rate_bps <= MAX_INTEREST_RATE_BPS,
-            "interest_rate_bps exceeds maximum allowed"
-        );
+        validate_credit_limit(credit_limit);
+        validate_interest_rate(interest_rate_bps);
 
         // Get existing credit line
         let mut credit_line: CreditLineData = env
