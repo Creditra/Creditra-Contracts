@@ -32,6 +32,10 @@ fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
 }
 
+/// Returns the persisted contract admin.
+///
+/// # Panics
+/// Panics if `init` has not been called yet.
 fn require_admin(env: &Env) -> Address {
     env.storage()
         .instance()
@@ -39,6 +43,10 @@ fn require_admin(env: &Env) -> Address {
         .expect("admin not set")
 }
 
+/// Enforces that the persisted admin authorized the current invocation.
+///
+/// # Panics
+/// Panics if `init` has not been called yet, or if the admin did not authorize.
 fn require_admin_auth(env: &Env) -> Address {
     let admin = require_admin(env);
     admin.require_auth();
@@ -65,9 +73,22 @@ pub struct Credit;
 
 #[contractimpl]
 impl Credit {
-    /// Initialize the contract (admin).
+    /// Initialize the contract and persist the admin address in instance storage.
+    ///
+    /// Security:
+    /// - One-time initialization only (re-initialization is rejected).
+    /// - The `admin` address must authorize this call.
+    ///
+    /// # Panics
+    /// - If contract has already been initialized.
+    /// - If `admin` has not authorized the call.
     pub fn init(env: Env, admin: Address) -> () {
-        env.storage().instance().set(&admin_key(&env), &admin);
+        let key = admin_key(&env);
+        if env.storage().instance().has(&key) {
+            panic!("already initialized");
+        }
+        admin.require_auth();
+        env.storage().instance().set(&key, &admin);
         ()
     }
 
@@ -365,8 +386,29 @@ impl Credit {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::testutils::Events;
+    use soroban_sdk::{
+        testutils::{Address as _, Events, MockAuth, MockAuthInvoke},
+        IntoVal,
+    };
+
+    fn init_with_admin_auth_only(
+        env: &Env,
+        contract_id: &Address,
+        client: &CreditClient<'_>,
+        admin: &Address,
+    ) {
+        client
+            .mock_auths(&[MockAuth {
+                address: admin,
+                invoke: &MockAuthInvoke {
+                    contract: contract_id,
+                    fn_name: "init",
+                    args: (admin.clone(),).into_val(env),
+                    sub_invokes: &[],
+                },
+            }])
+            .init(admin);
+    }
 
     #[test]
     fn test_init_and_open_credit_line() {
@@ -391,6 +433,28 @@ mod test {
         assert_eq!(credit_line.interest_rate_bps, 300);
         assert_eq!(credit_line.risk_score, 70);
         assert_eq!(credit_line.status, CreditStatus::Active);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_init_requires_admin_auth() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "already initialized")]
+    fn test_init_rejects_double_init() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.init(&admin);
     }
 
     #[test]
@@ -828,14 +892,13 @@ mod test {
     #[should_panic]
     fn test_update_risk_parameters_unauthorized_caller() {
         let env = Env::default();
-        // Do not use mock_all_auths: no auth means admin.require_auth() will fail.
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
 
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
 
-        client.init(&admin);
+        init_with_admin_auth_only(&env, &contract_id, &client, &admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &2000_i128, &400_u32, &85_u32);
     }
@@ -1041,7 +1104,7 @@ mod test {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
 
-        client.init(&admin);
+        init_with_admin_auth_only(&env, &contract_id, &client, &admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
     }
@@ -1056,7 +1119,7 @@ mod test {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
 
-        client.init(&admin);
+        init_with_admin_auth_only(&env, &contract_id, &client, &admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
     }
