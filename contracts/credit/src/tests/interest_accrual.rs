@@ -19,8 +19,6 @@
 //! - Overflow protection
 //! - Idempotency of accrual calls
 
-#![cfg(test)]
-
 use crate::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
@@ -222,9 +220,10 @@ fn test_accrual_after_multiple_periods() {
     );
 
     // Verify it's NOT simply 7× one-day interest (would be wrong for compound)
-    let one_day_interest = calculate_expected_debt(PRINCIPAL, STANDARD_RATE_BPS, ONE_DAY_SECS) - PRINCIPAL;
+    let one_day_interest =
+        calculate_expected_debt(PRINCIPAL, STANDARD_RATE_BPS, ONE_DAY_SECS) - PRINCIPAL;
     let naive_seven_day = PRINCIPAL + (one_day_interest * 7);
-    
+
     // For simple interest, these should be equal; for compound they'd differ
     // Our implementation uses simple interest, so they match
     assert!(
@@ -403,14 +402,8 @@ fn test_accrual_independent_per_borrower() {
         alice_debt, bob_debt,
         "Debts must differ for different accrual periods"
     );
-    assert!(
-        alice_debt > PRINCIPAL,
-        "Alice's debt must exceed principal"
-    );
-    assert!(
-        bob_debt > PRINCIPAL,
-        "Bob's debt must exceed principal"
-    );
+    assert!(alice_debt > PRINCIPAL, "Alice's debt must exceed principal");
+    assert!(bob_debt > PRINCIPAL, "Bob's debt must exceed principal");
 }
 
 /// # Purpose
@@ -451,7 +444,8 @@ fn test_partial_repayment_then_accrual() {
     let final_debt = client.get_effective_debt(&borrower);
 
     // Calculate what debt would be without repayment
-    let debt_without_repayment = calculate_expected_debt(PRINCIPAL, STANDARD_RATE_BPS, ONE_DAY_SECS * 30);
+    let debt_without_repayment =
+        calculate_expected_debt(PRINCIPAL, STANDARD_RATE_BPS, ONE_DAY_SECS * 30);
 
     assert!(
         final_debt < debt_without_repayment,
@@ -461,7 +455,8 @@ fn test_partial_repayment_then_accrual() {
     );
 
     // Verify final debt is approximately new_principal + 15 days interest on new_principal
-    let expected_final = calculate_expected_debt(new_principal, STANDARD_RATE_BPS, ONE_DAY_SECS * 15);
+    let expected_final =
+        calculate_expected_debt(new_principal, STANDARD_RATE_BPS, ONE_DAY_SECS * 15);
     assert!(
         (final_debt - expected_final).abs() <= TOLERANCE * 2,
         "Final debt after repayment: expected {}, got {}",
@@ -504,10 +499,7 @@ fn test_full_repayment_zeroes_debt() {
 
     let remaining_debt = client.get_effective_debt(&borrower);
 
-    assert_eq!(
-        remaining_debt, 0,
-        "Debt after full repayment must be zero"
-    );
+    assert_eq!(remaining_debt, 0, "Debt after full repayment must be zero");
 }
 
 /// # Purpose
@@ -546,7 +538,9 @@ fn test_accrual_does_not_mutate_state_on_read_only() {
     );
 
     // Verify that the stored utilized_amount hasn't changed
-    let credit_line = client.get_credit_line(&borrower).expect("Credit line must exist");
+    let credit_line = client
+        .get_credit_line(&borrower)
+        .expect("Credit line must exist");
     assert_eq!(
         credit_line.utilized_amount, PRINCIPAL,
         "View function must not mutate stored utilized_amount"
@@ -611,7 +605,7 @@ fn test_interest_overflow_protection() {
 
     // Use a very large principal (but not so large it overflows immediately)
     let large_principal = i128::MAX / 10_000;
-    
+
     client.set_utilized_amount(&borrower, &large_principal);
     client.set_borrow_rate(&borrower, &MAX_RATE_BPS);
 
@@ -731,8 +725,7 @@ fn test_get_borrow_rate() {
     let rate = client.get_borrow_rate(&borrower);
 
     assert_eq!(
-        rate,
-        STANDARD_RATE_BPS as i128,
+        rate, STANDARD_RATE_BPS as i128,
         "get_borrow_rate must return the configured rate"
     );
 }
@@ -784,11 +777,11 @@ fn test_rate_change_affects_future_accrual() {
     // Advance another 7 days
     advance_ledger(&env, ONE_DAY_SECS * 7);
     let final_debt = client.get_effective_debt(&borrower);
-    
+
     // Interest in second period should be approximately double first period
     // (on a slightly higher principal due to first period accrual)
     let second_period_interest = final_debt - debt_after_first_period;
-    
+
     // Second period interest should be roughly 2x first period interest
     // Allow some tolerance due to compounding on higher principal
     let ratio = second_period_interest as f64 / first_period_interest as f64;

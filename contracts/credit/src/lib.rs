@@ -20,7 +20,7 @@ use events::{
 use types::{CreditLineData, CreditStatus};
 
 /// Maximum interest rate in basis points (100%).
-const MAX_INTEREST_RATE_BPS: u32 = 100_00;
+const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
 /// Instance storage key for reentrancy guard.
@@ -66,9 +66,8 @@ pub struct Credit;
 #[contractimpl]
 impl Credit {
     /// Initialize the contract (admin).
-    pub fn init(env: Env, admin: Address) -> () {
+    pub fn init(env: Env, admin: Address) {
         env.storage().instance().set(&admin_key(&env), &admin);
-        ()
     }
 
     /// Open a new credit line for a borrower (called by backend/risk engine).
@@ -79,7 +78,7 @@ impl Credit {
         credit_limit: i128,
         interest_rate_bps: u32,
         risk_score: u32,
-    ) -> () {
+    ) {
         let credit_line = CreditLineData {
             borrower: borrower.clone(),
             credit_limit,
@@ -104,12 +103,11 @@ impl Credit {
                 risk_score,
             },
         );
-        ()
     }
 
     /// Draw from credit line (borrower).
     /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
+    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         set_reentrancy_guard(&env);
         borrower.require_auth();
         let mut credit_line: CreditLineData = env
@@ -137,13 +135,12 @@ impl Credit {
         env.storage().persistent().set(&borrower, &credit_line);
         clear_reentrancy_guard(&env);
         // TODO: transfer token to borrower
-        ()
     }
 
     /// Repay credit (borrower).
     /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
     /// Reduces utilized_amount by amount (capped at 0). Emits RepaymentEvent.
-    pub fn repay_credit(env: Env, borrower: Address, amount: i128) -> () {
+    pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         set_reentrancy_guard(&env);
         borrower.require_auth();
         let mut credit_line: CreditLineData = env
@@ -175,7 +172,6 @@ impl Credit {
         );
         clear_reentrancy_guard(&env);
         // TODO: accept token from borrower
-        ()
     }
 
     /// Update risk parameters for an existing credit line (admin only).
@@ -198,7 +194,7 @@ impl Credit {
         credit_limit: i128,
         interest_rate_bps: u32,
         risk_score: u32,
-    ) -> () {
+    ) {
         require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
@@ -234,12 +230,11 @@ impl Credit {
                 risk_score,
             },
         );
-        ()
     }
 
     /// Suspend a credit line (admin only).
     /// Emits a CreditLineSuspended event.
-    pub fn suspend_credit_line(env: Env, borrower: Address) -> () {
+    pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
@@ -263,7 +258,6 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
     }
 
     /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
@@ -278,7 +272,7 @@ impl Credit {
     ///   borrower closes while `utilized_amount != 0`.
     ///
     /// Emits a CreditLineClosed event.
-    pub fn close_credit_line(env: Env, borrower: Address, closer: Address) -> () {
+    pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         closer.require_auth();
 
         let admin: Address = require_admin(&env);
@@ -290,7 +284,7 @@ impl Credit {
             .expect("Credit line not found");
 
         if credit_line.status == CreditStatus::Closed {
-            return ();
+            return;
         }
 
         let allowed = closer == admin || (closer == borrower && credit_line.utilized_amount == 0);
@@ -317,12 +311,11 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
     }
 
     /// Mark a credit line as defaulted (admin only).
     /// Emits a CreditLineDefaulted event.
-    pub fn default_credit_line(env: Env, borrower: Address) -> () {
+    pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
@@ -346,7 +339,6 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        ()
     }
 
     /// Get credit line data for a borrower (view function).
@@ -362,7 +354,7 @@ impl Credit {
     /// Accrue interest for a borrower's credit line.
     /// Updates the utilized_amount and last_accrual_timestamp in storage.
     /// This is called internally before any operation that reads or modifies debt.
-    pub fn accrue_interest(env: Env, borrower: Address) -> () {
+    pub fn accrue_interest(env: Env, borrower: Address) {
         let mut credit_line: CreditLineData = match env.storage().persistent().get(&borrower) {
             Some(cl) => cl,
             None => return,
@@ -431,26 +423,26 @@ impl Credit {
 
     /// Set the borrow rate for a borrower (for testing purposes).
     /// In production, this would be controlled by risk parameters.
-    pub fn set_borrow_rate(env: Env, borrower: Address, rate_bps: u32) -> () {
+    pub fn set_borrow_rate(env: Env, borrower: Address, rate_bps: u32) {
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
-        
+
         credit_line.interest_rate_bps = rate_bps;
         env.storage().persistent().set(&borrower, &credit_line);
     }
 
     /// Set the utilized amount for a borrower (for testing purposes).
     /// In production, this would be controlled by draw_credit and repay_credit.
-    pub fn set_utilized_amount(env: Env, borrower: Address, amount: i128) -> () {
+    pub fn set_utilized_amount(env: Env, borrower: Address, amount: i128) {
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
-        
+
         credit_line.utilized_amount = amount;
         credit_line.last_accrual_timestamp = env.ledger().timestamp();
         env.storage().persistent().set(&borrower, &credit_line);
@@ -458,13 +450,13 @@ impl Credit {
 
     /// Calculate accrued debt using compound interest formula.
     /// Formula: debt = principal * (1 + rate_per_second)^seconds
-    /// 
+    ///
     /// To avoid floating point, we use fixed-point arithmetic:
     /// - BPS (basis points) = rate * 10,000 (e.g., 500 BPS = 5% annual)
     /// - Annual rate = BPS / 10,000
     /// - Per-second rate = annual_rate / SECONDS_PER_YEAR
     /// - We use approximation: debt ≈ principal * (1 + rate_per_second * seconds) for small rates
-    /// 
+    ///
     /// For production, consider using a more sophisticated compound interest calculation
     /// or a library that handles fixed-point exponentiation.
     fn calculate_accrued_debt(principal: i128, rate_bps: u32, elapsed_seconds: u64) -> i128 {
@@ -482,10 +474,10 @@ impl Credit {
         // Calculate interest using simple interest approximation for safety
         // interest = principal * (rate_bps / BPS_DIVISOR) * (elapsed_seconds / SECONDS_PER_YEAR)
         // Rearranged to avoid overflow: interest = (principal * rate_bps * elapsed_seconds) / (BPS_DIVISOR * SECONDS_PER_YEAR)
-        
+
         let rate_i128 = capped_rate as i128;
         let elapsed_i128 = elapsed_seconds as i128;
-        
+
         // Check for potential overflow before multiplication
         let max_principal = i128::MAX / rate_i128 / elapsed_i128;
         if principal > max_principal {
@@ -496,7 +488,7 @@ impl Credit {
         let interest_numerator = principal
             .saturating_mul(rate_i128)
             .saturating_mul(elapsed_i128);
-        
+
         let interest_denominator = BPS_DIVISOR * (SECONDS_PER_YEAR as i128);
         let interest = interest_numerator / interest_denominator;
 
