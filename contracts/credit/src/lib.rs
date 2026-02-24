@@ -107,6 +107,9 @@ impl Credit {
             .get(&borrower)
             .expect("Credit line not found");
         if credit_line.status != CreditStatus::Active {
+            if credit_line.status == CreditStatus::Closed {
+                panic!("credit line is closed");
+            }
             panic!("credit line is not active");
         }
         if amount <= 0 {
@@ -602,7 +605,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "credit line is not active")]
+    #[should_panic(expected = "credit line is closed")]
     fn test_draw_credit_rejected_when_closed() {
         let env = Env::default();
         env.mock_all_auths();
