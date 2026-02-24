@@ -123,6 +123,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_update_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "risk_score"
                       },
                       "val": {
