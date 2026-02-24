@@ -23,6 +23,9 @@ use types::{CreditLineData, CreditStatus};
 const MAX_INTEREST_RATE_BPS: u32 = 100_00;
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
+/// Seconds in a 365-day year.
+const SECONDS_PER_YEAR: u64 = 31_536_000;
+
 /// Instance storage key for reentrancy guard.
 fn reentrancy_key(env: &Env) -> Symbol {
     Symbol::new(env, "reentrancy")
@@ -60,6 +63,39 @@ fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
+/// Compute new utilized amount including accrued interest.
+fn compute_accrued_interest(env: &Env, credit_line: &CreditLineData) -> i128 {
+    let now = env.ledger().timestamp();
+    let time_elapsed = now.saturating_sub(credit_line.last_update_timestamp);
+
+    if time_elapsed == 0 || credit_line.utilized_amount <= 0 || credit_line.interest_rate_bps == 0 {
+        return credit_line.utilized_amount;
+    }
+
+    // interest = utilized_amount * interest_rate_bps * time_elapsed / (100_00 * SECONDS_PER_YEAR)
+    let utilized = credit_line.utilized_amount as i128;
+    let rate = credit_line.interest_rate_bps as i128;
+    let time = time_elapsed as i128;
+    let year_sec = SECONDS_PER_YEAR as i128;
+
+    // To prevent overflow we do arithmetic in i128
+    let interest = utilized
+        .checked_mul(rate)
+        .expect("overflow")
+        .checked_mul(time)
+        .expect("overflow")
+        / (100_00 * year_sec);
+
+    utilized.checked_add(interest).expect("overflow")
+}
+
+/// Helper to accrue interest strictly and update the last timestamp.
+fn update_accrued_interest(env: &Env, credit_line: &mut CreditLineData) {
+    let new_utilized = compute_accrued_interest(env, credit_line);
+    credit_line.utilized_amount = new_utilized;
+    credit_line.last_update_timestamp = env.ledger().timestamp();
+}
+
 #[contract]
 pub struct Credit;
 
@@ -87,6 +123,7 @@ impl Credit {
             interest_rate_bps,
             risk_score,
             status: CreditStatus::Active,
+            last_update_timestamp: env.ledger().timestamp(),
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
@@ -116,6 +153,8 @@ impl Credit {
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
+        update_accrued_interest(&env, &mut credit_line);
+
         if credit_line.status == CreditStatus::Closed {
             clear_reentrancy_guard(&env);
             panic!("credit line is closed");
@@ -150,6 +189,8 @@ impl Credit {
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
+        update_accrued_interest(&env, &mut credit_line);
+
         if credit_line.status == CreditStatus::Closed {
             clear_reentrancy_guard(&env);
             panic!("credit line is closed");
@@ -205,6 +246,7 @@ impl Credit {
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
+        update_accrued_interest(&env, &mut credit_line);
 
         if credit_limit < 0 {
             panic!("credit_limit must be non-negative");
@@ -348,9 +390,12 @@ impl Credit {
         ()
     }
 
-    /// Get credit line data for a borrower (view function).
+    /// Get credit line data for a borrower (view function). Updates accrued interest dynamically for display.
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
-        env.storage().persistent().get(&borrower)
+        let mut credit_line: CreditLineData = env.storage().persistent().get(&borrower)?;
+        credit_line.utilized_amount = compute_accrued_interest(&env, &credit_line);
+        // Do not update last_update_timestamp here because it's a read-only view function
+        Some(credit_line)
     }
 }
 
@@ -359,6 +404,7 @@ mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events;
+    use soroban_sdk::testutils::Ledger;
 
     #[test]
     fn test_init_and_open_credit_line() {
@@ -1065,5 +1111,90 @@ mod test {
             client.get_credit_line(&borrower).unwrap().utilized_amount,
             100
         );
+    }
+
+    #[test]
+    fn test_interest_accrual() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &10000_i128, &1000_u32, &70_u32); // 10% interest rate (1000 bps)
+
+        // Draw 1000
+        client.draw_credit(&borrower, &1000_i128);
+
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp = 31_536_000;
+        env.ledger().set(ledger_info);
+
+        // Get credit line to check effective debt
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+
+        // 10% of 1000 is 100.
+        // wait, the amount is 1000 drawn, plus 100 interest => 1100.
+        assert_eq!(credit_line.utilized_amount, 1100);
+    }
+
+    #[test]
+    fn test_interest_accrual_zero_rate() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &10000_i128, &0_u32, &70_u32); // 0% interest rate
+
+        // Draw 1000
+        client.draw_credit(&borrower, &1000_i128);
+
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp = 31_536_000;
+        env.ledger().set(ledger_info);
+
+        // Get credit line to check effective debt
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+
+        // Debt should remain 1000
+        assert_eq!(credit_line.utilized_amount, 1000);
+    }
+
+    #[test]
+    fn test_interest_accrual_large_time() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &10000_i128, &1000_u32, &70_u32); // 10% interest rate
+
+        // Draw 1000
+        client.draw_credit(&borrower, &1000_i128);
+
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp = 315_360_000;
+        env.ledger().set(ledger_info);
+
+        // Get credit line to check effective debt
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+
+        // 10% of 1000 per year for 10 years = simple interest = 1000 total interest -> 2000 total debt
+        assert_eq!(credit_line.utilized_amount, 2000);
     }
 }

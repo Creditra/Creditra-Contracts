@@ -20,4 +20,5 @@ pub struct CreditLineData {
     pub interest_rate_bps: u32,
     pub risk_score: u32,
     pub status: CreditStatus,
+    pub last_update_timestamp: u64,
 }
