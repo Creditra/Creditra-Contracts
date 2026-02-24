@@ -7,7 +7,6 @@
     [],
     [],
     [],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
@@ -15,10 +14,22 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "function_name": "default_credit_line",
+              "function_name": "update_risk_parameters",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 2000
+                  }
+                },
+                {
+                  "u32": 400
+                },
+                {
+                  "u32": 85
                 }
               ]
             }
@@ -110,7 +121,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 1000
+                          "lo": 2000
                         }
                       }
                     },
@@ -119,7 +130,7 @@
                         "symbol": "interest_rate_bps"
                       },
                       "val": {
-                        "u32": 300
+                        "u32": 400
                       }
                     },
                     {
@@ -127,7 +138,7 @@
                         "symbol": "risk_score"
                       },
                       "val": {
-                        "u32": 70
+                        "u32": 85
                       }
                     },
                     {
@@ -135,7 +146,7 @@
                         "symbol": "status"
                       },
                       "val": {
-                        "u32": 2
+                        "u32": 0
                       }
                     },
                     {
