@@ -81,8 +81,24 @@ impl Credit {
         ()
     }
 
-    /// Draw from credit line (borrower).
-    /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
+    /// @notice Draws credit for a borrower with an active credit line.
+    /// @dev Enforces positive amount, active status, remaining-limit bounds, and overflow-safe math.
+    /// @param borrower Borrower address that must authorize this call.
+    /// @param amount Draw amount; must be strictly positive.
+    ///
+    /// # Arguments
+    /// * `borrower` - Borrower address that must authorize this call.
+    /// * `amount` - Draw amount; must be strictly positive.
+    ///
+    /// # Reverts
+    /// * If the credit line does not exist.
+    /// * If `borrower` is not authorized.
+    /// * If the credit line status is not [`CreditStatus::Active`].
+    /// * If `amount <= 0`.
+    /// * If `amount` exceeds the remaining limit (`credit_limit - utilized_amount`).
+    /// * If arithmetic overflows while computing remaining/utilized amounts.
+    ///
+    /// Note: Token transfer integration is intentionally deferred.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
         borrower.require_auth();
         let mut credit_line: CreditLineData = env
@@ -90,19 +106,23 @@ impl Credit {
             .persistent()
             .get(&borrower)
             .expect("Credit line not found");
-        if credit_line.status == CreditStatus::Closed {
-            panic!("credit line is closed");
+        if credit_line.status != CreditStatus::Active {
+            panic!("credit line is not active");
         }
         if amount <= 0 {
             panic!("amount must be positive");
+        }
+        let remaining_limit = credit_line
+            .credit_limit
+            .checked_sub(credit_line.utilized_amount)
+            .expect("invalid credit line accounting");
+        if amount > remaining_limit {
+            panic!("exceeds credit limit");
         }
         let new_utilized = credit_line
             .utilized_amount
             .checked_add(amount)
             .expect("overflow");
-        if new_utilized > credit_line.credit_limit {
-            panic!("exceeds credit limit");
-        }
         credit_line.utilized_amount = new_utilized;
         env.storage().persistent().set(&borrower, &credit_line);
         // TODO: transfer token to borrower
@@ -582,7 +602,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "credit line is closed")]
+    #[should_panic(expected = "credit line is not active")]
     fn test_draw_credit_rejected_when_closed() {
         let env = Env::default();
         env.mock_all_auths();
@@ -598,6 +618,83 @@ mod test {
         client.close_credit_line(&borrower, &admin);
 
         client.draw_credit(&borrower, &100_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "credit line is not active")]
+    fn test_draw_credit_rejected_when_suspended() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.suspend_credit_line(&borrower);
+
+        client.draw_credit(&borrower, &100_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "credit line is not active")]
+    fn test_draw_credit_rejected_when_defaulted() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.default_credit_line(&borrower);
+
+        client.draw_credit(&borrower, &100_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "amount must be positive")]
+    fn test_draw_credit_rejected_when_amount_zero() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+        client.draw_credit(&borrower, &0_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds credit limit")]
+    fn test_draw_credit_rejected_when_exceeds_remaining_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+        client.draw_credit(&borrower, &300_i128);
+
+        // Remaining limit is 100. Drawing 101 must revert.
+        client.draw_credit(&borrower, &101_i128);
     }
 
     #[test]
