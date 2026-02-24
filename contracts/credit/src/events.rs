@@ -28,6 +28,17 @@ pub struct RepaymentEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when a borrower draws credit.
+/// Used for indexing and analytics (borrower, amount, new utilized amount, timestamp).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub new_utilized_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Event emitted when admin updates risk parameters for a credit line.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,6 +58,12 @@ pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: Cred
 pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("repay")), event);
+}
+
+/// Publish a draw event.
+pub fn publish_draw_event(env: &Env, event: DrawEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("draw")), event);
 }
 
 /// Publish a risk parameters updated event.
