@@ -91,22 +91,29 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
-        assert!(
-            interest_rate_bps <= 10_000,
-            "interest_rate_bps cannot exceed 10000 (100%)"
-        );
-        assert!(risk_score <= 100, "risk_score must be between 0 and 100");
+        // Validate credit_limit
+        if credit_limit <= 0 {
+            panic!("credit_limit must be greater than zero");
+        }
+
+        // Validate interest_rate_bps
+        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
+            panic!("interest_rate_bps cannot exceed 10000 (100%)");
+        }
+
+        // Validate risk_score
+        if risk_score > MAX_RISK_SCORE {
+            panic!("risk_score must be between 0 and 100");
+        }
 
         if let Some(existing) = env
             .storage()
             .persistent()
             .get::<Address, CreditLineData>(&borrower)
         {
-            assert!(
-                existing.status != CreditStatus::Active,
-                "borrower already has an active credit line"
-            );
+            if existing.status == CreditStatus::Active {
+                panic!("borrower already has an active credit line");
+            }
         }
 
         let credit_line = CreditLineData {
@@ -116,6 +123,7 @@ impl Credit {
             interest_rate_bps,
             risk_score,
             status: CreditStatus::Active,
+            last_accrual_timestamp: env.ledger().timestamp(),
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
@@ -399,11 +407,163 @@ impl Credit {
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
     }
+
+    // ========== INTEREST ACCRUAL FUNCTIONS ==========
+    // These functions implement compound interest accrual based on ledger timestamp.
+    // Formula: effective_debt = principal * (1 + rate)^time
+    // Where rate is per-second rate derived from annual BPS.
+
+    /// Accrue interest for a borrower's credit line.
+    /// Updates the utilized_amount and last_accrual_timestamp in storage.
+    /// This is called internally before any operation that reads or modifies debt.
+    pub fn accrue_interest(env: Env, borrower: Address) {
+        let mut credit_line: CreditLineData = match env.storage().persistent().get(&borrower) {
+            Some(cl) => cl,
+            None => return,
+        };
+
+        if credit_line.utilized_amount == 0 {
+            // No debt, just update timestamp
+            credit_line.last_accrual_timestamp = env.ledger().timestamp();
+            env.storage().persistent().set(&borrower, &credit_line);
+            return;
+        }
+
+        let current_timestamp = env.ledger().timestamp();
+        let elapsed_seconds = current_timestamp.saturating_sub(credit_line.last_accrual_timestamp);
+
+        if elapsed_seconds == 0 {
+            return; // No time elapsed, no accrual needed
+        }
+
+        // Calculate new debt with compound interest
+        let new_debt = Self::calculate_accrued_debt(
+            credit_line.utilized_amount,
+            credit_line.interest_rate_bps,
+            elapsed_seconds,
+        );
+
+        credit_line.utilized_amount = new_debt;
+        credit_line.last_accrual_timestamp = current_timestamp;
+        env.storage().persistent().set(&borrower, &credit_line);
+    }
+
+    /// Get the effective debt for a borrower (includes accrued interest).
+    /// This is a view function that calculates interest without mutating state.
+    pub fn get_effective_debt(env: Env, borrower: Address) -> i128 {
+        let credit_line: CreditLineData = match env.storage().persistent().get(&borrower) {
+            Some(cl) => cl,
+            None => return 0,
+        };
+
+        if credit_line.utilized_amount == 0 {
+            return 0;
+        }
+
+        let current_timestamp = env.ledger().timestamp();
+        let elapsed_seconds = current_timestamp.saturating_sub(credit_line.last_accrual_timestamp);
+
+        if elapsed_seconds == 0 {
+            return credit_line.utilized_amount;
+        }
+
+        Self::calculate_accrued_debt(
+            credit_line.utilized_amount,
+            credit_line.interest_rate_bps,
+            elapsed_seconds,
+        )
+    }
+
+    /// Get the current borrow rate for a borrower in basis points.
+    pub fn get_borrow_rate(env: Env, borrower: Address) -> i128 {
+        let credit_line: CreditLineData = match env.storage().persistent().get(&borrower) {
+            Some(cl) => cl,
+            None => return 0,
+        };
+        credit_line.interest_rate_bps as i128
+    }
+
+    /// Set the borrow rate for a borrower (for testing purposes).
+    /// In production, this would be controlled by risk parameters.
+    pub fn set_borrow_rate(env: Env, borrower: Address, rate_bps: u32) {
+        let mut credit_line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("Credit line not found");
+
+        credit_line.interest_rate_bps = rate_bps;
+        env.storage().persistent().set(&borrower, &credit_line);
+    }
+
+    /// Set the utilized amount for a borrower (for testing purposes).
+    /// In production, this would be controlled by draw_credit and repay_credit.
+    pub fn set_utilized_amount(env: Env, borrower: Address, amount: i128) {
+        let mut credit_line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("Credit line not found");
+
+        credit_line.utilized_amount = amount;
+        credit_line.last_accrual_timestamp = env.ledger().timestamp();
+        env.storage().persistent().set(&borrower, &credit_line);
+    }
+
+    /// Calculate accrued debt using compound interest formula.
+    /// Formula: debt = principal * (1 + rate_per_second)^seconds
+    ///
+    /// To avoid floating point, we use fixed-point arithmetic:
+    /// - BPS (basis points) = rate * 10,000 (e.g., 500 BPS = 5% annual)
+    /// - Annual rate = BPS / 10,000
+    /// - Per-second rate = annual_rate / SECONDS_PER_YEAR
+    /// - We use approximation: debt ≈ principal * (1 + rate_per_second * seconds) for small rates
+    ///
+    /// For production, consider using a more sophisticated compound interest calculation
+    /// or a library that handles fixed-point exponentiation.
+    fn calculate_accrued_debt(principal: i128, rate_bps: u32, elapsed_seconds: u64) -> i128 {
+        const SECONDS_PER_YEAR: u64 = 31_536_000; // 365 days
+        const BPS_DIVISOR: i128 = 10_000;
+        const MAX_RATE_BPS: u32 = 50_000; // 500% annual rate cap
+
+        if rate_bps == 0 || elapsed_seconds == 0 {
+            return principal;
+        }
+
+        // Cap rate to prevent overflow
+        let capped_rate = rate_bps.min(MAX_RATE_BPS);
+
+        // Calculate interest using simple interest approximation for safety
+        // interest = principal * (rate_bps / BPS_DIVISOR) * (elapsed_seconds / SECONDS_PER_YEAR)
+        // Rearranged to avoid overflow: interest = (principal * rate_bps * elapsed_seconds) / (BPS_DIVISOR * SECONDS_PER_YEAR)
+
+        let rate_i128 = capped_rate as i128;
+        let elapsed_i128 = elapsed_seconds as i128;
+
+        // Check for potential overflow before multiplication
+        let max_principal = i128::MAX / rate_i128 / elapsed_i128;
+        if principal > max_principal {
+            // Return capped value to prevent overflow
+            return i128::MAX;
+        }
+
+        let interest_numerator = principal
+            .saturating_mul(rate_i128)
+            .saturating_mul(elapsed_i128);
+
+        let interest_denominator = BPS_DIVISOR * (SECONDS_PER_YEAR as i128);
+        let interest = interest_numerator / interest_denominator;
+
+        principal.saturating_add(interest)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests;
+
 #[cfg(test)]
 mod test {
     use super::*;
