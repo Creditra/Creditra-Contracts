@@ -174,8 +174,8 @@ impl Credit {
             panic!("amount must be positive");
         }
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         if credit_line.borrower != borrower {
             clear_reentrancy_guard(&env);
@@ -231,8 +231,8 @@ impl Credit {
         set_reentrancy_guard(&env);
         borrower.require_auth();
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         if credit_line.borrower != borrower {
             clear_reentrancy_guard(&env);
@@ -279,8 +279,8 @@ impl Credit {
     ) {
         require_admin_auth(&env);
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         if credit_limit < 0 {
             panic!("credit_limit must be non-negative");
@@ -315,8 +315,8 @@ impl Credit {
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         credit_line.status = CreditStatus::Suspended;
         set_credit_line_data(&env, &borrower, &credit_line);
@@ -344,8 +344,8 @@ impl Credit {
 
         let admin: Address = require_admin(&env);
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         if credit_line.status == CreditStatus::Closed {
             return;
@@ -380,8 +380,8 @@ impl Credit {
     pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
-        let mut credit_line: CreditLineData = get_credit_line_data(&env, &borrower)
-            .expect("Credit line not found");
+        let mut credit_line: CreditLineData =
+            get_credit_line_data(&env, &borrower).expect("Credit line not found");
 
         credit_line.status = CreditStatus::Defaulted;
         set_credit_line_data(&env, &borrower, &credit_line);
@@ -1461,7 +1461,7 @@ mod test_credit_line_storage {
         let token_id = env.register_stellar_asset_contract_v2(token_admin);
         let token_address = token_id.address();
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin, &token_address);
 
         // No credit line opened — should return None
@@ -1478,16 +1478,16 @@ mod test_credit_line_storage {
 
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
-        
+
         let contract_id = env.register(Credit, ());
         let token_admin = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin);
         let token_address = token_id.address();
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin, &token_address);
         client.open_credit_line(&borrower, &5000_i128, &250_u32, &60_u32);
-        
+
         let credit_line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(credit_line.borrower, borrower);
         assert_eq!(credit_line.credit_limit, 5000);
@@ -1512,13 +1512,13 @@ mod test_credit_line_storage {
         let token_id = env.register_stellar_asset_contract_v2(token_admin);
         let token_address = token_id.address();
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin, &token_address);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        
+
         // Overwrite via update_risk_parameters
         client.update_risk_parameters(&borrower, &3000_i128, &500_u32, &90_u32);
-        
+
         let credit_line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(credit_line.credit_limit, 3000);
         assert_eq!(credit_line.interest_rate_bps, 500);
@@ -1541,17 +1541,17 @@ mod test_credit_line_storage {
         let token_id = env.register_stellar_asset_contract_v2(token_admin);
         let token_address = token_id.address();
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin, &token_address);
         client.open_credit_line(&borrower_a, &1000_i128, &300_u32, &70_u32);
         client.open_credit_line(&borrower_b, &2000_i128, &400_u32, &80_u32);
-        
+
         // Suspend borrower_a — borrower_b must be unaffected
         client.suspend_credit_line(&borrower_a);
-        
+
         let line_a = client.get_credit_line(&borrower_a).unwrap();
         let line_b = client.get_credit_line(&borrower_b).unwrap();
-        
+
         assert_eq!(line_a.status, CreditStatus::Suspended);
         assert_eq!(line_b.status, CreditStatus::Active); // isolation confirmed
         assert_eq!(line_b.credit_limit, 2000);
@@ -1571,10 +1571,10 @@ mod test_credit_line_storage {
         let token_id = env.register_stellar_asset_contract_v2(token_admin);
         let token_address = token_id.address();
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin, &token_address);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        
+
         let credit_line = client.get_credit_line(&borrower).unwrap();
         // Timestamp should be set (non-zero in a real ledger; 0 is valid in test env)
         let _ = credit_line.last_update_timestamp; // field exists and is readable
