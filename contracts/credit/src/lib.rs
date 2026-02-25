@@ -129,19 +129,19 @@ impl Credit {
     }
 
     /// Open a new credit line for a borrower (called by backend/risk engine).
-    /// 
+    ///
     /// # Parameters
     /// - `borrower`: Address of the borrower
     /// - `credit_limit`: Credit limit in base units (must be > 0 and <= MAX_CREDIT_LIMIT)
     /// - `interest_rate_bps`: Interest rate in basis points (must be <= MAX_INTEREST_RATE_BPS, min is 0 as u32)
     /// - `risk_score`: Risk score for the borrower
-    /// 
+    ///
     /// # Panics
     /// - If credit_limit is <= 0
     /// - If credit_limit exceeds MAX_CREDIT_LIMIT
     /// - If interest_rate_bps is outside the valid range
     /// - If risk_score is > 100
-    /// 
+    ///
     /// # Events
     /// Emits a CreditLineOpened event on success.
     pub fn open_credit_line(
@@ -152,10 +152,10 @@ impl Credit {
         risk_score: u32,
     ) {
         require_admin_auth(&env);
-        
+
         validate_credit_limit(credit_limit);
         validate_interest_rate(interest_rate_bps);
-        
+
         assert!(risk_score <= 100, "risk_score must be between 0 and 100");
 
         let credit_line = CreditLineData {
@@ -167,9 +167,7 @@ impl Credit {
             status: CreditStatus::Active,
         };
 
-        env.storage()
-            .persistent()
-            .set(&borrower, &credit_line);
+        env.storage().persistent().set(&borrower, &credit_line);
 
         // Emit CreditLineOpened event
         publish_credit_line_event(
@@ -314,19 +312,19 @@ impl Credit {
     }
 
     /// Update risk parameters (admin/risk engine).
-    /// 
+    ///
     /// # Parameters
     /// - `borrower`: Address of the borrower
     /// - `credit_limit`: New credit limit in base units (must be > 0 and <= MAX_CREDIT_LIMIT)
     /// - `interest_rate_bps`: New interest rate in basis points (must be <= MAX_INTEREST_RATE_BPS, min is 0 as u32)
     /// - `risk_score`: New risk score for the borrower
-    /// 
+    ///
     /// # Panics
     /// - If credit line does not exist
     /// - If credit_limit is <= 0
     /// - If credit_limit exceeds MAX_CREDIT_LIMIT
     /// - If interest_rate_bps is outside the valid range
-    /// 
+    ///
     /// # Events
     /// Emits a RiskParametersUpdated event on success.
     pub fn update_risk_parameters(
@@ -337,7 +335,7 @@ impl Credit {
         risk_score: u32,
     ) {
         require_admin_auth(&env);
-        
+
         validate_credit_limit(credit_limit);
         validate_interest_rate(interest_rate_bps);
 
@@ -353,9 +351,7 @@ impl Credit {
         credit_line.interest_rate_bps = interest_rate_bps;
         credit_line.risk_score = risk_score;
 
-        env.storage()
-            .persistent()
-            .set(&borrower, &credit_line);
+        env.storage().persistent().set(&borrower, &credit_line);
 
         // Emit RiskParametersUpdated event
         publish_risk_parameters_updated(
@@ -373,7 +369,7 @@ impl Credit {
     /// Emits a CreditLineSuspended event.
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
-        
+
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -381,9 +377,7 @@ impl Credit {
             .expect("Credit line not found");
 
         credit_line.status = CreditStatus::Suspended;
-        env.storage()
-            .persistent()
-            .set(&borrower, &credit_line);
+        env.storage().persistent().set(&borrower, &credit_line);
 
         // Emit CreditLineSuspended event
         publish_credit_line_event(
@@ -424,9 +418,7 @@ impl Credit {
         }
 
         credit_line.status = CreditStatus::Closed;
-        env.storage()
-            .persistent()
-            .set(&borrower, &credit_line);
+        env.storage().persistent().set(&borrower, &credit_line);
 
         // Emit CreditLineClosed event
         publish_credit_line_event(
@@ -447,7 +439,7 @@ impl Credit {
     /// Emits a CreditLineDefaulted event.
     pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
-        
+
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -455,9 +447,7 @@ impl Credit {
             .expect("Credit line not found");
 
         credit_line.status = CreditStatus::Defaulted;
-        env.storage()
-            .persistent()
-            .set(&borrower, &credit_line);
+        env.storage().persistent().set(&borrower, &credit_line);
 
         // Emit CreditLineDefaulted event
         publish_credit_line_event(
