@@ -127,7 +127,11 @@ impl Credit {
         }
 
         // Check if borrower already has an active credit line
-        if let Some(existing) = env.storage().persistent().get::<Address, CreditLineData>(&borrower) {
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<Address, CreditLineData>(&borrower)
+        {
             if existing.status == CreditStatus::Active {
                 panic!("borrower already has an active credit line");
             }
