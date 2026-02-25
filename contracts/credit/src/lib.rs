@@ -111,7 +111,29 @@ impl Credit {
         credit_limit: i128,
         interest_rate_bps: u32,
         risk_score: u32,
-    ) -> () {
+    ) {
+        // Validate credit_limit
+        if credit_limit <= 0 {
+            panic!("credit_limit must be greater than zero");
+        }
+
+        // Validate interest_rate_bps
+        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
+            panic!("interest_rate_bps cannot exceed 10000 (100%)");
+        }
+
+        // Validate risk_score
+        if risk_score > MAX_RISK_SCORE {
+            panic!("risk_score must be between 0 and 100");
+        }
+
+        // Check if borrower already has an active credit line
+        if let Some(existing) = env.storage().persistent().get::<Address, CreditLineData>(&borrower) {
+            if existing.status == CreditStatus::Active {
+                panic!("borrower already has an active credit line");
+            }
+        }
+
         let credit_line = CreditLineData {
             borrower: borrower.clone(),
             credit_limit,
@@ -2513,6 +2535,8 @@ mod test_close_utilized {
         let events_after = env.events().all().len();
 
         // Exactly one event must be emitted by close_credit_line.
+        // Note: draw_credit also emits an event, but we capture events_before after the draw,
+        // so we should see exactly 1 new event from close_credit_line.
         assert_eq!(
             events_after,
             events_before + 1,
