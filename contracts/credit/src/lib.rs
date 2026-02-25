@@ -15,8 +15,9 @@ mod types;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol};
 
 use events::{
-    publish_credit_line_event, publish_repayment_event, publish_risk_parameters_updated,
-    CreditLineEvent, RepaymentEvent, RiskParametersUpdatedEvent,
+    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
+    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
+    RiskParametersUpdatedEvent,
 };
 use types::{CreditLineData, CreditStatus};
 
@@ -73,6 +74,9 @@ pub struct Credit;
 impl Credit {
     /// Initialize the contract with admin and reserve token address.
     pub fn init(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&admin_key(&env)) {
+            panic!("Already initialized");
+        }
         env.storage().instance().set(&admin_key(&env), &admin);
         env.storage().instance().set(&token_key(&env), &token);
     }
@@ -91,6 +95,7 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
+        require_admin_auth(&env);
         assert!(credit_limit > 0, "credit_limit must be greater than zero");
         assert!(
             interest_rate_bps <= 10_000,
@@ -108,7 +113,6 @@ impl Credit {
                 "borrower already has an active credit line"
             );
         }
-
         let credit_line = CreditLineData {
             borrower: borrower.clone(),
             credit_limit,
@@ -162,7 +166,6 @@ impl Credit {
             clear_reentrancy_guard(&env);
             panic!("Borrower mismatch for credit line");
         }
-
         if credit_line.status == CreditStatus::Closed {
             clear_reentrancy_guard(&env);
             panic!("credit line is closed");
@@ -205,6 +208,17 @@ impl Credit {
 
         clear_reentrancy_guard(&env);
 
+        let timestamp = env.ledger().timestamp();
+        publish_drawn_event(
+            &env,
+            DrawnEvent {
+                borrower: borrower.clone(),
+                amount,
+                new_utilized_amount: credit_line.utilized_amount,
+                timestamp,
+            },
+        );
+
         env.events().publish(
             (symbol_short!("credit"), symbol_short!("draw")),
             (borrower, amount, new_utilized),
@@ -228,7 +242,6 @@ impl Credit {
             clear_reentrancy_guard(&env);
             panic!("Borrower mismatch for credit line");
         }
-
         if credit_line.status == CreditStatus::Closed {
             clear_reentrancy_guard(&env);
             panic!("credit line is closed");
@@ -330,6 +343,7 @@ impl Credit {
         );
     }
 
+    /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
     /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
     ///
     /// # Arguments
@@ -1010,12 +1024,13 @@ mod test {
     #[should_panic]
     fn test_update_risk_parameters_unauthorized_caller() {
         let env = Env::default();
-        let borrower = Address::generate(&env);
         let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let token = Address::generate(&env);
         let contract_id = env.register(Credit, ());
-        let (token_address, _) = setup_token(&env, &contract_id, 0);
         let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin, &token_address);
+
+        client.init(&admin, &token);
         client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &2_000, &400_u32, &85_u32);
     }
@@ -1106,6 +1121,48 @@ mod test {
     }
 
     #[test]
+    #[should_panic]
+    fn test_open_credit_line_unauthorized() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let token = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin, &token);
+        // No mock_all_auths for admin
+        client.open_credit_line(&borrower, &1000, &300, &70);
+    }
+
+    #[test]
+    fn test_get_nonexistent_credit_line() {
+        let env = Env::default();
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        assert!(client.get_credit_line(&borrower).is_none());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_draw_credit_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let (token_address, _) = setup_token(&env, &contract_id, 0);
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin, &token_address);
+        client.open_credit_line(&borrower, &i128::MAX, &300, &70);
+        client.draw_credit(&borrower, &i128::MAX);
+        client.draw_credit(&borrower, &1);
+    }
+
+    #[test]
     fn test_repay_credit_saturates_at_zero() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1155,6 +1212,24 @@ mod test {
         client.repay_credit(&borrower, &100);
     }
 
+    #[test]
+    fn test_repay_credit_succeeds_when_suspended() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) =
+            setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+
+        client.draw_credit(&borrower, &300);
+        client.suspend_credit_line(&borrower);
+
+        client.repay_credit(&borrower, &100);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Suspended);
+        assert_eq!(line.utilized_amount, 200);
+    }
+
     // ── admin-only enforcement ────────────────────────────────────────────────
 
     #[test]
@@ -1166,8 +1241,11 @@ mod test {
         let contract_id = env.register(Credit, ());
         let (token_address, _) = setup_token(&env, &contract_id, 0);
         let client = CreditClient::new(&env, &contract_id);
+
         client.init(&admin, &token_address);
-        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.open_credit_line(&borrower, &1_000, &300, &70);
+
+        // No mock_all_auths
         client.suspend_credit_line(&borrower);
     }
 
@@ -1180,9 +1258,45 @@ mod test {
         let contract_id = env.register(Credit, ());
         let (token_address, _) = setup_token(&env, &contract_id, 0);
         let client = CreditClient::new(&env, &contract_id);
+
         client.init(&admin, &token_address);
-        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.open_credit_line(&borrower, &1_000, &300, &70);
+
+        // No mock_all_auths
         client.default_credit_line(&borrower);
+    }
+
+    #[test]
+    #[should_panic(expected = "Already initialized")]
+    fn test_init_twice() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin, &token);
+        client.init(&admin, &token);
+    }
+
+    #[test]
+    #[should_panic(expected = "Credit line not active")]
+    fn test_draw_credit_suspended() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        let (token_address, _) = setup_token(&env, &contract_id, 0);
+        client.init(&admin, &token_address);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.suspend_credit_line(&borrower);
+
+        client.draw_credit(&borrower, &100_i128);
     }
 
     // ── reentrancy guard ──────────────────────────────────────────────────────
