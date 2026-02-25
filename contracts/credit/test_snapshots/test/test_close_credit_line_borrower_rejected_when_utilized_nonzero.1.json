@@ -248,6 +248,14 @@
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "reentrancy"
+                        },
+                        "val": {
+                          "bool": false
+                        }
                       }
                     ]
                   }
