@@ -603,7 +603,7 @@ mod test {
     }
 
     #[test]
-    fn test_close_credit_line_borrower_when_utilized_zero() {
+    fn close_credit_line_utilized_zero_succeeds() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -615,6 +615,8 @@ mod test {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
         client.close_credit_line(&borrower, &borrower);
 
         let credit_line = client.get_credit_line(&borrower).unwrap();
@@ -691,7 +693,7 @@ mod test {
 
     #[test]
     #[should_panic(expected = "credit line is closed")]
-    fn test_draw_credit_rejected_when_closed() {
+    fn draw_after_close_reverts() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -703,14 +705,20 @@ mod test {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.close_credit_line(&borrower, &admin);
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+
+        client.close_credit_line(&borrower, &borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
 
         client.draw_credit(&borrower, &100_i128);
     }
 
     #[test]
     #[should_panic(expected = "credit line is closed")]
-    fn test_repay_credit_rejected_when_closed() {
+    fn repay_after_close_reverts() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -722,7 +730,13 @@ mod test {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.close_credit_line(&borrower, &admin);
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+
+        client.close_credit_line(&borrower, &borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
 
         client.repay_credit(&borrower, &100_i128);
     }
