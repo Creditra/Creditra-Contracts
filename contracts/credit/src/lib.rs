@@ -101,6 +101,11 @@ impl Credit {
             panic!("interest_rate_bps cannot exceed 10000 (100%)");
         }
 
+        // Validate risk_score
+        if risk_score > MAX_RISK_SCORE {
+            panic!("risk_score must be between 0 and 100");
+        }
+
         if let Some(existing) = env
             .storage()
             .persistent()
