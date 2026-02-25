@@ -21,7 +21,6 @@ use types::{CreditLineData, CreditStatus};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
-const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
 
@@ -85,7 +84,6 @@ pub struct Credit;
 #[contractimpl]
 impl Credit {
     /// Initialize the contract (admin).
-    pub fn init(env: Env, admin: Address) {
     pub fn init(env: Env, admin: Address) {
         env.storage().instance().set(&admin_key(&env), &admin);
     }
@@ -184,7 +182,6 @@ impl Credit {
     /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
     /// Reduces utilized_amount by amount (capped at 0). Emits RepaymentEvent.
     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
-    pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         set_reentrancy_guard(&env);
         borrower.require_auth();
         let mut credit_line: CreditLineData = env
@@ -244,7 +241,6 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-    ) {
         require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
@@ -285,7 +281,6 @@ impl Credit {
     /// Suspend a credit line (admin only).
     /// Emits a CreditLineSuspended event.
     pub fn suspend_credit_line(env: Env, borrower: Address) {
-    pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
@@ -324,7 +319,6 @@ impl Credit {
     ///
     /// Emits a CreditLineClosed event.
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
-    pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         closer.require_auth();
 
         let admin: Address = require_admin(&env);
@@ -336,7 +330,6 @@ impl Credit {
             .expect("Credit line not found");
 
         if credit_line.status == CreditStatus::Closed {
-            return;
             return;
         }
 
@@ -368,7 +361,6 @@ impl Credit {
 
     /// Mark a credit line as defaulted (admin only).
     /// Emits a CreditLineDefaulted event.
-    pub fn default_credit_line(env: Env, borrower: Address) {
     pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
 
