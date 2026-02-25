@@ -11,13 +11,20 @@
 mod events;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, Env, Symbol};
 
 use events::{
     publish_credit_line_event, publish_repayment_event, publish_risk_parameters_updated,
     CreditLineEvent, RepaymentEvent, RiskParametersUpdatedEvent,
 };
 use types::{CreditLineData, CreditStatus};
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    Unauthorized = 1,
+}
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 100_00;
@@ -62,17 +69,6 @@ fn clear_reentrancy_guard(env: &Env) {
 
 #[contract]
 pub struct Credit;
-
-fn read_admin(env: &Env) -> Address {
-    env.storage()
-        .instance()
-        .get(&DataKey::Admin)
-        .expect("admin not set")
-}
-
-fn require_admin(env: &Env) {
-    read_admin(env).require_auth();
-}
 
 #[contractimpl]
 impl Credit {
@@ -273,7 +269,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        Ok(())
+        ()
     }
 
     /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
@@ -360,7 +356,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
-        Ok(())
+        ()
     }
 
     /// Get credit line data for a borrower (view function).
@@ -370,7 +366,7 @@ impl Credit {
 
     /// Get current admin.
     pub fn get_admin(env: Env) -> Address {
-        read_admin(&env)
+        require_admin(&env)
     }
 }
 
