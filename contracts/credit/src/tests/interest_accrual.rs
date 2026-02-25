@@ -88,7 +88,8 @@ fn setup_env() -> (Env, CreditClient<'static>, Address) {
     let client = CreditClient::new(&env, &contract_id);
 
     // Initialize contract and open credit line
-    client.init(&admin);
+    let token = Address::generate(&env);
+    client.init(&admin, &token);
     client.open_credit_line(&borrower, &(PRINCIPAL * 10), &STANDARD_RATE_BPS, &70);
 
     (env, client, borrower)
