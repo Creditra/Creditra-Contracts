@@ -162,7 +162,7 @@ impl Credit {
 
     /// Draw from credit line (borrower).
     /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
+    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         set_reentrancy_guard(&env);
         borrower.require_auth();
 
