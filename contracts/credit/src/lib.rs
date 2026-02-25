@@ -412,11 +412,11 @@ impl Credit {
 #[cfg(test)]
 mod test {
     use super::*;
+    use soroban_sdk::token;
     use soroban_sdk::{
         testutils::{Address as _, MockAuth, MockAuthInvoke},
         IntoVal,
     };
-    use soroban_sdk::token;
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
