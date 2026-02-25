@@ -37,7 +37,23 @@ cd creditra-contracts
 cargo build --release -p creditra-credit
 ```
 
-WASM output (after a typical Soroban setup) is under `target/wasm32-unknown-unknown/release/creditra_credit.wasm` (name may vary by crate name).
+### WASM build (release profile, size-optimized)
+
+The workspace uses a release profile tuned for contract size (opt-level `"z"`, LTO, strip symbols). To build the contract for Soroban:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+```
+
+WASM output is at `target/wasm32-unknown-unknown/release/creditra_credit.wasm`. Size is kept small by:
+
+- `opt-level = "z"` (optimize for size)
+- `lto = true` (link-time optimization)
+- `strip = "symbols"` (no debug symbols in release)
+- `codegen-units = 1` (better optimization)
+
+Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay within practical Soroban deployment limits.
 
 ### Run tests
 
