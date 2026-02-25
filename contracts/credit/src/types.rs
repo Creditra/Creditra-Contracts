@@ -20,4 +20,8 @@ pub struct CreditLineData {
     pub interest_rate_bps: u32,
     pub risk_score: u32,
     pub status: CreditStatus,
+    /// Ledger timestamp of the last update to this credit line.
+    /// Used for interest accrual calculations — records when
+    /// utilized_amount last changed.
+    pub last_update_timestamp: u64,
 }
