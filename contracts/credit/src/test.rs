@@ -566,3 +566,166 @@ fn test_get_credit_line_returns_none_for_unknown_borrower() {
     // No credit line opened for this address
     assert!(client.get_credit_line(&unknown).is_none());
 }
+
+// ===== Additional Coverage Tests =====
+
+#[test]
+fn test_update_risk_parameters_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+    // Update risk parameters
+    client.update_risk_parameters(&borrower, &2000_i128, &500_u32, &85_u32);
+
+    let credit_line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(credit_line.credit_limit, 2000);
+    assert_eq!(credit_line.interest_rate_bps, 500);
+    assert_eq!(credit_line.risk_score, 85);
+}
+
+#[test]
+#[should_panic(expected = "Credit limit must be greater than 0")]
+fn test_update_risk_parameters_zero_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+    client.update_risk_parameters(&borrower, &0_i128, &500_u32, &85_u32);
+}
+
+#[test]
+#[should_panic(expected = "Credit limit exceeds maximum allowed")]
+fn test_update_risk_parameters_exceeds_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+    client.update_risk_parameters(&borrower, &100_000_001_i128, &500_u32, &85_u32);
+}
+
+#[test]
+#[should_panic(expected = "Interest rate exceeds maximum allowed")]
+fn test_update_risk_parameters_interest_rate_too_high() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+    client.update_risk_parameters(&borrower, &2000_i128, &10_001_u32, &85_u32);
+}
+
+#[test]
+#[should_panic(expected = "Credit line not found")]
+fn test_update_risk_parameters_nonexistent() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+
+    client.update_risk_parameters(&borrower, &2000_i128, &500_u32, &85_u32);
+}
+
+#[test]
+fn test_close_credit_line_by_borrower() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+
+    // Borrower can close when utilized_amount is 0
+    client.close_credit_line(&borrower, &borrower);
+
+    let credit_line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(credit_line.status, CreditStatus::Closed);
+}
+
+#[test]
+#[should_panic(expected = "Already initialized")]
+fn test_init_twice() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+    client.init(&admin, &token);
+}
+
+#[test]
+fn test_validation_functions_directly() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower1 = Address::generate(&env);
+    let borrower2 = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.init(&admin, &token);
+
+    // Test various valid combinations to ensure validation functions are covered
+    client.open_credit_line(&borrower1, &50_000_000_i128, &5_000_u32, &50_u32);
+    client.open_credit_line(&borrower2, &1_i128, &0_u32, &10_u32);
+
+    // Verify both were created successfully
+    assert!(client.get_credit_line(&borrower1).is_some());
+    assert!(client.get_credit_line(&borrower2).is_some());
+}
