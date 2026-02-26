@@ -38,6 +38,16 @@ pub struct RiskParametersUpdatedEvent {
     pub risk_score: u32,
 }
 
+/// Event emitted when a borrower draws credit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawnEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub new_utilized_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
@@ -47,6 +57,12 @@ pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: Cred
 pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("repay")), event);
+}
+
+/// Publish a drawn event.
+pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("drawn")), event);
 }
 
 /// Publish a risk parameters updated event.
