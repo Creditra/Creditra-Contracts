@@ -28,7 +28,7 @@
 //! All input parameters are validated before storage. Invalid parameters will cause
 //! the transaction to revert with a clear error message indicating the validation failure.
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol};
 
 mod events;
 mod types;
@@ -67,15 +67,15 @@ fn validate_interest_rate(interest_rate_bps: u32) {
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
-fn admin_key(env: &Env) -> Symbol {
+fn admin_key(_env: &Env) -> Symbol {
     symbol_short!("admin")
 }
 
-fn token_key(env: &Env) -> Symbol {
+fn token_key(_env: &Env) -> Symbol {
     symbol_short!("token")
 }
 
-fn reentrancy_key(env: &Env) -> Symbol {
+fn reentrancy_key(_env: &Env) -> Symbol {
     symbol_short!("reent")
 }
 
@@ -104,14 +104,6 @@ fn require_admin(env: &Env) -> Address {
 fn require_admin_auth(env: &Env) {
     let admin = require_admin(env);
     admin.require_auth();
-}
-
-// ── Token client ──────────────────────────────────────────────────────────────
-
-mod token {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/release/soroban_token_contract.wasm"
-    );
 }
 
 #[contract]
@@ -157,6 +149,18 @@ impl Credit {
         validate_interest_rate(interest_rate_bps);
 
         assert!(risk_score <= 100, "risk_score must be between 0 and 100");
+
+        // Check if borrower already has an active credit line
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<Address, CreditLineData>(&borrower)
+        {
+            assert!(
+                existing.status != CreditStatus::Active,
+                "borrower already has an active credit line"
+            );
+        }
 
         let credit_line = CreditLineData {
             borrower: borrower.clone(),
