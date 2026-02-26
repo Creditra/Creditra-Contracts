@@ -1,11 +1,45 @@
 {
   "generators": {
+<<<<<<< HEAD
+    "address": 3,
+=======
     "address": 2,
+>>>>>>> origin/main
     "nonce": 0
   },
   "auth": [
     [],
+<<<<<<< HEAD
+    [],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "function_name": "draw_credit",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 250
+                  }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ]
+=======
     []
+>>>>>>> origin/main
   ],
   "ledger": {
     "protocol_version": 22,
@@ -21,6 +55,136 @@
         {
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+<<<<<<< HEAD
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 801925984706572462
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "borrower"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "credit_limit"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "interest_rate_bps"
+                      },
+                      "val": {
+                        "u32": 300
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_accrual_timestamp"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "risk_score"
+                      },
+                      "val": {
+                        "u32": 70
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "status"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "utilized_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 250
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+=======
+>>>>>>> origin/main
             "key": "ledger_key_contract_instance",
             "durability": "persistent"
           }
@@ -31,7 +195,11 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
+<<<<<<< HEAD
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+=======
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+>>>>>>> origin/main
                 "key": "ledger_key_contract_instance",
                 "durability": "persistent",
                 "val": {
@@ -39,7 +207,28 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
+<<<<<<< HEAD
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "admin"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "reentrancy"
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      }
+                    ]
+=======
                     "storage": null
+>>>>>>> origin/main
                   }
                 }
               }
@@ -76,16 +265,27 @@
     {
       "event": {
         "ext": "v0",
+<<<<<<< HEAD
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+=======
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+>>>>>>> origin/main
         "type_": "contract",
         "body": {
           "v0": {
             "topics": [
               {
+<<<<<<< HEAD
+                "symbol": "credit"
+              },
+              {
+                "symbol": "draw"
+=======
                 "symbol": "credit_draw"
               },
               {
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+>>>>>>> origin/main
               }
             ],
             "data": {
@@ -97,7 +297,11 @@
                   "val": {
                     "i128": {
                       "hi": 0,
+<<<<<<< HEAD
+                      "lo": 250
+=======
                       "lo": 500
+>>>>>>> origin/main
                     }
                   }
                 },
@@ -106,17 +310,29 @@
                     "symbol": "borrower"
                   },
                   "val": {
+<<<<<<< HEAD
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+=======
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+>>>>>>> origin/main
                   }
                 },
                 {
                   "key": {
+<<<<<<< HEAD
+                    "symbol": "new_utilized_amount"
+=======
                     "symbol": "new_utilized"
+>>>>>>> origin/main
                   },
                   "val": {
                     "i128": {
                       "hi": 0,
+<<<<<<< HEAD
+                      "lo": 250
+=======
                       "lo": 500
+>>>>>>> origin/main
                     }
                   }
                 },
