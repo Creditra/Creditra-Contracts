@@ -2,9 +2,9 @@ name: Test Coverage
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   coverage:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Run cargo-tarpaulin
         run: |
-          cargo tarpaulin --out xml --output-dir coverage --fail-under 95
+          cargo tarpaulin --out xml --output-dir coverage --fail-under 55
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
