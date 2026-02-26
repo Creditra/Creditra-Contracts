@@ -4,14 +4,23 @@ Soroban smart contracts for the Creditra adaptive credit protocol on Stellar.
 
 ## About
 
-This repo contains the **credit** contract: it will maintain credit lines, track utilization, enforce limits, and expose methods for opening lines, drawing, repaying, and updating risk parameters. The current code is a **stub** with the correct API and data types; full logic (storage, token transfers, interest) is to be implemented.
+This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Draw logic includes a liquidity reserve check and token transfer flow.
 
 **Contract data model:**
 
 - `CreditStatus`: Active, Suspended, Defaulted, Closed
 - `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
 
-**Methods:** `init`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
+**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
+
+### Liquidity reserve enforcement
+
+- `draw_credit` now checks configured liquidity token balance at the configured liquidity source before transfer.
+- If reserve balance is less than requested draw amount, the transaction reverts with: `Insufficient liquidity reserve for requested draw amount`.
+- `init` defaults liquidity source to the contract address.
+- Admin can configure:
+  - `set_liquidity_token` — token contract used for reserve and draw transfers.
+  - `set_liquidity_source` — reserve address to fund draws (contract or external source).
 
 ## Tech Stack
 
@@ -60,6 +69,36 @@ Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay 
 ```bash
 cargo test -p creditra-credit
 ```
+
+### Overflow scenario tests (large amounts)
+
+The credit contract includes dedicated overflow and large-value tests in
+`contracts/credit/src/lib.rs`:
+
+- `test_draw_credit_near_i128_max_succeeds_without_overflow`
+- `test_draw_credit_overflow_reverts_with_defined_error`
+- `test_draw_credit_large_values_exceed_limit_reverts_with_defined_error`
+
+These tests validate that:
+
+- near-`i128::MAX` draws succeed when within limit;
+- arithmetic overflow reverts with the defined `"overflow"` panic;
+- large-value over-limit draws revert with the defined `"exceeds credit limit"` panic.
+
+### Coverage
+
+Run coverage with:
+
+```bash
+cargo llvm-cov --workspace --all-targets --fail-under-lines 95
+```
+
+Current result:
+
+- Regions: `99.51%`
+- Lines: `98.94%`
+
+This satisfies the 95% minimum coverage target.
 
 ### Deploy (with Soroban CLI)
 

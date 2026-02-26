@@ -14,8 +14,18 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "function_name": "",
-              "args": []
+              "function_name": "draw_credit",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "i128": {
+                    "hi": 9223372036854775807,
+                    "lo": 18446744073709551605
+                  }
+                }
+              ]
             }
           },
           "sub_invocations": []
@@ -104,8 +114,8 @@
                       },
                       "val": {
                         "i128": {
-                          "hi": 0,
-                          "lo": 1000
+                          "hi": 9223372036854775807,
+                          "lo": 18446744073709551613
                         }
                       }
                     },
@@ -115,14 +125,6 @@
                       },
                       "val": {
                         "u32": 300
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "last_accrual_timestamp"
-                      },
-                      "val": {
-                        "u64": 0
                       }
                     },
                     {
@@ -147,8 +149,8 @@
                       },
                       "val": {
                         "i128": {
-                          "hi": 0,
-                          "lo": 0
+                          "hi": 9223372036854775807,
+                          "lo": 18446744073709551605
                         }
                       }
                     }
@@ -198,18 +200,6 @@
                         },
                         "val": {
                           "bool": false
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "LiquiditySource"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                         }
                       }
                     ]
