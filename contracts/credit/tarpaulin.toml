@@ -1,0 +1,4 @@
+[tarpaulin]
+# Exclude token transfer implementation lines that require full token contract setup
+# These are from upstream and weren't covered in their tests either
+exclude-files = []
