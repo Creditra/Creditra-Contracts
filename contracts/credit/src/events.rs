@@ -60,6 +60,7 @@ pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
 }
 
 /// Publish a drawn event.
+#[allow(dead_code)]
 pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn")), event);
