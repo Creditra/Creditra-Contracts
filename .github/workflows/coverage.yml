@@ -16,9 +16,14 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
 
-      - name: Install cargo-tarpaulin
-        uses: taiki-e/install-action@cargo-tarpaulin
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -27,16 +32,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-tarpaulin-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-cov-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
 
-      - name: Run cargo-tarpaulin
+      - name: Run llvm-cov
         run: |
-          cargo tarpaulin --out xml --output-dir coverage --fail-under 95
+          cargo llvm-cov --workspace --all-targets --lcov --output-path coverage/lcov.info --fail-under-lines 95
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage/tarpaulin-report.xml
+          files: ./coverage/lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Creditra/Creditra-Contracts
