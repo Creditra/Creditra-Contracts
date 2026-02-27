@@ -16,6 +16,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
 
       - name: Run tests
         run: cargo test -p creditra-credit

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::unused_unit)]
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
 //!
@@ -27,7 +28,7 @@ pub enum ContractError {
 }
 
 /// Maximum interest rate in basis points (100%).
-const MAX_INTEREST_RATE_BPS: u32 = 100_00;
+const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
 /// Instance storage key for reentrancy guard.
@@ -617,7 +618,10 @@ mod test {
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
 
-        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            0
+        );
         client.close_credit_line(&borrower, &borrower);
 
         let credit_line = client.get_credit_line(&borrower).unwrap();
@@ -706,7 +710,10 @@ mod test {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            0
+        );
 
         client.close_credit_line(&borrower, &borrower);
         assert_eq!(
@@ -731,7 +738,10 @@ mod test {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            0
+        );
 
         client.close_credit_line(&borrower, &borrower);
         assert_eq!(
