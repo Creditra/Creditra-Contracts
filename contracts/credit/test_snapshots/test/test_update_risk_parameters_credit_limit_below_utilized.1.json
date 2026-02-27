@@ -129,6 +129,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_rate_update_ts"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "risk_score"
                       },
                       "val": {
@@ -200,6 +208,18 @@
                         },
                         "val": {
                           "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LiquiditySource"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                         }
                       }
                     ]

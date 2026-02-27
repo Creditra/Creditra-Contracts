@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, 'feature/**']
+    branches: [main, master, develop, "feature/**"]
   pull_request:
     branches: [main, master, develop]
 
@@ -10,9 +10,13 @@ defaults:
   run:
     shell: bash
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    name: Test
+  checks:
+    name: Format, Lint, Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,7 +26,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -38,11 +42,47 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Lint (clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Build
         run: cargo build --release
 
       - name: Test
-        run: cargo test --release
+        run: cargo test --workspace
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-cov-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cov-
+
+      - name: Enforce line coverage >= 95%
+        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 
   build-wasm:
     name: Build WASM
@@ -70,3 +110,11 @@ jobs:
 
       - name: Build contract (WASM)
         run: cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+
+      - name: Report WASM size
+        run: |
+          WASM_PATH="target/wasm32-unknown-unknown/release/creditra_credit.wasm"
+          if [ -f "$WASM_PATH" ]; then
+            SIZE_BYTES=$(stat -c%s "$WASM_PATH")
+            echo "WASM size: $SIZE_BYTES bytes ($((SIZE_BYTES / 1024)) KB)"
+          fi
