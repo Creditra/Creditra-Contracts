@@ -32,22 +32,10 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "function_name": "open_credit_line",
+              "function_name": "set_liquidity_token",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000
-                  }
-                },
-                {
-                  "u32": 300
-                },
-                {
-                  "u32": 70
+                  "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
                 }
               ]
             }
@@ -56,6 +44,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -214,6 +203,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_rate_update_ts"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "risk_score"
                       },
                       "val": {
@@ -281,14 +278,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "token"
-                        },
-                        "val": {
-                          "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
-                        }
-                      },
-                      {
-                        "key": {
                           "vec": [
                             {
                               "symbol": "LiquiditySource"
@@ -297,6 +286,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LiquidityToken"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
                         }
                       }
                     ]

@@ -42,6 +42,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Lint (clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
 

@@ -4,6 +4,13 @@ Soroban smart contracts for the Creditra adaptive credit protocol on Stellar.
 
 ## About
 
+This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Token transfers and interest accrual are still TODO.
+
+**Behavior notes:**
+
+- after `suspend_credit_line`, `draw_credit` for that borrower reverts
+- after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
+- `repay_credit` remains allowed while suspended or defaulted
 This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Draw logic includes a liquidity reserve check and token transfer flow.
 
 **Contract data model:**
@@ -11,6 +18,7 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - `CreditStatus`: Active, Suspended, Defaulted, Closed
 - `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
 
+**Methods:** `init`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
 **Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
 
 ### Liquidity reserve enforcement
@@ -18,6 +26,7 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - `draw_credit` now checks configured liquidity token balance at the configured liquidity source before transfer.
 - If reserve balance is less than requested draw amount, the transaction reverts with: `Insufficient liquidity reserve for requested draw amount`.
 - `init` defaults liquidity source to the contract address.
+- `repay_credit` (when a liquidity token is configured) uses `transfer_from` to move tokens from the borrower to the configured liquidity source; borrowers must approve an allowance for the credit contract.
 - Admin can configure:
   - `set_liquidity_token` — token contract used for reserve and draw transfers.
   - `set_liquidity_source` — reserve address to fund draws (contract or external source).
