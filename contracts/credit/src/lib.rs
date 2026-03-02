@@ -178,6 +178,7 @@ impl Credit {
             interest_rate_bps,
             risk_score,
             status: CreditStatus::Active,
+            last_rate_update_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
