@@ -71,6 +71,11 @@ Initializes the contract with an admin address. Must be called once before any o
 |---|---|---|
 | `admin` | `Address` | Address authorized for admin operations |
 
+Security behavior:
+- `init` is one-time only. A second call reverts with `already initialized`.
+- `admin` must authorize `init` (`admin.require_auth()`).
+- Admin is persisted in instance storage and treated as immutable in this version.
+
 ---
 
 ### `open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)`
@@ -211,7 +216,10 @@ Returns the credit line data for a borrower, or `None` if not found. View functi
 | `get_rate_change_limits` | Anyone (view) |
 | `get_credit_line` | Anyone (view) |
 
-> Note: On-chain authorization via `require_auth()` is not yet enforced in all functions. This is planned for a future release.
+Admin-only methods enforce authorization using the persisted admin:
+- `update_risk_parameters`
+- `suspend_credit_line`
+- `default_credit_line`
 
 ---
 
