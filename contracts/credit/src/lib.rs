@@ -51,7 +51,14 @@
 //!
 //! When status is Defaulted: `draw_credit` is disabled; `repay_credit` is allowed.
 //!
-//! # Reentrancy
+//! ## Overview
+//! This contract manages credit lines for borrowers, allowing them to draw and repay funds, with risk and lifecycle management.
+//!
+//! ## Security
+//! - All entrypoints that accept an `amount` parameter (draw_credit, repay_credit) require `amount > 0` and will revert with `"amount must be positive"` if not.
+//! - Reentrancy guard is used on draw_credit and repay_credit as a defense-in-depth measure.
+//!
+//! ## Reentrancy
 //! Soroban token transfers (e.g. Stellar Asset Contract) do not invoke callbacks back into
 //! the caller. This contract uses a reentrancy guard on draw_credit and repay_credit as a
 //! defense-in-depth measure; if a token or future integration ever called back, the guard
@@ -196,9 +203,27 @@ pub struct Credit;
 
 #[contractimpl]
 impl Credit {
+    /// @notice Initialize the contract with admin and reserve token address.
+    /// @param env The contract environment
+    /// @param admin The admin address
+    /// @param token The reserve token address
+    pub fn init(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&admin_key(&env)) {
+            panic!("Already initialized");
+        }
     /// Initialize the contract (admin).
     pub fn init(env: Env, admin: Address) {
         env.storage().instance().set(&admin_key(&env), &admin);
+        env.storage().instance().set(&token_key(&env), &token);
+    }
+
+    /// @notice Open a new credit line for a borrower (called by backend/risk engine).
+    /// @param env The contract environment
+    /// @param borrower The borrower's address
+    /// @param credit_limit The maximum amount the borrower can draw (must be > 0)
+    /// @param interest_rate_bps Interest rate in basis points (max 10000)
+    /// @param risk_score Risk score (max 100)
+    /// @dev Panics if credit_limit <= 0, interest_rate_bps > 10000, risk_score > 100, or an active credit line exists
     /// Initialize the contract with an admin address.
     ///
     /// Must be called exactly once after deployment before any other
@@ -334,6 +359,12 @@ impl Credit {
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
 
 
+    /// @notice Draw from credit line: verifies limit, updates utilized_amount, and transfers the protocol token from the contract reserve to the borrower.
+    /// @param env The contract environment
+    /// @param borrower The borrower's address
+    /// @param amount The amount to draw (must be > 0)
+    /// @dev Panics if credit line not found, closed, not active, exceeds credit limit, or amount <= 0. Uses a reentrancy guard.
+    /// @custom:security Throws `"amount must be positive"` if amount is zero or negative.
     /// Draw from credit line: verifies limit, updates utilized_amount,
     /// and transfers the protocol token from the contract reserve to the borrower.
     ///
@@ -518,6 +549,12 @@ impl Credit {
         ()
     }
 
+    /// @notice Repay credit (borrower).
+    /// @param env The contract environment
+    /// @param borrower The borrower's address
+    /// @param amount The amount to repay (must be > 0)
+    /// @dev Reverts if credit line does not exist, is Closed, or borrower has not authorized. Reduces utilized_amount by amount (capped at 0). Emits RepaymentEvent.
+    /// @custom:security Throws `"amount must be positive"` if amount is zero or negative.
     /// Repay credit (borrower).
     /// Allowed when status is Active, Suspended, or Defaulted. Reverts if credit line does not exist,
     /// is Closed, or borrower has not authorized. Reduces utilized_amount by amount (capped at 0).
