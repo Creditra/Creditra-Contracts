@@ -1,4 +1,4 @@
- #![no_std]
+#![no_std]
 #![allow(clippy::unused_unit)]
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
