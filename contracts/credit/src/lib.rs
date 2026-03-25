@@ -2,7 +2,7 @@
 #![allow(clippy::unused_unit)]
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
-//!
+
 //! # Status transitions
 //!
 //! | From    | To        | Trigger |
@@ -1541,5 +1541,293 @@ mod test_smoke_coverage {
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
+    }
+}
+
+#[cfg(test)]
+mod test_coverage_gaps {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::StellarAssetClient;
+
+    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        (client, admin, borrower)
+    }
+
+    // ── update_risk_parameters: negative credit_limit ────────────────────────
+
+    #[test]
+    #[should_panic(expected = "credit_limit must be non-negative")]
+    fn update_risk_params_negative_limit_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.update_risk_parameters(&borrower, &-1, &500_u32, &60_u32);
+    }
+
+    // ── update_risk_parameters: limit below utilized amount ──────────────────
+
+    #[test]
+    #[should_panic(expected = "credit_limit cannot be less than utilized amount")]
+    fn update_risk_params_limit_below_utilized_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.set_liquidity_token(&token_id.address());
+        StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        client.draw_credit(&borrower, &500);
+        // Try to set limit below current utilization of 500
+        client.update_risk_parameters(&borrower, &400, &500_u32, &60_u32);
+    }
+
+    // ── update_risk_parameters: interest_rate_bps over 10_000 ───────────────
+
+    #[test]
+    #[should_panic(expected = "interest_rate_bps exceeds maximum")]
+    fn update_risk_params_rate_too_high_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.update_risk_parameters(&borrower, &1_000, &10_001_u32, &60_u32);
+    }
+
+    // ── update_risk_parameters: risk_score over 100 ──────────────────────────
+
+    #[test]
+    #[should_panic(expected = "risk_score exceeds maximum")]
+    fn update_risk_params_score_too_high_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.update_risk_parameters(&borrower, &1_000, &500_u32, &101_u32);
+    }
+
+    // ── close_credit_line: unauthorized closer (not admin, not borrower) ─────
+
+    #[test]
+    #[should_panic(expected = "unauthorized")]
+    fn close_credit_line_unauthorized_closer_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = base_setup(&env);
+        let stranger = Address::generate(&env);
+        client.close_credit_line(&borrower, &stranger);
+    }
+
+    // ── close_credit_line: borrower attempts close with non-zero utilization ─
+
+    #[test]
+    #[should_panic(expected = "cannot close: utilized amount not zero")]
+    fn close_credit_line_borrower_with_utilization_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.set_liquidity_token(&token_id.address());
+        StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        client.draw_credit(&borrower, &200);
+        // Borrower tries to close while still owing
+        client.close_credit_line(&borrower, &borrower);
+    }
+
+    // ── reinstate_credit_line: not defaulted → panics ────────────────────────
+
+    #[test]
+    #[should_panic(expected = "credit line is not defaulted")]
+    fn reinstate_non_defaulted_active_line_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        // Line is Active, not Defaulted
+        client.reinstate_credit_line(&borrower);
+    }
+
+    #[test]
+    #[should_panic(expected = "credit line is not defaulted")]
+    fn reinstate_suspended_line_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.suspend_credit_line(&borrower);
+        // Line is Suspended, not Defaulted
+        client.reinstate_credit_line(&borrower);
+    }
+
+    // ── open_credit_line: allows reopening after Closed status ───────────────
+
+    #[test]
+    fn open_credit_line_succeeds_after_closed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, borrower) = base_setup(&env);
+        client.close_credit_line(&borrower, &admin);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
+        // Should succeed: existing line is Closed, not Active
+        client.open_credit_line(&borrower, &500, &300_u32, &50_u32);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
+    }
+
+    #[test]
+    fn open_credit_line_succeeds_after_defaulted() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.default_credit_line(&borrower);
+        // Should succeed: existing line is Defaulted, not Active
+        client.open_credit_line(&borrower, &500, &300_u32, &50_u32);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
+    }
+
+    // ── draw_credit: amount <= 0 early-exit clears reentrancy guard ──────────
+
+    #[test]
+    #[should_panic(expected = "amount must be positive")]
+    fn draw_credit_zero_amount_reverts_and_guard_cleared() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        client.draw_credit(&borrower, &0);
+    }
+
+    // ── draw_credit: defaulted line rejects draw ──────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "credit line is defaulted")]
+    fn draw_credit_on_defaulted_line_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.set_liquidity_token(&token_id.address());
+        StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        client.default_credit_line(&borrower);
+        client.draw_credit(&borrower, &100);
+    }
+
+    // ── draw_credit: closed line uses ContractError path ─────────────────────
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #4)")]
+    fn draw_credit_on_closed_line_reverts_with_contract_error() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.set_liquidity_token(&token_id.address());
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        client.close_credit_line(&borrower, &admin);
+        client.draw_credit(&borrower, &100);
+    }
+
+    // ── update_risk_parameters: rate change interval passes ──────────────────
+
+    #[test]
+    fn rate_change_after_interval_succeeds() {
+        use soroban_sdk::testutils::Ledger;
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.set_rate_change_limits(&1_000_u32, &86_400_u64);
+        env.ledger().set_timestamp(100);
+        client.update_risk_parameters(&borrower, &1_000, &600_u32, &60_u32);
+        // Advance past the minimum interval
+        env.ledger().set_timestamp(100 + 86_400 + 1);
+        client.update_risk_parameters(&borrower, &1_000, &700_u32, &60_u32);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+            700
+        );
+    }
+
+    // ── suspend_credit_line from Defaulted → panic (not Active) ─────────────
+
+    #[test]
+    #[should_panic(expected = "Only active credit lines can be suspended")]
+    fn suspend_defaulted_line_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = base_setup(&env);
+        client.default_credit_line(&borrower);
+        client.suspend_credit_line(&borrower);
+    }
+
+    // ── close_credit_line: idempotent on already-Closed line ─────────────────
+
+    #[test]
+    fn close_credit_line_idempotent_when_already_closed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, admin, borrower) = base_setup(&env);
+        client.close_credit_line(&borrower, &admin);
+        // Second close should return early, no panic
+        client.close_credit_line(&borrower, &admin);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
+    }
+
+    // ── draw_credit: overflow protection ─────────────────────────────────────
+
+    #[test]
+    #[should_panic]
+    fn draw_credit_overflow_on_utilized_amount_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.set_liquidity_token(&token_id.address());
+        // credit_limit and utilized pushed to i128::MAX to trigger overflow
+        env.as_contract(&contract_id, || {
+            let line = CreditLineData {
+                borrower: borrower.clone(),
+                credit_limit: i128::MAX,
+                utilized_amount: i128::MAX,
+                interest_rate_bps: 500,
+                risk_score: 60,
+                status: CreditStatus::Active,
+                last_rate_update_ts: 0,
+            };
+            env.storage().persistent().set(&borrower, &line);
+        });
+        StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
+        client.draw_credit(&borrower, &1);
     }
 }
