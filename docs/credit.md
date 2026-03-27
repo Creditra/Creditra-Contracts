@@ -35,6 +35,7 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | `Suspended` | 1 | Credit line is temporarily suspended |
 | `Defaulted` | 2 | Borrower has defaulted; draw disabled, repay allowed |
 | `Closed` | 3 | Credit line has been closed |
+| `Restricted` | 4 | Credit limit decreased below utilized amount; excess must be repaid |
 
 ### Status transitions
 
@@ -45,8 +46,11 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | Defaulted | Active | Admin calls `reinstate_credit_line`. |
 | Defaulted | Suspended | Admin calls `suspend_credit_line`. |
 | Defaulted | Closed | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. |
+| Active | Restricted | Admin decreases credit limit below `utilized_amount` via `update_risk_parameters`. |
+| Restricted | Active | Borrower repays enough to bring `utilized_amount` ≤ `credit_limit`, or admin increases limit above `utilized_amount`. |
 
 When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is allowed.
+When status is **Restricted**: `draw_credit` is disabled; `repay_credit` is allowed and may reactivate the line.
 
 ### `CreditLineEvent`
 Emitted on every lifecycle state change.
@@ -88,7 +92,7 @@ Emits: `("credit", "opened")` event.
 ---
 
 ### `draw_credit(env, borrower, amount)`
-Draw funds from an active credit line. Requires status **Active**; reverts if status is Suspended, Defaulted, or Closed.
+Draw funds from an active credit line. Requires status **Active**; reverts if status is Suspended, Defaulted, Restricted, or Closed.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -101,7 +105,7 @@ Draw funds from an active credit line. Verifies limit, updates utilized amount, 
 ---
 
 ### `repay_credit(env, borrower, amount)`
-Repay drawn funds. Allowed when status is **Active**, **Suspended**, or **Defaulted**. Reverts if credit line does not exist, is Closed, or borrower has not authorized.
+Repay drawn funds. Allowed when status is **Active**, **Suspended**, **Defaulted**, or **Restricted**. Reverts if credit line does not exist, is Closed, or borrower has not authorized.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -126,9 +130,28 @@ Update the risk parameters for an existing credit line. Admin-only.
 | Parameter | Type | Description |
 |---|---|---|
 | `borrower` | `Address` | Borrower whose credit line to update |
-| `credit_limit` | `i128` | New credit limit (must be ≥ current `utilized_amount`) |
+| `credit_limit` | `i128` | New credit limit (can be below `utilized_amount`) |
 | `interest_rate_bps` | `u32` | New interest rate in basis points (0–10000) |
 | `risk_score` | `u32` | New risk score (0–100) |
+
+#### Credit Limit Decrease Behavior
+
+When `credit_limit` is decreased below the current `utilized_amount`:
+
+- The credit line status changes to **Restricted**
+- `utilized_amount` remains unchanged (borrower must repay excess)
+- `draw_credit` is disabled until excess is repaid or limit is increased
+- A `("credit", "limit_dec")` event is emitted with details
+
+When `credit_limit` is decreased but remains ≥ `utilized_amount`:
+
+- The credit line remains **Active**
+- Normal operation continues
+
+When `credit_limit` is increased or unchanged:
+
+- Normal behavior applies
+- If currently Restricted, increasing limit above `utilized_amount` reactivates to **Active**
 
 #### Rate-change limits (optional, backward-compatible)
 When a `RateChangeConfig` has been set via `set_rate_change_limits`, the following
@@ -231,9 +254,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `10` | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
 | `11` | `Reentrancy` | Reentrancy detected during cross-contract calls. |
 | `12` | `Overflow` | Math overflow occurred during calculation. |
-
----
-
+| `13` | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
 ## Events
 
 | Topic | Event Type Symbol | Emitted By | Description |
@@ -244,6 +265,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `("credit", "closed")` | `closed` | `close_credit_line` | Credit line closed |
 | `("credit", "default")` | `default` | `default_credit_line` | Credit line defaulted |
 | `("credit", "reinstate")` | `reinstate` | `reinstate_credit_line` | Credit line reinstated to Active |
+| `("credit", "limit_dec")` | `limit_dec` | `update_risk_parameters` | Credit limit decreased below utilized amount |
 
 ---
 

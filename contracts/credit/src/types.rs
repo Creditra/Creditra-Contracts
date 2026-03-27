@@ -9,6 +9,8 @@ pub enum CreditStatus {
     Suspended = 1,
     Defaulted = 2,
     Closed = 3,
+    /// Credit limit was decreased below utilized amount; excess must be repaid.
+    Restricted = 4,
 }
 
 #[soroban_sdk::contracterror]
@@ -39,6 +41,8 @@ pub enum ContractError {
     Reentrancy = 11,
     /// Math overflow occurred during calculation.
     Overflow = 12,
+    /// Credit limit decrease requires immediate repayment of excess amount.
+    LimitDecreaseRequiresRepayment = 13,
 }
 
 /// Stored credit line for a borrower.

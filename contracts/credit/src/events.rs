@@ -48,6 +48,18 @@ pub struct DrawnEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when credit limit is decreased below utilized amount.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LimitDecreaseEvent {
+    pub borrower: Address,
+    pub old_limit: i128,
+    pub new_limit: i128,
+    pub utilized_amount: i128,
+    pub excess_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
@@ -69,4 +81,10 @@ pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
 pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("risk_upd")), event);
+}
+
+/// Publish a limit decrease event.
+pub fn publish_limit_decrease_event(env: &Env, event: LimitDecreaseEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("limit_dec")), event);
 }

@@ -29,8 +29,8 @@ use soroban_sdk::{
 };
 
 use events::{
-    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
+    publish_credit_line_event, publish_drawn_event, publish_limit_decrease_event, publish_repayment_event,
+    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, LimitDecreaseEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
 use types::{CreditLineData, CreditStatus};
@@ -283,6 +283,11 @@ impl Credit {
             panic!("credit line is closed");
         }
 
+        if credit_line.status == CreditStatus::Restricted {
+            clear_reentrancy_guard(&env);
+            panic!("credit line is restricted - repay excess amount first");
+        }
+
         let updated_utilized = credit_line
             .utilized_amount
             .checked_add(amount)
@@ -346,6 +351,12 @@ impl Credit {
         }
         let new_utilized = credit_line.utilized_amount.saturating_sub(amount).max(0);
         credit_line.utilized_amount = new_utilized;
+        
+        // If credit line was Restricted and utilization is now within limit, reactivate it
+        if credit_line.status == CreditStatus::Restricted && new_utilized <= credit_line.credit_limit {
+            credit_line.status = CreditStatus::Active;
+        }
+        
         env.storage().persistent().set(&borrower, &credit_line);
 
         let timestamp = env.ledger().timestamp();
@@ -394,8 +405,39 @@ impl Credit {
         if credit_limit < 0 {
             panic!("credit_limit must be non-negative");
         }
-        if credit_limit < credit_line.utilized_amount {
-            panic!("credit_limit cannot be less than utilized amount");
+        
+        // Handle credit limit decrease vs utilized amount
+        let old_limit = credit_line.credit_limit;
+        let is_limit_decrease = credit_limit < old_limit;
+        let excess_amount = if is_limit_decrease && credit_limit < credit_line.utilized_amount {
+            credit_line.utilized_amount - credit_limit
+        } else {
+            0
+        };
+        
+        if excess_amount > 0 {
+            // Limit decreased below utilized amount - place in Restricted status
+            credit_line.credit_limit = credit_limit;
+            credit_line.status = CreditStatus::Restricted;
+            
+            // Emit limit decrease event
+            let timestamp = env.ledger().timestamp();
+            publish_limit_decrease_event(
+                &env,
+                LimitDecreaseEvent {
+                    borrower: borrower.clone(),
+                    old_limit,
+                    new_limit: credit_limit,
+                    utilized_amount: credit_line.utilized_amount,
+                    excess_amount,
+                    timestamp,
+                },
+            );
+            
+            // Note: utilized_amount remains unchanged until borrower repays
+        } else {
+            // Normal limit increase or decrease within utilization
+            credit_line.credit_limit = credit_limit;
         }
         if interest_rate_bps > MAX_INTEREST_RATE_BPS {
             panic!("interest_rate_bps exceeds maximum");
@@ -404,7 +446,6 @@ impl Credit {
             panic!("risk_score exceeds maximum");
         }
 
-        credit_line.credit_limit = credit_limit;
         credit_line.interest_rate_bps = interest_rate_bps;
         credit_line.risk_score = risk_score;
         env.storage().persistent().set(&borrower, &credit_line);
@@ -2132,5 +2173,226 @@ use soroban_sdk::testutils::Events;
         // Current repay implementation is state-only; token balances/allowances are unchanged.
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
+    }
+
+    // ========== Credit Limit Decrease vs Utilization Tests ==========
+
+    /// Test credit limit decrease within utilization (normal case)
+    #[test]
+    fn test_update_risk_parameters_limit_decrease_within_utilization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &400_i128);
+
+        // Decrease limit but still above utilized amount
+        client.update_risk_parameters(&borrower, &600_i128, &350_u32, &75_u32);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.credit_limit, 600);
+        assert_eq!(credit_line.utilized_amount, 400);
+        assert_eq!(credit_line.status, CreditStatus::Active);
+        assert_eq!(credit_line.interest_rate_bps, 350);
+        assert_eq!(credit_line.risk_score, 75);
+    }
+
+    /// Test credit limit decrease below utilized amount (Restricted status case)
+    #[test]
+    fn test_update_risk_parameters_limit_decrease_below_utilization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.credit_limit, 400);
+        assert_eq!(credit_line.utilized_amount, 600); // unchanged
+        assert_eq!(credit_line.status, CreditStatus::Restricted);
+        assert_eq!(credit_line.interest_rate_bps, 350);
+        assert_eq!(credit_line.risk_score, 75);
+    }
+
+    /// Test that draws are blocked when credit line is Restricted
+    #[test]
+    #[should_panic(expected = "credit line is restricted - repay excess amount first")]
+    fn test_draw_credit_blocked_when_restricted() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount to trigger Restricted status
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        // Try to draw while Restricted - should panic
+        client.draw_credit(&borrower, &50_i128);
+    }
+
+    /// Test that repayment reactivates Restricted credit line when utilization is within limit
+    #[test]
+    fn test_repay_credit_reactivates_restricted_credit_line() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount to trigger Restricted status
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        let credit_line_restricted = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line_restricted.status, CreditStatus::Restricted);
+
+        // Repay enough to bring utilization within limit
+        client.repay_credit(&borrower, &300_i128);
+
+        let credit_line_active = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line_active.utilized_amount, 300);
+        assert_eq!(credit_line_active.credit_limit, 400);
+        assert_eq!(credit_line_active.status, CreditStatus::Active);
+    }
+
+    /// Test that partial repayment keeps credit line Restricted if still over limit
+    #[test]
+    fn test_partial_repayment_keeps_restricted_status() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount to trigger Restricted status
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        // Partial repayment that doesn't bring utilization within limit
+        client.repay_credit(&borrower, &100_i128);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.utilized_amount, 500);
+        assert_eq!(credit_line.credit_limit, 400);
+        assert_eq!(credit_line.status, CreditStatus::Restricted); // Still restricted
+    }
+
+    /// Test credit limit increase from Restricted status
+    #[test]
+    fn test_increase_limit_from_restricted_status() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount to trigger Restricted status
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        let credit_line_restricted = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line_restricted.status, CreditStatus::Restricted);
+
+        // Increase limit above utilized amount
+        client.update_risk_parameters(&borrower, &800_i128, &400_u32, &80_u32);
+
+        let credit_line_active = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line_active.credit_limit, 800);
+        assert_eq!(credit_line_active.utilized_amount, 600);
+        assert_eq!(credit_line_active.status, CreditStatus::Active); // Should be active now
+        assert_eq!(credit_line_active.interest_rate_bps, 400);
+        assert_eq!(credit_line_active.risk_score, 80);
+    }
+
+    /// Test limit decrease event emission
+    #[test]
+    fn test_limit_decrease_event_emission() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit below utilized amount
+        client.update_risk_parameters(&borrower, &400_i128, &350_u32, &75_u32);
+
+        // Check that limit decrease event was emitted
+        let events = env.events().all();
+        let limit_decrease_events: Vec<_> = events
+            .into_iter()
+            .filter(|event| {
+                event.topics[0] == Symbol::new(&env, "credit") 
+                && event.topics[1] == Symbol::new(&env, "limit_dec")
+            })
+            .collect();
+
+        assert_eq!(limit_decrease_events.len(), 1);
+    }
+
+    /// Test edge case: limit decrease exactly to utilized amount
+    #[test]
+    fn test_limit_decrease_exactly_to_utilized_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600_i128);
+
+        // Decrease limit exactly to utilized amount
+        client.update_risk_parameters(&borrower, &600_i128, &350_u32, &75_u32);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.credit_limit, 600);
+        assert_eq!(credit_line.utilized_amount, 600);
+        assert_eq!(credit_line.status, CreditStatus::Active); // Should remain active
     }
 }
