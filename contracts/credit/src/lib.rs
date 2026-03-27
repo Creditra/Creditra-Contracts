@@ -128,7 +128,11 @@ impl Credit {
         require_admin_auth(&env);
 
         // Validation: token cannot be the same as the liquidity source
-        if let Some(source) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquiditySource) {
+        if let Some(source) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::LiquiditySource)
+        {
             if source == token_address {
                 panic!("liquidity_token cannot be same as liquidity_source");
             }
@@ -146,14 +150,22 @@ impl Credit {
         require_admin_auth(&env);
 
         // Validation: source cannot be the same as the liquidity token
-        if let Some(token) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquidityToken) {
+        if let Some(token) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::LiquidityToken)
+        {
             if token == reserve_address {
                 panic!("liquidity_source cannot be same as liquidity_token");
             }
         }
 
         // Validation: source cannot be an active borrower
-        if let Some(line) = env.storage().persistent().get::<Address, CreditLineData>(&reserve_address) {
+        if let Some(line) = env
+            .storage()
+            .persistent()
+            .get::<Address, CreditLineData>(&reserve_address)
+        {
             if line.status != CreditStatus::Closed {
                 panic!("liquidity_source cannot be an active borrower");
             }
@@ -191,7 +203,10 @@ impl Credit {
         assert!(credit_limit > 0, "credit_limit must be greater than zero");
 
         // Validation: borrower cannot be the liquidity source
-        let source: Address = env.storage().instance().get(&DataKey::LiquiditySource)
+        let source: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquiditySource)
             .unwrap_or(env.current_contract_address());
         if borrower == source {
             panic!("borrower cannot be liquidity_source");
@@ -614,8 +629,8 @@ mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
-    use soroban_sdk::token;
     use soroban_sdk::testutils::Events;
+    use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
 
