@@ -78,10 +78,12 @@ Opens a new credit line for a borrower. Called by the backend or risk engine.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `borrower` | `Address` | Borrower's address |
-| `credit_limit` | `i128` | Maximum drawable amount |
-| `interest_rate_bps` | `u32` | Interest rate in basis points |
 | `risk_score` | `u32` | Risk score from the risk engine |
+
+#### Validation
+- `credit_limit` must be > 0.
+- `borrower` must not be the same address as the currently configured `LiquiditySource`.
+- Borrower must not already have an `Active` credit line.
 
 Emits: `("credit", "opened")` event.
 
@@ -210,6 +212,43 @@ Returns the current `RateChangeConfig`. Panics if none is set.
 
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
 Returns the credit line data for a borrower, or `None` if not found. View function — does not modify state.
+
+---
+
+### `set_liquidity_token(env, token_address)`
+Sets the protocol token used for draws. Admin-only.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `token_address` | `Address` | Address of the Stellar Asset Contract |
+
+**Validation**: `token_address` must not match the current `LiquiditySource`.
+
+---
+
+### `set_liquidity_source(env, reserve_address)`
+Sets the address from which `draw_credit` transfers funds. Admin-only.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `reserve_address` | `Address` | Source of funds (Vault or Contract) |
+
+**Validation**:
+- `reserve_address` must not match the current `LiquidityToken`.
+- `reserve_address` must not be an active borrower (checked via existence of an active/suspended credit line).
+
+---
+
+## Operational Configuration and Risk
+
+### Liquidity Source Management
+The `LiquiditySource` is a global setting. While the contract prevents the liquidity source from being a borrower at the time of configuration, and prevents new borrowers from overlapping with the current source, the admin must ensure:
+1. The liquidity source has sufficient token balance for all potential draws.
+2. The liquidity source has granted sufficient allowance to the `Credit` contract (if it is not the contract itself).
+3. If the liquidity source is changed, it does not create logic conflicts with existing legacy borrowers (though the contract attempts to block this).
+
+### Risk Boundaries
+Validation is "best-effort" for global settings. If a liquidity source is compromised or its status changes off-chain, the admin should immediately rotate the source using `set_liquidity_source`.
 
 ---
 
