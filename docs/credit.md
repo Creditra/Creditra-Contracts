@@ -38,13 +38,17 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 
 ### Status transitions
 
-| From | To | Trigger |
-|------|-----|--------|
-| Active | Defaulted | Admin calls `default_credit_line` (e.g. after past-due or oracle signal). |
-| Suspended | Defaulted | Admin calls `default_credit_line`. |
-| Defaulted | Active | Admin calls `reinstate_credit_line`. |
-| Defaulted | Suspended | Admin calls `suspend_credit_line`. |
-| Defaulted | Closed | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. |
+| From | To | Trigger | Authorization |
+|------|-----|--------|----------------|
+| Active | Defaulted | Admin calls `default_credit_line` (e.g. after past-due or oracle signal). | Admin |
+| Active | Suspended | Admin calls `suspend_credit_line`. | Admin |
+| Active | Closed | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. | Admin or borrower (zero utilization) |
+| Suspended | Defaulted | Admin calls `default_credit_line`. | Admin |
+| Suspended | Active | Admin calls `reinstate_credit_line`. | Admin |
+| Suspended | Closed | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. | Admin or borrower (zero utilization) |
+| Defaulted | Active | Admin calls `reinstate_credit_line`. | Admin |
+| Defaulted | Suspended | Admin calls `suspend_credit_line`. | Admin |
+| Defaulted | Closed | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. | Admin or borrower (zero utilization) |
 
 When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is allowed.
 
@@ -173,10 +177,31 @@ Emits: `("credit", "suspend")` event.
 ---
 
 ### `close_credit_line(env, borrower, closer)`
-Closes a credit line. Can be called by admin (force-close) or by borrower when `utilized_amount` is 0. Allowed from Active, Suspended, or Defaulted.
+Closes a credit line permanently. Can be called by admin (force-close) or by borrower when `utilized_amount` is 0. Allowed from Active, Suspended, or Defaulted states.
 
-Panics if the credit line does not exist.  
-Emits: `("credit", "closed")` event.
+| Parameter | Type | Description |
+|---|---|---|
+| `borrower` | `Address` | Borrower whose credit line to close |
+| `closer` | `Address` | Address authorized to close (admin or borrower) |
+
+#### Authorization Rules
+- **Admin**: Can close any credit line regardless of utilization amount
+- **Borrower**: Can only close when `utilized_amount == 0`
+
+#### State Transitions
+- **Active → Closed**: Admin (any utilization) or borrower (zero utilization)
+- **Suspended → Closed**: Admin (any utilization) or borrower (zero utilization)  
+- **Defaulted → Closed**: Admin (any utilization) or borrower (zero utilization)
+- **Closed → Closed**: Idempotent (no effect)
+
+#### Behavior
+- Sets credit line status to `Closed` permanently
+- Preserves `utilized_amount` for admin closes (force-close with outstanding debt)
+- Emits `("credit", "closed")` event with final credit line data
+- No further draws allowed after closing
+- Repayment operations are also blocked after closing
+
+Panics if the credit line does not exist, if `closer` is not authorized, or if borrower attempts to close with non-zero utilization.
 
 ---
 

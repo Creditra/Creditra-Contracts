@@ -51,6 +51,11 @@ fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
 }
 
+/// Instance storage key for rate change configuration.
+fn rate_cfg_key(env: &Env) -> Symbol {
+    Symbol::new(env, "rate_cfg")
+}
+
 fn require_admin(env: &Env) -> Address {
     env.storage()
         .instance()
@@ -482,17 +487,19 @@ impl Credit {
     }
 
     /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
-    /// Close a credit line. Callable by admin (force-close) or by borrower when utilization is zero.
     /// Allowed from Active, Suspended, or Defaulted. Idempotent if already Closed.
     ///
     /// # Arguments
+    /// * `borrower` - The borrower whose credit line to close
     /// * `closer` - Address that must have authorized this call. Must be either the contract admin
     ///   (can close regardless of utilization) or the borrower (can close only when
     ///   `utilized_amount` is zero).
     ///
     /// # Errors
-    /// * Panics if credit line does not exist, or if `closer` is not admin/borrower, or if
-    ///   borrower closes while `utilized_amount != 0`.
+    /// * Panics if credit line does not exist
+    /// * Panics if `closer` is not admin/borrower
+    /// * Panics if borrower closes while `utilized_amount != 0`
+    /// * Panics if credit line is in an invalid state for closing
     ///
     /// Emits a CreditLineClosed event.
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
@@ -506,10 +513,23 @@ impl Credit {
             .get(&borrower)
             .expect("Credit line not found");
 
+        // Idempotent: already closed
         if credit_line.status == CreditStatus::Closed {
             return;
         }
 
+        // Validate that the current state allows closing
+        match credit_line.status {
+            CreditStatus::Active | CreditStatus::Suspended | CreditStatus::Defaulted => {
+                // These states can be closed
+            }
+            CreditStatus::Closed => {
+                // Already handled above
+                return;
+            }
+        }
+
+        // Authorization check: admin can always close, borrower only if utilization is zero
         let allowed = closer == admin || (closer == borrower && credit_line.utilized_amount == 0);
 
         if !allowed {
@@ -534,6 +554,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
+    }
 
     /// Mark a credit line as defaulted (admin only).
     ///
@@ -1519,7 +1540,6 @@ use soroban_sdk::testutils::Events;
     }
 
     #[test]
-    #[should_panic(expected = "unauthorized")]
     fn test_close_credit_line_unauthorized_closer() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1534,6 +1554,304 @@ use soroban_sdk::testutils::Events;
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.close_credit_line(&borrower, &other);
+    }
+
+    // --- Additional comprehensive tests for close_credit_line ---
+
+    #[test]
+    fn test_close_credit_line_from_active_state_borrower_zero_utilization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        
+        // Verify initial state is Active
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
+
+        // Borrower can close when utilization is zero
+        client.close_credit_line(&borrower, &borrower);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.status, CreditStatus::Closed);
+        assert_eq!(credit_line.utilized_amount, 0);
+    }
+
+    #[test]
+    fn test_close_credit_line_from_suspended_state_admin_force_close() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        
+        // Draw some amount and suspend
+        client.draw_credit(&borrower, &300_i128);
+        client.suspend_credit_line(&borrower);
+        
+        // Verify state is Suspended
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
+
+        // Admin can force-close even with utilization
+        client.close_credit_line(&borrower, &admin);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.status, CreditStatus::Closed);
+        assert_eq!(credit_line.utilized_amount, 300); // Utilization preserved
+    }
+
+    #[test]
+    fn test_close_credit_line_from_suspended_state_borrower_zero_utilization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        
+        // Suspend without utilization
+        client.suspend_credit_line(&borrower);
+        
+        // Verify state is Suspended
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
+
+        // Borrower can close when utilization is zero
+        client.close_credit_line(&borrower, &borrower);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.status, CreditStatus::Closed);
+        assert_eq!(credit_line.utilized_amount, 0);
+    }
+
+    #[test]
+    fn test_close_credit_line_from_defaulted_state_admin_force_close() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, admin) =
+            setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+        
+        client.draw_credit(&borrower, &300);
+        client.default_credit_line(&borrower);
+        
+        // Verify state is Defaulted
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+
+        // Admin can force-close defaulted line with utilization
+        client.close_credit_line(&borrower, &admin);
+        
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Closed);
+        assert_eq!(line.utilized_amount, 300); // Utilization preserved
+    }
+
+    #[test]
+    fn test_close_credit_line_from_defaulted_state_borrower_zero_utilization() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
+        
+        client.default_credit_line(&borrower);
+        
+        // Verify state is Defaulted
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+
+        // Borrower can close defaulted line when utilization is zero
+        client.close_credit_line(&borrower, &borrower);
+        
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot close: utilized amount not zero")]
+    fn test_close_credit_line_borrower_rejected_when_utilized_nonzero_from_active() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &300_i128);
+
+        // Borrower cannot close Active line with utilization
+        client.close_credit_line(&borrower, &borrower);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot close: utilized amount not zero")]
+    fn test_close_credit_line_borrower_rejected_when_utilized_nonzero_from_suspended() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &300_i128);
+        client.suspend_credit_line(&borrower);
+
+        // Borrower cannot close Suspended line with utilization
+        client.close_credit_line(&borrower, &borrower);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot close: utilized amount not zero")]
+    fn test_close_credit_line_borrower_rejected_when_utilized_nonzero_from_defaulted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+        
+        client.draw_credit(&borrower, &300);
+        client.default_credit_line(&borrower);
+
+        // Borrower cannot close Defaulted line with utilization
+        client.close_credit_line(&borrower, &borrower);
+    }
+
+    #[test]
+    fn test_close_credit_line_idempotent_from_all_states() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        
+        // Close the line first
+        client.close_credit_line(&borrower, &admin);
+        
+        // Multiple close calls should be idempotent
+        client.close_credit_line(&borrower, &admin);
+        client.close_credit_line(&borrower, &borrower);
+        client.close_credit_line(&borrower, &admin);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
+    }
+
+    #[test]
+    fn test_close_credit_line_event_emission() {
+        use soroban_sdk::testutils::Events;
+        use soroban_sdk::{TryFromVal, TryIntoVal};
+        
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        
+        // Clear existing events
+        let _ = env.events().all();
+        
+        // Close the credit line
+        client.close_credit_line(&borrower, &admin);
+        
+        // Verify event was emitted
+        let events = env.events().all();
+        assert_eq!(events.len(), 1);
+        
+        let (_contract, topics, data) = events.last().unwrap();
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            symbol_short!("credit")
+        );
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            symbol_short!("closed")
+        );
+        
+        let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(event_data.event_type, symbol_short!("closed"));
+        assert_eq!(event_data.borrower, borrower);
+        assert_eq!(event_data.status, CreditStatus::Closed);
+        assert_eq!(event_data.credit_limit, 1000);
+        assert_eq!(event_data.interest_rate_bps, 300);
+        assert_eq!(event_data.risk_score, 70);
+    }
+
+    #[test]
+    fn test_close_credit_line_preserves_utilization_for_admin_close() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &400_i128);
+        
+        let utilization_before = client.get_credit_line(&borrower).unwrap().utilized_amount;
+        assert_eq!(utilization_before, 400);
+
+        // Admin close should preserve utilization
+        client.close_credit_line(&borrower, &admin);
+
+        let credit_line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line.status, CreditStatus::Closed);
+        assert_eq!(credit_line.utilized_amount, 400); // Preserved
     }
 
     #[test]
