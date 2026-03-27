@@ -164,6 +164,16 @@ Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, n
   so the first rate change is never blocked by the time window.
 - The delta check uses `abs_diff` which is symmetric and overflow-safe.
 
+#### Ledger timestamp trust assumptions
+- The cooldown window relies on `env.ledger().timestamp()` from the Soroban host.
+- Production deployments therefore trust the network-provided ledger timestamp to be monotonic enough for coarse cooldown enforcement.
+- This mechanism is suitable for protocol-level spacing of administrative rate changes, not for sub-second precision or wall-clock guarantees.
+- Test coverage should explicitly exercise:
+  - first update with `last_rate_update_ts == 0`
+  - exactly-at-boundary acceptance
+  - just-before-boundary rejection
+  - `rate_change_min_interval == 0` disabling the timing gate entirely
+
 ### `suspend_credit_line(env, borrower)`
 Suspends an active credit line. Called by admin.
 
@@ -265,6 +275,109 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `get_credit_line` | Anyone (view) |
 
 > Note: On-chain authorization via `require_auth()` is not yet enforced in all functions. This is planned for a future release.
+
+---
+
+## Admin Rotation Proposal
+
+### Current risk
+
+The current contract stores a single immutable admin address in instance storage. That keeps the access model simple, but it creates a high-impact operational risk:
+
+- a deployment initialized with the wrong admin address is effectively unrecoverable
+- an admin key compromise cannot be remediated on-chain
+- key-rotation policies require redeployment instead of controlled handoff
+
+### Recommended design
+
+Use a **two-step admin rotation** instead of a one-call `transfer_admin`.
+
+#### Proposed API
+
+```rust
+/// Propose a new admin. Callable only by the current admin.
+pub fn propose_admin(env: Env, new_admin: Address);
+
+/// Accept a pending admin role. Callable only by the pending admin.
+pub fn accept_admin(env: Env);
+
+/// Cancel a pending admin handoff. Callable only by the current admin.
+pub fn cancel_admin_rotation(env: Env);
+
+/// View the current pending admin, if any.
+pub fn get_pending_admin(env: Env) -> Option<Address>;
+```
+
+#### Why two-step is preferred
+
+A direct `transfer_admin(new_admin)` permanently changes authority in one call. That is efficient, but it increases wrong-address risk because:
+
+- the current admin may submit the wrong destination address
+- the destination may be a contract or wallet that cannot complete intended operations
+- the protocol loses the ability to prove that the receiving operator actually controls the destination key
+
+The two-step model lowers that risk because the recipient must explicitly accept the role.
+
+### Storage additions
+
+If implemented, add a new instance-storage slot:
+
+| Key | Storage Type | Value |
+|---|---|---|
+| `"pending_admin"` | Instance | `Address` |
+
+The `"admin"` slot remains authoritative until `accept_admin` succeeds.
+
+### Threat model update
+
+#### Assets protected
+
+- admin authority over credit-line lifecycle operations
+- admin authority over liquidity source/token configuration
+- admin authority over risk-parameter changes
+
+#### Trust boundaries
+
+- the current `admin` is trusted to nominate a valid successor
+- the `pending_admin` is trusted only after they successfully authenticate and accept
+- observers and indexers may treat rotation events as security-relevant governance actions
+
+#### Failure modes and mitigations
+
+| Failure mode | Risk | Mitigation |
+|---|---|---|
+| Wrong address proposed | Permanent governance loss with one-step transfer | Two-step acceptance keeps current admin active until recipient confirms |
+| Proposed admin never responds | Rotation stuck in pending state | `cancel_admin_rotation` allows admin to abort and retry |
+| Current admin key compromise | Attacker can still propose a malicious admin | Not fully solvable on-chain; mitigated operationally by hardware wallets, monitoring, and fast cancellation if compromise is detected before acceptance |
+| Malicious pending admin | Attempts to seize control without nomination | `accept_admin` must require `pending_admin.require_auth()` and exact match against stored pending admin |
+| Event/indexing ambiguity | Off-chain systems misread control state | Emit explicit proposal / cancellation / acceptance events and document that only accepted admin is authoritative |
+
+### Operational procedure
+
+Recommended production workflow:
+
+1. Current admin verifies the target address out of band.
+2. Current admin calls `propose_admin(new_admin)`.
+3. Off-chain monitoring confirms the pending-admin event and storage value.
+4. Proposed admin verifies the contract ID and calls `accept_admin()`.
+5. Monitoring confirms the old admin was replaced and `pending_admin` was cleared.
+6. If the proposal was wrong or stale, current admin calls `cancel_admin_rotation()` before acceptance.
+
+### Testing requirements for implementation
+
+If/when implemented, the minimum invariant coverage should include:
+
+- only current admin can call `propose_admin`
+- only current admin can call `cancel_admin_rotation`
+- only the exact pending admin can call `accept_admin`
+- `admin` remains unchanged until acceptance
+- `pending_admin` is cleared after acceptance or cancellation
+- proposing the current admin should be rejected to avoid no-op ambiguity
+- a missing pending admin should cause `accept_admin` to fail deterministically
+
+### Implementation note
+
+Given the sensitivity of governance handoff, a one-step `transfer_admin` should only be added if maintainers explicitly prefer operational simplicity over wrong-address protection. The safer default for this contract is the two-step rotation flow above.
 
 ---
 
