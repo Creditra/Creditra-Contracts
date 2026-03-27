@@ -33,7 +33,7 @@ use events::{
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
-use types::{CreditLineData, CreditStatus};
+use types::{CreditLineData, CreditStatus, RateChangeConfig};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -49,6 +49,11 @@ fn reentrancy_key(env: &Env) -> Symbol {
 /// Instance storage key for admin.
 fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
+}
+
+/// Instance storage key for rate configuration.
+fn rate_cfg_key(env: &Env) -> Symbol {
+    Symbol::new(env, "rate_cfg")
 }
 
 fn require_admin(env: &Env) -> Address {
@@ -121,6 +126,14 @@ impl Credit {
     /// @dev Admin-only.
     pub fn set_liquidity_token(env: Env, token_address: Address) -> () {
         require_admin_auth(&env);
+
+        // Validation: token cannot be the same as the liquidity source
+        if let Some(source) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquiditySource) {
+            if source == token_address {
+                panic!("liquidity_token cannot be same as liquidity_source");
+            }
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::LiquidityToken, &token_address);
@@ -131,6 +144,21 @@ impl Credit {
     /// @dev Admin-only. If unset, init config uses the contract address.
     pub fn set_liquidity_source(env: Env, reserve_address: Address) -> () {
         require_admin_auth(&env);
+
+        // Validation: source cannot be the same as the liquidity token
+        if let Some(token) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquidityToken) {
+            if token == reserve_address {
+                panic!("liquidity_source cannot be same as liquidity_token");
+            }
+        }
+
+        // Validation: source cannot be an active borrower
+        if let Some(line) = env.storage().persistent().get::<Address, CreditLineData>(&reserve_address) {
+            if line.status != CreditStatus::Closed {
+                panic!("liquidity_source cannot be an active borrower");
+            }
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::LiquiditySource, &reserve_address);
@@ -161,6 +189,14 @@ impl Credit {
         risk_score: u32,
     ) {
         assert!(credit_limit > 0, "credit_limit must be greater than zero");
+
+        // Validation: borrower cannot be the liquidity source
+        let source: Address = env.storage().instance().get(&DataKey::LiquiditySource)
+            .unwrap_or(env.current_contract_address());
+        if borrower == source {
+            panic!("borrower cannot be liquidity_source");
+        }
+
         assert!(
             interest_rate_bps <= 10_000,
             "interest_rate_bps cannot exceed 10000 (100%)"
@@ -202,44 +238,7 @@ impl Credit {
                 risk_score,
             },
         );
-
-
-
-    /// Draw from credit line (borrower).
- 
-    /// Errors with ContractError if credit line does not exist, is Closed, or borrower has not authorized.
-
-    /// Reverts if credit line does not exist, is Closed, borrower has not authorized,
-    /// or the provided borrower does not match the stored credit line owner.
- 
- 
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
-
-
-    /// Draw from credit line: verifies limit, updates utilized_amount,
-    /// and transfers the protocol token from the contract reserve to the borrower.
-    ///
-    /// # Panics
-    /// - `"Credit line not found"` – borrower has no open credit line
-    /// - `"credit line is closed"` – line is closed
-    /// - `"Credit line not active"` – line is suspended or defaulted
-    /// - `"exceeds credit limit"` – draw would push utilized_amount past credit_limit
-    /// - `"amount must be positive"` – amount is zero or negative
-    /// - `"reentrancy guard"` – re-entrant call detected
-
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
- 
-
-    /// Draw from credit line (borrower).
-    /// Reverts if credit line does not exist, is Closed/Suspended, or borrower has not authorized.
-    /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
-        set_reentrancy_guard(&env);
-        borrower.require_auth();
-
     }
-
-
 
     /// Update risk parameters for an existing credit line.
     ///
@@ -534,6 +533,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
+    }
 
     /// Mark a credit line as defaulted (admin only).
     ///
@@ -564,6 +564,7 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
+    }
 
     /// Reinstate a defaulted credit line to Active (admin only).
     ///
@@ -610,19 +611,13 @@ impl Credit {
 
 #[cfg(test)]
 mod test {
-    soroban_sdk::contractimpl! { export! CreditImpl }
-
-    use soroban_sdk::contractclient::ContractClient;
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::token;
-    use soroban_sdk::contractclient::ContractClient;
-use soroban_sdk::testutils::Events;
+    use soroban_sdk::testutils::Events;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
-
-    type CreditClient<'a> = soroban_sdk::contractclient::ContractClient<'a, CreditImpl>;
 
     fn setup_test(env: &Env) -> (Address, Address, Address) {
         env.mock_all_auths();
@@ -2132,5 +2127,67 @@ use soroban_sdk::testutils::Events;
         // Current repay implementation is state-only; token balances/allowances are unchanged.
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
+    }
+
+    // --- Liquidity source misconfiguration guards ---
+
+    #[test]
+    #[should_panic(expected = "liquidity_source cannot be same as liquidity_token")]
+    fn test_set_liquidity_source_invalid_token() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&token);
+    }
+
+    #[test]
+    #[should_panic(expected = "liquidity_source cannot be an active borrower")]
+    fn test_set_liquidity_source_is_borrower() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000, &300, &70);
+        client.set_liquidity_source(&borrower);
+    }
+
+    #[test]
+    #[should_panic(expected = "borrower cannot be liquidity_source")]
+    fn test_open_credit_line_is_liquidity_source() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let source = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_liquidity_source(&source);
+        client.open_credit_line(&source, &1000, &300, &70);
+    }
+
+    #[test]
+    #[should_panic(expected = "liquidity_token cannot be same as liquidity_source")]
+    fn test_set_liquidity_token_is_source() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let source = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_liquidity_source(&source);
+        client.set_liquidity_token(&source);
     }
 }
