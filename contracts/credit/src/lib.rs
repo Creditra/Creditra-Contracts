@@ -183,12 +183,12 @@ impl Credit {
     /// @notice Draws credit by transferring liquidity tokens to the borrower.
     /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
     /// Reverts if status is not Active (e.g. Suspended, Defaulted, or Closed).
-    /// 
+    ///
     /// # Reentrancy Protection
     /// This function uses a reentrancy guard to prevent re-entrant calls during
     /// token transfers. If a token contract were to call back into this contract
     /// during transfer, the guard would revert the transaction.
-    /// 
+    ///
     /// # Security Notes
     /// - Soroban token transfers (e.g. Stellar Asset Contract) do not invoke callbacks
     /// - This guard is defense-in-depth for future token integrations
@@ -267,12 +267,12 @@ impl Credit {
     /// Repay credit (borrower).
     /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
     /// Reduces utilized_amount by amount (capped at 0). Emits RepaymentEvent.
-    /// 
+    ///
     /// # Reentrancy Protection
     /// This function uses a reentrancy guard to prevent re-entrant calls during
     /// token transfers. If a token contract were to call back into this contract
     /// during transfer, the guard would revert the transaction.
-    /// 
+    ///
     /// # Security Notes
     /// - Soroban token transfers (e.g. Stellar Asset Contract) do not invoke callbacks
     /// - This guard is defense-in-depth for future token integrations
