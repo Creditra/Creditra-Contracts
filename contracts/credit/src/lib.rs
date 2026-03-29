@@ -2119,10 +2119,11 @@ mod test_e2e_lifecycle_happy {
             .iter()
             .rev()
             .find(|(_c, topics, _d)| {
-                topics.len() >= 2
-                    && Symbol::try_from_val(env, &topics.get(0).unwrap())
-                        .map(|s: Symbol| s == symbol_short!("credit"))
-                        .unwrap_or(false)
+                topics
+                    .get(0)
+                    .and_then(|v| Symbol::try_from_val(env, &v).ok())
+                    .map(|s: Symbol| s == symbol_short!("credit"))
+                    .unwrap_or(false)
             })
             .expect("no credit event found");
         Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap()
