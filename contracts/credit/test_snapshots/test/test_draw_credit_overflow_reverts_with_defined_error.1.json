@@ -22,7 +22,7 @@
                 {
                   "i128": {
                     "hi": 9223372036854775807,
-                    "lo": 18446744073709551615
+                    "lo": 18446744073709551610
                   }
                 }
               ]
@@ -129,6 +129,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_rate_update_ts"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "risk_score"
                       },
                       "val": {
@@ -150,7 +158,7 @@
                       "val": {
                         "i128": {
                           "hi": 9223372036854775807,
-                          "lo": 18446744073709551615
+                          "lo": 18446744073709551610
                         }
                       }
                     }
@@ -200,6 +208,18 @@
                         },
                         "val": {
                           "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "LiquiditySource"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                         }
                       }
                     ]

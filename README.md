@@ -1,16 +1,7 @@
 # Creditra Contracts
 
-Soroban smart contracts for the Creditra adaptive credit protocol on Stellar.
+Core smart contracts for the Creditra protocol, managing credit lines, draw operations, repayments, and risk parameters.
 
-## About
-
-This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Token transfers and interest accrual are still TODO.
-
-**Behavior notes:**
-
-- after `suspend_credit_line`, `draw_credit` for that borrower reverts
-- after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
-- `repay_credit` remains allowed while suspended or defaulted
 This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Draw logic includes a liquidity reserve check and token transfer flow.
 
 **Contract data model:**
@@ -18,8 +9,12 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - `CreditStatus`: Active, Suspended, Defaulted, Closed
 - `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
 
-**Methods:** `init`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
-**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
+**Behavior notes:**
+- after `suspend_credit_line`, `draw_credit` for that borrower reverts
+- after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
+- `repay_credit` remains allowed while suspended or defaulted
+
+**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
 
 ### Liquidity reserve enforcement
 
@@ -57,9 +52,9 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 
 ## Setup and build
 
+### Build
 ```bash
-cd creditra-contracts
-cargo build --release -p creditra-credit
+cargo build
 ```
 
 ### WASM build (release profile, size-optimized)
@@ -78,6 +73,8 @@ WASM output is at `target/wasm32-unknown-unknown/release/creditra_credit.wasm`. 
 - `strip = "symbols"` (no debug symbols in release)
 - `codegen-units = 1` (better optimization)
 
+CI enforces a size budget of 50 KB (`51200` bytes) for this artifact to ensure deployability and fast runtime.
+
 Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay within practical Soroban deployment limits.
 
 ### Run tests
@@ -86,28 +83,7 @@ Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay 
 cargo test -p creditra-credit
 ```
 
-For test helper conventions (mock token balances/allowances in draw and repay
-scenarios), see `docs/contributing-tests.md`.
-
-### Overflow scenario tests (large amounts)
-
-The credit contract includes dedicated overflow and large-value tests in
-`contracts/credit/src/lib.rs`:
-
-- `test_draw_credit_near_i128_max_succeeds_without_overflow`
-- `test_draw_credit_overflow_reverts_with_defined_error`
-- `test_draw_credit_large_values_exceed_limit_reverts_with_defined_error`
-
-These tests validate that:
-
-- near-`i128::MAX` draws succeed when within limit;
-- arithmetic overflow reverts with the defined `"overflow"` panic;
-- large-value over-limit draws revert with the defined `"exceeds credit limit"` panic.
-
 ### Coverage
-
-Run coverage with:
-
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
@@ -118,6 +94,10 @@ Current result:
 - Lines: `98.94%`
 
 This satisfies the 95% minimum coverage target.
+
+## Security Documentation
+
+- Threat model and trust assumptions: [`docs/threat-model.md`](docs/threat-model.md)
 
 ### Deploy (with Soroban CLI)
 
