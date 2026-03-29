@@ -248,7 +248,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `get_rate_change_limits` | Anyone (view)         |
 | `get_credit_line`        | Anyone (view)         |
 
-> Note: On-chain authorization via `require_auth()` is not yet enforced in all functions. This is planned for a future release.
+> Note: `open_credit_line` requires admin authorization (`require_auth`). The admin key is the backend/risk engine signer — borrowers cannot open their own credit lines.
 
 ---
 

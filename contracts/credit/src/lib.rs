@@ -18,8 +18,8 @@ use soroban_sdk::{
 
 use events::{
     publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    publish_risk_parameters_updated, publish_interest_accrued_event, CreditLineEvent, DrawnEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent, InterestAccruedEvent,
+    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
+    RiskParametersUpdatedEvent,
 };
 use types::{CreditLineData, CreditStatus, RateChangeConfig};
 
@@ -77,109 +77,6 @@ fn set_reentrancy_guard(env: &Env) {
 
 fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
-}
-
-/// Calculate and accrue interest for a credit line.
-///
-/// This function implements on-chain interest accrual using simple interest calculation:
-/// interest = principal * rate * time_elapsed
-///
-/// # Arguments
-/// * `env` - The contract environment
-/// * `borrower` - The borrower address whose credit line to accrue interest for
-/// * `force_accrual` - If true, accrues interest even when credit line is not active
-///
-/// # Returns
-/// * `i128` - The amount of interest that was accrued (0 if no accrual occurred)
-///
-/// # Notes
-/// - Uses simple interest with annual rate in basis points
-/// - Time is calculated in seconds from last accrual timestamp
-/// - Interest is capitalized (added to utilized amount)
-/// - Only accrues for Active credit lines unless force_accrual is true
-/// - Handles edge cases like zero utilization, zero rate, and overflow protection
-fn calculate_and_accrue_interest(env: &Env, borrower: &Address, force_accrual: bool) -> i128 {
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(borrower)
-        .expect("Credit line not found");
-
-    // Only accrue for active lines unless forced
-    if !force_accrual && credit_line.status != CreditStatus::Active {
-        return 0;
-    }
-
-    // Don't accrue if there's no utilized amount or interest rate is zero
-    if credit_line.utilized_amount <= 0 || credit_line.interest_rate_bps == 0 {
-        return 0;
-    }
-
-    let current_timestamp = env.ledger().timestamp();
-    let last_accrual_ts = credit_line.last_accrual_ts;
-
-    // If this is the first accrual, use the line creation timestamp (approximated as 0)
-    // or current timestamp to avoid huge accrual from timestamp 0
-    let accrual_start_ts = if last_accrual_ts == 0 {
-        current_timestamp // First accrual, no time elapsed yet
-    } else {
-        last_accrual_ts
-    };
-
-    // Calculate time elapsed in seconds
-    let time_elapsed = current_timestamp.saturating_sub(accrual_start_ts);
-    
-    // No time elapsed, no accrual needed
-    if time_elapsed == 0 {
-        return 0;
-    }
-
-    // Calculate interest using simple interest formula:
-    // interest = principal * (rate_bps / 10000) * (time_elapsed / seconds_in_year)
-    const SECONDS_IN_YEAR: u64 = 365 * 24 * 60 * 60; // 31,536,000 seconds
-    
-    // Convert to i128 for precise calculation
-    let principal = credit_line.utilized_amount;
-    let rate_bps = credit_line.interest_rate_bps as i128;
-    let time_elapsed_i128 = time_elapsed as i128;
-    let seconds_in_year_i128 = SECONDS_IN_YEAR as i128;
-
-    // Calculate: principal * rate_bps * time_elapsed / (10000 * seconds_in_year)
-    // Use checked operations to prevent overflow
-    let interest = principal
-        .checked_mul(rate_bps)
-        .and_then(|x| x.checked_mul(time_elapsed_i128))
-        .and_then(|x| x.checked_div(10000 * seconds_in_year_i128))
-        .unwrap_or(0);
-
-    // Only proceed if interest > 0
-    if interest <= 0 {
-        return 0;
-    }
-
-    // Update credit line with accrued interest
-    credit_line.utilized_amount = credit_line.utilized_amount.checked_add(interest)
-        .expect("utilized amount overflow after interest accrual");
-    credit_line.accrued_interest = credit_line.accrued_interest.checked_add(interest)
-        .expect("accrued interest overflow");
-    credit_line.last_accrual_ts = current_timestamp;
-
-    // Save updated credit line
-    env.storage().persistent().set(borrower, &credit_line);
-
-    // Publish accrual event
-    publish_interest_accrued_event(
-        &env,
-        InterestAccruedEvent {
-            borrower: borrower.clone(),
-            accrued_amount: interest,
-            total_accrued_interest: credit_line.accrued_interest,
-            new_utilized_amount: credit_line.utilized_amount,
-            timestamp: current_timestamp,
-        },
-    );
-
-    interest
 }
 
 #[contract]
@@ -241,8 +138,6 @@ impl Credit {
             risk_score,
             status: CreditStatus::Active,
             last_rate_update_ts: 0,
-            accrued_interest: 0,
-            last_accrual_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
@@ -325,16 +220,6 @@ impl Credit {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InvalidAmount);
         }
-
-        // Accrue interest before processing the draw
-        calculate_and_accrue_interest(&env, &borrower, false);
-
-        // Reload credit line after accrual to get updated utilized amount
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
 
         let updated_utilized = credit_line
             .utilized_amount
@@ -479,30 +364,6 @@ impl Credit {
 
         // --- Release reentrancy guard ---
         clear_reentrancy_guard(&env);
-    }
-
-    /// Accrue interest for a credit line (public entrypoint).
-    ///
-    /// This function can be called by anyone to trigger interest accrual for a specific borrower.
-    /// It uses the same accrual logic as draw/repay but as a standalone operation.
-    ///
-    /// # Arguments
-    /// * `borrower` - The borrower address whose credit line to accrue interest for
-    ///
-    /// # Returns
-    /// * `i128` - The amount of interest that was accrued (0 if no accrual occurred)
-    ///
-    /// # Notes
-    /// - Can be called even when credit line is not active (force accrual)
-    /// - Useful for regular interest compounding or manual accrual triggers
-    /// - Emits InterestAccruedEvent if interest is accrued
-    pub fn accrue_interest(env: Env, borrower: Address) -> i128 {
-        set_reentrancy_guard(&env);
-        
-        let accrued_amount = calculate_and_accrue_interest(&env, &borrower, true);
-        
-        clear_reentrancy_guard(&env);
-        accrued_amount
     }
 
     /// Update risk parameters for an existing credit line (admin only).
@@ -767,7 +628,6 @@ mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
-    use soroban_sdk::testutils::Events;
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::Symbol;
