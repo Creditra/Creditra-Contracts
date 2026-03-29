@@ -2,15 +2,6 @@
 
 Soroban smart contracts for the Creditra adaptive credit protocol on Stellar.
 
-## About
-
-This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Token transfers and interest accrual are still TODO.
-
-**Behavior notes:**
-
-- after `suspend_credit_line`, `draw_credit` for that borrower reverts
-- after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
-- `repay_credit` remains allowed while suspended or defaulted
 This repo contains the **credit** contract: it maintains credit lines, tracks utilization, enforces limits, and exposes methods for opening lines, drawing, repaying, and updating risk parameters. Draw logic includes a liquidity reserve check and token transfer flow.
 
 **Contract data model:**
@@ -18,8 +9,12 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - `CreditStatus`: Active, Suspended, Defaulted, Closed
 - `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
 
-**Methods:** `init`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
-**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`.
+**Behavior notes:**
+- after `suspend_credit_line`, `draw_credit` for that borrower reverts
+- after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
+- `repay_credit` remains allowed while suspended or defaulted
+
+**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
 
 ### Liquidity reserve enforcement
 
