@@ -3,6 +3,52 @@
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
 //!
+//! # Storage Audit (issue #127)
+//!
+//! ## Instance storage (shared contract-wide state, TTL tied to contract instance)
+//!
+//! | Key | Type | Written by | Purpose |
+//! |-----|------|------------|---------|
+//! | `Symbol("admin")` | `Address` | `init` | Contract admin. Instance is correct: there is exactly one admin per contract deployment. |
+//! | `DataKey::LiquidityToken` | `Address` | `set_liquidity_token` | Token contract for reserve. Instance is correct: global config. |
+//! | `DataKey::LiquiditySource` | `Address` | `init`, `set_liquidity_source` | Reserve address. Instance is correct: global config. |
+//! | `Symbol("reentrancy")` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth guard. Instance is correct: transient flag cleared every call. |
+//! | `Symbol("rate_cfg")` | `RateChangeConfig` | `set_rate_change_limits` | Rate-change governance. Instance is correct: global config. |
+//!
+//! ## Persistent storage (per-borrower records, independent TTL per entry)
+//!
+//! | Key | Type | Written by | Purpose |
+//! |-----|------|------------|---------|
+//! | `Address` (borrower) | `CreditLineData` | `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, status transitions | Per-borrower credit line. Persistent is correct: must survive beyond a single transaction and is independent per borrower. |
+//!
+//! ## Temporary storage
+//!
+//! Not currently used. Future candidate: the reentrancy flag could move to
+//! temporary storage since it is only meaningful within a single invocation,
+//! but instance storage works correctly today because it is cleared on every
+//! code path.
+//!
+//! ## TTL implications
+//!
+//! - **Instance keys** share the contract instance TTL. If the instance is
+//!   archived, all instance keys (admin, config, reentrancy) are lost.
+//!   Production deployments should call `env.storage().instance().extend_ttl()`
+//!   periodically (e.g. in `init` or a dedicated `bump` endpoint).
+//! - **Persistent keys** (borrower → CreditLineData) have independent TTLs.
+//!   Long-lived credit lines should be bumped via `persistent().extend_ttl()`
+//!   on access or via a keeper. If a borrower's entry is archived, their
+//!   credit line data is lost.
+//!
+//! # Status transitions
+//!
+//! | From    | To        | Trigger |
+//! |---------|-----------|---------|
+//! | Active  | Suspended | `suspend_credit_line` |
+//! | Active  | Defaulted | `default_credit_line` |
+//! | Suspended | Defaulted | `default_credit_line` |
+//! | Defaulted | Active   | `reinstate_credit_line` |
+//! | Any (non-Closed) | Closed | `close_credit_line` |
+//!
 //! # Reentrancy
 //! Soroban token transfers (e.g. Stellar Asset Contract) do not invoke callbacks back into
 //! the caller. This contract uses a reentrancy guard on draw_credit and repay_credit as a
@@ -17,9 +63,11 @@ use soroban_sdk::{
 };
 
 use events::{
-    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent,
+    publish_credit_line_event, publish_credit_line_event_v2, publish_drawn_event,
+    publish_drawn_event_v2, publish_repayment_event, publish_repayment_event_v2,
+    publish_risk_parameters_updated, publish_risk_parameters_updated_v2, CreditLineEvent,
+    CreditLineEventV2, DrawnEvent, DrawnEventV2, RepaymentEvent, RepaymentEventV2,
+    RiskParametersUpdatedEvent, RiskParametersUpdatedEventV2,
 };
 use types::{CreditLineData, CreditStatus, RateChangeConfig};
 
@@ -154,6 +202,21 @@ impl Credit {
                 risk_score,
             },
         );
+        publish_credit_line_event_v2(
+            &env,
+            (symbol_short!("credit"), symbol_short!("opened_v2")),
+            CreditLineEventV2 {
+                event_type: symbol_short!("opened"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Active,
+                credit_limit,
+                interest_rate_bps,
+                risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: borrower,
+                amount: 0,
+            },
+        );
     }
 
     /// Update risk parameters for an existing credit line.
@@ -251,7 +314,18 @@ impl Credit {
         publish_drawn_event(
             &env,
             DrawnEvent {
-                borrower,
+                borrower: borrower.clone(),
+                amount,
+                new_utilized_amount: updated_utilized,
+                timestamp,
+            },
+        );
+        publish_drawn_event_v2(
+            &env,
+            DrawnEventV2 {
+                borrower: borrower.clone(),
+                recipient: borrower.clone(),
+                reserve_source: reserve_address,
                 amount,
                 new_utilized_amount: updated_utilized,
                 timestamp,
@@ -406,7 +480,7 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-        require_admin_auth(&env);
+        let admin = require_admin_auth(&env);
 
         let mut credit_line: CreditLineData = env
             .storage()
@@ -464,6 +538,17 @@ impl Credit {
                 risk_score,
             },
         );
+        publish_risk_parameters_updated_v2(
+            &env,
+            RiskParametersUpdatedEventV2 {
+                borrower,
+                credit_limit,
+                interest_rate_bps,
+                risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: admin,
+            },
+        );
     }
 
     /// Set rate-change limits (admin only).
@@ -479,7 +564,7 @@ impl Credit {
     /// Suspend a credit line (admin only).
     /// Emits a CreditLineSuspended event.
     pub fn suspend_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
+        let admin = require_admin_auth(&env);
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -503,6 +588,21 @@ impl Credit {
                 credit_limit: credit_line.credit_limit,
                 interest_rate_bps: credit_line.interest_rate_bps,
                 risk_score: credit_line.risk_score,
+            },
+        );
+        publish_credit_line_event_v2(
+            &env,
+            (symbol_short!("credit"), Symbol::new(&env, "suspend_v2")),
+            CreditLineEventV2 {
+                event_type: symbol_short!("suspend"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Suspended,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: admin,
+                amount: 0,
             },
         );
     }
@@ -564,12 +664,27 @@ impl Credit {
                 risk_score: credit_line.risk_score,
             },
         );
+        publish_credit_line_event_v2(
+            &env,
+            (symbol_short!("credit"), symbol_short!("closed_v2")),
+            CreditLineEventV2 {
+                event_type: symbol_short!("closed"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Closed,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: closer,
+                amount: 0,
+            },
+        );
     }
 
     /// Mark a credit line as defaulted (admin only).
     /// Emits a CreditLineDefaulted event.
     pub fn default_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
+        let admin = require_admin_auth(&env);
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
@@ -589,6 +704,67 @@ impl Credit {
                 credit_limit: credit_line.credit_limit,
                 interest_rate_bps: credit_line.interest_rate_bps,
                 risk_score: credit_line.risk_score,
+            },
+        );
+        publish_credit_line_event_v2(
+            &env,
+            (symbol_short!("credit"), Symbol::new(&env, "default_v2")),
+            CreditLineEventV2 {
+                event_type: symbol_short!("default"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Defaulted,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: admin,
+                amount: 0,
+            },
+        );
+    }
+
+    /// Reinstate a defaulted credit line to Active (admin only).
+    pub fn reinstate_credit_line(env: Env, borrower: Address) {
+        let admin = require_admin_auth(&env);
+
+        let mut credit_line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("Credit line not found");
+
+        if credit_line.status != CreditStatus::Defaulted {
+            panic!("credit line is not defaulted");
+        }
+
+        credit_line.status = CreditStatus::Active;
+        env.storage().persistent().set(&borrower, &credit_line);
+
+        publish_credit_line_event(
+            &env,
+            (symbol_short!("credit"), symbol_short!("reinstate")),
+            CreditLineEvent {
+                event_type: symbol_short!("reinstate"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Active,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+            },
+        );
+        publish_credit_line_event_v2(
+            &env,
+            (symbol_short!("credit"), Symbol::new(&env, "reinstate_v2")),
+            CreditLineEventV2 {
+                event_type: symbol_short!("reinstate"),
+                borrower,
+                status: CreditStatus::Active,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+                timestamp: env.ledger().timestamp(),
+                actor: admin,
+                amount: 0,
             },
         );
     }

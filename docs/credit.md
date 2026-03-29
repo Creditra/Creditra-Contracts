@@ -268,6 +268,10 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
 
+The contract also emits additive v2 event topics (for indexer analytics fields
+like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
+[`docs/indexer-integration.md`](indexer-integration.md) for full topic mapping.
+
 ---
 
 ## Access Control
