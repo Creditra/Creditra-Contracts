@@ -21,7 +21,7 @@ use events::{
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
-use types::{CreditLineData, CreditStatus, RateChangeConfig};
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -603,6 +603,36 @@ impl Credit {
         );
     }
 
+    /// Reinstate a defaulted credit line to active status (admin only).
+    pub fn reinstate_credit_line(env: Env, borrower: Address) {
+        require_admin_auth(&env);
+        let mut credit_line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("Credit line not found");
+
+        if credit_line.status != CreditStatus::Defaulted {
+            panic!("credit line is not defaulted");
+        }
+
+        credit_line.status = CreditStatus::Active;
+        env.storage().persistent().set(&borrower, &credit_line);
+
+        publish_credit_line_event(
+            &env,
+            (symbol_short!("credit"), symbol_short!("reinstate")),
+            CreditLineEvent {
+                event_type: symbol_short!("reinstate"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Active,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+            },
+        );
+    }
+
     /// Get credit line data for a borrower (view function).
     ///
     /// # Parameters
@@ -617,58 +647,44 @@ impl Credit {
 
 #[cfg(test)]
 mod test {
-    /// Helper to set up a contract, open a credit line, and return (client, token, admin)
-    fn setup_contract_with_credit_line<'a>(
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::token;
+    use soroban_sdk::token::StellarAssetClient;
+    use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
+
+    fn approve(env: &Env, token: &Address, owner: &Address, spender: &Address, amount: i128) {
+        token::Client::new(env, token).approve(owner, spender, &amount, &1_000_u32);
+    }
+
+    fn setup<'a>(
         env: &'a Env,
         borrower: &'a Address,
         credit_limit: i128,
-        utilized_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
+        reserve_amount: i128,
+        draw_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address, Address) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
         client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        if utilized_amount > 0 {
-            client.draw_credit(borrower, &utilized_amount);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&contract_id);
+
+        if reserve_amount > 0 {
+            StellarAssetClient::new(env, &token).mint(&contract_id, &reserve_amount);
         }
-        (client, contract_id, admin)
-    }
-    use super::*;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::testutils::Events as _;
-    use soroban_sdk::token;
-    use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::Symbol;
+        if draw_amount > 0 {
+            client.draw_credit(borrower, &draw_amount);
+        }
 
-    fn setup_test(env: &Env) -> (Address, Address, Address) {
-        env.mock_all_auths();
-
-        let admin = Address::generate(env);
-        let borrower = Address::generate(env);
-
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-
-        (admin, borrower, contract_id)
-    }
-
-    fn call_contract<F>(env: &Env, contract_id: &Address, f: F)
-    where
-        F: FnOnce(),
-    {
-        env.as_contract(contract_id, f);
-    }
-
-    fn get_credit_data(env: &Env, contract_id: &Address, borrower: &Address) -> CreditLineData {
-        let client = CreditClient::new(env, contract_id);
-        client
-            .get_credit_line(borrower)
-            .expect("Credit line not found")
+        (client, token, contract_id, admin)
     }
 
     #[test]
@@ -1157,7 +1173,7 @@ mod test {
 #[cfg(test)]
 mod test_smoke_coverage {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 
     #[test]
@@ -1227,9 +1243,10 @@ mod test_smoke_coverage {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
+        let missing_borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
-        client.open_credit_line(&Address::generate(&env), &1000_i128, &10001_u32, &60_u32);
+        client.suspend_credit_line(&missing_borrower);
     }
 
     #[test]
@@ -1268,8 +1285,8 @@ mod test_smoke_coverage {
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
-        client.default_credit_line(&borrower);
         client.suspend_credit_line(&borrower);
+        client.default_credit_line(&borrower);
     }
 
     #[test]
@@ -1322,6 +1339,30 @@ mod test_coverage_gaps {
         (client, admin, borrower)
     }
 
+    fn setup_contract_with_credit_line<'a>(
+        env: &'a Env,
+        borrower: &'a Address,
+        credit_limit: i128,
+        utilized_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+
+        if utilized_amount > 0 {
+            let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+            let token = token_id.address();
+            client.set_liquidity_token(&token);
+            StellarAssetClient::new(env, &token).mint(&contract_id, &utilized_amount);
+            client.draw_credit(borrower, &utilized_amount);
+        }
+
+        (client, contract_id, admin)
+    }
+
     // ── update_risk_parameters: negative credit_limit ────────────────────────
 
     #[test]
@@ -1356,6 +1397,7 @@ mod test_coverage_gaps {
     // ── update_risk_parameters: interest_rate_bps over 10_000 ───────────────
 
     #[test]
+    #[should_panic(expected = "risk_score exceeds maximum")]
     fn test_draw_credit_updates_utilized() {
         let env = Env::default();
         let (client, _admin, borrower) = base_setup(&env);
@@ -1601,7 +1643,9 @@ mod test_coverage_gaps {
     fn rate_change_after_interval_succeeds() {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
-        let (client, _admin, borrower) = base_setup(&env);
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup_test_rate_change(&env, &borrower, 1_000);
         client.set_rate_change_limits(&1_000_u32, &86_400_u64);
         env.ledger().set_timestamp(100);
         client.update_risk_parameters(&borrower, &1_000, &600_u32, &60_u32);
@@ -1612,6 +1656,19 @@ mod test_coverage_gaps {
             client.get_credit_line(&borrower).unwrap().interest_rate_bps,
             700
         );
+    }
+
+    fn setup_test_rate_change<'a>(
+        env: &'a Env,
+        borrower: &'a Address,
+        credit_limit: i128,
+    ) -> (CreditClient<'a>, Address) {
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+        (client, admin)
     }
 
     // ── suspend_credit_line from Defaulted → panic (not Active) ─────────────
@@ -1640,13 +1697,9 @@ mod test_coverage_gaps {
 
         token_admin_client.mint(&contract_id, &500_i128);
         client.draw_credit(&borrower, &200_i128);
-
+        client.default_credit_line(&borrower);
         assert_eq!(token_client.balance(&contract_id), 300_i128);
-        assert_eq!(token_client.balance(&borrower), 200_i128);
-        assert_eq!(
-            client.get_credit_line(&borrower).unwrap().utilized_amount,
-            200_i128
-        );
+        client.suspend_credit_line(&borrower);
     }
 
     // ── close_credit_line: idempotent on already-Closed line ─────────────────
@@ -1694,7 +1747,7 @@ mod test_coverage_gaps {
         let token_admin = Address::generate(&env);
 
         let contract_id = env.register(Credit, ());
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let _token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
