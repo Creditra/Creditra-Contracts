@@ -1820,24 +1820,20 @@ mod test {
     /// CreditError::from converts each variant to a contract error code.
     #[test]
     fn test_credit_error_from_conversion() {
-        let err: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::CreditLineNotFound);
+        let err: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::CreditLineNotFound);
         assert_eq!(err, soroban_sdk::Error::from_contract_error(1));
 
-        let err2: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::InvalidCreditStatus);
+        let err2: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidCreditStatus);
         assert_eq!(err2, soroban_sdk::Error::from_contract_error(2));
 
-        let err3: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::InvalidAmount);
+        let err3: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidAmount);
         assert_eq!(err3, soroban_sdk::Error::from_contract_error(3));
 
         let err4: soroban_sdk::Error =
             soroban_sdk::Error::from(CreditError::InsufficientUtilization);
         assert_eq!(err4, soroban_sdk::Error::from_contract_error(4));
 
-        let err5: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::Unauthorized);
+        let err5: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::Unauthorized);
         assert_eq!(err5, soroban_sdk::Error::from_contract_error(5));
     }
 
