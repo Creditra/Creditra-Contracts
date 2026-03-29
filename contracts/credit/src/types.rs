@@ -2,15 +2,23 @@
 
 use soroban_sdk::{contracttype, Address};
 
+/// Status of a borrower's credit line.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CreditStatus {
+    /// Credit line is active and draws are allowed.
     Active = 0,
+    /// Credit line is temporarily frozen by admin.
     Suspended = 1,
+    /// Credit line is in default; draws are disabled.
     Defaulted = 2,
+    /// Credit line is permanently closed.
     Closed = 3,
+    /// Credit limit was decreased below utilized amount; excess must be repaid.
+    Restricted = 4,
 }
 
+/// Errors that can be returned by the Credit contract.
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -39,31 +47,42 @@ pub enum ContractError {
     Reentrancy = 11,
     /// Math overflow occurred during calculation.
     Overflow = 12,
+    /// Credit limit decrease requires immediate repayment of excess amount.
+    LimitDecreaseRequiresRepayment = 13,
 }
 
-/// Stored credit line for a borrower.
+/// Stored credit line data for a borrower.
 #[contracttype]
 pub struct CreditLineData {
+    /// Address of the borrower.
     pub borrower: Address,
+    /// Maximum borrowable amount for this line.
     pub credit_limit: i128,
+    /// Current outstanding principal.
     pub utilized_amount: i128,
+    /// Annual interest rate in basis points (1 bp = 0.01%).
     pub interest_rate_bps: u32,
+    /// Borrower's risk score (0-100).
     pub risk_score: u32,
+    /// Current status of the credit line.
     pub status: CreditStatus,
-    /// Ledger timestamp of the last interest-rate update via `update_risk_parameters`.
+    /// Ledger timestamp of the last interest-rate update.
     /// Zero means no rate update has occurred yet.
     pub last_rate_update_ts: u64,
+    /// Total accrued interest that has been added to the utilized amount.
+    /// This tracks the cumulative interest that has been capitalized.
+    pub accrued_interest: i128,
+    /// Ledger timestamp of the last interest accrual calculation.
+    /// Zero means no accrual has been calculated yet.
+    pub last_accrual_ts: u64,
 }
 
 /// Admin-configurable limits on interest-rate changes.
-///
-/// * `max_rate_change_bps` – Maximum absolute change in `interest_rate_bps`
-///   allowed per single `update_risk_parameters` call.
-/// * `rate_change_min_interval` – Minimum elapsed seconds between two
-///   consecutive rate changes. Set to `0` to disable the time-window check.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RateChangeConfig {
+    /// Maximum absolute change in `interest_rate_bps` allowed per single update.
     pub max_rate_change_bps: u32,
+    /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
 }
