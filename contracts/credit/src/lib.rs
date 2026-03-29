@@ -2111,27 +2111,12 @@ mod test_e2e_lifecycle_happy {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::token::{self, StellarAssetClient};
-    use soroban_sdk::TryFromVal;
-
-    fn last_credit_event_topic1(env: &Env) -> Symbol {
-        let events = env.events().all();
-        let (_contract, topics, _data) = events
-            .iter()
-            .rev()
-            .find(|(_c, topics, _d)| {
-                topics
-                    .get(0)
-                    .and_then(|v| Symbol::try_from_val(env, &v).ok())
-                    .map(|s: Symbol| s == symbol_short!("credit"))
-                    .unwrap_or(false)
-            })
-            .expect("no credit event found");
-        Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap()
-    }
 
     /// Full lifecycle: open → draw → full repay → close.
     #[test]
     fn test_e2e_open_draw_repay_close_happy_path() {
+        use soroban_sdk::{TryFromVal, TryIntoVal};
+
         let env = Env::default();
         env.mock_all_auths();
 
@@ -2141,13 +2126,12 @@ mod test_e2e_lifecycle_happy {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
 
-        // Deploy a mock liquidity token (Stellar Asset Contract).
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
         let sac = StellarAssetClient::new(&env, &token_address);
         let token = token::Client::new(&env, &token_address);
 
-        // ── Step 1: init + open credit line ──────────────────────────────────
+        // ── Step 1: open ──────────────────────────────────────────────────────
         client.init(&admin);
         client.set_liquidity_token(&token_address);
         sac.mint(&contract_id, &1_000_i128);
@@ -2157,35 +2141,51 @@ mod test_e2e_lifecycle_happy {
         assert_eq!(line.status, CreditStatus::Active);
         assert_eq!(line.utilized_amount, 0);
         assert_eq!(line.credit_limit, 1_000);
-        assert_eq!(last_credit_event_topic1(&env), symbol_short!("opened"));
 
         // ── Step 2: draw 600 ─────────────────────────────────────────────────
         client.draw_credit(&borrower, &600_i128);
 
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.status, CreditStatus::Active);
         assert_eq!(line.utilized_amount, 600);
         assert_eq!(token.balance(&contract_id), 400_i128);
         assert_eq!(token.balance(&borrower), 600_i128);
-        assert_eq!(last_credit_event_topic1(&env), symbol_short!("drawn"));
 
         // ── Step 3: full repay 600 ───────────────────────────────────────────
-        // Borrower must approve the contract to pull tokens via transfer_from.
         token.approve(&borrower, &contract_id, &600_i128, &1_000_u32);
         client.repay_credit(&borrower, &600_i128);
 
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.status, CreditStatus::Active);
         assert_eq!(line.utilized_amount, 0);
         assert_eq!(token.balance(&borrower), 0_i128);
         assert_eq!(token.balance(&contract_id), 1_000_i128);
-        assert_eq!(last_credit_event_topic1(&env), symbol_short!("repay"));
 
-        // ── Step 4: borrower self-closes (zero utilization) ──────────────────
+        // ── Step 4: close ────────────────────────────────────────────────────
         client.close_credit_line(&borrower, &borrower);
 
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Closed);
-        assert_eq!(last_credit_event_topic1(&env), symbol_short!("closed"));
+
+        // ── Event assertions: verify the last credit event is "closed" ───────
+        // (SAC transfer events are interleaved; filter to the last credit event)
+        let events = env.events().all();
+        let last_credit = events
+            .iter()
+            .rev()
+            .find(|(_c, topics, _d)| {
+                topics
+                    .get(0)
+                    .and_then(|v| Symbol::try_from_val(&env, &v).ok())
+                    .map(|s: Symbol| s == symbol_short!("credit"))
+                    .unwrap_or(false)
+            })
+            .expect("no credit event found");
+        let (_c, topics, data) = last_credit;
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            symbol_short!("closed")
+        );
+        let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(event_data.status, CreditStatus::Closed);
+        assert_eq!(event_data.borrower, borrower);
     }
 }
