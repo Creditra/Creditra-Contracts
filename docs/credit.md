@@ -90,6 +90,20 @@ Repay outstanding drawn funds.
 
 Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing the effective amount transferred and new `utilized_amount`.
 
+#### Utilization arithmetic assumptions (integer-only)
+- All utilization and limit math uses integer token base units (`i128`); no floating-point arithmetic is used.
+- `draw_credit` computes `updated_utilized` via `checked_add` and fails with `ContractError::Overflow` on overflow.
+- Successful draws enforce `updated_utilized <= credit_limit` whenever the line is `Active`.
+- `repay_credit` computes `effective_repay = min(amount, utilized_amount)` and updates with `saturating_sub`, so utilization cannot become negative even on over-repayment.
+- Tests enforce two invariants across scenarios:
+  - `Active` line utilization never exceeds `credit_limit`.
+  - utilization is never negative after repayments in `Active`, `Suspended`, or `Defaulted`.
+
+#### Trust boundaries and failure modes
+- The contract trusts Soroban host integer semantics (`checked_add`, `saturating_sub`) for deterministic overflow/floor behavior.
+- Token movement is delegated to the configured Stellar Asset Contract; failed allowance/balance/transfer checks revert the transaction before state mutation.
+- `credit_limit` and status transitions are admin-driven inputs; incorrect configuration cannot violate arithmetic invariants but can reduce borrower usability (for example, blocked draws).
+
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 Update credit limit, interest rate, and risk score (admin only).
 
