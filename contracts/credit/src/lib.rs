@@ -11,6 +11,11 @@
 
 mod events;
 pub mod types;
+mod auth;
+mod storage;
+mod config;
+mod risk;
+mod query;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
@@ -21,7 +26,7 @@ use events::{
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
-use types::{CreditLineData, CreditStatus, RateChangeConfig};
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -77,11 +82,6 @@ fn set_reentrancy_guard(env: &Env) {
 
 fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
-}
-
-/// Instance storage key for rate-change config.
-fn rate_cfg_key(env: &Env) -> Symbol {
-    Symbol::new(env, "rate_cfg")
 }
 
 #[contract]
@@ -143,6 +143,8 @@ impl Credit {
             risk_score,
             status: CreditStatus::Active,
             last_rate_update_ts: 0,
+            accrued_interest: 0,
+            last_accrual_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
