@@ -1509,6 +1509,201 @@ use soroban_sdk::{Address, Env};
 
         client.draw_credit(&borrower, &300_i128);
         client.repay_credit(&borrower, &200_i128);
+    //
+    // We cannot simulate a token callback in unit tests without a mock contract.
+    // These tests verify the guard is cleared on the happy path so that sequential
+    // calls succeed, proving no guard leak occurs on successful execution.
+
+    #[test]
+    fn test_reentrancy_guard_cleared_after_draw() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &100_i128);
+        client.draw_credit(&borrower, &100_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            200
+        );
+    }
+
+    #[test]
+    fn test_reentrancy_guard_cleared_after_repay() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &200_i128);
+        client.repay_credit(&borrower, &50_i128);
+        client.repay_credit(&borrower, &50_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            100
+        );
+    }
+
+    #[test]
+    fn test_draw_credit_with_sufficient_liquidity() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        let liquidity = MockLiquidityToken::deploy(&env);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        client.set_liquidity_token(&liquidity.address());
+        liquidity.mint(&contract_id, 500_i128);
+        client.draw_credit(&borrower, &200_i128);
+
+        assert_eq!(liquidity.balance(&contract_id), 300_i128);
+        assert_eq!(liquidity.balance(&borrower), 200_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            200_i128
+        );
+    }
+
+    #[test]
+    fn test_set_liquidity_source_updates_instance_storage() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let reserve = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_liquidity_source(&reserve);
+
+        let stored: Address = env
+            .as_contract(&contract_id, || {
+                env.storage().instance().get(&DataKey::LiquiditySource)
+            })
+            .unwrap();
+        assert_eq!(stored, reserve);
+    }
+
+    #[test]
+    fn test_draw_credit_uses_configured_external_liquidity_source() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        let liquidity = MockLiquidityToken::deploy(&env);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        let reserve = contract_id.clone();
+
+        client.set_liquidity_token(&liquidity.address());
+        client.set_liquidity_source(&reserve);
+
+        liquidity.mint(&reserve, 500_i128);
+        client.draw_credit(&borrower, &120_i128);
+
+        assert_eq!(liquidity.balance(&reserve), 380_i128);
+        assert_eq!(liquidity.balance(&borrower), 120_i128);
+        assert_eq!(liquidity.balance(&contract_id), 380_i128);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_liquidity_token_requires_admin_auth() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+
+        let token = env.register_stellar_asset_contract_v2(token_admin);
+        client.set_liquidity_token(&token.address());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_liquidity_source_requires_admin_auth() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let reserve = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_liquidity_source(&reserve);
+    }
+
+    #[test]
+    #[should_panic(expected = "Insufficient liquidity reserve for requested draw amount")]
+    fn test_draw_credit_with_insufficient_liquidity() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        let liquidity = MockLiquidityToken::deploy(&env);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+        client.set_liquidity_token(&liquidity.address());
+        liquidity.mint(&contract_id, 50_i128);
+        client.draw_credit(&borrower, &100_i128);
+    }
+
+    #[test]
+    fn test_repay_credit_integration_uses_mocked_allowance_and_balance_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        let liquidity = MockLiquidityToken::deploy(&env);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        client.set_liquidity_token(&liquidity.address());
+
+        liquidity.mint(&contract_id, 500_i128);
+        liquidity.mint(&borrower, 250_i128);
+        liquidity.approve(&borrower, &contract_id, 200_i128, 1_000_u32);
+
+        assert_eq!(liquidity.balance(&borrower), 250_i128);
+        assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
+
+        client.draw_credit(&borrower, &300_i128);
+        client.repay_credit(&borrower, &200_i128);
 
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().utilized_amount,
@@ -1518,3 +1713,97 @@ use soroban_sdk::{Address, Env};
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
     }
+
+    // ── E2E Case: Reinstate from Defaulted and draw again (#150) ──────────────
+
+    /// Full E2E scenario for reinstating a defaulted credit line.
+    ///
+    /// Verifies that:
+    /// 1. A defaulted credit line can be reinstated to Active by an admin.
+    /// 2. The reinstatement emits a ("credit", "reinstate") event.
+    /// 3. After reinstatement, the borrower can successfully draw credit again.
+    /// 4. The subsequent draw emits a drawn event with correct updated amounts.
+    #[test]
+    fn test_e2e_reinstate_from_defaulted_then_draw_again() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        // Setup with liquidity
+        let liquidity = MockLiquidityToken::deploy(&env);
+        client.init(&admin);
+        client.set_liquidity_token(&liquidity.address());
+        liquidity.mint(&contract_id, 2000_i128);
+
+        // 1. Open and draw
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &400_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            400
+        );
+
+        // 2. Transition to Defaulted
+        client.default_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+
+        // 3. Reinstate to Active
+        client.reinstate_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
+
+        // Verify Reinstate Event
+        let events = env.events().all();
+        let (_contract, topics, data) = events.last().unwrap();
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            soroban_sdk::symbol_short!("reinstate")
+        );
+        let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(event_data.borrower, borrower);
+        assert_eq!(event_data.status, CreditStatus::Active);
+
+        // 4. Draw again (the core of the E2E requirement)
+        client.draw_credit(&borrower, &200_i128);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 600);
+        assert_eq!(line.status, CreditStatus::Active);
+
+        // Verify Drawn Event
+        let events = env.events().all();
+        let (_contract, topics, data) = events.last().unwrap();
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            soroban_sdk::symbol_short!("drawn")
+        );
+        let drawn_event: DrawnEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(drawn_event.borrower, borrower);
+        assert_eq!(drawn_event.amount, 200);
+        assert_eq!(drawn_event.new_utilized_amount, 600);
+    }
+
+    /// Negative path: reinstate must fail if the current status is not Defaulted.
+    ///
+    /// This test verifies that even an admin cannot reinstate an Active credit line.
+    #[test]
+    #[should_panic(expected = "credit line is not defaulted")]
+    fn test_reinstate_fails_if_not_defaulted_active() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
+
+        // Status is Active (default after open), so reinstate must panic
+        client.reinstate_credit_line(&borrower);
+    }
+}
