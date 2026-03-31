@@ -137,6 +137,7 @@ pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: Cred
 }
 
 /// Publish a v2 credit line lifecycle event.
+#[allow(dead_code)]
 pub fn publish_credit_line_event_v2(env: &Env, topic: (Symbol, Symbol), event: CreditLineEventV2) {
     env.events().publish(topic, event);
 }
@@ -148,6 +149,7 @@ pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
 }
 
 /// Publish a v2 repayment event.
+#[allow(dead_code)]
 pub fn publish_repayment_event_v2(env: &Env, event: RepaymentEventV2) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "repay_v2")),
@@ -162,6 +164,7 @@ pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
 }
 
 /// Publish a v2 drawn event.
+#[allow(dead_code)]
 pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
@@ -174,6 +177,7 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 }
 
 /// Publish an interest accrued event.
+#[allow(dead_code)]
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);

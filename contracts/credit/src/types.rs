@@ -51,6 +51,8 @@ pub enum ContractError {
     Overflow = 12,
     /// Credit limit decrease requires immediate repayment of excess amount.
     LimitDecreaseRequiresRepayment = 13,
+    /// Contract has already been initialized; `init` may only be called once.
+    AlreadyInitialized = 14,
 }
 
 /// Stored credit line data for a borrower.

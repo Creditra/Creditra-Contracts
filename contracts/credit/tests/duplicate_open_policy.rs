@@ -88,6 +88,9 @@ mod test_helpers {
             CreditStatus::Closed => {
                 client.close_credit_line(&borrower, &admin);
             }
+            CreditStatus::Restricted => {
+                // Restricted is not directly reachable via public API in tests
+            }
         }
 
         (

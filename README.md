@@ -6,8 +6,8 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 
 **Contract data model:**
 
-- `CreditStatus`: Active, Suspended, Defaulted, Closed
-- `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status
+- `CreditStatus`: Active, Suspended, Defaulted, Closed, Restricted
+- `CreditLineData`: borrower, credit_limit, utilized_amount, interest_rate_bps, risk_score, status, last_rate_update_ts, accrued_interest, last_accrual_ts
 
 **Behavior notes:**
 - after `suspend_credit_line`, `draw_credit` for that borrower reverts
@@ -32,6 +32,12 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - Only lines in `Active` status can be suspended.
 - `draw_credit` rejects any draw when the line is not `Active` (including `Suspended`).
 - Repayments are intended to remain allowed while suspended.
+
+### Interest accrual design
+
+- The contract already reserves `accrued_interest` and `last_accrual_ts` in storage for lazy interest accounting.
+- The design note for implementing accrual is documented in [`docs/interest-accrual.md`](docs/interest-accrual.md).
+- Current code does not yet apply periodic accrual to balances; the new document defines the intended behavior before implementation.
 
 ## Tech Stack
 

@@ -1,6 +1,6 @@
 use crate::auth::require_admin_auth;
-use crate::storage::rate_cfg_key;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
+use crate::storage::rate_cfg_key;
 use crate::types::{CreditLineData, RateChangeConfig};
 use soroban_sdk::{Address, Env};
 
@@ -11,67 +11,88 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 pub const MAX_RISK_SCORE: u32 = 100;
 
 pub fn update_risk_parameters(
-        env: Env,
-        borrower: Address,
-        credit_limit: i128,
-        interest_rate_bps: u32,
-        risk_score: u32,
-    ) {
-        require_admin_auth(&env);
+    env: Env,
+    borrower: Address,
+    credit_limit: i128,
+    interest_rate_bps: u32,
+    risk_score: u32,
+) {
+    require_admin_auth(&env);
 
-        let mut credit_line: CreditLineData = env
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    if credit_limit < 0 {
+        panic!("credit_limit must be non-negative");
+    }
+    if credit_limit < credit_line.utilized_amount {
+        panic!("credit_limit cannot be less than utilized amount");
+    }
+    if interest_rate_bps > MAX_INTEREST_RATE_BPS {
+        panic!("interest_rate_bps exceeds maximum");
+    }
+    if risk_score > MAX_RISK_SCORE {
+        panic!("risk_score exceeds maximum");
+    }
+
+    if interest_rate_bps != credit_line.interest_rate_bps {
+        if let Some(cfg) = env
             .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
+            .instance()
+            .get::<_, RateChangeConfig>(&rate_cfg_key(&env))
+        {
+            let old_rate = credit_line.interest_rate_bps;
+            let delta = interest_rate_bps.abs_diff(old_rate);
 
-        if credit_limit < 0 {
-            panic!("credit_limit must be non-negative");
-        }
-        if credit_limit < credit_line.utilized_amount {
-            panic!("credit_limit cannot be less than utilized amount");
-        }
-        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
-            panic!("interest_rate_bps exceeds maximum");
-        }
-        if risk_score > MAX_RISK_SCORE {
-            panic!("risk_score exceeds maximum");
+            if delta > cfg.max_rate_change_bps {
+                panic!("rate change exceeds maximum allowed delta");
+            }
+
+            if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts != 0 {
+                let now = env.ledger().timestamp();
+                let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
+                if elapsed < cfg.rate_change_min_interval {
+                    panic!("rate change too soon: minimum interval not elapsed");
+                }
+            }
         }
 
-        credit_line.credit_limit = credit_limit;
-        credit_line.interest_rate_bps = interest_rate_bps;
-        credit_line.risk_score = risk_score;
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        publish_risk_parameters_updated(
-            &env,
-            RiskParametersUpdatedEvent {
-                borrower: borrower.clone(),
-                credit_limit,
-                interest_rate_bps,
-                risk_score,
-            },
-        );
+        credit_line.last_rate_update_ts = env.ledger().timestamp();
     }
 
-    /// Set rate-change limits (admin only).
-    ///
-    /// Configures the maximum allowed interest-rate change per call and the
-    /// minimum time interval between consecutive rate changes.
-    pub fn set_rate_change_limits(
-        env: Env,
-        max_rate_change_bps: u32,
-        rate_change_min_interval: u64,
-    ) {
-        require_admin_auth(&env);
-        let cfg = RateChangeConfig {
-            max_rate_change_bps,
-            rate_change_min_interval,
-        };
-        env.storage().instance().set(&rate_cfg_key(&env), &cfg);
-    }
+    credit_line.credit_limit = credit_limit;
+    credit_line.interest_rate_bps = interest_rate_bps;
+    credit_line.risk_score = risk_score;
+    env.storage().persistent().set(&borrower, &credit_line);
 
-    /// Get the current rate-change limit configuration (view function).
-    pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
-        env.storage().instance().get(&rate_cfg_key(&env))
-    }
+    publish_risk_parameters_updated(
+        &env,
+        RiskParametersUpdatedEvent {
+            borrower: borrower.clone(),
+            credit_limit,
+            interest_rate_bps,
+            risk_score,
+        },
+    );
+}
+
+/// Set rate-change limits (admin only).
+///
+/// Configures the maximum allowed interest-rate change per call and the
+/// minimum time interval between consecutive rate changes.
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+    require_admin_auth(&env);
+    let cfg = RateChangeConfig {
+        max_rate_change_bps,
+        rate_change_min_interval,
+    };
+    env.storage().instance().set(&rate_cfg_key(&env), &cfg);
+}
+
+/// Get the current rate-change limit configuration (view function).
+pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
+    env.storage().instance().get(&rate_cfg_key(&env))
+}

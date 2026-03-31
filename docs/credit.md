@@ -23,6 +23,8 @@ Stored in persistent storage keyed by the borrower's address.
 | `risk_score`         | `u32`    | Risk score assigned by the risk engine (0–100) |
 | `status`             | `CreditStatus` | Current status of the credit line |
 | `last_rate_update_ts`| `u64`    | Ledger timestamp of the last interest-rate change (0 = never updated) |
+| `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
+| `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
 
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
@@ -40,16 +42,19 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | `Suspended`| 1     | Credit line is temporarily suspended |
 | `Defaulted`| 2     | Borrower has defaulted; draw disabled, repay allowed |
 | `Closed`   | 3     | Credit line has been permanently closed |
+| `Restricted` | 4   | Limit is below utilization; additional draws are blocked until cured |
 
 ### Status transitions
 
 | From       | To         | Trigger |
 |------------|------------|---------|
+| Active     | Suspended  | Admin calls `suspend_credit_line` |
 | Active     | Defaulted  | Admin calls `default_credit_line` |
 | Suspended  | Defaulted  | Admin calls `default_credit_line` |
 | Defaulted  | Active     | Admin calls `reinstate_credit_line` |
-| Defaulted  | Suspended  | Admin calls `suspend_credit_line` |
 | Defaulted  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+| Active     | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+| Suspended  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
 
 When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
 
@@ -60,8 +65,32 @@ When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still
 ### `init(env, admin)`
 Initializes the contract with an admin address. Must be called exactly once.
 
+- Stores `admin` in instance storage under the `"admin"` key.
+- Sets `LiquiditySource` to the contract's own address as a deterministic default.
+- Reverts with `ContractError::AlreadyInitialized` (14) if called a second time, preventing admin takeover via re-initialization.
+
+#### Parameters
+| Parameter | Type | Description |
+|---|---|---|
+| `admin` | `Address` | Address that will hold admin authority over this contract |
+
+#### Errors
+| Condition | Error |
+|---|---|
+| Contract already initialized | `ContractError::AlreadyInitialized` (14) |
+
+#### Security notes
+- Must be called by the deployer immediately after deployment.
+- The guard checks for the presence of the `"admin"` key before writing; no storage is mutated on a rejected second call.
+- The admin address is immutable after initialization. See the Admin Rotation Proposal section for a safe rotation design.
+- `LiquiditySource` defaults to the contract address and can be updated post-init via `set_liquidity_source` (admin only).
+
 ### `set_liquidity_token(env, token_address)`
 Sets the Stellar Asset Contract token used for draws and repayments (admin only).
+
+- Writes the token contract address to instance storage under `DataKey::LiquidityToken`.
+- Only the configured admin may update this value; unauthorized callers fail auth before storage is mutated.
+- Covered by unit tests in `contracts/credit/src/lib.rs` for both successful admin updates and rejected non-admin calls.
 
 ### `set_liquidity_source(env, reserve_address)`
 Sets the address that holds liquidity for draws and receives repayments (defaults to contract address).
@@ -76,7 +105,7 @@ Opens a new credit line for a borrower. Called by the backend or risk engine.
 | `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000) |
 | `risk_score` | `u32` | Risk score from the risk engine (0–100) |
 
-`last_rate_update_ts` is initialized to `0` (no rate update has occurred yet).
+`last_rate_update_ts`, `accrued_interest`, and `last_accrual_ts` are initialized to `0`.
 
 #### Errors
 | Condition | Error |
@@ -204,7 +233,16 @@ Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, n
 ### `suspend_credit_line(env, borrower)`
 Suspend an Active credit line (admin only).
 
+- Reverts if the line does not exist.
+- Reverts unless the current status is `Active`.
+
 Emits: `("credit", "suspend")` event.
+
+### Interest accrual
+
+Interest accrual fields exist in storage, but scheduled/lazy accrual logic is not yet active in the contract.
+
+The intended implementation design is documented separately in [`docs/interest-accrual.md`](interest-accrual.md).
 
 ### `close_credit_line(env, borrower, closer)`
 Close a credit line.
@@ -231,11 +269,18 @@ View function — returns credit line data or `None`.
 
 ## Overflow Policy
 
-Arithmetic paths that affect credit limit and utilization use checked math.
+Arithmetic paths that affect credit limit and utilization stay in integer-only arithmetic.
 
 - `draw_credit`: utilization update uses `checked_add`; arithmetic overflow reverts with `ContractError::Overflow` (`12`).
-- `repay_credit`: applied repayment is capped to current utilization, then utilization update uses `checked_sub`; arithmetic overflow reverts with `ContractError::Overflow` (`12`).
+- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies an integer floor at zero with `saturating_sub`. This keeps utilization non-negative even for over-repayments.
 - `update_risk_parameters`: limit/risk bounds are validated before state updates; rate delta uses `abs_diff` for overflow-safe unsigned distance checks.
+
+### Integer arithmetic assumptions
+
+- Amounts and limits are stored as whole-number `i128` values; there is no fractional accounting or rounding path inside the contract.
+- `open_credit_line` requires a positive limit, and `draw_credit` / `repay_credit` both reject non-positive amounts at the contract boundary.
+- Because `repay_credit` caps the applied amount to current utilization before subtraction, repayment paths preserve the invariant `0 <= utilized_amount`.
+- While a line is `Active`, draw paths also preserve `utilized_amount <= credit_limit`; dedicated invariant tests cover repeated draw and repay sequences across status changes.
 
 ### Large-number test coverage
 
@@ -245,6 +290,8 @@ The contract test suite includes explicit large-value coverage:
 - `test_draw_credit_overflow_reverts_with_defined_error`
 - `test_draw_credit_large_values_exceed_limit_reverts_with_defined_error`
 - `test_repay_credit_large_amount_caps_at_zero_without_underflow`
+- `utilization_stays_bounded_across_active_scenarios`
+- `utilization_never_goes_negative_after_repays_across_statuses`
 - `test_update_risk_parameters_rejects_limit_below_utilized_near_i128_max`
 
 These tests validate behavior near `i128::MAX` and confirm overflow handling remains deterministic.
@@ -269,6 +316,8 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `10`       | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
 | `11`       | `Reentrancy`         | Reentrancy detected during cross-contract calls.                            |
 | `12`       | `Overflow`           | Math overflow occurred during calculation.                                  |
+| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
+| `14`       | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once.      |
 
 ---
 
@@ -432,10 +481,12 @@ All sensitive functions enforce authorization via `require_auth()`.
 
 | Key                  | Type       | Value                     |
 |----------------------|------------|---------------------------|
-| `"admin"`            | Instance   | Admin `Address`           |
+| `"admin"`            | Instance   | Admin `Address` (written once; re-init reverts) |
 | `borrower: Address`  | Persistent | `CreditLineData`          |
 | `"rate_cfg"`         | Instance   | `RateChangeConfig` (optional) |
 | `"reentrancy"`       | Instance   | Reentrancy guard (internal) |
+| `DataKey::LiquiditySource` | Instance | Reserve `Address` (defaults to contract address) |
+| `DataKey::LiquidityToken`  | Instance | Token `Address` (optional) |
 
 ---
 
@@ -486,7 +537,7 @@ these keys are lost. Production deployments should call
 
 | Key | Rust type | Value type | Written by | Notes |
 |-----|-----------|------------|------------|-------|
-| `Symbol("admin")` | `Symbol` | `Address` | `init` | Contract admin. Exactly one per deployment. |
+| `Symbol("admin")` | `Symbol` | `Address` | `init` | Contract admin. Written exactly once; second write reverts with `AlreadyInitialized`. |
 | `DataKey::LiquidityToken` | `DataKey` | `Address` | `set_liquidity_token` | Token contract for reserve/draw transfers. |
 | `DataKey::LiquiditySource` | `DataKey` | `Address` | `init`, `set_liquidity_source` | Reserve address. Defaults to contract address. |
 | `Symbol("reentrancy")` | `Symbol` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth flag. Cleared on every code path. |
