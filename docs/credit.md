@@ -490,7 +490,30 @@ All sensitive functions enforce authorization via `require_auth()`.
 
 ---
 
-## Deployment and CLI Usage
+## Deployment Playbook
+
+This section covers deploying the credit contract to Stellar testnet and invoking its core methods. All examples use the [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (`stellar`).
+
+### Prerequisites
+
+- Rust with `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
+- Stellar CLI installed: `cargo install --locked stellar-cli --features opt`
+- A funded testnet identity (never commit private keys)
+
+### 1. Identity setup
+
+```bash
+# Generate a new keypair and store it locally under an alias
+stellar keys generate --global admin --network testnet
+
+# Fund it via Friendbot
+stellar keys fund admin --network testnet
+
+# Confirm the address
+stellar keys address admin
+```
+
+For the backend/risk-engine identity used to open credit lines:
 
 (Examples unchanged — still valid)
 
