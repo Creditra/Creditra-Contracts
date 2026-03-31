@@ -65,6 +65,26 @@ When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still
 ### `init(env, admin)`
 Initializes the contract with an admin address. Must be called exactly once.
 
+- Stores `admin` in instance storage under the `"admin"` key.
+- Sets `LiquiditySource` to the contract's own address as a deterministic default.
+- Reverts with `ContractError::AlreadyInitialized` (14) if called a second time, preventing admin takeover via re-initialization.
+
+#### Parameters
+| Parameter | Type | Description |
+|---|---|---|
+| `admin` | `Address` | Address that will hold admin authority over this contract |
+
+#### Errors
+| Condition | Error |
+|---|---|
+| Contract already initialized | `ContractError::AlreadyInitialized` (14) |
+
+#### Security notes
+- Must be called by the deployer immediately after deployment.
+- The guard checks for the presence of the `"admin"` key before writing; no storage is mutated on a rejected second call.
+- The admin address is immutable after initialization. See the Admin Rotation Proposal section for a safe rotation design.
+- `LiquiditySource` defaults to the contract address and can be updated post-init via `set_liquidity_source` (admin only).
+
 ### `set_liquidity_token(env, token_address)`
 Sets the Stellar Asset Contract token used for draws and repayments (admin only).
 
@@ -283,6 +303,8 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `10`       | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
 | `11`       | `Reentrancy`         | Reentrancy detected during cross-contract calls.                            |
 | `12`       | `Overflow`           | Math overflow occurred during calculation.                                  |
+| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
+| `14`       | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once.      |
 
 ---
 
@@ -446,10 +468,12 @@ All sensitive functions enforce authorization via `require_auth()`.
 
 | Key                  | Type       | Value                     |
 |----------------------|------------|---------------------------|
-| `"admin"`            | Instance   | Admin `Address`           |
+| `"admin"`            | Instance   | Admin `Address` (written once; re-init reverts) |
 | `borrower: Address`  | Persistent | `CreditLineData`          |
 | `"rate_cfg"`         | Instance   | `RateChangeConfig` (optional) |
 | `"reentrancy"`       | Instance   | Reentrancy guard (internal) |
+| `DataKey::LiquiditySource` | Instance | Reserve `Address` (defaults to contract address) |
+| `DataKey::LiquidityToken`  | Instance | Token `Address` (optional) |
 
 ---
 
@@ -477,7 +501,7 @@ these keys are lost. Production deployments should call
 
 | Key | Rust type | Value type | Written by | Notes |
 |-----|-----------|------------|------------|-------|
-| `Symbol("admin")` | `Symbol` | `Address` | `init` | Contract admin. Exactly one per deployment. |
+| `Symbol("admin")` | `Symbol` | `Address` | `init` | Contract admin. Written exactly once; second write reverts with `AlreadyInitialized`. |
 | `DataKey::LiquidityToken` | `DataKey` | `Address` | `set_liquidity_token` | Token contract for reserve/draw transfers. |
 | `DataKey::LiquiditySource` | `DataKey` | `Address` | `init`, `set_liquidity_source` | Reserve address. Defaults to contract address. |
 | `Symbol("reentrancy")` | `Symbol` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth flag. Cleared on every code path. |
