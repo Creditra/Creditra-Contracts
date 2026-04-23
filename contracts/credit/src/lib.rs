@@ -105,7 +105,10 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
+        borrower.require_auth();
+        if credit_limit <= 0 {
+            env.panic_with_error(ContractError::AmountMustBePositive);
+        }
         if interest_rate_bps > MAX_INTEREST_RATE_BPS {
             env.panic_with_error(ContractError::RateTooHigh);
         }
@@ -119,10 +122,9 @@ impl Credit {
             .persistent()
             .get::<Address, CreditLineData>(&borrower)
         {
-            assert!(
-                existing.status != CreditStatus::Active,
-                "borrower already has an active credit line"
-            );
+            if existing.status == CreditStatus::Active {
+                env.panic_with_error(ContractError::InvalidStatus);
+            }
         }
 
         let credit_line = CreditLineData {
@@ -1199,7 +1201,6 @@ mod test_smoke_coverage {
     }
 
     #[test]
-    #[should_panic(expected = "borrower already has an active credit line")]
     fn open_credit_line_rejects_duplicate_active() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1208,7 +1209,11 @@ mod test_smoke_coverage {
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
-        client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
+        let result = client.try_open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
     }
 
     #[test]
@@ -1483,17 +1488,20 @@ mod test_coverage_gaps {
     // ── update_risk_parameters: negative credit_limit ────────────────────────
 
     #[test]
-    #[should_panic(expected = "credit_limit must be non-negative")]
     fn update_risk_params_negative_limit_reverts() {
         let env = Env::default();
+        env.mock_all_auths();
         let (client, _admin, borrower) = base_setup(&env);
-        client.update_risk_parameters(&borrower, &-1, &500_u32, &60_u32);
+        let result = client.try_update_risk_parameters(&borrower, &-1, &500_u32, &60_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::NegativeLimit.into()),
+            _ => panic!("Expected contract error NegativeLimit, got {:?}", result),
+        }
     }
 
     // ── update_risk_parameters: limit below utilized amount ──────────────────
 
     #[test]
-    #[should_panic(expected = "credit_limit cannot be less than utilized amount")]
     fn update_risk_params_limit_below_utilized_reverts() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1508,7 +1516,11 @@ mod test_coverage_gaps {
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.draw_credit(&borrower, &500);
         // Try to set limit below current utilization of 500
-        client.update_risk_parameters(&borrower, &400, &500_u32, &60_u32);
+        let result = client.try_update_risk_parameters(&borrower, &400, &500_u32, &60_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::LimitDecreaseRequiresRepayment.into()),
+            _ => panic!("Expected contract error LimitDecreaseRequiresRepayment, got {:?}", result),
+        }
     }
 
     // ── update_risk_parameters: interest_rate_bps over 10_000 ───────────────
@@ -1677,7 +1689,6 @@ mod test_coverage_gaps {
     }
 
     #[test]
-    #[should_panic(expected = "interest_rate_bps exceeds maximum")]
     fn test_update_risk_parameters_interest_rate_exceeds_max() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1690,11 +1701,14 @@ mod test_coverage_gaps {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.update_risk_parameters(&borrower, &1000_i128, &10001_u32, &70_u32);
+        let result = client.try_update_risk_parameters(&borrower, &1000_i128, &10001_u32, &70_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "risk_score exceeds maximum")]
     fn test_update_risk_parameters_risk_score_exceeds_max() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1707,7 +1721,11 @@ mod test_coverage_gaps {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &101_u32);
+        let result = client.try_update_risk_parameters(&borrower, &1000_i128, &300_u32, &101_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::ScoreTooHigh.into()),
+            _ => panic!("Expected contract error ScoreTooHigh, got {:?}", result),
+        }
     }
 
     #[test]
@@ -1794,13 +1812,16 @@ mod test_coverage_gaps {
     // ── suspend_credit_line from Defaulted → panic (not Active) ─────────────
 
     #[test]
-    #[should_panic(expected = "Only active credit lines can be suspended")]
     fn suspend_defaulted_line_reverts() {
         let env = Env::default();
         env.mock_all_auths();
         let (client, _admin, borrower) = base_setup(&env);
         client.default_credit_line(&borrower);
-        client.suspend_credit_line(&borrower);
+        let result = client.try_suspend_credit_line(&borrower);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
     }
 
     // ── close_credit_line: idempotent on already-Closed line ─────────────────
@@ -2107,7 +2128,6 @@ mod test_rate_change_limits {
     }
 
     #[test]
-    #[should_panic(expected = "rate change exceeds maximum allowed delta")]
     fn test_rate_change_over_limit_reverts() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2116,11 +2136,14 @@ mod test_rate_change_limits {
 
         client.set_rate_change_limits(&50_u32, &0_u64);
         // Current rate is 300; 300 + 51 = 351 → delta 51 > 50
-        client.update_risk_parameters(&borrower, &5_000_i128, &351_u32, &70_u32);
+        let result = client.try_update_risk_parameters(&borrower, &5_000_i128, &351_u32, &70_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "rate change exceeds maximum allowed delta")]
     fn test_rate_decrease_over_limit_reverts() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2129,7 +2152,11 @@ mod test_rate_change_limits {
 
         client.set_rate_change_limits(&50_u32, &0_u64);
         // Current rate is 300; 300 - 51 = 249 → delta 51 > 50
-        client.update_risk_parameters(&borrower, &5_000_i128, &249_u32, &70_u32);
+        let result = client.try_update_risk_parameters(&borrower, &5_000_i128, &249_u32, &70_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
     }
 
     #[test]
@@ -2148,7 +2175,6 @@ mod test_rate_change_limits {
     }
 
     #[test]
-    #[should_panic(expected = "rate change exceeds maximum allowed delta")]
     fn test_rate_change_one_over_limit_reverts() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2157,11 +2183,14 @@ mod test_rate_change_limits {
 
         client.set_rate_change_limits(&50_u32, &0_u64);
         // Current rate 300; 300 + 51 = 351 → delta 51 > 50
-        client.update_risk_parameters(&borrower, &5_000_i128, &351_u32, &70_u32);
+        let result = client.try_update_risk_parameters(&borrower, &5_000_i128, &351_u32, &70_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "rate change too soon: minimum interval not elapsed")]
     fn test_rate_change_within_interval_reverts() {
         let env = Env::default();
         env.mock_all_auths();
@@ -2177,7 +2206,11 @@ mod test_rate_change_limits {
 
         // Second update at t=200 (only 100 s later, < 3600).
         env.ledger().with_mut(|li| li.timestamp = 200);
-        client.update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
+        let result = client.try_update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
     }
 
     #[test]

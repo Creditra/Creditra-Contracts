@@ -147,7 +147,6 @@ mod unit_tests {
     /// with an existing Active credit line fails with the error message
     /// "borrower already has an active credit line".
     #[test]
-    #[should_panic(expected = "borrower already has an active credit line")]
     fn test_duplicate_active_credit_line_rejection() {
         let (env, _admin, borrower, contract_id, _credit_limit, _interest_rate_bps, _risk_score) =
             setup_with_active_line();
@@ -155,8 +154,12 @@ mod unit_tests {
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         // Attempt to open a second credit line with different parameters
-        // This should panic with "borrower already has an active credit line"
-        client.open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
+        // This should fail with ContractError::InvalidStatus
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
     }
 
     /// Task 2.2: Test for state preservation on duplicate Active rejection
@@ -196,13 +199,14 @@ mod unit_tests {
         assert_eq!(original_credit_line.last_rate_update_ts, 0);
 
         // Attempt to open a second credit line with completely different parameters
-        // This should fail, and we catch the panic
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
-        }));
+        // This should fail with ContractError::InvalidStatus
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
 
-        // Verify the operation failed
-        assert!(result.is_err(), "Expected duplicate Active open to fail");
+        // Verify the operation failed with the expected error
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
 
         // Verify the credit line state is completely unchanged after the failed operation
         let credit_line_after_failure = client.get_credit_line(&borrower).unwrap();
@@ -255,13 +259,14 @@ mod unit_tests {
         let _ = env.events().all();
 
         // Attempt to open a second credit line with different parameters
-        // This should fail, and we catch the panic
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
-        }));
+        // This should fail with ContractError::InvalidStatus
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
 
         // Verify the operation failed
-        assert!(result.is_err(), "Expected duplicate Active open to fail");
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::InvalidStatus.into()),
+            _ => panic!("Expected contract error InvalidStatus, got {:?}", result),
+        }
 
         // Verify no events were emitted during the failed operation
         let events_after_failure = env.events().all();
@@ -1425,24 +1430,21 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
     fn test_zero_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         // Attempt to open a credit line with credit_limit = 0
-        // This should panic with "credit_limit must be greater than zero"
+        // This should fail with ContractError::AmountMustBePositive
         let zero_credit_limit = 0_i128;
         let interest_rate_bps = 300_u32;
         let risk_score = 70_u32;
-
-        client.open_credit_line(
-            &borrower,
-            &zero_credit_limit,
-            &interest_rate_bps,
-            &risk_score,
-        );
+        let result = client.try_open_credit_line(&borrower, &zero_credit_limit, &interest_rate_bps, &risk_score);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::AmountMustBePositive.into()),
+            _ => panic!("Expected contract error AmountMustBePositive, got {:?}", result),
+        }
     }
 
     /// Task 6.2: Test for negative credit_limit rejection
@@ -1453,24 +1455,21 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
     fn test_negative_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         // Attempt to open a credit line with negative credit_limit
-        // This should panic with "credit_limit must be greater than zero"
+        // This should fail with ContractError::AmountMustBePositive
         let negative_credit_limit = -1000_i128;
         let interest_rate_bps = 300_u32;
         let risk_score = 70_u32;
-
-        client.open_credit_line(
-            &borrower,
-            &negative_credit_limit,
-            &interest_rate_bps,
-            &risk_score,
-        );
+        let result = client.try_open_credit_line(&borrower, &negative_credit_limit, &interest_rate_bps, &risk_score);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::AmountMustBePositive.into()),
+            _ => panic!("Expected contract error AmountMustBePositive, got {:?}", result),
+        }
     }
 
     /// Task 6.3: Test for excessive interest_rate_bps rejection
@@ -1573,10 +1572,11 @@ mod unit_tests {
         assert_eq!(original_credit_line.last_rate_update_ts, 0);
 
         // Test 1: Attempt to reopen with invalid credit_limit (zero)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &0_i128, &400_u32, &80_u32);
-        }));
-        assert!(result.is_err(), "Expected invalid credit_limit to fail");
+        let result = client.try_open_credit_line(&borrower, &0_i128, &400_u32, &80_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::AmountMustBePositive.into()),
+            _ => panic!("Expected contract error AmountMustBePositive, got {:?}", result),
+        }
 
         // Verify state is unchanged after invalid credit_limit
         let credit_line_after_invalid_limit = client.get_credit_line(&borrower).unwrap();
@@ -1610,13 +1610,11 @@ mod unit_tests {
         );
 
         // Test 2: Attempt to reopen with invalid interest_rate_bps (> 10000)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &10001_u32, &80_u32);
-        }));
-        assert!(
-            result.is_err(),
-            "Expected invalid interest_rate_bps to fail"
-        );
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &10001_u32, &80_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
 
         // Verify state is unchanged after invalid interest_rate_bps
         let credit_line_after_invalid_rate = client.get_credit_line(&borrower).unwrap();
@@ -1634,7 +1632,7 @@ mod unit_tests {
         );
         assert_eq!(
             credit_line_after_invalid_rate.interest_rate_bps,
-            original_credit_line.interest_rate_bps
+            original_interest_rate_bps
         );
         assert_eq!(
             credit_line_after_invalid_rate.risk_score,
@@ -1650,10 +1648,11 @@ mod unit_tests {
         );
 
         // Test 3: Attempt to reopen with invalid risk_score (> 100)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &400_u32, &101_u32);
-        }));
-        assert!(result.is_err(), "Expected invalid risk_score to fail");
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &400_u32, &101_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::ScoreTooHigh.into()),
+            _ => panic!("Expected contract error ScoreTooHigh, got {:?}", result),
+        }
 
         // Verify state is unchanged after invalid risk_score
         let credit_line_after_invalid_score = client.get_credit_line(&borrower).unwrap();
@@ -1715,10 +1714,11 @@ mod unit_tests {
         let _ = env.events().all();
 
         // Test 1: Attempt to reopen with invalid credit_limit (zero)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &0_i128, &400_u32, &80_u32);
-        }));
-        assert!(result.is_err(), "Expected invalid credit_limit to fail");
+        let result = client.try_open_credit_line(&borrower, &0_i128, &400_u32, &80_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::AmountMustBePositive.into()),
+            _ => panic!("Expected contract error AmountMustBePositive, got {:?}", result),
+        }
 
         // Verify no events were emitted during the failed operation
         let events_after_invalid_limit = env.events().all();
@@ -1729,13 +1729,11 @@ mod unit_tests {
         );
 
         // Test 2: Attempt to reopen with invalid interest_rate_bps (> 10000)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &10001_u32, &80_u32);
-        }));
-        assert!(
-            result.is_err(),
-            "Expected invalid interest_rate_bps to fail"
-        );
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &10001_u32, &80_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
 
         // Verify no events were emitted during the failed operation
         let events_after_invalid_rate = env.events().all();
@@ -1746,10 +1744,11 @@ mod unit_tests {
         );
 
         // Test 3: Attempt to reopen with invalid risk_score (> 100)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.open_credit_line(&borrower, &2000_i128, &400_u32, &101_u32);
-        }));
-        assert!(result.is_err(), "Expected invalid risk_score to fail");
+        let result = client.try_open_credit_line(&borrower, &2000_i128, &400_u32, &101_u32);
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::ScoreTooHigh.into()),
+            _ => panic!("Expected contract error ScoreTooHigh, got {:?}", result),
+        }
 
         // Verify no events were emitted during the failed operation
         let events_after_invalid_score = env.events().all();

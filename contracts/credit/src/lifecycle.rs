@@ -10,12 +10,16 @@ pub fn open_credit_line(
     interest_rate_bps: u32,
     risk_score: u32,
 ) {
-    assert!(credit_limit > 0, "credit_limit must be greater than zero");
-    assert!(
-        interest_rate_bps <= 10_000,
-        "interest_rate_bps cannot exceed 10000 (100%)"
-    );
-    assert!(risk_score <= 100, "risk_score must be between 0 and 100");
+    borrower.require_auth();
+    if credit_limit <= 0 {
+        env.panic_with_error(crate::types::ContractError::AmountMustBePositive);
+    }
+    if interest_rate_bps > 10_000 {
+        env.panic_with_error(crate::types::ContractError::RateTooHigh);
+    }
+    if risk_score > 100 {
+        env.panic_with_error(crate::types::ContractError::ScoreTooHigh);
+    }
 
     // Prevent overwriting an existing Active credit line
     if let Some(existing) = env
@@ -23,10 +27,9 @@ pub fn open_credit_line(
         .persistent()
         .get::<Address, CreditLineData>(&borrower)
     {
-        assert!(
-            existing.status != CreditStatus::Active,
-            "borrower already has an active credit line"
-        );
+        if existing.status == CreditStatus::Active {
+            env.panic_with_error(crate::types::ContractError::InvalidStatus);
+        }
     }
     let credit_line = CreditLineData {
         borrower: borrower.clone(),
@@ -78,7 +81,7 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         .expect("Credit line not found");
 
     if credit_line.status != CreditStatus::Active {
-        panic!("Only active credit lines can be suspended");
+        env.panic_with_error(crate::types::ContractError::InvalidStatus);
     }
 
     credit_line.status = CreditStatus::Suspended;
@@ -196,7 +199,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         .expect("Credit line not found");
 
     if credit_line.status != CreditStatus::Defaulted {
-        panic!("credit line is not defaulted");
+        env.panic_with_error(crate::types::ContractError::InvalidStatus);
     }
 
     credit_line.status = CreditStatus::Active;
