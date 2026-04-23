@@ -1,0 +1,186 @@
+﻿cargo : warning: unused import: `contracttype`
+At line:1 char:1
++ cargo test -p creditra-credit 2>&1 | Out-File -Encoding utf8 test_out ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: unused import: `contracttype`:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  --> contracts\credit\src\lib.rs:27:29
+   |
+27 |     contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+   |                             ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `RiskParametersUpdatedEvent` and `publish_risk_parameters_updated`
+  --> contracts\credit\src\lib.rs:32:5
+   |
+32 |     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+33 |     RiskParametersUpdatedEvent,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `reentrancy_key` is never used
+  --> contracts\credit\src\lib.rs:46:4
+   |
+46 | fn reentrancy_key(env: &Env) -> Symbol {
+   |    ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `init` is never used
+ --> contracts\credit\src\config.rs:6:8
+  |
+6 | pub fn init(env: Env, admin: Address) {
+  |        ^^^^
+
+warning: function `set_liquidity_token` is never used
+  --> contracts\credit\src\config.rs:15:8
+   |
+15 | pub fn set_liquidity_token(env: Env, token_address: Address) {
+   |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `set_liquidity_source` is never used
+  --> contracts\credit\src\config.rs:24:8
+   |
+24 | pub fn set_liquidity_source(env: Env, reserve_address: Address) {
+   |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `open_credit_line` is never used
+ --> contracts\credit\src\lifecycle.rs:6:8
+  |
+6 | pub fn open_credit_line(
+  |        ^^^^^^^^^^^^^^^^
+
+warning: function `get_credit_line` is never used
+ --> contracts\credit\src\query.rs:4:8
+  |
+4 | pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
+  |        ^^^^^^^^^^^^^^^
+
+warning: function `set_rate_change_limits` is never used
+  --> contracts\credit\src\risk.rs:89:8
+   |
+89 | pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_rate_change_limits` is never used
+  --> contracts\credit\src\risk.rs:99:8
+   |
+99 | pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `draw_credit` is never used
+ --> contracts\credit\src\borrow.rs:6:8
+  |
+6 | pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
+  |        ^^^^^^^^^^^
+
+warning: function `repay_credit` is never used
+  --> contracts\credit\src\borrow.rs:72:12
+   |
+72 |     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
+   |            ^^^^^^^^^^^^
+
+warning: `creditra-credit` (lib) generated 12 warnings (run `cargo fix --lib -p creditra-credit` to apply 2 
+suggestions)
+   Compiling creditra-credit v0.1.0 (C:\Users\ADMIN\Desktop\kweb-drips\Creditra-Contracts\contracts\credit)
+error[E0425]: cannot find function `setup_contract_with_credit_line` in this scope
+    --> contracts\credit\src\lib.rs:1069:13
+     |
+1069 |             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+note: function `crate::test_coverage_gaps::setup_contract_with_credit_line` exists but is inaccessible
+    --> contracts\credit\src\lib.rs:1418:5
+     |
+1418 | /     fn setup_contract_with_credit_line<'a>(
+1419 | |         env: &'a Env,
+1420 | |         borrower: &'a Address,
+1421 | |         credit_limit: i128,
+...    |
+1433 | |         (client, contract_id, admin)
+1434 | |     }
+     | |_____^ not accessible
+
+error[E0425]: cannot find function `setup_contract_with_credit_line` in this scope
+    --> contracts\credit\src\lib.rs:1106:13
+     |
+1106 |             setup_contract_with_credit_line(&env, &borrower, 1_000, 600);
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+note: function `crate::test_coverage_gaps::setup_contract_with_credit_line` exists but is inaccessible
+    --> contracts\credit\src\lib.rs:1418:5
+     |
+1418 | /     fn setup_contract_with_credit_line<'a>(
+1419 | |         env: &'a Env,
+1420 | |         borrower: &'a Address,
+1421 | |         credit_limit: i128,
+...    |
+1433 | |         (client, contract_id, admin)
+1434 | |     }
+     | |_____^ not accessible
+
+error[E0425]: cannot find value `token_admin` in this scope
+    --> contracts\credit\src\lib.rs:1776:60
+     |
+1776 |         let token = env.register_stellar_asset_contract_v2(token_admin);
+     |                                                            ^^^^^^^^^^^ not found in this scope
+
+warning: unused imports: `CreditLineData` and `CreditStatus`
+ --> contracts\credit\src\accrual_tests.rs:5:24
+  |
+5 |     use crate::types::{CreditLineData, CreditStatus};
+  |                        ^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::accrual::apply_accrual`
+ --> contracts\credit\src\accrual_tests.rs:6:9
+  |
+6 |     use crate::accrual::apply_accrual;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `contracttype`
+  --> contracts\credit\src\lib.rs:27:29
+   |
+27 |     contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+   |                             ^^^^^^^^^^^^
+
+error[E0282]: type annotations needed
+    --> contracts\credit\src\lib.rs:1071:36
+     |
+1071 |         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
+     |                                    ^^^^^^ cannot infer type
+
+error[E0282]: type annotations needed
+    --> contracts\credit\src\lib.rs:1108:36
+     |
+1108 |         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
+     |                                    ^^^^^^ cannot infer type
+
+warning: unused variable: `token_address`
+   --> contracts\credit\src\lib.rs:496:13
+    |
+496 |         let token_address = token_id.address();
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_token_address`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `borrower`
+    --> contracts\credit\src\lib.rs:1211:13
+     |
+1211 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower_two`
+    --> contracts\credit\src\lib.rs:1250:13
+     |
+1250 |         let borrower_two = Address::generate(&env);
+     |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower_two`
+
+Some errors have detailed explanations: E0282, E0425.
+For more information about an error, try `rustc --explain E0282`.
+warning: `creditra-credit` (lib test) generated 7 warnings (1 duplicate)
+error: could not compile `creditra-credit` (lib test) due to 5 previous errors; 7 warnings emitted
+warning: build failed, waiting for other jobs to finish...
