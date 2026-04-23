@@ -25,23 +25,7 @@ pub struct CreditLineEvent {
     pub risk_score: u32,
 }
 
-/// Versioned lifecycle event for analytics/indexers.
-///
-/// Semver policy: this is additive and emitted alongside `CreditLineEvent` so
-/// existing indexers remain compatible while new consumers migrate to v2.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreditLineEventV2 {
-    pub event_type: Symbol,
-    pub borrower: Address,
-    pub status: CreditStatus,
-    pub credit_limit: i128,
-    pub interest_rate_bps: u32,
-    pub risk_score: u32,
-    pub timestamp: u64,
-    pub actor: Address,
-    pub amount: i128,
-}
+
 
 /// Event emitted when a borrower repays credit.
 ///
@@ -67,19 +51,7 @@ pub struct RepaymentEvent {
     pub timestamp: u64,
 }
 
-/// Versioned repayment event with explicit payer identifier and allocation breakdown.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RepaymentEventV2 {
-    pub borrower: Address,
-    pub payer: Address,
-    pub amount: i128,
-    pub interest_repaid: i128,
-    pub principal_repaid: i128,
-    pub new_utilized_amount: i128,
-    pub new_accrued_interest: i128,
-    pub timestamp: u64,
-}
+
 
 /// Event emitted when admin updates risk parameters for a credit line.
 #[contracttype]
@@ -95,17 +67,7 @@ pub struct RiskParametersUpdatedEvent {
     pub risk_score: u32,
 }
 
-/// Versioned risk update event with timestamp and actor identifier.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RiskParametersUpdatedEventV2 {
-    pub borrower: Address,
-    pub credit_limit: i128,
-    pub interest_rate_bps: u32,
-    pub risk_score: u32,
-    pub timestamp: u64,
-    pub actor: Address,
-}
+
 
 /// Event emitted when a borrower draws credit.
 #[contracttype]
@@ -128,18 +90,6 @@ pub struct InterestAccruedEvent {
     pub borrower: Address,
     pub accrued_amount: i128,
     pub total_accrued_interest: i128,
-    pub new_utilized_amount: i128,
-    pub timestamp: u64,
-}
-
-/// Versioned draw event with explicit recipient/source identifiers.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DrawnEventV2 {
-    pub borrower: Address,
-    pub recipient: Address,
-    pub reserve_source: Address,
-    pub amount: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
 }
@@ -176,11 +126,7 @@ pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: Cred
     env.events().publish(topic, event);
 }
 
-/// Publish a v2 credit line lifecycle event.
-#[allow(dead_code)]
-pub fn publish_credit_line_event_v2(env: &Env, topic: (Symbol, Symbol), event: CreditLineEventV2) {
-    env.events().publish(topic, event);
-}
+
 
 /// Publish a repayment event.
 pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
@@ -188,14 +134,7 @@ pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
         .publish((symbol_short!("credit"), symbol_short!("repay")), event);
 }
 
-/// Publish a v2 repayment event.
-#[allow(dead_code)]
-pub fn publish_repayment_event_v2(env: &Env, event: RepaymentEventV2) {
-    env.events().publish(
-        (symbol_short!("credit"), Symbol::new(env, "repay_v2")),
-        event,
-    );
-}
+
 
 /// Publish a drawn event.
 pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
@@ -203,12 +142,7 @@ pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
         .publish((symbol_short!("credit"), symbol_short!("drawn")), event);
 }
 
-/// Publish a v2 drawn event.
-#[allow(dead_code)]
-pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
-    env.events()
-        .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
-}
+
 
 /// Publish a risk parameters updated event.
 pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEvent) {
