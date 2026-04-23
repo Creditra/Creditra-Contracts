@@ -43,10 +43,6 @@ use types::{
 
 // constants removed - imported from risk module
 
-
-
-
-
 #[contract]
 pub struct Credit;
 
@@ -694,8 +690,6 @@ mod test {
     fn approve(env: &Env, token: &Address, from: &Address, spender: &Address, amount: i128) {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
     }
-
-
 
     fn assert_utilization_invariants(line: &CreditLineData) {
         assert!(
@@ -1520,7 +1514,8 @@ mod test {
         assert!(checkpoint > 0);
 
         // Advance ledger timestamp by exactly one year
-        env.ledger().set_timestamp(checkpoint + accrual::SECONDS_PER_YEAR);
+        env.ledger()
+            .set_timestamp(checkpoint + accrual::SECONDS_PER_YEAR);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
