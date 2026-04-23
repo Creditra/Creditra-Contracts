@@ -101,10 +101,26 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 
 /// Mark a credit line as defaulted (admin only).
 ///
-/// Call when the line is past due or when an oracle/off-chain signal indicates default.
-/// Transition: Active or Suspended → Defaulted.
-/// After this, draw_credit is disabled and repay_credit remains allowed.
-/// Emits a CreditLineDefaulted event.
+/// Transitions the credit line to [`CreditStatus::Defaulted`].
+///
+/// # Valid source statuses
+/// - [`CreditStatus::Active`] → Defaulted
+/// - [`CreditStatus::Suspended`] → Defaulted
+///
+/// Closed lines cannot be defaulted (they are permanently closed).
+/// Already-Defaulted lines are idempotent (no-op, no event emitted).
+///
+/// # Effects
+/// - `draw_credit` is disabled for the borrower after this call.
+/// - `repay_credit` remains allowed so the borrower can reduce their debt.
+///
+/// # Errors
+/// - Panics if the credit line does not exist.
+/// - Panics if the caller is not the contract admin.
+/// - Panics if the credit line is `Closed`.
+///
+/// # Events
+/// Emits `("credit", "default")` with a [`CreditLineEvent`] payload.
 pub fn default_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
     let mut credit_line: CreditLineData = env
@@ -112,6 +128,15 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .expect("Credit line not found");
+
+    if credit_line.status == CreditStatus::Closed {
+        panic!("cannot default a closed credit line");
+    }
+
+    if credit_line.status == CreditStatus::Defaulted {
+        // Idempotent: already defaulted, nothing to do.
+        return;
+    }
 
     credit_line.status = CreditStatus::Defaulted;
     env.storage().persistent().set(&borrower, &credit_line);

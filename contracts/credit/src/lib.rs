@@ -2563,3 +2563,212 @@ mod test_draw_freeze {
         assert!(!client_b.is_draws_frozen());
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: default_credit_line — issue #229
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod test_default_credit_line {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::Symbol;
+
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        (client, admin, borrower)
+    }
+
+    // ── Happy paths ───────────────────────────────────────────────────────────
+
+    /// Active → Defaulted: status transitions correctly.
+    #[test]
+    fn default_active_line_sets_status_to_defaulted() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.default_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+    }
+
+    /// Suspended → Defaulted: admin can default a suspended line.
+    #[test]
+    fn default_suspended_line_sets_status_to_defaulted() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.suspend_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
+        client.default_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+    }
+
+    /// Defaulted → Defaulted: idempotent, no panic.
+    #[test]
+    fn default_already_defaulted_line_is_idempotent() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.default_credit_line(&borrower);
+        // Second call must not panic.
+        client.default_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+    }
+
+    /// default_credit_line preserves utilized_amount and other fields.
+    #[test]
+    fn default_preserves_credit_line_fields() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        let before = client.get_credit_line(&borrower).unwrap();
+        client.default_credit_line(&borrower);
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(after.credit_limit, before.credit_limit);
+        assert_eq!(after.utilized_amount, before.utilized_amount);
+        assert_eq!(after.interest_rate_bps, before.interest_rate_bps);
+        assert_eq!(after.risk_score, before.risk_score);
+        assert_eq!(after.borrower, before.borrower);
+    }
+
+    // ── draw_credit disabled after default ────────────────────────────────────
+
+    /// draw_credit reverts with "credit line is defaulted" after default.
+    #[test]
+    #[should_panic(expected = "credit line is defaulted")]
+    fn draw_credit_reverts_after_default() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.default_credit_line(&borrower);
+        client.draw_credit(&borrower, &100_i128);
+    }
+
+    // ── repay_credit still allowed after default ──────────────────────────────
+
+    /// repay_credit succeeds on a defaulted line (state-only, no token).
+    #[test]
+    fn repay_credit_allowed_after_default() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // No token configured: draw/repay work as state-only operations.
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // Manually set utilized_amount so there's something to repay.
+        env.as_contract(&contract_id, || {
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get::<Address, CreditLineData>(&borrower)
+                .unwrap();
+            line.utilized_amount = 400;
+            env.storage().persistent().set(&borrower, &line);
+        });
+        client.default_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+        client.repay_credit(&borrower, &200_i128);
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 200);
+        assert_eq!(line.status, CreditStatus::Defaulted);
+    }
+
+    // ── Authorization ─────────────────────────────────────────────────────────
+
+    /// Non-admin cannot default a credit line.
+    #[test]
+    #[should_panic]
+    fn default_credit_line_requires_admin_auth() {
+        let env = Env::default();
+        // No mock_all_auths — admin auth not provided.
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.default_credit_line(&borrower);
+    }
+
+    // ── Invalid source statuses ───────────────────────────────────────────────
+
+    /// Cannot default a nonexistent credit line.
+    #[test]
+    #[should_panic(expected = "Credit line not found")]
+    fn default_nonexistent_credit_line_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.default_credit_line(&Address::generate(&env));
+    }
+
+    /// Cannot default a closed credit line.
+    #[test]
+    #[should_panic(expected = "cannot default a closed credit line")]
+    fn default_closed_credit_line_reverts() {
+        let env = Env::default();
+        let (client, admin, borrower) = setup(&env);
+        client.close_credit_line(&borrower, &admin);
+        client.default_credit_line(&borrower);
+    }
+
+    // ── Event ─────────────────────────────────────────────────────────────────
+
+    /// default_credit_line emits ("credit", "default") with correct payload.
+    #[test]
+    fn default_credit_line_emits_event() {
+        use soroban_sdk::TryFromVal;
+        use soroban_sdk::TryIntoVal;
+
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.default_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_contract, topics, data) = events.last().unwrap();
+        let topic = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(topic, Symbol::new(&env, "default"));
+        let event: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(event.status, CreditStatus::Defaulted);
+        assert_eq!(event.borrower, borrower);
+    }
+
+    /// Idempotent call (already Defaulted) does NOT emit a second event.
+    #[test]
+    fn default_idempotent_does_not_emit_duplicate_event() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.default_credit_line(&borrower);
+        // Second call on an already-Defaulted line: idempotent, returns early.
+        client.default_credit_line(&borrower);
+        // Status must still be Defaulted and no panic occurred.
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
+        // The second call returns early before emitting an event, so the
+        // current transaction's event log is empty.
+        assert!(env.events().all().is_empty());
+    }
+}
