@@ -51,9 +51,15 @@ pub enum ContractError {
     Overflow = 12,
     /// Credit limit decrease requires immediate repayment of excess amount.
     LimitDecreaseRequiresRepayment = 13,
+    /// Caller borrower is blocked from drawing by admin.
+    BorrowerBlocked = 14,
     /// Contract has already been initialized; `init` may only be called once.
-    AlreadyInitialized = 14,
-    DrawExceedsMaxAmount = 14, 
+    AlreadyInitialized = 15,
+    /// The requested draw exceeds the per-transaction maximum allowed amount.
+    DrawExceedsMaxAmount = 16,
+    /// Action cannot be performed because the draw cooldown interval has not elapsed.
+    DrawCooldown = 17,
+    AdminAcceptTooEarly = 18,
 }
 
 /// Stored credit line data for a borrower.
@@ -83,6 +89,14 @@ pub struct CreditLineData {
     /// Ledger timestamp of the last successful draw.
     /// Zero means no draw has occurred yet (cooldown not enforced on first draw).
     pub last_draw_ts: u64,
+}
+
+/// Admin-configurable minimum interval between successive draws.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawCooldownConfig {
+    /// Minimum elapsed seconds required between two consecutive draws per borrower.
+    pub min_interval_seconds: u64,
 }
 
 /// Admin-configurable limits on interest-rate changes.

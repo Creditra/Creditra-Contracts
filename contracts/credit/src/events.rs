@@ -161,6 +161,16 @@ pub struct AdminRotationAcceptedEvent {
     pub new_admin: Address,
 }
 
+/// Event emitted when the rate formula configuration is updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateFormulaConfigEvent {
+    pub base_rate_bps: u32,
+    pub slope_bps_per_score: u32,
+    pub min_rate_bps: u32,
+    pub max_rate_bps: u32,
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
@@ -232,4 +242,28 @@ pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
     };
     env.events()
         .publish((symbol_short!("credit"), topic), event);
+}
+
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
+}
+
+/// Publish a rate formula configuration event.
+pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rate_form")),
+        event,
+    );
 }

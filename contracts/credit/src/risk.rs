@@ -142,3 +142,8 @@ pub fn update_risk_parameters(
         },
     );
 }
+
+/// Get the current rate formula configuration.
+pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
+    env.storage().instance().get(&rate_formula_key(&env))
+}
