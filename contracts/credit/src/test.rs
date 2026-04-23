@@ -1719,3 +1719,114 @@ use soroban_sdk::{Address, Env};
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
     }
+
+    // --- Utilization ratio cap tests ---
+
+    #[test]
+    fn test_draw_credit_respects_default_100_percent_utilization_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32); // risk 70 < 80, ratio 100%
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.max_utilization_ratio_bps, 10000);
+
+        client.draw_credit(&borrower, &1000_i128); // should succeed
+
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 1000);
+    }
+
+    #[test]
+    fn test_draw_credit_respects_80_percent_utilization_ratio_for_high_risk() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &85_u32); // risk 85 >= 80, ratio 80%
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.max_utilization_ratio_bps, 8000);
+
+        client.draw_credit(&borrower, &800_i128); // 80% of 1000, should succeed
+
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 800);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds max utilization ratio")]
+    fn test_draw_credit_rejects_exceeding_80_percent_utilization_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &85_u32); // risk 85, ratio 80%
+
+        client.draw_credit(&borrower, &801_i128); // exceeds 80%, should fail
+    }
+
+    #[test]
+    fn test_draw_credit_allows_exact_80_percent_utilization_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &85_u32); // risk 85, ratio 80%
+
+        client.draw_credit(&borrower, &800_i128); // exact 80%, should succeed
+
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 800);
+    }
+
+    #[test]
+    fn test_update_risk_parameters_updates_utilization_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32); // starts with 100%
+
+        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &85_u32); // to 80%
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.max_utilization_ratio_bps, 8000);
+
+        client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &60_u32); // back to 100%
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.max_utilization_ratio_bps, 10000);
+    }

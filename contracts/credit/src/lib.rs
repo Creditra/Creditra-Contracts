@@ -18,13 +18,6 @@ mod query;
 mod risk;
 mod storage;
 pub mod types;
-mod auth;
-mod storage;
-mod borrow;
-mod config;
-mod lifecycle;
-mod risk;
-mod query;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
@@ -146,6 +139,7 @@ impl Credit {
             last_rate_update_ts: 0,
             accrued_interest: 0,
             last_accrual_ts: 0,
+            max_utilization_ratio_bps: 10000, // 100%
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
@@ -237,9 +231,23 @@ impl Credit {
                 env.panic_with_error(ContractError::Overflow)
             });
 
-        if updated_utilized > credit_line.credit_limit {
+        // Calculate max allowed utilization based on ratio
+        let max_allowed = credit_line
+            .credit_limit
+            .checked_mul(credit_line.max_utilization_ratio_bps as i128)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::Overflow)
+            })
+            .checked_div(10000)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::Overflow)
+            });
+
+        if updated_utilized > max_allowed {
             clear_reentrancy_guard(&env);
-            panic!("exceeds credit limit");
+            panic!("exceeds max utilization ratio");
         }
 
         if let Some(token_address) = token_address {

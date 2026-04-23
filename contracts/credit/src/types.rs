@@ -79,6 +79,10 @@ pub struct CreditLineData {
     /// Ledger timestamp of the last interest accrual calculation.
     /// Zero means no accrual has been calculated yet.
     pub last_accrual_ts: u64,
+    /// Maximum utilization ratio in basis points (1 bp = 0.01%).
+    /// Limits utilization to this percentage of credit_limit.
+    /// Default is 10000 (100%).
+    pub max_utilization_ratio_bps: u32,
 }
 
 /// Admin-configurable limits on interest-rate changes.

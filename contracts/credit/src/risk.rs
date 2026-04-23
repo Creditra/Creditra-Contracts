@@ -10,6 +10,16 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 pub const MAX_RISK_SCORE: u32 = 100;
 
+/// Calculate max utilization ratio based on risk score.
+/// High risk (>=80) gets 80%, others 100%.
+pub fn calculate_max_utilization_ratio(risk_score: u32) -> u32 {
+    if risk_score >= 80 {
+        8000 // 80%
+    } else {
+        10000 // 100%
+    }
+}
+
 pub fn update_risk_parameters(
     env: Env,
     borrower: Address,
@@ -66,6 +76,7 @@ pub fn update_risk_parameters(
     credit_line.credit_limit = credit_limit;
     credit_line.interest_rate_bps = interest_rate_bps;
     credit_line.risk_score = risk_score;
+    credit_line.max_utilization_ratio_bps = calculate_max_utilization_ratio(risk_score);
     env.storage().persistent().set(&borrower, &credit_line);
 
     publish_risk_parameters_updated(

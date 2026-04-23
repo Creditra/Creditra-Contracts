@@ -25,6 +25,7 @@ Stored in persistent storage keyed by the borrower's address.
 | `last_rate_update_ts`| `u64`    | Ledger timestamp of the last interest-rate change (0 = never updated) |
 | `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
 | `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
+| `max_utilization_ratio_bps` | `u32` | Maximum utilization ratio in basis points (e.g. 8000 = 80%) |
 
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
@@ -57,6 +58,21 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | Suspended  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
 
 When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
+
+### Utilization Ratio Cap
+
+Each credit line has a `max_utilization_ratio_bps` field that caps utilization at a percentage of the `credit_limit`. This provides an additional layer of risk control beyond the nominal limit.
+
+- **Default**: 10000 bps (100%) for new credit lines.
+- **Tiered by Risk Score**:
+  - Risk score < 80: 100% utilization allowed.
+  - Risk score ≥ 80: 80% utilization allowed.
+- **Enforcement**: In `draw_credit`, the effective limit is `min(credit_limit, (credit_limit * max_utilization_ratio_bps) / 10000)`.
+- **Updates**: `max_utilization_ratio_bps` is recalculated whenever `risk_score` changes via `update_risk_parameters`.
+
+**Example**:
+- Borrower with `credit_limit = 1000` and `risk_score = 85` can draw up to 800 (80%).
+- If `risk_score` is updated to 70, they can then draw up to the full 1000.
 
 ---
 
