@@ -42,7 +42,6 @@ use types::{
 };
 
 // constants removed - imported from risk module
-
 #[contract]
 pub struct Credit;
 
