@@ -1,7 +1,12 @@
+// SPDX-License-Identifier: MIT
+
 use crate::auth::{require_admin, require_admin_auth};
-use crate::events::{publish_credit_line_event, CreditLineEvent};
+use crate::events::{
+    publish_credit_line_event, CreditLineEvent, ACTION_CLOSED, ACTION_DEFAULT, ACTION_OPENED,
+    ACTION_REINSTATE, ACTION_SUSPEND,
+};
 use crate::types::{CreditLineData, CreditStatus};
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{Address, Env, Symbol};
 
 pub fn open_credit_line(
     env: Env,
@@ -44,9 +49,9 @@ pub fn open_credit_line(
 
     publish_credit_line_event(
         &env,
-        (symbol_short!("credit"), symbol_short!("opened")),
+        Symbol::new(&env, ACTION_OPENED),
         CreditLineEvent {
-            event_type: symbol_short!("opened"),
+            event_type: Symbol::new(&env, ACTION_OPENED),
             borrower: borrower.clone(),
             status: CreditStatus::Active,
             credit_limit,
@@ -66,9 +71,11 @@ pub fn open_credit_line(
 ///
 /// # Panics
 /// - If no credit line exists for the given borrower.
+/// - If the credit line is not currently Active.
 ///
 /// # Events
-/// Emits a `("credit", "suspend")` [`CreditLineEvent`].
+/// Emits topic `(Symbol::new(env, "credit"), Symbol::new(env, "suspend"))` with
+/// a [`CreditLineEvent`] payload.
 pub fn suspend_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
     let mut credit_line: CreditLineData = env
@@ -86,9 +93,9 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
 
     publish_credit_line_event(
         &env,
-        (symbol_short!("credit"), symbol_short!("suspend")),
+        Symbol::new(&env, ACTION_SUSPEND),
         CreditLineEvent {
-            event_type: symbol_short!("suspend"),
+            event_type: Symbol::new(&env, ACTION_SUSPEND),
             borrower: borrower.clone(),
             status: CreditStatus::Suspended,
             credit_limit: credit_line.credit_limit,
@@ -110,7 +117,9 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
 /// * Panics if credit line does not exist, or if `closer` is not admin/borrower, or if
 ///   borrower closes while `utilized_amount != 0`.
 ///
-/// Emits a CreditLineClosed event.
+/// # Events
+/// Emits topic `(Symbol::new(env, "credit"), Symbol::new(env, "closed"))` with
+/// a [`CreditLineEvent`] payload.
 pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     closer.require_auth();
 
@@ -140,9 +149,9 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 
     publish_credit_line_event(
         &env,
-        (symbol_short!("credit"), symbol_short!("closed")),
+        Symbol::new(&env, ACTION_CLOSED),
         CreditLineEvent {
-            event_type: symbol_short!("closed"),
+            event_type: Symbol::new(&env, ACTION_CLOSED),
             borrower: borrower.clone(),
             status: CreditStatus::Closed,
             credit_limit: credit_line.credit_limit,
@@ -157,7 +166,10 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 /// Call when the line is past due or when an oracle/off-chain signal indicates default.
 /// Transition: Active or Suspended → Defaulted.
 /// After this, draw_credit is disabled and repay_credit remains allowed.
-/// Emits a CreditLineDefaulted event.
+///
+/// # Events
+/// Emits topic `(Symbol::new(env, "credit"), Symbol::new(env, "default"))` with
+/// a [`CreditLineEvent`] payload.
 pub fn default_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
     let mut credit_line: CreditLineData = env
@@ -171,9 +183,9 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 
     publish_credit_line_event(
         &env,
-        (symbol_short!("credit"), symbol_short!("default")),
+        Symbol::new(&env, ACTION_DEFAULT),
         CreditLineEvent {
-            event_type: symbol_short!("default"),
+            event_type: Symbol::new(&env, ACTION_DEFAULT),
             borrower: borrower.clone(),
             status: CreditStatus::Defaulted,
             credit_limit: credit_line.credit_limit,
@@ -186,6 +198,10 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 /// Reinstate a defaulted credit line to Active (admin only).
 ///
 /// Allowed only when status is Defaulted. Transition: Defaulted → Active.
+///
+/// # Events
+/// Emits topic `(Symbol::new(env, "credit"), Symbol::new(env, "reinstate"))` with
+/// a [`CreditLineEvent`] payload.
 pub fn reinstate_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
 
@@ -204,9 +220,9 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
 
     publish_credit_line_event(
         &env,
-        (symbol_short!("credit"), symbol_short!("reinstate")),
+        Symbol::new(&env, ACTION_REINSTATE),
         CreditLineEvent {
-            event_type: symbol_short!("reinstate"),
+            event_type: Symbol::new(&env, ACTION_REINSTATE),
             borrower: borrower.clone(),
             status: CreditStatus::Active,
             credit_limit: credit_line.credit_limit,

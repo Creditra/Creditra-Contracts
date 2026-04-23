@@ -655,7 +655,7 @@ use soroban_sdk::{Address, Env};
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
         client.set_liquidity_token(&token_address);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     #[test]
@@ -670,7 +670,7 @@ use soroban_sdk::{Address, Env};
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Defaulted
         );
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Active
@@ -689,7 +689,7 @@ use soroban_sdk::{Address, Env};
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     #[test]
@@ -705,7 +705,7 @@ use soroban_sdk::{Address, Env};
         client.set_liquidity_token(&token_address);
         client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     // ── reinstate_credit_line: new explicit transition tests ─────────────────
@@ -719,7 +719,7 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Active);
         // Draw must succeed after reinstatement to Active
@@ -727,7 +727,7 @@ use soroban_sdk::{Address, Env};
         assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 100);
     }
 
-    /// Defaulted → Suspended: status becomes Suspended, draws remain disabled.
+    /// Defaulted → Active: reinstate always goes to Active.
     #[test]
     fn test_reinstate_to_suspended_status() {
         let env = Env::default();
@@ -736,14 +736,14 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.status, CreditStatus::Suspended);
+        // reinstate_credit_line always transitions to Active
+        assert_eq!(line.status, CreditStatus::Active);
     }
 
-    /// Defaulted → Suspended: draws are still blocked.
+    /// After reinstatement to Active, draws are re-enabled.
     #[test]
-    #[should_panic(expected = "credit line is suspended")]
     fn test_reinstate_to_suspended_blocks_draws() {
         let env = Env::default();
         env.mock_all_auths();
@@ -751,8 +751,10 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
+        // After reinstatement to Active, draws succeed
         client.draw_credit(&borrower, &100);
+        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 100);
     }
 
     /// Invariant: utilized_amount is preserved after reinstatement.
@@ -765,7 +767,7 @@ use soroban_sdk::{Address, Env};
             setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.draw_credit(&borrower, &400);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 400);
         assert_eq!(line.credit_limit, 1_000);
@@ -773,7 +775,7 @@ use soroban_sdk::{Address, Env};
         assert_eq!(line.risk_score, 70);
     }
 
-    /// Invariant: utilized_amount preserved when reinstating to Suspended.
+    /// Invariant: utilized_amount preserved after reinstatement.
     #[test]
     fn test_reinstate_to_suspended_preserves_utilized_amount() {
         let env = Env::default();
@@ -783,36 +785,36 @@ use soroban_sdk::{Address, Env};
             setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.draw_credit(&borrower, &250);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 250);
-        assert_eq!(line.status, CreditStatus::Suspended);
+        assert_eq!(line.status, CreditStatus::Active);
     }
 
-    /// Invalid target_status (e.g. Closed) must revert.
+    /// Invalid target: reinstate on a non-defaulted line must revert.
     #[test]
-    #[should_panic(expected = "target_status must be Active or Suspended")]
+    #[should_panic(expected = "credit line is not defaulted")]
     fn test_reinstate_invalid_target_status_closed_reverts() {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
-        client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Closed);
+        // Line is Active, not Defaulted — must revert
+        client.reinstate_credit_line(&borrower);
     }
 
-    /// Invalid target_status (Defaulted) must revert.
+    /// Reinstate on a non-defaulted (Active) line must revert.
     #[test]
-    #[should_panic(expected = "target_status must be Active or Suspended")]
+    #[should_panic(expected = "credit line is not defaulted")]
     fn test_reinstate_invalid_target_status_defaulted_reverts() {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
-        client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Defaulted);
+        // Line is Active, not Defaulted — must revert
+        client.reinstate_credit_line(&borrower);
     }
 
     /// Reinstate to Active emits event with correct status.
@@ -826,21 +828,27 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
+        // New schema: topic0 = "credit", topic1 = "reinstate"
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "credit")
+        );
         assert_eq!(
             soroban_sdk::Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            soroban_sdk::symbol_short!("reinstate")
+            soroban_sdk::Symbol::new(&env, "reinstate")
         );
         let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
         assert_eq!(event_data.status, CreditStatus::Active);
         assert_eq!(event_data.borrower, borrower);
     }
 
-    /// Reinstate to Suspended emits event with correct status.
+    /// Reinstate to Suspended is no longer supported (reinstate always goes to Active).
+    /// This test verifies the current behavior: reinstate_credit_line goes to Active.
     #[test]
-    fn test_reinstate_to_suspended_emits_event_with_suspended_status() {
+    fn test_reinstate_to_active_emits_event_with_correct_topic() {
         use soroban_sdk::testutils::Events;
         use soroban_sdk::{TryFromVal, TryIntoVal};
         let env = Env::default();
@@ -849,15 +857,20 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
+        // New schema: topic0 = "credit", topic1 = "reinstate"
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "credit")
+        );
         assert_eq!(
             soroban_sdk::Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            soroban_sdk::symbol_short!("reinstate")
+            soroban_sdk::Symbol::new(&env, "reinstate")
         );
         let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
-        assert_eq!(event_data.status, CreditStatus::Suspended);
+        assert_eq!(event_data.status, CreditStatus::Active);
         assert_eq!(event_data.borrower, borrower);
     }
 
@@ -870,13 +883,13 @@ use soroban_sdk::{Address, Env};
         let (client, _token, _admin) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Active);
         client.suspend_credit_line(&borrower);
         assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Suspended);
     }
 
-    /// Reinstate to Suspended then can be closed by admin.
+    /// Reinstate then admin can close.
     #[test]
     fn test_reinstate_to_suspended_then_admin_close() {
         let env = Env::default();
@@ -888,7 +901,7 @@ use soroban_sdk::{Address, Env};
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
         client.close_credit_line(&borrower, &admin);
         assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
     }
@@ -906,7 +919,7 @@ use soroban_sdk::{Address, Env};
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
+        client.reinstate_credit_line(&borrower);
     }
 
     // ── update_risk_parameters ────────────────────────────────────────────────
@@ -1350,12 +1363,17 @@ use soroban_sdk::{Address, Env};
         let borrower = Address::generate(&env);
         let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
+        // New schema: topic0 = "credit", topic1 = "reinstate"
+        assert_eq!(
+            Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            Symbol::new(&env, "credit")
+        );
         assert_eq!(
             Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            soroban_sdk::symbol_short!("reinstate")
+            Symbol::new(&env, "reinstate")
         );
         let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
         assert_eq!(event_data.status, CreditStatus::Active);
@@ -1719,3 +1737,569 @@ use soroban_sdk::{Address, Env};
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
     }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Schema Tests
+//
+// These tests assert the exact topic structure and data payload for every event
+// emitted by the credit contract, per the frozen schema defined in events.rs.
+//
+// Schema summary:
+//   Lifecycle events  → topic: ("credit", action_symbol),  data: CreditLineEvent
+//   Draw events       → topic: ("drawn",  borrower_addr),  data: DrawnEvent
+//   Repay events      → topic: ("repay",  borrower_addr),  data: RepaymentEvent
+//   Risk-update events→ topic: ("credit", "risk_upd"),     data: RiskParametersUpdatedEvent
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod event_schema_tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
+    use soroban_sdk::token::StellarAssetClient;
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    fn deploy(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        (client, admin, contract_id)
+    }
+
+    fn deploy_with_token(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token_addr = token_id.address();
+        client.set_liquidity_token(&token_addr);
+        (client, admin, contract_id, token_addr)
+    }
+
+    // ── open_credit_line → ("credit", "opened") ───────────────────────────────
+
+    /// Topic[0] must be the Symbol "credit".
+    #[test]
+    fn open_event_topic0_is_credit_symbol() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+    }
+
+    /// Topic[1] must be the Symbol "opened".
+    #[test]
+    fn open_event_topic1_is_opened_symbol() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t1, Symbol::new(&env, "opened"));
+    }
+
+    /// Data payload must decode as CreditLineEvent with correct fields.
+    #[test]
+    fn open_event_data_payload_matches_inputs() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &2_500, &450_u32, &65_u32);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: CreditLineEvent = data.try_into_val(&env).unwrap();
+
+        assert_eq!(ev.borrower, borrower);
+        assert_eq!(ev.status, CreditStatus::Active);
+        assert_eq!(ev.credit_limit, 2_500);
+        assert_eq!(ev.interest_rate_bps, 450);
+        assert_eq!(ev.risk_score, 65);
+        assert_eq!(ev.event_type, Symbol::new(&env, "opened"));
+    }
+
+    /// Exactly one event is emitted per open_credit_line call.
+    #[test]
+    fn open_event_exactly_one_event_emitted() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        assert_eq!(env.events().all().len(), 1);
+    }
+
+    // ── draw_credit → ("drawn", borrower_addr) ────────────────────────────────
+
+    /// Topic[0] must be the Symbol "drawn".
+    #[test]
+    fn draw_event_topic0_is_drawn_symbol() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &200);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "drawn"));
+    }
+
+    /// Topic[1] must be the borrower's Address (not a Symbol).
+    #[test]
+    fn draw_event_topic1_is_borrower_address() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &300);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t1: Address = Address::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t1, borrower);
+    }
+
+    /// Data payload must decode as DrawnEvent with correct fields.
+    #[test]
+    fn draw_event_data_payload_matches_inputs() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &400);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: DrawnEvent = data.try_into_val(&env).unwrap();
+
+        assert_eq!(ev.borrower, borrower);
+        assert_eq!(ev.amount, 400);
+        assert_eq!(ev.new_utilized_amount, 400);
+    }
+
+    /// Cumulative draw: new_utilized_amount reflects total after multiple draws.
+    #[test]
+    fn draw_event_new_utilized_accumulates_across_draws() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &200);
+        client.draw_credit(&borrower, &300);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: DrawnEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.amount, 300);
+        assert_eq!(ev.new_utilized_amount, 500);
+    }
+
+    // ── repay_credit → ("repay", borrower_addr) ───────────────────────────────
+
+    /// Topic[0] must be the Symbol "repay".
+    #[test]
+    fn repay_event_topic0_is_repay_symbol() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &500);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &200);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &200, &1_000_u32);
+        client.repay_credit(&borrower, &200);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "repay"));
+    }
+
+    /// Topic[1] must be the borrower's Address.
+    #[test]
+    fn repay_event_topic1_is_borrower_address() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &500);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &150);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &150, &1_000_u32);
+        client.repay_credit(&borrower, &150);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t1: Address = Address::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t1, borrower);
+    }
+
+    /// Data payload must decode as RepaymentEvent with correct fields.
+    #[test]
+    fn repay_event_data_payload_matches_inputs() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &600);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &250);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &250, &1_000_u32);
+        client.repay_credit(&borrower, &250);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: RepaymentEvent = data.try_into_val(&env).unwrap();
+
+        assert_eq!(ev.borrower, borrower);
+        assert_eq!(ev.amount, 250);
+        assert_eq!(ev.new_utilized_amount, 350); // 600 - 250
+    }
+
+    /// Overpayment: event amount is capped at utilized_amount, not the nominal amount.
+    #[test]
+    fn repay_event_amount_is_effective_not_nominal_on_overpayment() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &100);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &500);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &500, &1_000_u32);
+        client.repay_credit(&borrower, &500); // overpay
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: RepaymentEvent = data.try_into_val(&env).unwrap();
+
+        assert_eq!(ev.amount, 100);           // effective, not 500
+        assert_eq!(ev.new_utilized_amount, 0);
+    }
+
+    // ── suspend_credit_line → ("credit", "suspend") ───────────────────────────
+
+    /// Topic[0] = "credit", Topic[1] = "suspend".
+    #[test]
+    fn suspend_event_topics_are_credit_and_suspend() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.suspend_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+        assert_eq!(t1, Symbol::new(&env, "suspend"));
+    }
+
+    /// Data payload status must be Suspended.
+    #[test]
+    fn suspend_event_data_status_is_suspended() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.suspend_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.status, CreditStatus::Suspended);
+        assert_eq!(ev.borrower, borrower);
+    }
+
+    // ── close_credit_line → ("credit", "closed") ──────────────────────────────
+
+    /// Topic[0] = "credit", Topic[1] = "closed".
+    #[test]
+    fn close_event_topics_are_credit_and_closed() {
+        let env = Env::default();
+        let (client, admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.close_credit_line(&borrower, &admin);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+        assert_eq!(t1, Symbol::new(&env, "closed"));
+    }
+
+    /// Data payload status must be Closed and borrower must match.
+    #[test]
+    fn close_event_data_status_is_closed_and_borrower_matches() {
+        let env = Env::default();
+        let (client, admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.close_credit_line(&borrower, &admin);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.status, CreditStatus::Closed);
+        assert_eq!(ev.borrower, borrower);
+    }
+
+    // ── default_credit_line → ("credit", "default") ───────────────────────────
+
+    /// Topic[0] = "credit", Topic[1] = "default".
+    #[test]
+    fn default_event_topics_are_credit_and_default() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.default_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+        assert_eq!(t1, Symbol::new(&env, "default"));
+    }
+
+    /// Data payload status must be Defaulted.
+    #[test]
+    fn default_event_data_status_is_defaulted() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.default_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.status, CreditStatus::Defaulted);
+        assert_eq!(ev.borrower, borrower);
+    }
+
+    // ── reinstate_credit_line → ("credit", "reinstate") ──────────────────────
+
+    /// Topic[0] = "credit", Topic[1] = "reinstate".
+    #[test]
+    fn reinstate_event_topics_are_credit_and_reinstate() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.default_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+        assert_eq!(t1, Symbol::new(&env, "reinstate"));
+    }
+
+    /// Data payload status must be Active after reinstatement.
+    #[test]
+    fn reinstate_event_data_status_is_active() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.default_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: CreditLineEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.status, CreditStatus::Active);
+        assert_eq!(ev.borrower, borrower);
+    }
+
+    // ── update_risk_parameters → ("credit", "risk_upd") ──────────────────────
+
+    /// Topic[0] = "credit", Topic[1] = "risk_upd".
+    #[test]
+    fn risk_update_event_topics_are_credit_and_risk_upd() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.update_risk_parameters(&borrower, &2_000, &400_u32, &80_u32);
+
+        let events = env.events().all();
+        let (_cid, topics, _data) = events.last().unwrap();
+        let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(t0, Symbol::new(&env, "credit"));
+        assert_eq!(t1, Symbol::new(&env, "risk_upd"));
+    }
+
+    /// Data payload must decode as RiskParametersUpdatedEvent with correct fields.
+    #[test]
+    fn risk_update_event_data_payload_matches_inputs() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.update_risk_parameters(&borrower, &3_000, &500_u32, &85_u32);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: RiskParametersUpdatedEvent = data.try_into_val(&env).unwrap();
+
+        assert_eq!(ev.borrower, borrower);
+        assert_eq!(ev.credit_limit, 3_000);
+        assert_eq!(ev.interest_rate_bps, 500);
+        assert_eq!(ev.risk_score, 85);
+    }
+
+    // ── Cross-cutting: topic stability across full lifecycle ──────────────────
+
+    /// Every event in a full lifecycle has the correct namespace in topic[0].
+    #[test]
+    fn full_lifecycle_all_events_have_correct_namespace() {
+        let env = Env::default();
+        let (client, admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &200);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &100);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &100, &1_000_u32);
+        client.repay_credit(&borrower, &100);
+
+        client.suspend_credit_line(&borrower);
+        client.default_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower);
+        client.close_credit_line(&borrower, &admin);
+
+        let events = env.events().all();
+        // Expected namespaces in order: credit, drawn, repay, credit, credit, credit, credit
+        let expected_ns = ["credit", "drawn", "repay", "credit", "credit", "credit", "credit"];
+        assert_eq!(events.len(), expected_ns.len());
+
+        for (i, ((_cid, topics, _data), ns)) in events.iter().zip(expected_ns.iter()).enumerate() {
+            let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+            assert_eq!(
+                t0,
+                Symbol::new(&env, ns),
+                "event[{i}] topic[0] mismatch: expected {ns}"
+            );
+        }
+    }
+
+    /// Lifecycle action symbols appear in topic[1] in the correct order.
+    #[test]
+    fn full_lifecycle_action_symbols_in_correct_order() {
+        let env = Env::default();
+        let (client, admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.suspend_credit_line(&borrower);
+        client.default_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower);
+        client.close_credit_line(&borrower, &admin);
+
+        let events = env.events().all();
+        // All are lifecycle events: topic[1] is a Symbol
+        let expected_actions = ["opened", "suspend", "default", "reinstate", "closed"];
+        assert_eq!(events.len(), expected_actions.len());
+
+        for (i, ((_cid, topics, _data), action)) in
+            events.iter().zip(expected_actions.iter()).enumerate()
+        {
+            let t1: Symbol = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+            assert_eq!(
+                t1,
+                Symbol::new(&env, action),
+                "event[{i}] topic[1] mismatch: expected {action}"
+            );
+        }
+    }
+
+    /// Draw and repay events carry the borrower address in topic[1], not a Symbol.
+    #[test]
+    fn draw_and_repay_events_carry_borrower_address_in_topic1() {
+        let env = Env::default();
+        let (client, _admin, contract_id, token) = deploy_with_token(&env);
+        let borrower = Address::generate(&env);
+
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &300);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &100);
+        soroban_sdk::token::Client::new(&env, &token)
+            .approve(&borrower, &contract_id, &100, &1_000_u32);
+        client.repay_credit(&borrower, &100);
+
+        let events = env.events().all();
+        // event[0] = open (lifecycle), event[1] = draw, event[2] = repay
+        assert_eq!(events.len(), 3);
+
+        // draw event topic[1] is borrower Address
+        let (_cid, draw_topics, _) = &events[1];
+        let draw_t1: Address =
+            Address::try_from_val(&env, &draw_topics.get(1).unwrap()).unwrap();
+        assert_eq!(draw_t1, borrower);
+
+        // repay event topic[1] is borrower Address
+        let (_cid, repay_topics, _) = &events[2];
+        let repay_t1: Address =
+            Address::try_from_val(&env, &repay_topics.get(1).unwrap()).unwrap();
+        assert_eq!(repay_t1, borrower);
+    }
+
+    // ── Boundary: zero-draw repay emits event with zero amount ────────────────
+
+    /// Repay when utilized_amount is zero: event is emitted with amount = 0.
+    #[test]
+    fn repay_zero_utilization_event_has_zero_amount() {
+        let env = Env::default();
+        let (client, _admin, _cid) = deploy(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+        // No draw — repay with no token configured (state-only path)
+        client.repay_credit(&borrower, &500);
+
+        let events = env.events().all();
+        let (_cid, _topics, data) = events.last().unwrap();
+        let ev: RepaymentEvent = data.try_into_val(&env).unwrap();
+        assert_eq!(ev.amount, 0);
+        assert_eq!(ev.new_utilized_amount, 0);
+    }
+}

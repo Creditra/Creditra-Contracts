@@ -321,28 +321,189 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 
 ---
 
-## Events
+## Event Schema
 
-| Topic                      | Event Type | Emitted By                  | Description |
-|----------------------------|------------|-----------------------------|-----------|
-| `("credit", "opened")`     | `opened`   | `open_credit_line`          | New credit line created |
-| `("credit", "drawn")`      | `drawn`    | `draw_credit`               | Funds drawn |
-| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made |
-| `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
-| `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
-| `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
-| `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
-| `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
+This section is the **frozen contract** for all events emitted by the credit
+contract.  Indexers and analytics pipelines must rely on this schema and must
+**not** depend on any field ordering or naming that is not listed here.
 
-The contract also emits additive v2 event topics (for indexer analytics fields
-like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
-[`docs/indexer-integration.md`](indexer-integration.md) for full topic mapping.
+> **Trust boundary** — Indexers **must** verify the emitting contract ID before
+> trusting event content.  Any contract can publish events with identical topic
+> structures; the contract address is the authoritative identity, not the topic
+> symbols.
+
+> **Address authorization** — `Address` values that appear in topics are always
+> the borrower address that was authenticated by `require_auth()` earlier in the
+> same call frame.  They are never caller-supplied without prior auth.
+
+### Topic layout
+
+Every event topic is a two-element tuple:
+
+```
+(namespace: Symbol, qualifier: Symbol | Address)
+```
+
+| Namespace constant | Value      | Used for |
+|--------------------|------------|----------|
+| `TOPIC_CREDIT`     | `"credit"` | Lifecycle events and risk-update events |
+| `TOPIC_DRAWN`      | `"drawn"`  | Draw (borrow) events |
+| `TOPIC_REPAY`      | `"repay"`  | Repayment events |
+
+### Event catalogue
+
+#### `open_credit_line` → credit-line opened
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "opened")` |
+| data     | `CreditLineEvent` | See payload table below |
+
+**`CreditLineEvent` payload:**
+
+| Field               | Type           | Description |
+|---------------------|----------------|-------------|
+| `event_type`        | `Symbol`       | `"opened"` |
+| `borrower`          | `Address`      | Borrower's address |
+| `status`            | `CreditStatus` | `Active` |
+| `credit_limit`      | `i128`         | Credit limit at open |
+| `interest_rate_bps` | `u32`          | Annual rate in basis points |
+| `risk_score`        | `u32`          | Risk score (0–100) |
+
+---
+
+#### `draw_credit` → funds drawn
+
+| Field    | Type      | Value |
+|----------|-----------|-------|
+| topic[0] | `Symbol`  | `Symbol::new(env, "drawn")` |
+| topic[1] | `Address` | Borrower's address (authenticated via `require_auth`) |
+| data     | `DrawnEvent` | See payload table below |
+
+**`DrawnEvent` payload:**
+
+| Field                 | Type      | Description |
+|-----------------------|-----------|-------------|
+| `borrower`            | `Address` | Borrower's address |
+| `amount`              | `i128`    | Amount drawn in this operation |
+| `new_utilized_amount` | `i128`    | Outstanding principal after this draw |
+| `timestamp`           | `u64`     | Ledger timestamp of the draw |
+
+---
+
+#### `repay_credit` → repayment made
+
+| Field    | Type      | Value |
+|----------|-----------|-------|
+| topic[0] | `Symbol`  | `Symbol::new(env, "repay")` |
+| topic[1] | `Address` | Borrower's address (authenticated via `require_auth`) |
+| data     | `RepaymentEvent` | See payload table below |
+
+**`RepaymentEvent` payload:**
+
+| Field                 | Type      | Description |
+|-----------------------|-----------|-------------|
+| `borrower`            | `Address` | Borrower's address |
+| `amount`              | `i128`    | **Effective** amount repaid (≤ `utilized_amount`; over-payments are capped) |
+| `new_utilized_amount` | `i128`    | Outstanding principal after this repayment |
+| `timestamp`           | `u64`     | Ledger timestamp of the repayment |
+
+> **Note:** `amount` is the effective repayment, not the nominal amount passed
+> by the caller.  If the caller passes more than `utilized_amount`, the event
+> records only what was actually applied.
+
+---
+
+#### `suspend_credit_line` → line suspended
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "suspend")` |
+| data     | `CreditLineEvent` | `event_type = "suspend"`, `status = Suspended` |
+
+---
+
+#### `close_credit_line` → line closed
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "closed")` |
+| data     | `CreditLineEvent` | `event_type = "closed"`, `status = Closed` |
+
+> **Idempotency:** `close_credit_line` is idempotent when the line is already
+> `Closed`.  No event is emitted on a no-op close.
+
+---
+
+#### `default_credit_line` → line defaulted
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "default")` |
+| data     | `CreditLineEvent` | `event_type = "default"`, `status = Defaulted` |
+
+---
+
+#### `reinstate_credit_line` → line reinstated
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "reinstate")` |
+| data     | `CreditLineEvent` | `event_type = "reinstate"`, `status = Active` |
+
+---
+
+#### `update_risk_parameters` → risk parameters updated
+
+| Field    | Type     | Value |
+|----------|----------|-------|
+| topic[0] | `Symbol` | `Symbol::new(env, "credit")` |
+| topic[1] | `Symbol` | `Symbol::new(env, "risk_upd")` |
+| data     | `RiskParametersUpdatedEvent` | See payload table below |
+
+**`RiskParametersUpdatedEvent` payload:**
+
+| Field               | Type      | Description |
+|---------------------|-----------|-------------|
+| `borrower`          | `Address` | Borrower's address |
+| `credit_limit`      | `i128`    | New credit limit |
+| `interest_rate_bps` | `u32`     | New annual rate in basis points |
+| `risk_score`        | `u32`     | New risk score (0–100) |
+
+---
+
+### Indexer integration notes
+
+1. **Filter by contract ID first.** The topic structure alone does not uniquely
+   identify this contract's events.  Always filter `contract_id == <deployed_address>`.
+
+2. **Distinguish address vs. symbol in topic[1].** Lifecycle events carry a
+   `Symbol` in topic[1]; draw and repay events carry an `Address`.  Indexers
+   should branch on the topic type before decoding.
+
+3. **Effective repayment.** The `amount` field in `RepaymentEvent` is the
+   effective amount transferred, not the nominal amount the caller requested.
+   Use `new_utilized_amount` to track the outstanding balance.
+
+4. **No event on idempotent close.** If `close_credit_line` is called on an
+   already-closed line, it returns without emitting an event.
+
+5. **Verification command:**
+   ```bash
+   cargo test -p creditra-credit
+   ```
 
 ---
 
 ## Access Control
 
 | Function                 | Caller                |
+
 | ------------------------ | --------------------- |
 | `init`                   | Deployer (once)       |
 | `open_credit_line`       | Backend / risk engine |
