@@ -25,6 +25,10 @@ pub fn reentrancy_key(env: &Env) -> Symbol {
     Symbol::new(env, "reentrancy")
 }
 
+pub fn draw_cooldown_key(env: &Env) -> Symbol {
+    Symbol::new(env, "draw_cool")
+}
+
 pub fn rate_cfg_key(env: &Env) -> Symbol {
     Symbol::new(env, "rate_cfg")
 }

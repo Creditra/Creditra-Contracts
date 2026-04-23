@@ -25,8 +25,6 @@ pub struct CreditLineEvent {
     pub risk_score: u32,
 }
 
-
-
 /// Event emitted when a borrower repays credit.
 ///
 /// Allocation policy: accrued interest is repaid first, then principal.
@@ -51,8 +49,6 @@ pub struct RepaymentEvent {
     pub timestamp: u64,
 }
 
-
-
 /// Event emitted when admin updates risk parameters for a credit line.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,8 +62,6 @@ pub struct RiskParametersUpdatedEvent {
     /// New risk score.
     pub risk_score: u32,
 }
-
-
 
 /// Event emitted when a borrower draws credit.
 #[contracttype]
@@ -126,23 +120,17 @@ pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: Cred
     env.events().publish(topic, event);
 }
 
-
-
 /// Publish a repayment event.
 pub fn publish_repayment_event(env: &Env, event: RepaymentEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("repay")), event);
 }
 
-
-
 /// Publish a drawn event.
 pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn")), event);
 }
-
-
 
 /// Publish a risk parameters updated event.
 pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEvent) {

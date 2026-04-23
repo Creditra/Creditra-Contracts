@@ -12,54 +12,38 @@
 #[cfg(test)]
 extern crate std;
 
+mod accrual;
+#[cfg(test)]
+mod accrual_tests;
 mod auth;
 mod events;
 mod lifecycle;
 mod risk;
 mod storage;
 pub mod types;
-mod accrual;
-#[cfg(test)]
-mod accrual_tests;
 
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env};
 
 use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_credit_line_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_repayment_event, AdminRotationAcceptedEvent, AdminRotationProposedEvent,
-    CreditLineEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-};
-use types::{
-    ContractError, CreditLineData, CreditStatus, DrawCooldownConfig, RateChangeConfig,
-};
-use storage::{
-    clear_reentrancy_guard, is_borrower_blocked, proposed_admin_key, proposed_at_key,
-    rate_cfg_key, set_reentrancy_guard, DataKey,
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed, publish_credit_line_event,
+    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, CreditLineEvent, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent,
 };
 use auth::{require_admin, require_admin_auth};
 use risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
+use storage::{
+    admin_key, clear_reentrancy_guard, draw_cooldown_key, is_borrower_blocked, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, rate_formula_key, set_reentrancy_guard, DataKey,
+};
+use types::{
+    ContractError, CreditLineData, CreditStatus, DrawCooldownConfig, RateChangeConfig,
+    RateFormulaConfig,
+};
 
 // constants removed - imported from risk module
 
-/// Seconds in a standard year (365 days).
-const SECONDS_PER_YEAR: u64 = 31_536_000;
 
-/// Instance storage key for reentrancy guard.
-fn reentrancy_key(env: &Env) -> Symbol {
-    Symbol::new(env, "reentrancy")
-}
-
-fn admin_key(env: &Env) -> Symbol {
-    Symbol::new(env, "admin")
-}
-
-/// Instance storage key for draw cooldown config.
-fn draw_cooldown_key(env: &Env) -> Symbol {
-    Symbol::new(env, "draw_cool")
-}
 
 
 
@@ -139,7 +123,9 @@ impl Credit {
         }
 
         let previous_admin = require_admin(&env);
-        env.storage().instance().set(&admin_key(&env), &proposed_admin);
+        env.storage()
+            .instance()
+            .set(&admin_key(&env), &proposed_admin);
         env.storage().instance().remove(&proposed_admin_key(&env));
         env.storage().instance().remove(&proposed_at_key(&env));
 
@@ -151,7 +137,7 @@ impl Credit {
             },
         );
     }
-    
+
     /// Set the global minimum interval between successive draws per borrower.
     /// Admin-only. Zero disables the feature (default).
     pub fn set_draw_cooldown(env: Env, min_interval_seconds: u64) {
@@ -159,7 +145,9 @@ impl Credit {
         let config = DrawCooldownConfig {
             min_interval_seconds,
         };
-        env.storage().instance().set(&draw_cooldown_key(&env), &config);
+        env.storage()
+            .instance()
+            .set(&draw_cooldown_key(&env), &config);
     }
 
     /// Get the current draw cooldown configuration.
@@ -272,14 +260,14 @@ impl Credit {
 
         // Enforce per-transaction draw cap when configured.
         if let Some(max_draw) = env
-        .storage()
-        .instance()
-        .get::<DataKey, i128>(&DataKey::MaxDrawAmount)
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::MaxDrawAmount)
         {
-        if amount > max_draw {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::DrawExceedsMaxAmount);
-        }
+            if amount > max_draw {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::DrawExceedsMaxAmount);
+            }
         }
 
         let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
@@ -437,8 +425,6 @@ impl Credit {
             env.panic_with_error(ContractError::CreditLineClosed);
         }
 
-
-
         // --- Compute effective repayment (cap at total owed) ---
         // Overpayments are capped to the total outstanding debt. No refund is issued.
         let effective_repay = if amount > credit_line.utilized_amount {
@@ -492,8 +478,11 @@ impl Credit {
         // Repayment applies to interest first, then to principal.
         // utilized_amount includes both principal and accrued_interest.
         let interest_to_pay = effective_repay.min(credit_line.accrued_interest);
-        credit_line.accrued_interest = credit_line.accrued_interest.checked_sub(interest_to_pay).unwrap_or(0);
-        
+        credit_line.accrued_interest = credit_line
+            .accrued_interest
+            .checked_sub(interest_to_pay)
+            .unwrap_or(0);
+
         credit_line.utilized_amount = credit_line
             .utilized_amount
             .saturating_sub(effective_repay)
@@ -606,6 +595,43 @@ impl Credit {
             .set(&DataKey::MaxDrawAmount, &amount);
     }
 
+    /// Set or clear the blocked status for a borrower (admin only).
+    pub fn set_borrower_blocked(env: Env, borrower: Address, blocked: bool) {
+        require_admin_auth(&env);
+        crate::storage::set_borrower_blocked(&env, &borrower, blocked);
+        crate::events::publish_borrower_blocked_event(
+            &env,
+            crate::events::BorrowerBlockedEvent { borrower, blocked },
+        );
+    }
+
+    /// Set the dynamic interest rate formula (admin only).
+    pub fn set_rate_formula_config(
+        env: Env,
+        base_rate_bps: u32,
+        slope_bps_per_score: u32,
+        min_rate_bps: u32,
+        max_rate_bps: u32,
+    ) {
+        require_admin_auth(&env);
+        let cfg = RateFormulaConfig {
+            base_rate_bps,
+            slope_bps_per_score,
+            min_rate_bps,
+            max_rate_bps,
+        };
+        env.storage().instance().set(&rate_formula_key(&env), &cfg);
+        crate::events::publish_rate_formula_config_event(
+            &env,
+            crate::events::RateFormulaConfigEvent {
+                base_rate_bps,
+                slope_bps_per_score,
+                min_rate_bps,
+                max_rate_bps,
+            },
+        );
+    }
+
     /// Get the current per-transaction draw cap. Returns None when uncapped.
     pub fn get_max_draw_amount(env: Env) -> Option<i128> {
         env.storage().instance().get(&DataKey::MaxDrawAmount)
@@ -623,7 +649,7 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
-// duplicate wrapper removed
+    // duplicate wrapper removed
 
     /// Get credit line data for a borrower (view function).
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
@@ -634,7 +660,7 @@ impl Credit {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test_coverage_gaps::setup_contract_with_credit_line as setup_gaps;
+
     use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
@@ -669,23 +695,7 @@ mod test {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
     }
 
-    fn setup_contract_with_credit_line<'a>(
-        env: &'a Env,
-        borrower: &Address,
-        credit_limit: i128,
-        utilized_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        if utilized_amount > 0 {
-            client.draw_credit(borrower, &utilized_amount);
-        }
-        (client, contract_id, admin)
-    }
+
 
     fn assert_utilization_invariants(line: &CreditLineData) {
         assert!(
@@ -700,7 +710,6 @@ mod test {
             );
         }
     }
-
 
     #[test]
     fn set_liquidity_token_updates_instance_storage() {
@@ -1318,8 +1327,7 @@ mod test {
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         // Use setup which returns contract_id needed for approve
-        let (client, token, contract_id, _admin) =
-            setup(&env, &borrower, 1_000, 1_000, 600);
+        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 600);
 
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Active);
@@ -1512,7 +1520,7 @@ mod test {
         assert!(checkpoint > 0);
 
         // Advance ledger timestamp by exactly one year
-        env.ledger().set_timestamp(checkpoint + SECONDS_PER_YEAR);
+        env.ledger().set_timestamp(checkpoint + accrual::SECONDS_PER_YEAR);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
@@ -1812,6 +1820,7 @@ mod test_coverage_gaps {
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
 
+    #[allow(dead_code)]
     pub(crate) fn setup_contract_with_credit_line<'a>(
         env: &'a Env,
         borrower: &'a Address,
@@ -2198,7 +2207,6 @@ mod test_coverage_gaps {
         client.draw_credit(&borrower, &100_i128);
     }
 
-
     /// draw_credit panics with "overflow" when utilized_amount + amount overflows i128.
     #[test]
     #[should_panic(expected = "Error(Contract, #12)")]
@@ -2385,7 +2393,7 @@ mod test_coverage_gaps {
 
     #[test]
     fn test_risk_compute_rate_clamping() {
-        let env = Env::default();
+        let _env = Env::default();
         let cfg = RateFormulaConfig {
             base_rate_bps: 1000,
             slope_bps_per_score: 50,
@@ -2406,7 +2414,7 @@ mod test_coverage_gaps {
         let (client, _admin, borrower) = base_setup(&env);
         let line = client.get_credit_line(&borrower).unwrap();
         let ts_before = line.last_rate_update_ts;
-        
+
         // Update with same rate/score/limit
         client.update_risk_parameters(&borrower, &1000, &500_u32, &60_u32);
         let line_after = client.get_credit_line(&borrower).unwrap();
@@ -2430,7 +2438,7 @@ mod test_coverage_gaps {
     #[test]
     fn test_lifecycle_reinstate_active_reverts() {
         let env = Env::default();
-        let (client, _admin, borrower) = base_setup(&env);
+        let (_client, _admin, _borrower) = base_setup(&env);
         // Line is Active. Reinstating should panic.
         // We'll catch this in a real test run or just assert it panics.
     }

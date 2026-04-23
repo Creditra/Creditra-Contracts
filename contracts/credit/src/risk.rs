@@ -1,7 +1,6 @@
 use crate::auth::require_admin_auth;
 use crate::events::{
-    publish_rate_formula_config_event, publish_risk_parameters_updated,
-    RateFormulaConfigEvent, RiskParametersUpdatedEvent,
+    publish_risk_parameters_updated, RiskParametersUpdatedEvent,
 };
 use crate::storage::{rate_cfg_key, rate_formula_key};
 use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
