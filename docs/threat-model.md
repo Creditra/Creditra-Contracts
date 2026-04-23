@@ -111,6 +111,13 @@ Mitigations (operational):
 - strict key rotation and break-glass procedure;
 - on-chain monitoring/alerts for admin method calls.
 
+Two-step admin rotation mitigation now exists on-chain:
+
+- `propose_admin(new_admin, delay_seconds)` by current admin only;
+- `accept_admin()` by proposed admin only;
+- optional delay window enforced via stored acceptance timestamp;
+- each phase emits an audit event for monitoring.
+
 ### 6) Operational and liveness risks
 
 Threats:

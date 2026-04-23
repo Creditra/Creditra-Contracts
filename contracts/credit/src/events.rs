@@ -144,6 +144,23 @@ pub struct DrawnEventV2 {
     pub timestamp: u64,
 }
 
+/// Event emitted when admin rotation is proposed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationProposedEvent {
+    pub current_admin: Address,
+    pub proposed_admin: Address,
+    pub accept_after: u64,
+}
+
+/// Event emitted when admin rotation is accepted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationAcceptedEvent {
+    pub previous_admin: Address,
+    pub new_admin: Address,
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);

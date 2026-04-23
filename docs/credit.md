@@ -82,8 +82,24 @@ Initializes the contract with an admin address. Must be called exactly once.
 #### Security notes
 - Must be called by the deployer immediately after deployment.
 - The guard checks for the presence of the `"admin"` key before writing; no storage is mutated on a rejected second call.
-- The admin address is immutable after initialization. See the Admin Rotation Proposal section for a safe rotation design.
+- Admin rotation is two-step (`propose_admin` then `accept_admin`) with an optional delay.
 - `LiquiditySource` defaults to the contract address and can be updated post-init via `set_liquidity_source` (admin only).
+
+### `propose_admin(env, new_admin, delay_seconds)`
+Creates or overwrites a pending admin proposal (admin only).
+
+- Stores `new_admin` under `"proposed_admin"` and acceptance timestamp under `"proposed_at"`.
+- `delay_seconds = 0` allows immediate acceptance.
+- A second proposal **overwrites** the previous pending proposal and its delay window.
+- Emits `("credit", "admin_prop")` with `AdminRotationProposedEvent`.
+
+### `accept_admin(env)`
+Accepts a pending admin proposal (proposed admin only).
+
+- Caller must be exactly the currently proposed admin.
+- Reverts with `ContractError::AdminAcceptTooEarly` (15) if called before `"proposed_at"`.
+- On success, updates `"admin"` and clears `"proposed_admin"`/`"proposed_at"`.
+- Emits `("credit", "admin_acc")` with `AdminRotationAcceptedEvent`.
 
 ### `set_liquidity_token(env, token_address)`
 Sets the Stellar Asset Contract token used for draws and repayments (admin only).

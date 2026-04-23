@@ -12,6 +12,14 @@ pub fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
 }
 
+pub fn proposed_admin_key(env: &Env) -> Symbol {
+    Symbol::new(env, "proposed_admin")
+}
+
+pub fn proposed_at_key(env: &Env) -> Symbol {
+    Symbol::new(env, "proposed_at")
+}
+
 pub fn reentrancy_key(env: &Env) -> Symbol {
     Symbol::new(env, "reentrancy")
 }

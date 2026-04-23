@@ -86,6 +86,62 @@ impl Credit {
             .set(&DataKey::LiquiditySource, &env.current_contract_address());
     }
 
+    /// Propose a new admin with an optional acceptance delay.
+    ///
+    /// A second proposal overwrites any prior pending proposal.
+    pub fn propose_admin(env: Env, new_admin: Address, delay_seconds: u64) {
+        let current_admin = require_admin_auth(&env);
+        let accept_after = env.ledger().timestamp().saturating_add(delay_seconds);
+
+        env.storage()
+            .instance()
+            .set(&proposed_admin_key(&env), &new_admin);
+        env.storage()
+            .instance()
+            .set(&proposed_at_key(&env), &accept_after);
+
+        publish_admin_rotation_proposed(
+            &env,
+            AdminRotationProposedEvent {
+                current_admin,
+                proposed_admin: new_admin,
+                accept_after,
+            },
+        );
+    }
+
+    /// Accept pending admin role by the currently proposed admin.
+    pub fn accept_admin(env: Env) {
+        let proposed_admin: Address = env
+            .storage()
+            .instance()
+            .get(&proposed_admin_key(&env))
+            .unwrap_or_else(|| panic!("no pending admin proposal"));
+        let accept_after: u64 = env
+            .storage()
+            .instance()
+            .get(&proposed_at_key(&env))
+            .unwrap_or(0_u64);
+
+        proposed_admin.require_auth();
+        if env.ledger().timestamp() < accept_after {
+            env.panic_with_error(ContractError::AdminAcceptTooEarly);
+        }
+
+        let previous_admin = require_admin(&env);
+        env.storage().instance().set(&admin_key(&env), &proposed_admin);
+        env.storage().instance().remove(&proposed_admin_key(&env));
+        env.storage().instance().remove(&proposed_at_key(&env));
+
+        publish_admin_rotation_accepted(
+            &env,
+            AdminRotationAcceptedEvent {
+                previous_admin,
+                new_admin: proposed_admin,
+            },
+        );
+    }
+
     /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
     pub fn set_liquidity_token(env: Env, token_address: Address) {
         require_admin_auth(&env);
