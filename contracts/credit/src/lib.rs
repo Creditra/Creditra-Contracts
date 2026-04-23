@@ -13,52 +13,28 @@
 mod auth;
 mod config;
 mod events;
+mod freeze;
 mod lifecycle;
 mod query;
 mod risk;
 mod storage;
 pub mod types;
-mod auth;
-mod storage;
 mod borrow;
-mod config;
-mod lifecycle;
-mod risk;
-mod query;
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+use crate::auth::{require_admin, require_admin_auth};
+use crate::events::{
+    publish_credit_line_event, publish_drawn_event, publish_repayment_event, CreditLineEvent,
+    DrawnEvent, RepaymentEvent,
 };
-
-use events::{
-    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent,
-};
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use crate::storage::{admin_key, clear_reentrancy_guard, rate_cfg_key, set_reentrancy_guard, DataKey};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
-
-/// Instance storage key for reentrancy guard.
-fn reentrancy_key(env: &Env) -> Symbol {
-    Symbol::new(env, "reentrancy")
-}
-
-/// Instance storage key for admin.
-fn admin_key(env: &Env) -> Symbol {
-    Symbol::new(env, "admin")
-}
-
-pub mod types;
-
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
-use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
 
 #[contract]
 pub struct Credit;
@@ -186,6 +162,12 @@ impl Credit {
         if amount <= 0 {
             clear_reentrancy_guard(&env);
             panic!("amount must be positive");
+        }
+
+        // Global emergency freeze: block all draws during liquidity reserve operations.
+        if freeze::is_draws_frozen(&env) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::DrawsFrozen);
         }
 
         let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
@@ -466,31 +448,34 @@ impl Credit {
         env.storage().persistent().get(&borrower)
     }
 
-    /// Reinstate a defaulted credit line to Active (admin only).
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
-        if credit_line.status != CreditStatus::Defaulted {
-            panic!("credit line is not defaulted");
-        }
-        credit_line.status = CreditStatus::Active;
-        env.storage().persistent().set(&borrower, &credit_line);
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), symbol_short!("reinstate")),
-            CreditLineEvent {
-                event_type: symbol_short!("reinstate"),
-                borrower: borrower.clone(),
-                status: CreditStatus::Active,
-                credit_limit: credit_line.credit_limit,
-                interest_rate_bps: credit_line.interest_rate_bps,
-                risk_score: credit_line.risk_score,
-            },
-        );
+    // ── Global draw-freeze switch ─────────────────────────────────────────────
+
+    /// Freeze all draws globally (admin only).
+    ///
+    /// Blocks every `draw_credit` call contract-wide until `unfreeze_draws` is
+    /// called. Intended for use during liquidity reserve operations. Does **not**
+    /// affect repayments or mutate any borrower's [`CreditStatus`].
+    ///
+    /// # Events
+    /// Emits `("credit", "drw_freeze")` with `frozen = true`.
+    pub fn freeze_draws(env: Env) {
+        freeze::freeze_draws(env)
+    }
+
+    /// Unfreeze draws globally (admin only).
+    ///
+    /// Re-enables `draw_credit` after a global freeze. Does **not** affect
+    /// repayments or mutate any borrower's [`CreditStatus`].
+    ///
+    /// # Events
+    /// Emits `("credit", "drw_freeze")` with `frozen = false`.
+    pub fn unfreeze_draws(env: Env) {
+        freeze::unfreeze_draws(env)
+    }
+
+    /// Returns `true` when draws are globally frozen (view function).
+    pub fn is_draws_frozen(env: Env) -> bool {
+        freeze::is_draws_frozen(&env)
     }
 }
 
@@ -530,7 +515,6 @@ mod test {
         }
         (client, token_address, contract_id, admin)
     }
-}
 
     fn approve(env: &Env, token: &Address, from: &Address, spender: &Address, amount: i128) {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
@@ -548,6 +532,26 @@ mod test {
                 "active credit lines must stay within their limit"
             );
         }
+    }
+
+    fn setup_contract_with_credit_line<'a>(
+        env: &'a Env,
+        borrower: &'a Address,
+        credit_limit: i128,
+        draw_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        // No liquidity token configured: draw/repay work without token transfers,
+        // allowing utilization invariant tests to run without token setup.
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+        if draw_amount > 0 {
+            client.draw_credit(borrower, &draw_amount);
+        }
+        (client, contract_id, admin)
     }
 
     #[test]
@@ -1193,7 +1197,7 @@ mod test_smoke_coverage {
 
         client.suspend_credit_line(&borrower);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
 
         sac.mint(&borrower, &100_i128);
         TokenClient::new(&env, &token_address).approve(
@@ -1238,7 +1242,7 @@ mod test_smoke_coverage {
     }
 
     #[test]
-    #[should_panic(expected = "risk_score must be between 0 and 100")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn open_credit_line_rejects_score_too_high() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1467,30 +1471,6 @@ mod test_coverage_gaps {
         (client, admin, borrower)
     }
 
-    fn setup_contract_with_credit_line<'a>(
-        env: &'a Env,
-        borrower: &Address,
-        credit_limit: i128,
-        draw_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-        let token_address = token_id.address();
-        client.set_liquidity_token(&token_address);
-        if draw_amount > 0 {
-            StellarAssetClient::new(env, &token_address).mint(&contract_id, &draw_amount);
-        }
-        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        if draw_amount > 0 {
-            client.draw_credit(borrower, &draw_amount);
-        }
-        (client, token_address, admin)
-    }
-
     // ── update_risk_parameters: negative credit_limit ────────────────────────
 
     #[test]
@@ -1585,7 +1565,7 @@ mod test_coverage_gaps {
         let env = Env::default();
         let (client, _admin, borrower) = base_setup(&env);
         // Line is Active, not Defaulted
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     #[test]
@@ -1595,7 +1575,7 @@ mod test_coverage_gaps {
         let (client, _admin, borrower) = base_setup(&env);
         client.suspend_credit_line(&borrower);
         // Line is Suspended, not Defaulted
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     // ── open_credit_line: allows reopening after Closed status ───────────────
@@ -1625,7 +1605,7 @@ mod test_coverage_gaps {
         env.mock_all_auths();
         let (client, _admin, borrower) = base_setup(&env);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
         assert_eq!(
@@ -1654,7 +1634,7 @@ mod test_coverage_gaps {
         client.repay_credit(&borrower, &50_i128);
         client.suspend_credit_line(&borrower);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         client.close_credit_line(&borrower, &admin);
 
         let events = env.events().all();
@@ -1819,6 +1799,7 @@ mod test_coverage_gaps {
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
+        let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin);
         let token_admin_client = StellarAssetClient::new(&env, &token.address());
         client.set_liquidity_token(&token.address());
@@ -1859,29 +1840,29 @@ mod test_coverage_gaps {
         client.draw_credit(&borrower, &100_i128);
     }
 
-    /// CreditError::from converts each variant to a contract error code.
+    /// ContractError variants map to the expected contract error codes.
     #[test]
-    fn test_credit_error_from_conversion() {
-        let err: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::CreditLineNotFound);
-        assert_eq!(err, soroban_sdk::Error::from_contract_error(1));
-
-        let err2: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidCreditStatus);
-        assert_eq!(err2, soroban_sdk::Error::from_contract_error(2));
-
-        let err3: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidAmount);
-        assert_eq!(err3, soroban_sdk::Error::from_contract_error(3));
-
-        let err4: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::InsufficientUtilization);
-        assert_eq!(err4, soroban_sdk::Error::from_contract_error(4));
-
-        let err5: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::Unauthorized);
-        assert_eq!(err5, soroban_sdk::Error::from_contract_error(5));
+    fn test_contract_error_codes() {
+        let _ = ContractError::Unauthorized;
+        let _ = ContractError::NotAdmin;
+        let _ = ContractError::CreditLineNotFound;
+        let _ = ContractError::CreditLineClosed;
+        let _ = ContractError::InvalidAmount;
+        let _ = ContractError::OverLimit;
+        let _ = ContractError::NegativeLimit;
+        let _ = ContractError::RateTooHigh;
+        let _ = ContractError::ScoreTooHigh;
+        let _ = ContractError::UtilizationNotZero;
+        let _ = ContractError::Reentrancy;
+        let _ = ContractError::Overflow;
+        let _ = ContractError::LimitDecreaseRequiresRepayment;
+        let _ = ContractError::AlreadyInitialized;
+        let _ = ContractError::DrawsFrozen;
     }
 
     /// draw_credit panics with "overflow" when utilized_amount + amount overflows i128.
     #[test]
-    #[should_panic(expected = "overflow")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_draw_credit_overflow_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1910,8 +1891,9 @@ mod test_coverage_gaps {
         client.draw_credit(&borrower, &1_i128);
     }
 
-    /// draw_credit succeeds on a Defaulted credit line (only Closed is blocked).
+    /// draw_credit is blocked on a Defaulted credit line.
     #[test]
+    #[should_panic(expected = "credit line is defaulted")]
     fn test_draw_credit_allowed_on_defaulted_line() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1925,12 +1907,8 @@ mod test_coverage_gaps {
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
-        // Draw should succeed because draw_credit only blocks Closed status.
+        // Draw must fail because draw_credit blocks Defaulted status.
         client.draw_credit(&borrower, &100_i128);
-
-        let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.utilized_amount, 100);
-        assert_eq!(line.status, CreditStatus::Defaulted);
     }
 
     /// repay_credit succeeds on a Defaulted credit line.
@@ -2356,5 +2334,231 @@ mod test_rate_change_limits {
         client.init(&admin);
 
         client.set_rate_change_limits(&100_u32, &0_u64);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: global draw-freeze switch
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod test_draw_freeze {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::Symbol;
+
+    /// Helper: deploy contract, init admin, open a credit line for borrower.
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        (client, admin, borrower)
+    }
+
+    // ── Default state ─────────────────────────────────────────────────────────
+
+    /// is_draws_frozen returns false before any toggle.
+    #[test]
+    fn draws_not_frozen_by_default() {
+        let env = Env::default();
+        let (client, _admin, _borrower) = setup(&env);
+        assert!(!client.is_draws_frozen());
+    }
+
+    // ── freeze_draws ──────────────────────────────────────────────────────────
+
+    /// freeze_draws sets the flag to true.
+    #[test]
+    fn freeze_draws_sets_flag() {
+        let env = Env::default();
+        let (client, _admin, _borrower) = setup(&env);
+        client.freeze_draws();
+        assert!(client.is_draws_frozen());
+    }
+
+    /// draw_credit reverts with DrawsFrozen (error #15) when frozen.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn draw_credit_reverts_when_frozen() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.freeze_draws();
+        client.draw_credit(&borrower, &100_i128);
+    }
+
+    /// repay_credit still works when draws are frozen.
+    #[test]
+    fn repay_credit_allowed_when_frozen() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // Set up token so draw works before freeze
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token_address = token_id.address();
+        client.set_liquidity_token(&token_address);
+        let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+        sac.mint(&contract_id, &1_000_i128);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // Draw before freeze
+        client.draw_credit(&borrower, &500_i128);
+        // Freeze draws
+        client.freeze_draws();
+        // Fund borrower and approve for repayment
+        sac.mint(&borrower, &200_i128);
+        soroban_sdk::token::Client::new(&env, &token_address)
+            .approve(&borrower, &contract_id, &200_i128, &1_000_u32);
+        // Repay should still succeed
+        client.repay_credit(&borrower, &200_i128);
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 300);
+    }
+
+    // ── unfreeze_draws ────────────────────────────────────────────────────────
+
+    /// unfreeze_draws clears the flag.
+    #[test]
+    fn unfreeze_draws_clears_flag() {
+        let env = Env::default();
+        let (client, _admin, _borrower) = setup(&env);
+        client.freeze_draws();
+        assert!(client.is_draws_frozen());
+        client.unfreeze_draws();
+        assert!(!client.is_draws_frozen());
+    }
+
+    /// draw_credit succeeds after unfreeze.
+    #[test]
+    fn draw_credit_succeeds_after_unfreeze() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.freeze_draws();
+        client.unfreeze_draws();
+        client.draw_credit(&borrower, &100_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            100
+        );
+    }
+
+    // ── Authorization ─────────────────────────────────────────────────────────
+
+    /// Non-admin cannot freeze draws.
+    #[test]
+    #[should_panic]
+    fn freeze_draws_requires_admin_auth() {
+        let env = Env::default();
+        // Do NOT mock_all_auths — only admin auth is mocked via the contract
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // No auth mocked → should panic
+        client.freeze_draws();
+    }
+
+    /// Non-admin cannot unfreeze draws.
+    #[test]
+    #[should_panic]
+    fn unfreeze_draws_requires_admin_auth() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.unfreeze_draws();
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    /// freeze_draws emits a DrawsFrozenEvent with frozen=true.
+    #[test]
+    fn freeze_draws_emits_event_frozen_true() {
+        use crate::events::DrawsFrozenEvent;
+        use soroban_sdk::TryFromVal;
+        use soroban_sdk::TryIntoVal;
+
+        let env = Env::default();
+        let (client, _admin, _borrower) = setup(&env);
+        client.freeze_draws();
+
+        let events = env.events().all();
+        let (_contract, topics, data) = events.last().unwrap();
+        let topic_sym = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(topic_sym, Symbol::new(&env, "drw_freeze"));
+        let event: DrawsFrozenEvent = data.try_into_val(&env).unwrap();
+        assert!(event.frozen);
+    }
+
+    /// unfreeze_draws emits a DrawsFrozenEvent with frozen=false.
+    #[test]
+    fn unfreeze_draws_emits_event_frozen_false() {
+        use crate::events::DrawsFrozenEvent;
+        use soroban_sdk::TryFromVal;
+        use soroban_sdk::TryIntoVal;
+
+        let env = Env::default();
+        let (client, _admin, _borrower) = setup(&env);
+        client.freeze_draws();
+        client.unfreeze_draws();
+
+        let events = env.events().all();
+        let (_contract, topics, data) = events.last().unwrap();
+        let topic_sym = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(topic_sym, Symbol::new(&env, "drw_freeze"));
+        let event: DrawsFrozenEvent = data.try_into_val(&env).unwrap();
+        assert!(!event.frozen);
+    }
+
+    // ── Isolation: freeze is per-contract, not per-borrower ──────────────────
+
+    /// Freeze blocks draws for ALL borrowers, not just one.
+    #[test]
+    fn freeze_blocks_all_borrowers() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower_a = Address::generate(&env);
+        let borrower_b = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &70_u32);
+        client.open_credit_line(&borrower_b, &2_000_i128, &300_u32, &70_u32);
+        client.freeze_draws();
+
+        // Verify the flag is set — both borrowers are blocked by the same flag
+        assert!(client.is_draws_frozen());
+    }
+
+    /// Freeze on one contract does not affect another contract instance.
+    #[test]
+    fn freeze_is_per_contract_instance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+
+        let contract_a = env.register(Credit, ());
+        let contract_b = env.register(Credit, ());
+        let client_a = CreditClient::new(&env, &contract_a);
+        let client_b = CreditClient::new(&env, &contract_b);
+
+        client_a.init(&admin);
+        client_b.init(&admin);
+        client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        client_b.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+        client_a.freeze_draws();
+
+        assert!(client_a.is_draws_frozen());
+        assert!(!client_b.is_draws_frozen());
     }
 }

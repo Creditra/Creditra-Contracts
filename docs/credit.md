@@ -265,6 +265,27 @@ Emits: `("credit", "reinstate")` event.
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
 View function — returns credit line data or `None`.
 
+### `freeze_draws(env)`
+Freeze all `draw_credit` calls contract-wide (admin only).
+
+- Sets `DataKey::DrawsFrozen` to `true` in instance storage.
+- Does **not** mutate any borrower's `CreditStatus`; lines remain Active, Defaulted, etc.
+- Repayments are never blocked by this flag.
+- Idempotent: calling when already frozen still emits the event.
+
+Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, timestamp, actor }`.
+
+### `unfreeze_draws(env)`
+Re-enable `draw_credit` after a global freeze (admin only).
+
+- Sets `DataKey::DrawsFrozen` to `false` in instance storage.
+- Idempotent: calling when already unfrozen still emits the event.
+
+Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, timestamp, actor }`.
+
+### `is_draws_frozen(env) -> bool`
+Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
+
 ---
 
 ## Overflow Policy
@@ -318,6 +339,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `12`       | `Overflow`           | Math overflow occurred during calculation.                                  |
 | `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
 | `14`       | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once.      |
+| `15`       | `DrawsFrozen` | All draws are globally frozen by admin for liquidity reserve operations.    |
 
 ---
 
@@ -333,6 +355,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
+| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled |
 
 The contract also emits additive v2 event topics (for indexer analytics fields
 like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
@@ -358,6 +381,9 @@ like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
 | `set_rate_change_limits` | Admin                 |
 | `get_rate_change_limits` | Anyone (view)         |
 | `get_credit_line`        | Anyone (view)         |
+| `freeze_draws`           | Admin                 |
+| `unfreeze_draws`         | Admin                 |
+| `is_draws_frozen`        | Anyone (view)         |
 
 > Note: `open_credit_line` requires admin authorization (`require_auth`). The admin key is the backend/risk engine signer — borrowers cannot open their own credit lines.
 
@@ -891,6 +917,7 @@ these keys are lost. Production deployments should call
 | `DataKey::LiquiditySource` | `DataKey` | `Address` | `init`, `set_liquidity_source` | Reserve address. Defaults to contract address. |
 | `Symbol("reentrancy")` | `Symbol` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth flag. Cleared on every code path. |
 | `Symbol("rate_cfg")` | `Symbol` | `RateChangeConfig` | `set_rate_change_limits` | Admin-configurable rate-change governance. |
+| `DataKey::DrawsFrozen` | `DataKey` | `bool` | `freeze_draws`, `unfreeze_draws` | Global emergency draw freeze. Absent = `false` (draws allowed). |
 
 **Why instance?** These are global singleton configuration values. There is
 exactly one admin, one liquidity token, one liquidity source, and one rate
@@ -928,6 +955,9 @@ Instance storage works correctly today because it is always cleared.
 7. **TTL management** — not yet implemented. Recommend adding
    `extend_ttl()` calls on instance (in `init` or a dedicated `bump` endpoint)
    and on persistent (on credit line access) before production deployment.
+8. **DrawsFrozen** — correctly on instance. Global singleton flag; absent key
+   is treated as `false` (draws allowed). Shares instance TTL — extend alongside
+   other instance keys.
 
 You can also run all workspace tests from the repository root with `cargo test`.
 
@@ -954,6 +984,8 @@ This section documents all contract errors and their exact error codes for consi
 | 11 | `Reentrancy` | Reentrancy detected during cross-contract calls | Reentrancy guard |
 | 12 | `Overflow` | Math overflow occurred during calculation | Arithmetic operations |
 | 13 | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount | Limit decrease validation |
+| 14 | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once | Second `init` call |
+| 15 | `DrawsFrozen` | All draws are globally frozen by admin for liquidity reserve operations | `draw_credit` when `DataKey::DrawsFrozen` is `true` |
 
 ### Rate and Score Validation
 

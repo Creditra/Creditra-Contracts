@@ -119,6 +119,18 @@ pub struct InterestAccruedEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when the global draws-frozen switch is toggled by admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawsFrozenEvent {
+    /// `true` when draws are now frozen; `false` when unfrozen.
+    pub frozen: bool,
+    /// Ledger timestamp of the toggle.
+    pub timestamp: u64,
+    /// Admin address that performed the toggle.
+    pub actor: Address,
+}
+
 /// Versioned draw event with explicit recipient/source identifiers.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -181,4 +193,10 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
+}
+
+/// Publish a draws-frozen toggle event.
+pub fn publish_draws_frozen_event(env: &Env, event: DrawsFrozenEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "drw_freeze")), event);
 }

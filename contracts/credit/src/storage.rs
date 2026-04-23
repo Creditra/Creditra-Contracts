@@ -5,6 +5,9 @@ use soroban_sdk::{contracttype, Env, Symbol};
 pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
+    /// Global emergency switch: when `true`, all `draw_credit` calls revert.
+    /// Does not affect repayments. Distinct from per-line `Suspended` status.
+    DrawsFrozen,
 }
 
 pub fn admin_key(env: &Env) -> Symbol {

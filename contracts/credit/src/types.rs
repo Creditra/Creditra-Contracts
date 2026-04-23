@@ -53,6 +53,8 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
+    /// All draws are globally frozen by admin for liquidity reserve operations.
+    DrawsFrozen = 15,
 }
 
 /// Stored credit line data for a borrower.
