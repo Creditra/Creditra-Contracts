@@ -89,7 +89,7 @@ mod test_helpers {
                 client.close_credit_line(&borrower, &admin);
             }
             CreditStatus::Restricted => {
-                // Restricted is set internally; not directly reachable via lifecycle calls
+                // Restricted is not directly reachable via public API in tests
             }
         }
 
@@ -1481,7 +1481,7 @@ mod unit_tests {
     /// fails with the error message "interest_rate_bps cannot exceed 10000 (100%)".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "interest_rate_bps cannot exceed 10000 (100%)")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_excessive_interest_rate_bps_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
@@ -1509,7 +1509,7 @@ mod unit_tests {
     /// fails with the error message "risk_score must be between 0 and 100".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "risk_score must be between 0 and 100")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn test_excessive_risk_score_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 

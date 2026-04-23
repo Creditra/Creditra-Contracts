@@ -1,14 +1,23 @@
-use soroban_sdk::{contracttype, Env, Symbol};
+use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
+    MaxDrawAmount,
 }
 
 pub fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
+}
+
+pub fn proposed_admin_key(env: &Env) -> Symbol {
+    Symbol::new(env, "proposed_admin")
+}
+
+pub fn proposed_at_key(env: &Env) -> Symbol {
+    Symbol::new(env, "proposed_at")
 }
 
 pub fn reentrancy_key(env: &Env) -> Symbol {
@@ -17,6 +26,11 @@ pub fn reentrancy_key(env: &Env) -> Symbol {
 
 pub fn rate_cfg_key(env: &Env) -> Symbol {
     Symbol::new(env, "rate_cfg")
+}
+
+/// Instance storage key for the risk-score-based rate formula configuration.
+pub fn rate_formula_key(env: &Env) -> Symbol {
+    Symbol::new(env, "rate_form")
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.
@@ -32,4 +46,19 @@ pub fn set_reentrancy_guard(env: &Env) {
 
 pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
+}
+
+/// Check whether a borrower is blocked from drawing credit.
+pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BlockedBorrower(borrower.clone()))
+        .unwrap_or(false)
+}
+
+/// Set or clear the blocked status for a borrower.
+pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::BlockedBorrower(borrower.clone()), &blocked);
 }

@@ -21,6 +21,7 @@ The contract publishes Soroban events under a `credit` namespace.
 | `DrawnEvent` | `("credit", "drawn")` | `draw_credit` |
 | `RepaymentEvent` | `("credit", "repay")` | `repay_credit` |
 | `RiskParametersUpdatedEvent` | `("credit", "risk_upd")` | `update_risk_parameters` |
+| `InterestAccruedEvent` | `("credit", "accrue")` | `draw_credit`, `repay_credit` |
 
 For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symbol.
 
@@ -55,6 +56,16 @@ For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symb
 | `borrower` | `Address` | Borrower address |
 | `amount` | `i128` | Repaid amount recorded by contract |
 | `new_utilized_amount` | `i128` | Post-repay utilized amount |
+| `timestamp` | `u64` | Ledger timestamp at emit time |
+
+### `InterestAccruedEvent`
+
+| Field | Type | Notes |
+|---|---|---|
+| `borrower` | `Address` | Borrower address |
+| `accrued_amount` | `i128` | Amount of interest accrued in this step |
+| `total_accrued_interest` | `i128` | Cumulative interest accrued |
+| `new_utilized_amount` | `i128` | Utilized amount including the new interest |
 | `timestamp` | `u64` | Ledger timestamp at emit time |
 
 ### `RiskParametersUpdatedEvent`
@@ -151,6 +162,7 @@ After decoding `ScVal`, map by topic pair to the corresponding strongly-typed ev
    - `drawn` -> `DrawnEvent`
    - `repay` -> `RepaymentEvent`
    - `risk_upd` -> `RiskParametersUpdatedEvent`
+   - `accrue` -> `InterestAccruedEvent`
 5. Validate payload fields and ranges (for example non-negative numeric invariants where expected).
 6. Upsert into event store with idempotency key (`event.id` + ledger/tx metadata).
 7. Advance checkpoint only after durable write.
@@ -201,7 +213,7 @@ Suggested contract for consumers:
 ## 7) Quick checklist for integrators
 
 - Subscribe/query by `contractId` + `credit` topic namespace.
-- Implement decoders for `CreditLineEvent`, `DrawnEvent`, `RepaymentEvent`, `RiskParametersUpdatedEvent`.
+- Implement decoders for `CreditLineEvent`, `DrawnEvent`, `RepaymentEvent`, `RiskParametersUpdatedEvent`, `InterestAccruedEvent`.
 - Store raw XDR alongside normalized records for audit/replay.
 - Make ingestion idempotent and checkpointed.
 - Support versioned topic suffixes (`*_v2`, etc.) for future migrations.

@@ -51,8 +51,9 @@ pub enum ContractError {
     Overflow = 12,
     /// Credit limit decrease requires immediate repayment of excess amount.
     LimitDecreaseRequiresRepayment = 13,
-    /// Draw rejected: minimum cooldown interval since last draw has not elapsed.
-    DrawCooldown = 14,
+    /// Contract has already been initialized; `init` may only be called once.
+    AlreadyInitialized = 14,
+    DrawExceedsMaxAmount = 14, 
 }
 
 /// Stored credit line data for a borrower.
@@ -94,14 +95,30 @@ pub struct RateChangeConfig {
     pub rate_change_min_interval: u64,
 }
 
-/// Admin-configurable minimum interval between successive draws for any borrower.
+/// Admin-configurable piecewise-linear rate formula.
 ///
-/// When set, a borrower must wait at least `min_interval_seconds` after their
-/// last draw before making another. Zero or absent means no cooldown (default).
+/// When stored in instance storage, `update_risk_parameters` computes
+/// `interest_rate_bps` from the borrower's `risk_score` instead of using
+/// the manually supplied rate.
+///
+/// # Formula
+/// ```text
+/// raw_rate = base_rate_bps + (risk_score * slope_bps_per_score)
+/// effective_rate = clamp(raw_rate, min_rate_bps, min(max_rate_bps, 10_000))
+/// ```
+///
+/// # Invariants
+/// - `min_rate_bps <= max_rate_bps <= 10_000`
+/// - `base_rate_bps <= 10_000`
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DrawCooldownConfig {
-    /// Minimum seconds that must elapse between two consecutive draws.
-    /// Zero disables the cooldown.
-    pub min_interval_seconds: u64,
+pub struct RateFormulaConfig {
+    /// Base interest rate in bps applied at risk_score = 0.
+    pub base_rate_bps: u32,
+    /// Additional bps per unit of risk_score (0–100).
+    pub slope_bps_per_score: u32,
+    /// Minimum allowed computed rate (floor).
+    pub min_rate_bps: u32,
+    /// Maximum allowed computed rate (ceiling), must be <= 10_000.
+    pub max_rate_bps: u32,
 }
