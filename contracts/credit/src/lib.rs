@@ -11,6 +11,7 @@
 //! would revert.
 
 mod auth;
+mod borrow;
 mod config;
 mod events;
 mod lifecycle;
@@ -18,23 +19,19 @@ mod query;
 mod risk;
 mod storage;
 pub mod types;
-mod auth;
-mod storage;
-mod borrow;
-mod config;
-mod lifecycle;
-mod risk;
-mod query;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
 };
 
+use auth::require_admin_auth;
+use borrow::{draw_credit, repay_credit};
 use events::{
     publish_credit_line_event, publish_drawn_event, publish_repayment_event,
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
+use storage::DataKey;
 use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 
 /// Maximum interest rate in basis points (100%).
@@ -53,12 +50,9 @@ fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
 }
 
-pub mod types;
-
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
-use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
+fn rate_cfg_key(env: &Env) -> Symbol {
+    Symbol::new(env, "rate_cfg")
+}
 
 #[contract]
 pub struct Credit;
@@ -116,306 +110,17 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
-        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
-            env.panic_with_error(ContractError::RateTooHigh);
-        }
-        if risk_score > MAX_RISK_SCORE {
-            env.panic_with_error(ContractError::ScoreTooHigh);
-        }
-
-        // Prevent overwriting an existing Active credit line
-        if let Some(existing) = env
-            .storage()
-            .persistent()
-            .get::<Address, CreditLineData>(&borrower)
-        {
-            assert!(
-                existing.status != CreditStatus::Active,
-                "borrower already has an active credit line"
-            );
-        }
-
-        let credit_line = CreditLineData {
-            borrower: borrower.clone(),
-            credit_limit,
-            utilized_amount: 0,
-            interest_rate_bps,
-            risk_score,
-            status: CreditStatus::Active,
-            last_rate_update_ts: 0,
-            accrued_interest: 0,
-            last_accrual_ts: 0,
-        };
-
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), symbol_short!("opened")),
-            CreditLineEvent {
-                event_type: symbol_short!("opened"),
-                borrower: borrower.clone(),
-                status: CreditStatus::Active,
-                credit_limit,
-                interest_rate_bps,
-                risk_score,
-            },
-        );
+        lifecycle::open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)
     }
 
-    /// Update risk parameters for an existing credit line.
-    ///
-    /// Called by admin or risk engine when a borrower's risk profile changes.
-    ///
-    /// # Parameters
-    /// - `borrower`: The borrower's address.
-    /// - `credit_limit`: New credit limit.
-    /// - `interest_rate_bps`: New interest rate in basis points.
-    /// - `risk_score`: New risk score.
-    ///
-    /// # Note
-    /// Not yet implemented. Planned logic: load existing record, update fields,
-    /// persist updated [`CreditLineData`].
-    /// @notice Draws credit by transferring liquidity tokens to the borrower.
-    /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
-        set_reentrancy_guard(&env);
-        borrower.require_auth();
-
-        if amount <= 0 {
-            clear_reentrancy_guard(&env);
-            panic!("amount must be positive");
-        }
-
-        let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
-        let reserve_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::LiquiditySource)
-            .unwrap_or(env.current_contract_address());
-
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
-
-        if credit_line.borrower != borrower {
-            clear_reentrancy_guard(&env);
-            panic!("Borrower mismatch for credit line");
-        }
-
-        if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::CreditLineClosed);
-        }
-
-        if credit_line.status == CreditStatus::Suspended {
-            clear_reentrancy_guard(&env);
-            panic!("credit line is suspended");
-        }
-
-        if credit_line.status == CreditStatus::Defaulted {
-            clear_reentrancy_guard(&env);
-            panic!("credit line is defaulted");
-        }
-
-        if credit_line.status != CreditStatus::Active {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::InvalidAmount);
-        }
-
-        let updated_utilized = credit_line
-            .utilized_amount
-            .checked_add(amount)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::Overflow)
-            });
-
-        if updated_utilized > credit_line.credit_limit {
-            clear_reentrancy_guard(&env);
-            panic!("exceeds credit limit");
-        }
-
-        if let Some(token_address) = token_address {
-            let token_client = token::Client::new(&env, &token_address);
-            let reserve_balance = token_client.balance(&reserve_address);
-            if reserve_balance < amount {
-                clear_reentrancy_guard(&env);
-                panic!("Insufficient liquidity reserve for requested draw amount");
-            }
-
-            token_client.transfer(&reserve_address, &borrower, &amount);
-        }
-
-        credit_line.utilized_amount = updated_utilized;
-        env.storage().persistent().set(&borrower, &credit_line);
-        let timestamp = env.ledger().timestamp();
-        publish_drawn_event(
-            &env,
-            DrawnEvent {
-                borrower,
-                amount,
-                new_utilized_amount: updated_utilized,
-                timestamp,
-            },
-        );
-        clear_reentrancy_guard(&env);
-        ()
+        borrow::draw_credit(env, borrower, amount)
     }
 
-    /// Repay credit (borrower).
-    /// Reverts if credit line does not exist, is Closed, or borrower has not authorized.
-    /// Reduces utilized_amount by amount (capped at 0). Emits RepaymentEvent.
-    ///
-    /// # Reentrancy Protection
-    /// This function uses a reentrancy guard to prevent re-entrant calls during
-    /// token transfers. If a token contract were to call back into this contract
-    /// during transfer, the guard would revert the transaction.
-    ///
-    /// # Security Notes
-    /// - Soroban token transfers (e.g. Stellar Asset Contract) do not invoke callbacks
-    /// - This guard is defense-in-depth for future token integrations
-    /// - Guard is cleared on all success and failure paths
-    pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
-        // --- Reentrancy guard (defense-in-depth) ---
-        set_reentrancy_guard(&env);
-
-        // --- Auth: only the borrower may repay their own line ---
-        borrower.require_auth();
-
-        // --- Input validation ---
-        if amount <= 0 {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::InvalidAmount);
-        }
-
-        // --- Load credit line ---
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
-
-        // --- Status check: only Closed is disallowed ---
-        if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::CreditLineClosed);
-        }
-
-        // --- Compute effective repayment (cap at outstanding utilization) ---
-        // This prevents over-pulling tokens and keeps accounting correct.
-        let effective_repay = if amount > credit_line.utilized_amount {
-            credit_line.utilized_amount
-        } else {
-            amount
-        };
-
-        // --- Token transfer (when liquidity token is configured) ---
-        // We check allowance and balance *before* mutating state so that a
-        // failed transfer reverts cleanly without partial state changes.
-        if effective_repay > 0 {
-            let token_address: Option<Address> =
-                env.storage().instance().get(&DataKey::LiquidityToken);
-
-            if let Some(token_address) = token_address {
-                let reserve_address: Address = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::LiquiditySource)
-                    .unwrap_or_else(|| env.current_contract_address());
-
-                let token_client = token::Client::new(&env, &token_address);
-                let contract_address = env.current_contract_address();
-
-                // Guard: allowance must cover the effective repayment.
-                let allowance = token_client.allowance(&borrower, &contract_address);
-                if allowance < effective_repay {
-                    clear_reentrancy_guard(&env);
-                    panic!("Insufficient allowance");
-                }
-
-                // Guard: borrower must actually hold the tokens.
-                let balance = token_client.balance(&borrower);
-                if balance < effective_repay {
-                    clear_reentrancy_guard(&env);
-                    panic!("Insufficient balance");
-                }
-
-                // Pull tokens from borrower → liquidity source via transfer_from.
-                token_client.transfer_from(
-                    &contract_address,
-                    &borrower,
-                    &reserve_address,
-                    &effective_repay,
-                );
-            }
-        }
-
-        // --- Update state ---
-        let new_utilized = credit_line
-            .utilized_amount
-            .saturating_sub(effective_repay)
-            .max(0);
-        credit_line.utilized_amount = new_utilized;
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        // --- Emit event ---
-        let timestamp = env.ledger().timestamp();
-        publish_repayment_event(
-            &env,
-            RepaymentEvent {
-                borrower,
-                amount: effective_repay,
-                new_utilized_amount: new_utilized,
-                timestamp,
-            },
-        );
-
-        // --- Release reentrancy guard ---
-        clear_reentrancy_guard(&env);
+    pub fn repay_credit(env: Env, borrower: Address, amount: i128) -> () {
+        borrow::repay_credit(env, borrower, amount)
     }
 
-    /// Update risk parameters for an existing credit line (admin only).
-    ///
-    /// # Arguments
-    /// * `borrower` - Borrower whose credit line to update.
-    /// * `credit_limit` - New credit limit (must be >= current utilized_amount and >= 0).
-    /// * `interest_rate_bps` - New interest rate in basis points (0 ..= 10000).
-    /// * `risk_score` - New risk score (0 ..= 100).
-    ///
-    /// # Panics
-    /// * If caller is not the contract admin.
-    /// * If no credit line exists for the borrower.
-    /// * If bounds are violated (e.g. credit_limit < utilized_amount).
-    ///
-    /// # Rate-change limits
-    /// When a `RateChangeConfig` has been set via `set_rate_change_limits`, the
-    /// following additional checks are enforced whenever the interest rate is
-    /// actually changing:
-    /// * The absolute delta `|new_rate - old_rate|` must be ≤ `max_rate_change_bps`.
-    /// * If a minimum interval is configured and a previous rate change
-    ///   timestamp exists, the elapsed time since the last change must be ≥
-    ///   `rate_change_min_interval`.
-    ///
-    /// # Rate-change limits
-    /// When a `RateChangeConfig` has been set via `set_rate_change_limits`, the
-    /// following additional checks are enforced whenever the interest rate is
-    /// actually changing:
-    /// * The absolute delta `|new_rate - old_rate|` must be ≤
-    ///   `max_rate_change_bps`.
-    /// * If a minimum interval is configured and a previous rate change
-    ///   timestamp exists, the elapsed time since the last change must be ≥
-    ///   `rate_change_min_interval`.
-    ///
     pub fn update_risk_parameters(
         env: Env,
         borrower: Address,
@@ -445,8 +150,8 @@ impl Credit {
         env.storage().instance().get(&rate_cfg_key(&env))
     }
 
-    pub fn suspend_credit_line(env: Env, borrower: Address) {
-        lifecycle::suspend_credit_line(env, borrower)
+    pub fn suspend_credit_line(env: Env, line_id: u32) {
+        lifecycle::suspend_credit_line(env, line_id)
     }
 
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
@@ -464,33 +169,6 @@ impl Credit {
     /// Get credit line data for a borrower (view function).
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
-    }
-
-    /// Reinstate a defaulted credit line to Active (admin only).
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
-        if credit_line.status != CreditStatus::Defaulted {
-            panic!("credit line is not defaulted");
-        }
-        credit_line.status = CreditStatus::Active;
-        env.storage().persistent().set(&borrower, &credit_line);
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), symbol_short!("reinstate")),
-            CreditLineEvent {
-                event_type: symbol_short!("reinstate"),
-                borrower: borrower.clone(),
-                status: CreditStatus::Active,
-                credit_limit: credit_line.credit_limit,
-                interest_rate_bps: credit_line.interest_rate_bps,
-                risk_score: credit_line.risk_score,
-            },
-        );
     }
 }
 
@@ -510,7 +188,7 @@ mod test {
         credit_limit: i128,
         reserve_amount: i128,
         draw_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address, Address) {
+    ) -> (CreditClient<'a>, Address, Address, Address, u32) {
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
         let token_admin = Address::generate(env);
@@ -528,7 +206,8 @@ mod test {
         if draw_amount > 0 {
             client.draw_credit(borrower, &draw_amount);
         }
-        (client, token_address, contract_id, admin)
+        let line = client.get_credit_line(borrower).unwrap();
+        (client, token_address, contract_id, admin, line.line_id)
     }
 }
 
@@ -606,7 +285,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 500);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 500);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &500);
         approve(&env, &token, &borrower, &contract_id, 500);
@@ -625,9 +304,9 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 300);
+        let (client, token, contract_id, _admin, line_id) = setup(&env, &borrower, 1_000, 1_000, 300);
 
-        client.suspend_credit_line(&borrower);
+        client.suspend_credit_line(&line_id);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Suspended
@@ -650,7 +329,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 400);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 400);
 
         client.default_credit_line(&borrower);
         assert_eq!(
@@ -675,7 +354,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 100);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 100);
 
         // Fund borrower with 500 but only 100 is owed
         StellarAssetClient::new(&env, &token).mint(&borrower, &500);
@@ -701,7 +380,7 @@ mod test {
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         // draw_amount = 0 → utilized_amount starts at 0
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 0, 0);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 0, 0);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
         approve(&env, &token, &borrower, &contract_id, 200);
@@ -727,7 +406,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, _contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 200);
+        let (client, _token, _contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 200);
         client.repay_credit(&borrower, &0);
     }
 
@@ -737,7 +416,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, _contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 200);
+        let (client, _token, _contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 200);
         client.repay_credit(&borrower, &-100);
     }
 
@@ -749,7 +428,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, _contract_id, admin) = setup(&env, &borrower, 1_000, 0, 0);
+        let (client, _token, _contract_id, admin, _line_id) = setup(&env, &borrower, 1_000, 0, 0);
         client.close_credit_line(&borrower, &admin);
         client.repay_credit(&borrower, &100);
     }
@@ -776,7 +455,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 300);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 300);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
         approve(&env, &token, &borrower, &contract_id, 200);
@@ -797,7 +476,7 @@ mod test {
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let reserve = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 250);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 250);
 
         client.set_liquidity_source(&reserve);
 
@@ -819,7 +498,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 300);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 300);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
         approve(&env, &token, &borrower, &contract_id, 200);
@@ -842,7 +521,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 200);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 200);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
         // Approve only 50 but trying to repay 200
@@ -857,7 +536,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 200);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 200);
 
         // Reduce borrower's token balance to 50 while credit utilization remains 200
         let token_client = token::Client::new(&env, &token);
@@ -876,7 +555,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 5_000, 5_000, 1_000);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 5_000, 5_000, 1_000);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &400);
         approve(&env, &token, &borrower, &contract_id, 400);
@@ -903,7 +582,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 200);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 200);
 
         // Over-approve and over-repay: only 200 (utilized) should appear in event
         StellarAssetClient::new(&env, &token).mint(&borrower, &500);
@@ -924,7 +603,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 600);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 600);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
         approve(&env, &token, &borrower, &contract_id, 200);
@@ -946,7 +625,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 600);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 600);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &400);
         approve(&env, &token, &borrower, &contract_id, 400);
@@ -986,7 +665,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 300);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 1_000, 1_000, 300);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &100);
         approve(&env, &token, &borrower, &contract_id, 100);
@@ -1007,7 +686,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 2_000, 2_000, 1_500);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 2_000, 2_000, 1_500);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &1_500);
         approve(&env, &token, &borrower, &contract_id, 1_500);
@@ -1065,7 +744,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, token, contract_id, _admin) = setup(&env, &borrower, 3_000, 3_000, 800);
+        let (client, token, contract_id, _admin, _line_id) = setup(&env, &borrower, 3_000, 3_000, 800);
 
         let before = client.get_credit_line(&borrower).unwrap();
 
@@ -1088,7 +767,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _contract_id, _admin) =
+        let (client, _contract_id, _admin, _line_id) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
 
         let line = client.get_credit_line(&borrower).unwrap();
@@ -1125,7 +804,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _contract_id, _admin) =
+        let (client, _contract_id, _admin, _line_id) =
             setup_contract_with_credit_line(&env, &borrower, 1_000, 600);
 
         let line = client.get_credit_line(&borrower).unwrap();
@@ -1443,7 +1122,7 @@ mod test_coverage_gaps {
         borrower: &'a Address,
         credit_limit: i128,
         utilized_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
+    ) -> (CreditClient<'a>, Address, Address, u32) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
@@ -1453,10 +1132,11 @@ mod test_coverage_gaps {
         if utilized_amount > 0 {
             client.draw_credit(borrower, &utilized_amount);
         }
-        (client, contract_id, admin)
+        let line = client.get_credit_line(borrower).unwrap();
+        (client, contract_id, admin, line.line_id)
     }
 
-    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address, u32) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let borrower = Address::generate(env);
@@ -1464,15 +1144,16 @@ mod test_coverage_gaps {
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
-        (client, admin, borrower)
+        let line = client.get_credit_line(&borrower).unwrap();
+        (client, admin, borrower, line.line_id)
     }
 
-    fn setup_contract_with_credit_line<'a>(
+    fn setup_with_tokens<'a>(
         env: &'a Env,
         borrower: &Address,
         credit_limit: i128,
         draw_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
+    ) -> (CreditClient<'a>, Address, Address, u32) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
@@ -1488,7 +1169,8 @@ mod test_coverage_gaps {
         if draw_amount > 0 {
             client.draw_credit(borrower, &draw_amount);
         }
-        (client, token_address, admin)
+        let line = client.get_credit_line(borrower).unwrap();
+        (client, token_address, admin, line.line_id)
     }
 
     // ── update_risk_parameters: negative credit_limit ────────────────────────
@@ -1497,7 +1179,7 @@ mod test_coverage_gaps {
     #[should_panic(expected = "credit_limit must be non-negative")]
     fn update_risk_params_negative_limit_reverts() {
         let env = Env::default();
-        let (client, _admin, borrower) = base_setup(&env);
+        let (client, _admin, borrower, _line_id) = base_setup(&env);
         client.update_risk_parameters(&borrower, &-1, &500_u32, &60_u32);
     }
 
@@ -1551,7 +1233,7 @@ mod test_coverage_gaps {
     fn close_credit_line_unauthorized_closer_reverts() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, _admin, borrower) = base_setup(&env);
+        let (client, _admin, borrower, _line_id) = base_setup(&env);
         let stranger = Address::generate(&env);
         client.close_credit_line(&borrower, &stranger);
     }
@@ -1583,7 +1265,7 @@ mod test_coverage_gaps {
     #[should_panic(expected = "credit line is not defaulted")]
     fn reinstate_non_defaulted_active_line_reverts() {
         let env = Env::default();
-        let (client, _admin, borrower) = base_setup(&env);
+        let (client, _admin, borrower, _line_id) = base_setup(&env);
         // Line is Active, not Defaulted
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     }
@@ -1592,8 +1274,8 @@ mod test_coverage_gaps {
     #[should_panic(expected = "credit line is not defaulted")]
     fn reinstate_suspended_line_reverts() {
         let env = Env::default();
-        let (client, _admin, borrower) = base_setup(&env);
-        client.suspend_credit_line(&borrower);
+        let (client, _admin, borrower, line_id) = base_setup(&env);
+        client.suspend_credit_line(&line_id);
         // Line is Suspended, not Defaulted
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     }
@@ -1604,7 +1286,7 @@ mod test_coverage_gaps {
     fn open_credit_line_succeeds_after_closed() {
         let env = Env::default();
         env.mock_all_auths();
-        let (client, admin, borrower) = base_setup(&env);
+        let (client, admin, borrower, _line_id) = base_setup(&env);
         client.close_credit_line(&borrower, &admin);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
@@ -1623,7 +1305,7 @@ mod test_coverage_gaps {
         use soroban_sdk::testutils::Events;
         let env = Env::default();
         env.mock_all_auths();
-        let (client, _admin, borrower) = base_setup(&env);
+        let (client, _admin, borrower, _line_id) = base_setup(&env);
         client.default_credit_line(&borrower);
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         let events = env.events().all();
@@ -1650,9 +1332,10 @@ mod test_coverage_gaps {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        let line = client.get_credit_line(&borrower).unwrap();
         client.draw_credit(&borrower, &200_i128);
         client.repay_credit(&borrower, &50_i128);
-        client.suspend_credit_line(&borrower);
+        client.suspend_credit_line(&line.line_id);
         client.default_credit_line(&borrower);
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         client.close_credit_line(&borrower, &admin);
@@ -2036,7 +1719,8 @@ mod test_coverage_gaps {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.suspend_credit_line(&borrower);
+        let line = client.get_credit_line(&borrower).unwrap();
+        client.suspend_credit_line(&line.line_id);
 
         client.close_credit_line(&borrower, &admin);
 
@@ -2057,7 +1741,8 @@ mod test_coverage_gaps {
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.suspend_credit_line(&borrower);
+        let line = client.get_credit_line(&borrower).unwrap();
+        client.suspend_credit_line(&line.line_id);
 
         // Re-opening a Suspended line should succeed.
         client.open_credit_line(&borrower, &2000_i128, &400_u32, &60_u32);
@@ -2082,13 +1767,14 @@ mod test_rate_change_limits {
         borrower: &'a Address,
         credit_limit: i128,
         _reserve_amount: i128,
-    ) -> (CreditClient<'a>, Address) {
+    ) -> (CreditClient<'a>, Address, u32) {
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
         client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        (client, admin)
+        let line = client.get_credit_line(borrower).unwrap();
+        (client, admin, line.line_id)
     }
 
     #[test]
@@ -2096,7 +1782,7 @@ mod test_rate_change_limits {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _admin) = setup(&env, &borrower, 5_000, 0);
+        let (client, _admin, _line_id) = setup(&env, &borrower, 5_000, 0);
 
         client.set_rate_change_limits(&100_u32, &0_u64);
         client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
@@ -2305,19 +1991,61 @@ mod test_rate_change_limits {
     }
 
     #[test]
-    fn test_rate_change_timestamp_recorded() {
+    fn test_suspend_active_line_success() {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _admin) = setup(&env, &borrower, 5_000, 0);
+        let (client, _token, _contract_id, admin, line_id) = setup(&env, &borrower, 1_000, 0, 0);
 
-        client.set_rate_change_limits(&100_u32, &0_u64);
-        env.ledger().with_mut(|li| li.timestamp = 42);
-        client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
+        client.suspend_credit_line(&line_id);
 
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.last_rate_update_ts, 42);
+        assert_eq!(line.status, CreditStatus::Suspended);
+        
+        // Verify event
+        let events = env.events().all();
+        let last_event = events.last().unwrap();
+        let event: CreditLineEvent = last_event.2.try_into_val(&env).unwrap();
+        assert_eq!(event.event_type, symbol_short!("suspend"));
+        assert_eq!(event.line_id, line_id);
     }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn test_suspend_line_unauthorized() {
+        let env = Env::default();
+        let borrower = Address::generate(&env);
+        let (client, _token, _contract_id, _admin, line_id) = setup(&env, &borrower, 1_000, 0, 0);
+        
+        // No mock_all_auths and we don't mock admin auth, so this should fail
+        client.suspend_credit_line(&line_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn test_suspend_line_invalid_state_closed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _contract_id, admin, line_id) = setup(&env, &borrower, 1_000, 0, 0);
+        
+        client.close_credit_line(&borrower, &admin);
+        client.suspend_credit_line(&line_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn test_suspend_nonexistent_line() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        
+        client.suspend_credit_line(&999_u32);
+    }
+}
 
     #[test]
     fn test_rate_change_multiple_sequential_within_limits() {

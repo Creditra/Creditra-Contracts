@@ -1,6 +1,7 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{publish_credit_line_event, CreditLineEvent};
-use crate::types::{CreditLineData, CreditStatus};
+use crate::storage::DataKey;
+use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{symbol_short, Address, Env};
 
 pub fn open_credit_line(
@@ -28,7 +29,14 @@ pub fn open_credit_line(
             "borrower already has an active credit line"
         );
     }
+
+    // Generate a new line_id
+    let mut counter: u32 = env.storage().instance().get(&DataKey::LineIdCounter).unwrap_or(0);
+    counter += 1;
+    env.storage().instance().set(&DataKey::LineIdCounter, &counter);
+
     let credit_line = CreditLineData {
+        line_id: counter,
         borrower: borrower.clone(),
         credit_limit,
         utilized_amount: 0,
@@ -41,12 +49,14 @@ pub fn open_credit_line(
     };
 
     env.storage().persistent().set(&borrower, &credit_line);
+    env.storage().persistent().set(&DataKey::LineIdMap(counter), &borrower);
 
     publish_credit_line_event(
         &env,
         (symbol_short!("credit"), symbol_short!("opened")),
         CreditLineEvent {
             event_type: symbol_short!("opened"),
+            line_id: counter,
             borrower: borrower.clone(),
             status: CreditStatus::Active,
             credit_limit,
@@ -59,26 +69,40 @@ pub fn open_credit_line(
 /// Suspend a credit line temporarily.
 ///
 /// Called by admin to freeze a borrower's credit line without closing it.
-/// The credit line can be reactivated or closed after suspension.
+/// Transition: Active → Suspended.
+/// While suspended, draws are disabled but repayments remain allowed.
 ///
 /// # Parameters
-/// - `borrower`: The borrower's address.
+/// - `line_id`: The unique identifier for the credit line.
 ///
-/// # Panics
-/// - If no credit line exists for the given borrower.
+/// # Errors
+/// - `ContractError::NotAdmin`: If caller is not the contract administrator.
+/// - `ContractError::CreditLineNotFound`: If no credit line exists for the given ID.
+/// - `ContractError::InvalidStatus`: If the current status is not `Active`.
 ///
 /// # Events
 /// Emits a `("credit", "suspend")` [`CreditLineEvent`].
-pub fn suspend_credit_line(env: Env, borrower: Address) {
+pub fn suspend_credit_line(env: Env, line_id: u32) {
     require_admin_auth(&env);
+
+    let borrower: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::LineIdMap(line_id))
+        .unwrap_or_else(|| {
+            env.panic_with_error(ContractError::CreditLineNotFound);
+        });
+
     let mut credit_line: CreditLineData = env
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| {
+            env.panic_with_error(ContractError::CreditLineNotFound);
+        });
 
     if credit_line.status != CreditStatus::Active {
-        panic!("Only active credit lines can be suspended");
+        env.panic_with_error(ContractError::InvalidStatus);
     }
 
     credit_line.status = CreditStatus::Suspended;
@@ -89,6 +113,7 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         (symbol_short!("credit"), symbol_short!("suspend")),
         CreditLineEvent {
             event_type: symbol_short!("suspend"),
+            line_id,
             borrower: borrower.clone(),
             status: CreditStatus::Suspended,
             credit_limit: credit_line.credit_limit,
@@ -143,6 +168,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         (symbol_short!("credit"), symbol_short!("closed")),
         CreditLineEvent {
             event_type: symbol_short!("closed"),
+            line_id: credit_line.line_id,
             borrower: borrower.clone(),
             status: CreditStatus::Closed,
             credit_limit: credit_line.credit_limit,
@@ -174,6 +200,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         (symbol_short!("credit"), symbol_short!("default")),
         CreditLineEvent {
             event_type: symbol_short!("default"),
+            line_id: credit_line.line_id,
             borrower: borrower.clone(),
             status: CreditStatus::Defaulted,
             credit_limit: credit_line.credit_limit,
@@ -207,6 +234,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         (symbol_short!("credit"), symbol_short!("reinstate")),
         CreditLineEvent {
             event_type: symbol_short!("reinstate"),
+            line_id: credit_line.line_id,
             borrower: borrower.clone(),
             status: CreditStatus::Active,
             credit_limit: credit_line.credit_limit,

@@ -9,7 +9,7 @@ use soroban_sdk::{Address, Env};
     use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
 
 
-    fn setup_test(env: &Env) -> (Address, Address, Address) {
+    fn setup_test(env: &Env) -> (Address, Address, Address, u32) {
         env.mock_all_auths();
 
         let admin = Address::generate(env);
@@ -20,8 +20,9 @@ use soroban_sdk::{Address, Env};
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+        let line = client.get_credit_line(&borrower).unwrap();
 
-        (admin, borrower, contract_id)
+        (admin, borrower, contract_id, line.line_id)
     }
 
     fn call_contract<F>(env: &Env, contract_id: &Address, f: F)
@@ -156,7 +157,8 @@ use soroban_sdk::{Address, Env};
 
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.suspend_credit_line(&borrower);
+        let line = client.get_credit_line(&borrower).unwrap();
+        client.suspend_credit_line(&line.line_id);
 
         let credit_line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(credit_line.status, CreditStatus::Suspended);
