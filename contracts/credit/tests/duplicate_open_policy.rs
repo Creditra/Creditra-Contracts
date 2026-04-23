@@ -18,7 +18,7 @@ mod test_helpers {
     use soroban_sdk::{Address, Env};
 
     // Re-export types from the credit contract
-    pub use creditra_credit::types::CreditStatus;
+    pub use creditra_credit::types::{ContractError, CreditStatus};
     pub use creditra_credit::Credit;
 
     /// Get a CreditClient for the given contract address
@@ -1481,24 +1481,26 @@ mod unit_tests {
     /// fails with the error message "interest_rate_bps cannot exceed 10000 (100%)".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "interest_rate_bps cannot exceed 10000 (100%)")]
     fn test_excessive_interest_rate_bps_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         // Attempt to open a credit line with interest_rate_bps > 10000
-        // This should panic with "interest_rate_bps cannot exceed 10000 (100%)"
         let credit_limit = 1000_i128;
         let excessive_interest_rate_bps = 10001_u32;
         let risk_score = 70_u32;
 
-        client.open_credit_line(
+        let result = client.try_open_credit_line(
             &borrower,
             &credit_limit,
             &excessive_interest_rate_bps,
             &risk_score,
         );
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::RateTooHigh.into()),
+            _ => panic!("Expected contract error RateTooHigh, got {:?}", result),
+        }
     }
 
     /// Task 6.4: Test for excessive risk_score rejection
@@ -1509,24 +1511,26 @@ mod unit_tests {
     /// fails with the error message "risk_score must be between 0 and 100".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "risk_score must be between 0 and 100")]
     fn test_excessive_risk_score_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         // Attempt to open a credit line with risk_score > 100
-        // This should panic with "risk_score must be between 0 and 100"
         let credit_limit = 1000_i128;
         let interest_rate_bps = 300_u32;
         let excessive_risk_score = 101_u32;
 
-        client.open_credit_line(
+        let result = client.try_open_credit_line(
             &borrower,
             &credit_limit,
             &interest_rate_bps,
             &excessive_risk_score,
         );
+        match result {
+            Err(Ok(err)) => assert_eq!(err, ContractError::ScoreTooHigh.into()),
+            _ => panic!("Expected contract error ScoreTooHigh, got {:?}", result),
+        }
     }
 
     /// Task 6.5: Test for state preservation on validation failure

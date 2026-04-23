@@ -743,7 +743,6 @@ use soroban_sdk::{Address, Env};
 
     /// Defaulted → Suspended: draws are still blocked.
     #[test]
-    #[should_panic(expected = "credit line is suspended")]
     fn test_reinstate_to_suspended_blocks_draws() {
         let env = Env::default();
         env.mock_all_auths();
@@ -752,7 +751,8 @@ use soroban_sdk::{Address, Env};
             setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.default_credit_line(&borrower);
         client.reinstate_credit_line(&borrower, &CreditStatus::Suspended);
-        client.draw_credit(&borrower, &100);
+        let result = client.try_draw_credit(&borrower, &100);
+        assert_eq!(result, Err(core::result::Result::Ok(ContractError::InvalidStatus)));
     }
 
     /// Invariant: utilized_amount is preserved after reinstatement.
@@ -1050,7 +1050,6 @@ use soroban_sdk::{Address, Env};
     }
 
     #[test]
-    #[should_panic(expected = "credit line is closed")]
     fn test_draw_credit_rejected_when_closed() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1065,11 +1064,11 @@ use soroban_sdk::{Address, Env};
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.close_credit_line(&borrower, &admin);
 
-        client.draw_credit(&borrower, &100_i128);
+        let result = client.try_draw_credit(&borrower, &100_i128);
+        assert_eq!(result, Err(core::result::Result::Ok(ContractError::InvalidStatus)));
     }
 
     #[test]
-    #[should_panic(expected = "exceeds credit limit")]
     fn test_draw_credit_rejected_when_exceeding_limit() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1082,7 +1081,8 @@ use soroban_sdk::{Address, Env};
 
         client.init(&admin);
         client.open_credit_line(&borrower, &100_i128, &300_u32, &70_u32);
-        client.draw_credit(&borrower, &101_i128);
+        let result = client.try_draw_credit(&borrower, &101_i128);
+        assert_eq!(result, Err(core::result::Result::Ok(ContractError::LimitExceeded)));
     }
 
     #[test]
@@ -1172,7 +1172,6 @@ use soroban_sdk::{Address, Env};
     // --- draw_credit: zero and negative amount guards ---
 
     #[test]
-    #[should_panic(expected = "amount must be positive")]
     fn test_draw_credit_rejected_when_amount_is_zero() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1186,12 +1185,12 @@ use soroban_sdk::{Address, Env};
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
 
-        // Should panic: zero is not a positive amount
-        client.draw_credit(&borrower, &0_i128);
+        // Should return AmountMustBePositive: zero is not a positive amount
+        let result = client.try_draw_credit(&borrower, &0_i128);
+        assert_eq!(result, Err(Ok(ContractError::AmountMustBePositive)));
     }
 
     #[test]
-    #[should_panic(expected = "amount must be positive")]
     fn test_draw_credit_rejected_when_amount_is_negative() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1206,7 +1205,8 @@ use soroban_sdk::{Address, Env};
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
 
         // i128 allows negatives — the guard `amount <= 0` must catch this
-        client.draw_credit(&borrower, &-1_i128);
+        let result = client.try_draw_credit(&borrower, &-1_i128);
+        assert_eq!(result, Err(Ok(ContractError::AmountMustBePositive)));
     }
 
     // --- repay_credit: zero and negative amount guards ---
@@ -1718,4 +1718,95 @@ use soroban_sdk::{Address, Env};
         // Current repay implementation is state-only; token balances/allowances are unchanged.
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
+    }
+
+    // ========== draw_credit authorization and status gates tests ==========
+
+    #[test]
+    fn test_draw_credit_success_active() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1000, 1000);
+
+        client.draw_credit(&borrower, &500);
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 500);
+    }
+
+    #[test]
+    fn test_draw_credit_failure_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let non_borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1000, 1000);
+
+        let result = client.try_draw_credit(&non_borrower, &500);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::Unauthorized))
+        );
+    }
+
+    #[test]
+    fn test_draw_credit_failure_suspended() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1000, 1000);
+
+        client.suspend_credit_line(&borrower);
+        let result = client.try_draw_credit(&borrower, &500);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::InvalidStatus))
+        );
+    }
+
+    #[test]
+    fn test_draw_credit_failure_defaulted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1000, 1000);
+
+        client.default_credit_line(&borrower);
+        let result = client.try_draw_credit(&borrower, &500);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::InvalidStatus))
+        );
+    }
+
+    #[test]
+    fn test_draw_credit_failure_closed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, admin) = setup_contract_with_credit_line(&env, &borrower, 1000, 1000);
+
+        client.close_credit_line(&borrower, &admin);
+        let result = client.try_draw_credit(&borrower, &500);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::InvalidStatus))
+        );
+    }
+
+    #[test]
+    fn test_draw_credit_failure_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, i128::MAX, i128::MAX);
+
+        // Pre-utilize some amount
+        client.draw_credit(&borrower, &1000);
+
+        let result = client.try_draw_credit(&borrower, &i128::MAX);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::Overflow))
+        );
     }
