@@ -609,6 +609,30 @@ mod test {
         }
     }
 
+    fn setup_contract_with_credit_line<'a>(
+        env: &'a Env,
+        borrower: &Address,
+        credit_limit: i128,
+        draw_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token_address = token_id.address();
+        client.set_liquidity_token(&token_address);
+        if draw_amount > 0 {
+            StellarAssetClient::new(env, &token_address).mint(&contract_id, &draw_amount);
+        }
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+        if draw_amount > 0 {
+            client.draw_credit(borrower, &draw_amount);
+        }
+        (client, token_address, admin)
+    }
+
     #[test]
     fn set_liquidity_token_updates_instance_storage() {
         let env = Env::default();
@@ -1214,8 +1238,8 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _contract_id, _admin) =
-            setup_contract_with_credit_line(&env, &borrower, 1_000, 0);
+        // Use setup which properly mints reserve tokens
+        let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 0);
 
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
         assert_utilization_invariants(&line);
@@ -1230,6 +1254,8 @@ mod test {
         assert_eq!(line.utilized_amount, 750);
         assert_utilization_invariants(&line);
 
+        StellarAssetClient::new(&env, &token).mint(&borrower, &300);
+        approve(&env, &token, &borrower, &contract_id, 300);
         client.repay_credit(&borrower, &300);
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 450);
@@ -1240,6 +1266,8 @@ mod test {
         assert_eq!(line.credit_limit, 1_250);
         assert_utilization_invariants(&line);
 
+        StellarAssetClient::new(&env, &token).mint(&borrower, &450);
+        approve(&env, &token, &borrower, &contract_id, 450);
         client.repay_credit(&borrower, &1_000);
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 0);
@@ -1251,12 +1279,16 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _contract_id, _admin) =
-            setup_contract_with_credit_line(&env, &borrower, 1_000, 600);
+        // Use setup which returns contract_id needed for approve
+        let (client, token, contract_id, _admin) =
+            setup(&env, &borrower, 1_000, 1_000, 600);
 
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Active);
         assert_utilization_invariants(&line);
+
+        StellarAssetClient::new(&env, &token).mint(&borrower, &600);
+        approve(&env, &token, &borrower, &contract_id, 600);
 
         client.repay_credit(&borrower, &250);
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -1768,7 +1800,16 @@ mod test_coverage_gaps {
     }
 
 
-    // ── update_risk_parameters: negative credit_limit ────────────────────────
+    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        (client, admin, borrower)
+    }
 
     #[test]
     #[should_panic(expected = "credit_limit must be non-negative")]
