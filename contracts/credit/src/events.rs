@@ -56,6 +56,7 @@ pub const TOPIC_REPAY: &str = "repay";
 /// Namespace for lifecycle sub-action events (suspend, close, default, reinstate).
 ///
 /// Topic element 0 for lifecycle action events.
+#[allow(dead_code)]
 pub const TOPIC_LIFECYCLE: &str = "lifecycle";
 
 // ─── Lifecycle action sub-symbols ────────────────────────────────────────────
