@@ -90,8 +90,15 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
             clear_reentrancy_guard(&env);
             panic!("amount must be positive");
         }
-        let new_utilized = credit_line.utilized_amount.saturating_sub(amount).max(0);
+        let effective_repay = amount.min(credit_line.utilized_amount);
+        let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+        let principal_repaid = effective_repay - interest_repaid;
+
+        let new_utilized = credit_line.utilized_amount.saturating_sub(effective_repay).max(0);
+        let new_accrued_interest = credit_line.accrued_interest.saturating_sub(interest_repaid).max(0);
+
         credit_line.utilized_amount = new_utilized;
+        credit_line.accrued_interest = new_accrued_interest;
         env.storage().persistent().set(&borrower, &credit_line);
 
         let timestamp = env.ledger().timestamp();
@@ -99,8 +106,11 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
             &env,
             RepaymentEvent {
                 borrower: borrower.clone(),
-                amount,
+                amount: effective_repay,
+                interest_repaid,
+                principal_repaid,
                 new_utilized_amount: new_utilized,
+                new_accrued_interest,
                 timestamp,
             },
         );

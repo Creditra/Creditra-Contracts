@@ -25,6 +25,9 @@ pub fn update_risk_parameters(
         .get(&borrower)
         .expect("Credit line not found");
 
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+
     if credit_limit < 0 {
         panic!("credit_limit must be non-negative");
     }

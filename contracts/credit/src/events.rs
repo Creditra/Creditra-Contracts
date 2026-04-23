@@ -44,27 +44,40 @@ pub struct CreditLineEventV2 {
 }
 
 /// Event emitted when a borrower repays credit.
+///
+/// Allocation policy: accrued interest is repaid first, then principal.
+/// Integrators can reconcile balances using `new_utilized_amount` and
+/// `new_accrued_interest`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepaymentEvent {
     /// Address of the borrower.
     pub borrower: Address,
-    /// Amount repaid.
+    /// Effective amount repaid (capped at total owed).
     pub amount: i128,
-    /// New outstanding principal.
+    /// Portion of the repayment applied to accrued interest.
+    pub interest_repaid: i128,
+    /// Portion of the repayment applied to principal.
+    pub principal_repaid: i128,
+    /// Total outstanding debt after repayment.
     pub new_utilized_amount: i128,
+    /// Remaining accrued interest after repayment.
+    pub new_accrued_interest: i128,
     /// Ledger timestamp of the repayment.
     pub timestamp: u64,
 }
 
-/// Versioned repayment event with explicit payer identifier.
+/// Versioned repayment event with explicit payer identifier and allocation breakdown.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepaymentEventV2 {
     pub borrower: Address,
     pub payer: Address,
     pub amount: i128,
+    pub interest_repaid: i128,
+    pub principal_repaid: i128,
     pub new_utilized_amount: i128,
+    pub new_accrued_interest: i128,
     pub timestamp: u64,
 }
 

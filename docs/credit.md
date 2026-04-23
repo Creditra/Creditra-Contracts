@@ -132,12 +132,28 @@ Repay outstanding drawn funds.
 **Allowed on**: Active, Suspended, or Defaulted credit lines.  
 **Not allowed on**: Closed credit lines.
 
+**Repayment allocation policy** (applied after pending interest accrual):
+1. **Accrue pending interest** — `apply_pending_accrual` capitalizes any elapsed interest into `utilized_amount` and `accrued_interest` before repayment is applied. This prevents interest evasion through frequent repayments.
+2. **Cap overpayment** — `effective_repay = min(amount, utilized_amount)`. Overpayments beyond total owed are ignored (no refund).
+3. **Interest first** — `interest_repaid = min(effective_repay, accrued_interest)`.
+4. **Principal second** — `principal_repaid = effective_repay - interest_repaid`.
+5. **Update state** — `accrued_interest` and `utilized_amount` are reduced accordingly.
+
 - The borrower must have approved the contract to pull tokens via `transfer_from`.
-- Effective repayment = `min(amount, utilized_amount)` (over-payments are safe).
 - Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change.
+- Repayment failures due to insufficient allowance or balance do not alter `utilized_amount`, `accrued_interest`, or the credit line record.
 - Works even when no liquidity token is configured (state-only update).
 
-Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing the effective amount transferred and new `utilized_amount`.
+Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing:
+- `amount` — effective amount repaid (capped at total owed)
+- `interest_repaid` — portion applied to accrued interest
+- `principal_repaid` — portion applied to principal
+- `new_utilized_amount` — total outstanding debt after repayment
+- `new_accrued_interest` — remaining interest debt after repayment
+
+Integrators can reconcile balances using:
+- `principal_owed = new_utilized_amount - new_accrued_interest`
+- `total_owed = new_utilized_amount`
 
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 Update credit limit, interest rate, and risk score (admin only).
@@ -257,8 +273,8 @@ Mark credit line as Defaulted (admin only).
 
 Emits: `("credit", "default")` event.
 
-### `reinstate_credit_line(env, borrower)`
-Reinstate a Defaulted credit line to Active (admin only).
+### `reinstate_credit_line(env, borrower, target_status)`
+Reinstate a Defaulted credit line to `target_status` (Active or Suspended). Admin only.
 
 Emits: `("credit", "reinstate")` event.
 
@@ -272,7 +288,8 @@ View function — returns credit line data or `None`.
 Arithmetic paths that affect credit limit and utilization stay in integer-only arithmetic.
 
 - `draw_credit`: utilization update uses `checked_add`; arithmetic overflow reverts with `ContractError::Overflow` (`12`).
-- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies an integer floor at zero with `saturating_sub`. This keeps utilization non-negative even for over-repayments.
+- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies the allocation policy (interest first, then principal) using `saturating_sub` and `max(0)` to keep both `accrued_interest` and `utilized_amount` non-negative. Over-repayments are capped at total owed.
+- `apply_pending_accrual`: interest calculation uses checked multiplication and division; overflow reverts with `ContractError::Overflow` (`12`).
 - `update_risk_parameters`: limit/risk bounds are validated before state updates; rate delta uses `abs_diff` for overflow-safe unsigned distance checks.
 
 ### Integer arithmetic assumptions
@@ -327,7 +344,8 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 |----------------------------|------------|-----------------------------|-----------|
 | `("credit", "opened")`     | `opened`   | `open_credit_line`          | New credit line created |
 | `("credit", "drawn")`      | `drawn`    | `draw_credit`               | Funds drawn |
-| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made |
+| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made (includes interest/principal allocation) |
+| `("credit", "accrue")`     | `accrue`   | `apply_pending_accrual`     | Interest capitalized into debt |
 | `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
 | `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
