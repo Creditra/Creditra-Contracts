@@ -55,7 +55,7 @@ fn admin_key(env: &Env) -> Symbol {
 
 pub mod types;
 
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
+use crate::events::{publish_drawn_event, publish_repayment_event, publish_interest_accrued_event, DrawnEvent, RepaymentEvent, InterestAccruedEvent};
 use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 use soroban_sdk::{contract, contractimpl, token, Address, Env};
@@ -256,6 +256,16 @@ impl Credit {
         credit_line.utilized_amount = updated_utilized;
         env.storage().persistent().set(&borrower, &credit_line);
         let timestamp = env.ledger().timestamp();
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 0,
+                total_accrued_interest: credit_line.accrued_interest,
+                new_utilized_amount: credit_line.utilized_amount,
+                timestamp,
+            },
+        );
         publish_drawn_event(
             &env,
             DrawnEvent {
@@ -370,6 +380,16 @@ impl Credit {
 
         // --- Emit event ---
         let timestamp = env.ledger().timestamp();
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 0,
+                total_accrued_interest: credit_line.accrued_interest,
+                new_utilized_amount: credit_line.utilized_amount,
+                timestamp,
+            },
+        );
         publish_repayment_event(
             &env,
             RepaymentEvent {

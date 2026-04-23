@@ -1,5 +1,5 @@
 use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
+use crate::events::{publish_drawn_event, publish_repayment_event, publish_interest_accrued_event, DrawnEvent, RepaymentEvent, InterestAccruedEvent};
 use crate::types::{CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
 
@@ -54,6 +54,19 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         credit_line.utilized_amount = updated_utilized;
         env.storage().persistent().set(&borrower, &credit_line);
         let timestamp = env.ledger().timestamp();
+
+        // Emit interest accrual event (currently 0 until full math is implemented)
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 0,
+                total_accrued_interest: credit_line.accrued_interest,
+                new_utilized_amount: credit_line.utilized_amount,
+                timestamp,
+            },
+        );
+
         publish_drawn_event(
             &env,
             DrawnEvent {
@@ -95,6 +108,19 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         env.storage().persistent().set(&borrower, &credit_line);
 
         let timestamp = env.ledger().timestamp();
+
+        // Emit interest accrual event (currently 0 until full math is implemented)
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 0,
+                total_accrued_interest: credit_line.accrued_interest,
+                new_utilized_amount: credit_line.utilized_amount,
+                timestamp,
+            },
+        );
+
         publish_repayment_event(
             &env,
             RepaymentEvent {
