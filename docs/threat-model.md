@@ -159,3 +159,27 @@ Recommended operational policy:
 - Recommended before production: independent review focused on auth boundaries,
   external token trust assumptions, and admin key operational controls.
 - Re-run threat model on each material contract behavior change.
+
+
+### 7) Large single-transaction draw (compromised borrower key or buggy integrator)
+
+Threat: A compromised borrower private key or a buggy integrator submits an
+oversized single-transaction draw, draining a disproportionate share of the
+liquidity reserve in one ledger.
+
+Mitigation: Admin can configure a protocol-wide per-transaction draw cap via
+`set_max_draw_amount`. Draws above the cap revert with
+`ContractError::DrawExceedsMaxAmount` before any state or token transfer
+occurs.
+
+Residual risk:
+- Cap is unset by default; operators must actively configure it for the
+  protection to apply.
+- A compromised admin key can raise or remove the cap.
+- Multiple sequential draws just at or under the cap are not rate-limited
+  by this control; separate rate-limiting or circuit-breaker logic would
+  be needed to address that threat.
+
+Operational recommendation: set `max_draw_amount` to a value reflecting the
+largest legitimate single draw expected during normal protocol operation
+immediately after deployment initialization.

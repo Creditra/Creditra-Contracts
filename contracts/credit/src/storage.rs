@@ -5,6 +5,7 @@ use soroban_sdk::{contracttype, Env, Symbol};
 pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
+    MaxDrawAmount,
 }
 
 pub fn admin_key(env: &Env) -> Symbol {
