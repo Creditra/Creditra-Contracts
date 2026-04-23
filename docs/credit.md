@@ -230,11 +230,13 @@ Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, n
   - just-before-boundary rejection
   - `rate_change_min_interval == 0` disabling the timing gate entirely
 
-### `suspend_credit_line(env, borrower)`
+### `suspend_credit_line(env, line_id)`
 Suspend an Active credit line (admin only).
 
+- `line_id`: The unique identifier for the credit line.
 - Reverts if the line does not exist.
 - Reverts unless the current status is `Active`.
+- While suspended, the borrower cannot draw new funds, but repayments are still permitted.
 
 Emits: `("credit", "suspend")` event.
 

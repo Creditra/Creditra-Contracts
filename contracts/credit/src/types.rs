@@ -53,11 +53,15 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
+    /// Action cannot be performed because the credit line is in an invalid state for this operation.
+    InvalidStatus = 15,
 }
 
 /// Stored credit line data for a borrower.
 #[contracttype]
 pub struct CreditLineData {
+    /// Unique identifier for the credit line.
+    pub line_id: u32,
     /// Address of the borrower.
     pub borrower: Address,
     /// Maximum borrowable amount for this line.

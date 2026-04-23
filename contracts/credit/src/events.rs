@@ -13,6 +13,8 @@ use crate::types::CreditStatus;
 pub struct CreditLineEvent {
     /// Type of lifecycle event (e.g., "opened", "suspend", "closed", "default").
     pub event_type: Symbol,
+    /// Unique identifier for the credit line.
+    pub line_id: u32,
     /// Address of the borrower.
     pub borrower: Address,
     /// New status of the credit line.
