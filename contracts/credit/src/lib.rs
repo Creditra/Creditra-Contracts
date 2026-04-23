@@ -552,7 +552,6 @@ mod test {
         }
         (client, token_address, contract_id, admin)
     }
-}
 
     fn approve(env: &Env, token: &Address, from: &Address, spender: &Address, amount: i128) {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);

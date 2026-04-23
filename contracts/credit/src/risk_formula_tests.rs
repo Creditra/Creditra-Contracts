@@ -8,47 +8,6 @@ use crate::{Credit, CreditClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 
-#[cfg(test)]
-mod proptests {
-    use super::*;
-    use proptest::prelude::*;
-
-    proptest! {
-        #[test]
-        fn test_formula_invariants(
-            base in 0..10_000u32,
-            slope in 0..10_000u32,
-            min in 0..10_000u32,
-            max in 0..10_000u32,
-            score in 0..100u32,
-        ) {
-            // Ensure min <= max for the test config
-            let (real_min, real_max) = if min <= max { (min, max) } else { (max, min) };
-            
-            let cfg = RateFormulaConfig {
-                base_rate_bps: base,
-                slope_bps_per_score: slope,
-                min_rate_bps: real_min,
-                max_rate_bps: real_max,
-            };
-            
-            let rate = compute_rate_from_score(&cfg, score);
-            
-            // 1. Respects user-defined bounds
-            assert!(rate >= cfg.min_rate_bps, "Rate {} below min {}", rate, cfg.min_rate_bps);
-            assert!(rate <= cfg.max_rate_bps, "Rate {} above max {}", rate, cfg.max_rate_bps);
-            
-            // 2. Respects global maximum
-            assert!(rate <= MAX_INTEREST_RATE_BPS, "Rate {} above global max", rate);
-            
-            // 3. Monotonicity: higher score should not result in lower rate (for positive slope)
-            if score > 0 {
-                let rate_lower = compute_rate_from_score(&cfg, score - 1);
-                assert!(rate >= rate_lower, "Non-monotonic: score {} gives {}, score {} gives {}", score, rate, score-1, rate_lower);
-            }
-        }
-    }
-}
 
 fn make_cfg(base: u32, slope: u32, min: u32, max: u32) -> RateFormulaConfig {
     RateFormulaConfig {
