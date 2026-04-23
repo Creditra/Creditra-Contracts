@@ -1719,3 +1719,191 @@ use soroban_sdk::{Address, Env};
         assert_eq!(liquidity.balance(&borrower), 550_i128);
         assert_eq!(liquidity.allowance(&borrower, &contract_id), 200_i128);
     }
+
+    // ── Utilization cap tests (issue #268) ──────────────────────────────────
+
+    #[test]
+    fn test_draw_within_utilization_cap_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        // 80% cap → max 800
+        client.set_utilization_cap(&borrower, &8_000_u32);
+        // Draw exactly at cap boundary — should succeed
+        client.draw_credit(&borrower, &800_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            800_i128
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds utilization cap")]
+    fn test_draw_exceeds_utilization_cap_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        // 80% cap → max 800; drawing 801 must revert
+        client.set_utilization_cap(&borrower, &8_000_u32);
+        client.draw_credit(&borrower, &801_i128);
+    }
+
+    #[test]
+    fn test_no_cap_allows_full_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        // No cap set — full limit draw must succeed
+        client.draw_credit(&borrower, &1_000_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            1_000_i128
+        );
+    }
+
+    #[test]
+    fn test_remove_cap_allows_full_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        client.set_utilization_cap(&borrower, &5_000_u32); // 50% cap
+        // Remove cap by passing 0
+        client.set_utilization_cap(&borrower, &0_u32);
+        assert!(client.get_utilization_cap(&borrower).is_none());
+        // Full draw should now succeed
+        client.draw_credit(&borrower, &1_000_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            1_000_i128
+        );
+    }
+
+    #[test]
+    fn test_get_utilization_cap_returns_set_value() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        assert!(client.get_utilization_cap(&borrower).is_none());
+        client.set_utilization_cap(&borrower, &7_500_u32);
+        assert_eq!(client.get_utilization_cap(&borrower), Some(7_500_u32));
+    }
+
+    #[test]
+    fn test_cap_at_100_percent_allows_full_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        client.set_utilization_cap(&borrower, &10_000_u32); // 100%
+        client.draw_credit(&borrower, &1_000_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            1_000_i128
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "cap_bps must be <= 10000")]
+    fn test_set_cap_above_10000_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+        client.set_utilization_cap(&borrower, &10_001_u32);
+    }
+
+    #[test]
+    fn test_cap_is_per_borrower_independent() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower_a = Address::generate(&env);
+        let borrower_b = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &50_u32);
+        client.open_credit_line(&borrower_b, &1_000_i128, &300_u32, &50_u32);
+        // Only borrower_a gets a cap
+        client.set_utilization_cap(&borrower_a, &5_000_u32); // 50%
+        // borrower_b has no cap — full draw succeeds
+        client.draw_credit(&borrower_b, &1_000_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower_b).unwrap().utilized_amount,
+            1_000_i128
+        );
+        // borrower_a capped at 500
+        client.draw_credit(&borrower_a, &500_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower_a).unwrap().utilized_amount,
+            500_i128
+        );
+    }
+
+    #[test]
+    fn test_cap_boundary_exact_draw_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // credit_limit=500, cap=60% → cap_amount=300
+        client.open_credit_line(&borrower, &500_i128, &300_u32, &50_u32);
+        client.set_utilization_cap(&borrower, &6_000_u32);
+        client.draw_credit(&borrower, &300_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            300_i128
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds utilization cap")]
+    fn test_cap_boundary_one_over_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // credit_limit=500, cap=60% → cap_amount=300; drawing 301 must revert
+        client.open_credit_line(&borrower, &500_i128, &300_u32, &50_u32);
+        client.set_utilization_cap(&borrower, &6_000_u32);
+        client.draw_credit(&borrower, &301_i128);
+    }

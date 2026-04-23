@@ -242,6 +242,26 @@ impl Credit {
             panic!("exceeds credit limit");
         }
 
+        // Enforce per-borrower utilization cap if configured.
+        if let Some(cap_bps) = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::UtilizationCapBps(borrower.clone()))
+        {
+            let cap_amount = credit_line
+                .credit_limit
+                .checked_mul(cap_bps as i128)
+                .and_then(|v| v.checked_div(10_000))
+                .unwrap_or_else(|| {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::Overflow)
+                });
+            if updated_utilized > cap_amount {
+                clear_reentrancy_guard(&env);
+                panic!("exceeds utilization cap");
+            }
+        }
+
         if let Some(token_address) = token_address {
             let token_client = token::Client::new(&env, &token_address);
             let reserve_balance = token_client.balance(&reserve_address);
@@ -443,6 +463,35 @@ impl Credit {
     /// Get the current rate-change limit configuration (view function).
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         env.storage().instance().get(&rate_cfg_key(&env))
+    }
+
+    /// Set a per-borrower utilization cap in basis points (admin only).
+    ///
+    /// When set, `draw_credit` will reject any draw that would push
+    /// `utilized_amount` above `credit_limit * cap_bps / 10_000`.
+    ///
+    /// # Parameters
+    /// - `borrower`: The borrower whose cap to configure.
+    /// - `cap_bps`: Cap ratio in basis points (1–10_000). Pass 0 to remove the cap.
+    pub fn set_utilization_cap(env: Env, borrower: Address, cap_bps: u32) {
+        require_admin_auth(&env);
+        if cap_bps == 0 {
+            env.storage()
+                .instance()
+                .remove(&DataKey::UtilizationCapBps(borrower));
+        } else {
+            assert!(cap_bps <= 10_000, "cap_bps must be <= 10000");
+            env.storage()
+                .instance()
+                .set(&DataKey::UtilizationCapBps(borrower), &cap_bps);
+        }
+    }
+
+    /// Get the utilization cap in basis points for a borrower, if set.
+    pub fn get_utilization_cap(env: Env, borrower: Address) -> Option<u32> {
+        env.storage()
+            .instance()
+            .get(&DataKey::UtilizationCapBps(borrower))
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
