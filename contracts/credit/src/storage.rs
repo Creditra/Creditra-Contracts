@@ -20,6 +20,11 @@ pub fn rate_cfg_key(env: &Env) -> Symbol {
     Symbol::new(env, "rate_cfg")
 }
 
+/// Instance storage key for the risk-score-based rate formula configuration.
+pub fn rate_formula_key(env: &Env) -> Symbol {
+    Symbol::new(env, "rate_form")
+}
+
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 /// Caller must call clear_reentrancy_guard when done (on all paths).
 pub fn set_reentrancy_guard(env: &Env) {
