@@ -51,6 +51,8 @@ pub enum ContractError {
     Overflow = 12,
     /// Credit limit decrease requires immediate repayment of excess amount.
     LimitDecreaseRequiresRepayment = 13,
+    /// Draw rejected: minimum cooldown interval since last draw has not elapsed.
+    DrawCooldown = 14,
 }
 
 /// Stored credit line data for a borrower.
@@ -77,6 +79,9 @@ pub struct CreditLineData {
     /// Ledger timestamp of the last interest accrual calculation.
     /// Zero means no accrual has been calculated yet.
     pub last_accrual_ts: u64,
+    /// Ledger timestamp of the last successful draw.
+    /// Zero means no draw has occurred yet (cooldown not enforced on first draw).
+    pub last_draw_ts: u64,
 }
 
 /// Admin-configurable limits on interest-rate changes.
@@ -87,4 +92,16 @@ pub struct RateChangeConfig {
     pub max_rate_change_bps: u32,
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
+}
+
+/// Admin-configurable minimum interval between successive draws for any borrower.
+///
+/// When set, a borrower must wait at least `min_interval_seconds` after their
+/// last draw before making another. Zero or absent means no cooldown (default).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawCooldownConfig {
+    /// Minimum seconds that must elapse between two consecutive draws.
+    /// Zero disables the cooldown.
+    pub min_interval_seconds: u64,
 }
