@@ -497,6 +497,11 @@ impl Credit {
         env.storage().instance().get(&DataKey::MaxDrawAmount)
     }
 
+    /// Get the current storage schema version.
+    pub fn get_schema_version(env: Env) -> Option<u32> {
+        env.storage().instance().get(&DataKey::SchemaVersion)
+    }
+
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         lifecycle::suspend_credit_line(env, borrower)
     }
@@ -1556,6 +1561,39 @@ mod test_smoke_coverage {
         let new_source = Address::generate(&env);
         client.set_liquidity_source(&new_source);
         // If we reach here without panic, admin was stored and LiquiditySource was writable.
+    }
+
+    #[test]
+    fn test_init_sets_schema_version() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn test_init_schema_version_stable_after_failed_reinit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.init(&attacker);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
     }
 
     /// Double-init must revert with AlreadyInitialized.

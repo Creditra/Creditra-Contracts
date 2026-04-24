@@ -67,6 +67,7 @@ Initializes the contract with an admin address. Must be called exactly once.
 
 - Stores `admin` in instance storage under the `"admin"` key.
 - Sets `LiquiditySource` to the contract's own address as a deterministic default.
+- Sets `DataKey::SchemaVersion` to `1` in instance storage.
 - Reverts with `ContractError::AlreadyInitialized` (14) if called a second time, preventing admin takeover via re-initialization.
 
 #### Parameters
@@ -195,6 +196,22 @@ Configure rate-change limits (admin only).
 
 ### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
 Returns the current rate-change configuration (or `None` if not set).
+
+### `get_schema_version(env) -> Option<u32>`
+Returns the stored storage schema version from instance storage.
+
+- After successful `init`, this returns `Some(1)`.
+- Before initialization, this returns `None`.
+
+### Storage schema versioning and migrations
+
+The credit contract stores an explicit schema marker under `DataKey::SchemaVersion`.
+
+- Current schema version: `1`
+- Existing key/value layouts are unchanged; the version key is additive metadata.
+- For immutable deployments, the version still gives off-chain tooling a deterministic way to detect schema expectations.
+- For future contract deployments, bump the schema version when storage semantics change and document migration requirements in release notes and deployment playbooks.
+
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 
 Update the risk parameters for an existing credit line. Admin-only.
