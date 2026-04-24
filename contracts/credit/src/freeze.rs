@@ -29,6 +29,12 @@ use soroban_sdk::Env;
 /// Sets [`DataKey::DrawsFrozen`] to `true`. Idempotent: calling when already
 /// frozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+///   If instance is archived, this flag is lost and draws become allowed.
+///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = true`.
 pub fn freeze_draws(env: Env) {
@@ -49,6 +55,11 @@ pub fn freeze_draws(env: Env) {
 /// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
 /// unfrozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = false`.
 pub fn unfreeze_draws(env: Env) {
@@ -67,6 +78,10 @@ pub fn unfreeze_draws(env: Env) {
 /// Returns `true` when draws are globally frozen.
 ///
 /// Defaults to `false` (draws allowed) if the key has never been set.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
 pub fn is_draws_frozen(env: &Env) -> bool {
     env.storage()
         .instance()

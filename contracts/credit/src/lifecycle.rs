@@ -1,9 +1,27 @@
+// SPDX-License-Identifier: MIT
+
+//! Credit line lifecycle management: suspend, close, default, reinstate, and liquidation settlement.
+//!
+//! # Storage
+//! - **Borrower credit lines**: Persistent storage (independent TTL per borrower)
+//!   - Key: `borrower: Address`
+//!   - Value: `CreditLineData`
+//! - **Liquidation settlement markers**: Persistent storage (replay protection)
+//!   - Key: `(Symbol("liq_seen"), borrower, settlement_id)`
+//!   - Value: `bool`
+
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{publish_credit_line_event, CreditLineEvent};
 use crate::storage::assert_not_paused;
 use crate::types::{CreditLineData, CreditStatus};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
+/// Generate a unique key for tracking liquidation settlements.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per settlement)
+/// - **Key**: `(Symbol("liq_seen"), borrower, settlement_id)`
+/// - **Purpose**: Prevents replay of the same liquidation settlement
 fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> (Symbol, Address, Symbol) {
     (
         symbol_short!("liq_seen"),

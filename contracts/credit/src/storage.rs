@@ -52,6 +52,13 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,
 /// indicating a reentrant call. Caller **must** call [`clear_reentrancy_guard`]
 /// on every success and failure path to release the guard.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("reentrancy")`
+/// - **TTL Note**: Guard is functionally temporary (set on entry, cleared on all exits)
+///   but stored in instance storage for simplicity. Instance TTL must be maintained
+///   separately via `extend_ttl()` calls in frequently-invoked functions.
 pub fn set_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     let current: bool = env.storage().instance().get(&key).unwrap_or(false);
@@ -65,11 +72,22 @@ pub fn set_reentrancy_guard(env: &Env) {
 ///
 /// Must be called on every exit path (success and failure) of any function
 /// that called [`set_reentrancy_guard`].
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `false` (effectively removes the guard)
 pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
 /// Check whether a borrower is blocked from drawing credit.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per borrower)
+/// - **Key**: `DataKey::BlockedBorrower(borrower)`
+/// - **TTL Note**: Each borrower's block status has its own TTL, independent
+///   of their credit line data. TTL should be extended on access.
 pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
     env.storage()
         .persistent()
@@ -78,6 +96,11 @@ pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
 }
 
 /// Set or clear the blocked status for a borrower.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per borrower)
+/// - **Key**: `DataKey::BlockedBorrower(borrower)`
+/// - **TTL Note**: Writes extend the TTL for this specific borrower's block flag.
 #[allow(dead_code)]
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     env.storage()
@@ -86,6 +109,11 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
 }
 
 /// Check whether the protocol is paused.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("paused")`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn is_paused(env: &Env) -> bool {
     env.storage()
         .instance()
@@ -94,6 +122,11 @@ pub fn is_paused(env: &Env) -> bool {
 }
 
 /// Set the protocol pause state (admin only, enforced by caller).
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("paused")`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
 }
