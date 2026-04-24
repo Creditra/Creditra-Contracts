@@ -7,7 +7,59 @@ The Auction contract implements two auction flows that coexist in the same contr
 
 Both flows use Soroban auth (`require_auth`) and ledger timestamp checks to enforce access and timing constraints.
 
+## Running Tests Locally
+
+Run all workspace tests:
+
+```bash
+cargo test --workspace
+```
+
+Run only auction invariant/fuzz tests:
+
+```bash
+cargo test --manifest-path gateway-contract/contracts/auction_contract/Cargo.toml fuzz_
+cargo test --manifest-path gateway-contract/contracts/auction_contract/Cargo.toml close_semantics_cannot_be_bypassed
+```
+
+The fuzz tests use fixed seeds and bounded iteration counts to keep CI runtime deterministic.
+
 ## Public Entry Points
+
+### Function: `settle_default_liquidation`
+
+Emits a deterministic settlement signal after an auction is closed so off-chain
+orchestrators can apply proceeds to the credit contract settlement hook.
+
+#### Interface
+
+```rust
+pub fn settle_default_liquidation(
+		env: Env,
+		auction_id: Symbol,
+		credit_contract: Address,
+		borrower: Address,
+)
+```
+
+#### Requirements
+
+- Auction identified by `auction_id` must be closed.
+- Settlement signal can be emitted only once per `auction_id`.
+
+#### Events Emitted
+
+- `("LIQ_SETL", "auction")` with payload:
+	- `auction_id`
+	- `credit_contract`
+	- `borrower`
+	- `winner`
+	- `recovered_amount`
+
+#### Notes
+
+- This method is signaling-only and does not perform token transfers.
+- Credit accounting update is performed by `settle_default_liquidation` on the credit contract.
 
 ### Function: `create_auction`
 

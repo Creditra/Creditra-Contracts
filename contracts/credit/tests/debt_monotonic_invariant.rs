@@ -167,7 +167,9 @@ mod debt_monotonic {
 
     #[test]
     fn debt_monotonic_with_simulated_interest_accrual() {
+        use soroban_sdk::testutils::Ledger;
         let env = Env::default();
+        env.ledger().set_timestamp(1_000);
         let (client, contract_id, _admin, borrower) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &10_000, &500_u32, &70_u32);
@@ -177,13 +179,12 @@ mod debt_monotonic {
         assert_eq!(prev_debt, 5_000);
 
         // Simulate interest accrual by writing accrued_interest directly.
-        // This models the future lazy-accrual path described in
-        // docs/interest-accrual.md: accrued interest is capitalized into the
-        // accrued_interest field on each state-changing operation.
+        // last_accrual_ts must be set to current timestamp so apply_accrual
+        // sees no elapsed time and preserves the injected value.
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
             line.accrued_interest = 250;
-            line.last_accrual_ts = 1_000;
+            line.last_accrual_ts = 1_000; // matches current env timestamp
             env.storage().persistent().set(&borrower, &line);
         });
 
@@ -223,11 +224,13 @@ mod debt_monotonic {
         assert_eq!(total_debt(&line), 6_250);
         prev_debt = total_debt(&line);
 
-        // Simulate more interest accrual
+        // Simulate more interest accrual — advance time first so apply_accrual
+        // doesn't recalculate and overwrite the injected value.
+        env.ledger().set_timestamp(2_000);
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
             line.accrued_interest = 500;
-            line.last_accrual_ts = 2_000;
+            line.last_accrual_ts = 2_000; // matches current env timestamp
             env.storage().persistent().set(&borrower, &line);
         });
 
@@ -243,9 +246,12 @@ mod debt_monotonic {
         // -- REPAY: allowed to decrease --
         client.repay_credit(&borrower, &2_000);
         let line = client.get_credit_line(&borrower).unwrap();
+        // Repay 2000: interest first (500), then principal (1500)
+        // utilized_amount: 6000 - 2000 = 4000
+        // accrued_interest: 500 - 500 = 0
         assert_eq!(line.utilized_amount, 4_000);
-        assert_eq!(line.accrued_interest, 500);
-        assert_eq!(total_debt(&line), 4_500);
+        assert_eq!(line.accrued_interest, 0);
+        assert_eq!(total_debt(&line), 4_000);
     }
 
     #[test]

@@ -6,6 +6,8 @@ This guide explains how indexers subscribe to Credit contract events and decode:
 - `DrawnEvent`
 - `RepaymentEvent`
 - `RiskParametersUpdatedEvent`
+- `DefaultLiquidationRequestedEvent`
+- `DefaultLiquidationSettledEvent`
 
 Source of truth for schemas: `contracts/credit/src/events.rs`.
 
@@ -22,6 +24,8 @@ The contract publishes Soroban events under a `credit` namespace.
 | `RepaymentEvent` | `("credit", "repay")` | `repay_credit` |
 | `RiskParametersUpdatedEvent` | `("credit", "risk_upd")` | `update_risk_parameters` |
 | `InterestAccruedEvent` | `("credit", "accrue")` | `draw_credit`, `repay_credit` |
+| `DefaultLiquidationRequestedEvent` | `("credit", "liq_req")` | `default_credit_line` |
+| `DefaultLiquidationSettledEvent` | `("credit", "liq_setl")` | `settle_default_liquidation` |
 
 For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symbol.
 
@@ -76,6 +80,25 @@ For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symb
 | `credit_limit` | `i128` | Updated limit |
 | `interest_rate_bps` | `u32` | Updated rate |
 | `risk_score` | `u32` | Updated score |
+
+### `DefaultLiquidationRequestedEvent`
+
+| Field | Type | Notes |
+|---|---|---|
+| `borrower` | `Address` | Defaulted borrower |
+| `utilized_amount` | `i128` | Debt at request time |
+| `timestamp` | `u64` | Ledger timestamp at emit time |
+
+### `DefaultLiquidationSettledEvent`
+
+| Field | Type | Notes |
+|---|---|---|
+| `borrower` | `Address` | Borrower being settled |
+| `settlement_id` | `Symbol` | Idempotency key (typically auction id) |
+| `recovered_amount` | `i128` | Amount applied from liquidation proceeds |
+| `remaining_utilized_amount` | `i128` | Debt remaining after settlement |
+| `status` | `CreditStatus` | `Defaulted` for partial, `Closed` for full |
+| `timestamp` | `u64` | Ledger timestamp at emit time |
 
 ---
 
@@ -163,6 +186,8 @@ After decoding `ScVal`, map by topic pair to the corresponding strongly-typed ev
    - `repay` -> `RepaymentEvent`
    - `risk_upd` -> `RiskParametersUpdatedEvent`
    - `accrue` -> `InterestAccruedEvent`
+  - `liq_req` -> `DefaultLiquidationRequestedEvent`
+  - `liq_setl` -> `DefaultLiquidationSettledEvent`
 5. Validate payload fields and ranges (for example non-negative numeric invariants where expected).
 6. Upsert into event store with idempotency key (`event.id` + ledger/tx metadata).
 7. Advance checkpoint only after durable write.
@@ -184,6 +209,10 @@ Suggested contract for consumers:
 - Treat `(contract_id, topics[], tx_hash, event_index)` as unique identity.
 - Never assume field ordering beyond the documented schema.
 - Fail closed on unknown required fields for a known version.
+
+### Contract API version probe
+
+Before ingesting events from a deployed credit contract, indexers should call the read-only `get_contract_version()` query and record the returned `ContractVersion { major, minor, patch }` alongside the contract ID. Route decoders by `major` and gate on unsupported majors so that a re-deployed contract with a breaking schema change cannot silently corrupt downstream state. See `docs/credit.md` for the full versioning policy.
 
 ---
 
@@ -213,7 +242,7 @@ Suggested contract for consumers:
 ## 7) Quick checklist for integrators
 
 - Subscribe/query by `contractId` + `credit` topic namespace.
-- Implement decoders for `CreditLineEvent`, `DrawnEvent`, `RepaymentEvent`, `RiskParametersUpdatedEvent`, `InterestAccruedEvent`.
+- Implement decoders for `CreditLineEvent`, `DrawnEvent`, `RepaymentEvent`, `RiskParametersUpdatedEvent`, `InterestAccruedEvent`, `DefaultLiquidationRequestedEvent`, `DefaultLiquidationSettledEvent`.
 - Store raw XDR alongside normalized records for audit/replay.
 - Make ingestion idempotent and checkpointed.
 - Support versioned topic suffixes (`*_v2`, etc.) for future migrations.
