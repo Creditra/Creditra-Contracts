@@ -638,6 +638,7 @@ mod test {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
     }
 
+    #[allow(dead_code)]
     fn setup_contract_with_credit_line<'a>(
         env: &'a Env,
         borrower: &Address,

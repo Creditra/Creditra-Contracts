@@ -2,8 +2,6 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::accrual::apply_accrual;
-    use crate::types::{CreditLineData, CreditStatus};
     use crate::Credit;
     use crate::CreditClient;
     use soroban_sdk::{
