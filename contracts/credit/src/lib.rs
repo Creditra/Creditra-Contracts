@@ -32,11 +32,11 @@ use crate::events::{
     publish_repayment_event, AdminRotationAcceptedEvent, AdminRotationProposedEvent,
     CreditLineEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, RateChangeConfig};
 use auth::{require_admin, require_admin_auth};
 use storage::{
     admin_key, clear_reentrancy_guard, is_borrower_blocked, set_reentrancy_guard,
-    rate_cfg_key, DataKey, proposed_admin_key, proposed_at_key,
+    rate_cfg_key, grace_period_key, DataKey, proposed_admin_key, proposed_at_key,
 };
 use risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 
@@ -200,6 +200,7 @@ impl Credit {
             last_rate_update_ts: 0,
             accrued_interest: 0,
             last_accrual_ts: 0,
+            suspension_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
@@ -561,6 +562,59 @@ impl Credit {
     /// Get the current rate-change limit configuration (view function).
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         env.storage().instance().get(&rate_cfg_key(&env))
+    }
+
+    // ── Grace period policy ───────────────────────────────────────────────────
+
+    /// Set the optional grace period policy for Suspended credit lines (admin only).
+    ///
+    /// When configured, a Suspended line accrues interest at a reduced (or zero)
+    /// rate for `grace_period_seconds` after the suspension timestamp. After the
+    /// window expires, normal accrual resumes at the line's full rate.
+    ///
+    /// # Parameters
+    /// - `grace_period_seconds`: Duration of the grace window. Pass `0` to disable
+    ///   the grace period without removing the config record.
+    /// - `waiver_mode`: [`GraceWaiverMode::FullWaiver`] (zero interest) or
+    ///   [`GraceWaiverMode::ReducedRate`] (partial rate).
+    /// - `reduced_rate_bps`: Rate applied during the window when `waiver_mode` is
+    ///   `ReducedRate`. Must be ≤ 10 000. Ignored for `FullWaiver`.
+    ///
+    /// # Errors
+    /// - Reverts if caller is not the contract admin.
+    /// - Reverts with [`ContractError::RateTooHigh`] if `reduced_rate_bps > 10 000`.
+    ///
+    /// # Economics and risks
+    /// See [`GracePeriodConfig`] and [`GraceWaiverMode`] for a full discussion of
+    /// the economic trade-offs and interaction with `default_credit_line` and
+    /// `reinstate_credit_line`.
+    pub fn set_grace_period_config(
+        env: Env,
+        grace_period_seconds: u64,
+        waiver_mode: GraceWaiverMode,
+        reduced_rate_bps: u32,
+    ) {
+        require_admin_auth(&env);
+        if reduced_rate_bps > crate::risk::MAX_INTEREST_RATE_BPS {
+            env.panic_with_error(ContractError::RateTooHigh);
+        }
+        let cfg = GracePeriodConfig {
+            grace_period_seconds,
+            waiver_mode,
+            reduced_rate_bps,
+        };
+        env.storage()
+            .instance()
+            .set(&crate::storage::grace_period_key(&env), &cfg);
+    }
+
+    /// Get the current grace period policy (view function).
+    ///
+    /// Returns `None` when no policy has been configured (disabled by default).
+    pub fn get_grace_period_config(env: Env) -> Option<GracePeriodConfig> {
+        env.storage()
+            .instance()
+            .get(&crate::storage::grace_period_key(&env))
     }
 
     /// Set the maximum draw amount per transaction (admin only).

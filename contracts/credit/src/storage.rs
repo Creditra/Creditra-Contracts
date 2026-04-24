@@ -40,6 +40,11 @@ pub fn rate_formula_key(env: &Env) -> Symbol {
     Symbol::new(env, "rate_form")
 }
 
+/// Instance storage key for the grace period policy configuration.
+pub fn grace_period_key(env: &Env) -> Symbol {
+    Symbol::new(env, "grace_cfg")
+}
+
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 ///
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,

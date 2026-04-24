@@ -85,6 +85,11 @@ pub struct CreditLineData {
     /// Ledger timestamp of the last interest accrual calculation.
     /// Zero means no accrual has been calculated yet.
     pub last_accrual_ts: u64,
+    /// Ledger timestamp when the credit line was most recently suspended.
+    /// Zero when the line has never been suspended or has been reinstated.
+    /// Used by the grace period logic to determine whether the waiver window
+    /// is still active.
+    pub suspension_ts: u64,
 }
 
 /// Admin-configurable limits on interest-rate changes.
@@ -123,4 +128,67 @@ pub struct RateFormulaConfig {
     pub min_rate_bps: u32,
     /// Maximum allowed computed rate (ceiling), must be <= 10_000.
     pub max_rate_bps: u32,
+}
+
+// ─── Grace period policy ──────────────────────────────────────────────────────
+
+/// How interest is treated for a Suspended line that is within its grace window.
+///
+/// # Economics
+/// - [`GraceWaiverMode::FullWaiver`]: no interest accrues during the grace window.
+///   Borrowers get a complete interest holiday to support recovery. The protocol
+///   absorbs the cost of foregone interest.
+/// - [`GraceWaiverMode::ReducedRate`]: interest accrues at a lower rate during the
+///   grace window. Provides partial relief while keeping the borrower accountable.
+///   `reduced_rate_bps` must be ≤ the line's `interest_rate_bps`.
+///
+/// # Risks
+/// - Full waiver creates a moral-hazard incentive to trigger suspension.
+///   Mitigate by requiring admin approval for suspension and limiting grace duration.
+/// - Reduced rate still accrues debt; borrowers must be informed of the residual cost.
+///
+/// # Interaction with `default_credit_line`
+/// If admin calls `default_credit_line` while a grace period is active, the grace
+/// period ends immediately. Interest resumes at the full rate from the moment of
+/// default (the accrual checkpoint is updated at the time of the status transition).
+///
+/// # Interaction with `reinstate_credit_line`
+/// Reinstatement transitions Defaulted → Active. The grace period only applies to
+/// Suspended lines; a reinstated line accrues at its full rate immediately.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraceWaiverMode {
+    /// Interest is fully waived (zero accrual) during the grace window.
+    FullWaiver = 0,
+    /// Interest accrues at a reduced rate (in bps) during the grace window.
+    ReducedRate = 1,
+}
+
+/// Admin-configurable grace period policy for Suspended credit lines.
+///
+/// When set, a Suspended line that is within `grace_period_seconds` of its
+/// suspension timestamp accrues interest according to `waiver_mode` instead of
+/// the full rate. After the window expires, normal accrual resumes.
+///
+/// # Defaults
+/// The policy is **disabled by default** (not stored). No grace period applies
+/// unless an admin explicitly calls `set_grace_period_config`.
+///
+/// # Configuration
+/// - `grace_period_seconds`: Duration of the grace window in ledger seconds.
+///   Set to `0` to disable the grace period without removing the config.
+/// - `waiver_mode`: [`GraceWaiverMode::FullWaiver`] or [`GraceWaiverMode::ReducedRate`].
+/// - `reduced_rate_bps`: Effective rate during the grace window when `waiver_mode`
+///   is [`GraceWaiverMode::ReducedRate`]. Ignored for `FullWaiver`. Must be ≤ 10 000.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GracePeriodConfig {
+    /// Seconds after suspension during which the waiver applies.
+    /// Zero disables the grace period.
+    pub grace_period_seconds: u64,
+    /// How interest is treated within the grace window.
+    pub waiver_mode: GraceWaiverMode,
+    /// Interest rate in bps applied during the grace window when
+    /// `waiver_mode == ReducedRate`. Ignored for `FullWaiver`.
+    pub reduced_rate_bps: u32,
 }
