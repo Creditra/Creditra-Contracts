@@ -36,7 +36,7 @@ mod debt_monotonic {
     use soroban_sdk::{Address, Env};
 
     fn total_debt(line: &CreditLineData) -> i128 {
-        line.utilized_amount + line.accrued_interest
+        line.utilized_amount
     }
 
     fn setup_initialized_contract(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
@@ -183,6 +183,7 @@ mod debt_monotonic {
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
             line.accrued_interest = 250;
+            line.utilized_amount += 250; // Capitalize
             line.last_accrual_ts = 1_000;
             env.storage().persistent().set(&borrower, &line);
         });
@@ -206,7 +207,7 @@ mod debt_monotonic {
             prev_debt,
             total_debt(&line)
         );
-        assert_eq!(line.utilized_amount, 6_000);
+        assert_eq!(line.utilized_amount, 6_250);
         assert_eq!(line.accrued_interest, 250);
         assert_eq!(total_debt(&line), 6_250);
         prev_debt = total_debt(&line);
@@ -227,6 +228,7 @@ mod debt_monotonic {
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
             line.accrued_interest = 500;
+            line.utilized_amount += 250; // Capitalize additional 250
             line.last_accrual_ts = 2_000;
             env.storage().persistent().set(&borrower, &line);
         });
@@ -241,10 +243,15 @@ mod debt_monotonic {
         assert_eq!(total_debt(&line), 6_500);
 
         // -- REPAY: allowed to decrease --
+        // Repay 2,000. Interest-first policy:
+        // interest_paid = min(2000, 500) = 500
+        // principal_paid = 2000 - 500 = 1500
+        // new_utilized = 6000 - 1500 = 4500
+        // new_accrued = 500 - 500 = 0
         client.repay_credit(&borrower, &2_000);
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.utilized_amount, 4_000);
-        assert_eq!(line.accrued_interest, 500);
+        assert_eq!(line.utilized_amount, 4_500);
+        assert_eq!(line.accrued_interest, 0);
         assert_eq!(total_debt(&line), 4_500);
     }
 

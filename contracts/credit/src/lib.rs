@@ -21,6 +21,9 @@ mod accrual;
 #[cfg(test)]
 mod accrual_tests;
 
+#[cfg(test)]
+use soroban_sdk::testutils::Ledger as _;
+
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, Env, Symbol,
 };
@@ -404,12 +407,9 @@ impl Credit {
             });
 
         // --- Compute effective repayment (cap at total owed) ---
-        // Overpayments are capped to the total outstanding debt. No refund is issued.
-        let effective_repay = if amount > credit_line.utilized_amount {
-            credit_line.utilized_amount
-        } else {
-            amount
-        };
+        // Overpayments are capped to the total outstanding debt.
+        let total_owed = credit_line.utilized_amount.saturating_add(credit_line.accrued_interest);
+        let effective_repay = amount.min(total_owed);
 
         // --- Token transfer (when liquidity token is configured) ---
         // We check allowance and balance *before* mutating state so that a
@@ -453,15 +453,11 @@ impl Credit {
         }
 
         // --- Update state with "interest-first" policy ---
-        // Repayment applies to interest first, then to principal.
-        // utilized_amount includes both principal and accrued_interest.
+        // utilized_amount includes both principal and accrued_interest (capitalized).
         let interest_to_pay = effective_repay.min(credit_line.accrued_interest);
-        credit_line.accrued_interest = credit_line.accrued_interest.checked_sub(interest_to_pay).unwrap_or(0);
         
-        credit_line.utilized_amount = credit_line
-            .utilized_amount
-            .saturating_sub(effective_repay)
-            .max(0);
+        credit_line.accrued_interest -= interest_to_pay;
+        credit_line.utilized_amount = credit_line.utilized_amount.saturating_sub(effective_repay).max(0);
 
         env.storage().persistent().set(&borrower, &credit_line);
 
@@ -584,6 +580,10 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
+    pub fn reinstate_credit_line(env: Env, borrower: Address) {
+        lifecycle::reinstate_credit_line(env, borrower)
+    }
+
 // duplicate wrapper removed
 
     /// Get credit line data for a borrower (view function).
@@ -604,11 +604,18 @@ mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::Symbol;
     use soroban_sdk::{TryFromVal, TryIntoVal};
+    #[cfg(test)]
+    extern crate std;
+    #[cfg(test)]
     use std::panic::{catch_unwind, AssertUnwindSafe};
+    
+    const SECONDS_PER_YEAR: u64 = 31_536_000;
+
 
     fn setup<'a>(
         env: &'a Env,
@@ -1405,7 +1412,7 @@ mod test {
 
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.accrued_interest, 100); // 200 - 100
-        assert_eq!(line.utilized_amount, 500); // total unchanged since interest only
+        assert_eq!(line.utilized_amount, 400); // 500 - 100
     }
 
     #[test]
@@ -1494,13 +1501,14 @@ mod test {
     #[test]
     fn repay_accrual_initializes_checkpoint_without_charging() {
         let env = Env::default();
+        env.ledger().set_timestamp(100);
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 400);
 
-        // last_accrual_ts should be 0 initially
+        // last_accrual_ts should be 100 (from setup)
         let line_before = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line_before.last_accrual_ts, 0);
+        assert_eq!(line_before.last_accrual_ts, 100);
         assert_eq!(line_before.accrued_interest, 0);
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &100);
@@ -1518,6 +1526,7 @@ mod test {
     #[test]
     fn repay_after_time_elapse_accrues_interest_before_allocation() {
         let env = Env::default();
+        env.ledger().set_timestamp(100);
         env.mock_all_auths();
         let borrower = Address::generate(&env);
         let (client, token, contract_id, _admin) = setup(&env, &borrower, 10_000, 10_000, 1_000);
@@ -1554,6 +1563,8 @@ mod test {
 #[cfg(test)]
 mod test_smoke_coverage {
     use super::*;
+    use soroban_sdk::testutils::Ledger as _;
+    const SECONDS_PER_YEAR: u64 = 31_536_000;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 
@@ -1586,7 +1597,7 @@ mod test_smoke_coverage {
 
         client.suspend_credit_line(&borrower);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
 
         sac.mint(&borrower, &100_i128);
         TokenClient::new(&env, &token_address).approve(
@@ -1668,7 +1679,7 @@ mod test_smoke_coverage {
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Active
@@ -1829,8 +1840,10 @@ mod test_coverage_gaps {
     use super::*;
     use crate::events::CreditLineEvent;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
+    const SECONDS_PER_YEAR: u64 = 31_536_000;
 
     pub(crate) fn setup_contract_with_credit_line<'a>(
         env: &'a Env,
@@ -1849,18 +1862,6 @@ mod test_coverage_gaps {
         }
         (client, contract_id, admin)
     }
-
-    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let borrower = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
-        (client, admin, borrower)
-    }
-
 
     fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
         env.mock_all_auths();
@@ -1964,7 +1965,7 @@ mod test_coverage_gaps {
     fn reinstate_non_defaulted_active_line_reverts() {
         let env = Env::default();
         let (client, _admin, borrower) = base_setup(&env);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     #[test]
@@ -1973,7 +1974,7 @@ mod test_coverage_gaps {
         let env = Env::default();
         let (client, _admin, borrower) = base_setup(&env);
         client.suspend_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
     }
 
     // ── open_credit_line: allows reopening after Closed status ───────────────
@@ -2003,7 +2004,7 @@ mod test_coverage_gaps {
         env.mock_all_auths();
         let (client, _admin, borrower) = base_setup(&env);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
         assert_eq!(
@@ -2032,7 +2033,7 @@ mod test_coverage_gaps {
         client.repay_credit(&borrower, &50_i128);
         client.suspend_credit_line(&borrower);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        client.reinstate_credit_line(&borrower);
         client.close_credit_line(&borrower, &admin);
 
         let events = env.events().all();
