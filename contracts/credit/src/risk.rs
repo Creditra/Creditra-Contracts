@@ -1,8 +1,5 @@
 use crate::auth::require_admin_auth;
-use crate::events::{
-    publish_risk_parameters_updated,
-    RiskParametersUpdatedEvent,
-};
+use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{rate_cfg_key, rate_formula_key};
 use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
