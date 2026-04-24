@@ -5,7 +5,7 @@ pub fn require_admin(env: &Env) -> Address {
     env.storage()
         .instance()
         .get(&admin_key(env))
-        .expect("admin not set")
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::AdminNotSet))
 }
 
 pub fn require_admin_auth(env: &Env) -> Address {

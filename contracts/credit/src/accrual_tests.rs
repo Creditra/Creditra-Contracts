@@ -2,10 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{CreditLineData, CreditStatus};
-    use crate::accrual::apply_accrual;
-    use crate::Credit;
-    use crate::CreditClient;
+    use crate::{Credit, CreditClient};
     use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env};
 
     fn setup_env() -> (Env, Address, Address, CreditClient<'static>) {

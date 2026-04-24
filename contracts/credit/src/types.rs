@@ -59,6 +59,24 @@ pub enum ContractError {
     BorrowerBlocked = 16,
     /// Admin acceptance is attempted before the required delay.
     AdminAcceptTooEarly = 17,
+    /// The credit line status is not valid for this operation.
+    InvalidStatus = 18,
+    /// The credit line is suspended.
+    CreditLineSuspended = 19,
+    /// The credit line is defaulted.
+    CreditLineDefaulted = 20,
+    /// The borrower already has a credit line.
+    CreditLineAlreadyExists = 22,
+    /// Borrower address mismatch.
+    BorrowerMismatch = 23,
+    /// Insufficient allowance for token transfer.
+    InsufficientAllowance = 24,
+    /// Insufficient balance for token transfer.
+    InsufficientBalance = 25,
+    /// Administrative account has not been configured.
+    AdminNotSet = 26,
+    /// Math underflow occurred during calculation.
+    Underflow = 27,
 }
 
 /// Stored credit line data for a borrower.

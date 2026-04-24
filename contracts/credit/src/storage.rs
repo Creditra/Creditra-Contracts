@@ -40,7 +40,7 @@ pub fn set_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     let current: bool = env.storage().instance().get(&key).unwrap_or(false);
     if current {
-        panic!("reentrancy guard");
+        env.panic_with_error(crate::types::ContractError::Reentrancy);
     }
     env.storage().instance().set(&key, &true);
 }

@@ -53,8 +53,10 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         let accrued = val / denominator;
         
         if accrued > 0 {
-            line.utilized_amount = line.utilized_amount.checked_add(accrued).expect("utilized_amount overflow");
-            line.accrued_interest = line.accrued_interest.checked_add(accrued).expect("accrued_interest overflow");
+            line.utilized_amount = line.utilized_amount.checked_add(accrued)
+                .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::Overflow));
+            line.accrued_interest = line.accrued_interest.checked_add(accrued)
+                .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::Overflow));
             
             publish_interest_accrued_event(
                 env,
@@ -69,7 +71,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         }
     } else {
         // Handle overflow of intermediate calculation
-        panic!("interest calculation overflow");
+        env.panic_with_error(crate::types::ContractError::Overflow);
     }
 
     line.last_accrual_ts = now;

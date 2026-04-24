@@ -1,7 +1,7 @@
 use crate::auth::require_admin_auth;
 use crate::events::{
-    publish_rate_formula_config_event, publish_risk_parameters_updated,
-    RateFormulaConfigEvent, RiskParametersUpdatedEvent,
+    publish_risk_parameters_updated,
+    RiskParametersUpdatedEvent,
 };
 use crate::storage::{rate_cfg_key, rate_formula_key};
 use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
@@ -75,19 +75,19 @@ pub fn update_risk_parameters(
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_limit < 0 {
-        panic!("credit_limit must be non-negative");
+        env.panic_with_error(crate::types::ContractError::NegativeLimit);
     }
     if credit_limit < credit_line.utilized_amount {
-        panic!("credit_limit cannot be less than utilized amount");
+        env.panic_with_error(crate::types::ContractError::LimitDecreaseRequiresRepayment);
     }
     if risk_score > MAX_RISK_SCORE {
-        panic!("risk_score exceeds maximum");
+        env.panic_with_error(crate::types::ContractError::ScoreTooHigh);
     }
 
     // Determine the effective interest rate:
@@ -104,7 +104,7 @@ pub fn update_risk_parameters(
     };
 
     if effective_rate > MAX_INTEREST_RATE_BPS {
-        panic!("interest_rate_bps exceeds maximum");
+        env.panic_with_error(crate::types::ContractError::RateTooHigh);
     }
 
     if effective_rate != credit_line.interest_rate_bps {
@@ -117,14 +117,14 @@ pub fn update_risk_parameters(
             let delta = effective_rate.abs_diff(old_rate);
 
             if delta > cfg.max_rate_change_bps {
-                panic!("rate change exceeds maximum allowed delta");
+                env.panic_with_error(crate::types::ContractError::RateTooHigh);
             }
 
             if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts != 0 {
                 let now = env.ledger().timestamp();
                 let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
-                    panic!("rate change too soon: minimum interval not elapsed");
+                    env.panic_with_error(crate::types::ContractError::AdminAcceptTooEarly);
                 }
             }
         }

@@ -22,13 +22,13 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status != CreditStatus::Active {
-        panic!("Only active credit lines can be suspended");
+        env.panic_with_error(crate::types::ContractError::InvalidStatus);
     }
 
     credit_line.status = CreditStatus::Suspended;
@@ -70,7 +70,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
@@ -83,9 +83,9 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 
     if !allowed {
         if closer == borrower {
-            panic!("cannot close: utilized amount not zero");
+            env.panic_with_error(crate::types::ContractError::UtilizationNotZero);
         }
-        panic!("unauthorized");
+        env.panic_with_error(crate::types::ContractError::Unauthorized);
     }
 
     credit_line.status = CreditStatus::Closed;
@@ -117,7 +117,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
@@ -149,13 +149,13 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status != CreditStatus::Defaulted {
-        panic!("credit line is not defaulted");
+        env.panic_with_error(crate::types::ContractError::InvalidStatus);
     }
 
     credit_line.status = CreditStatus::Active;
