@@ -1,9 +1,13 @@
+use crate::types::ContractError;
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
+/// Storage keys used in instance and persistent storage.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
+    /// Address of the liquidity token (SAC or compatible token contract).
     LiquidityToken,
+    /// Address of the liquidity source / reserve that funds draws.
     LiquiditySource,
     /// Global emergency switch: when `true`, all `draw_credit` calls revert.
     /// Does not affect repayments. Distinct from per-line `Suspended` status.
@@ -39,16 +43,23 @@ pub fn rate_formula_key(env: &Env) -> Symbol {
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.
-/// Caller must call clear_reentrancy_guard when done (on all paths).
+///
+/// Panics with [`ContractError::Reentrancy`] if the guard is already active,
+/// indicating a reentrant call. Caller **must** call [`clear_reentrancy_guard`]
+/// on every success and failure path to release the guard.
 pub fn set_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     let current: bool = env.storage().instance().get(&key).unwrap_or(false);
     if current {
-        panic!("reentrancy guard");
+        env.panic_with_error(ContractError::Reentrancy);
     }
     env.storage().instance().set(&key, &true);
 }
 
+/// Clear the reentrancy guard set by [`set_reentrancy_guard`].
+///
+/// Must be called on every exit path (success and failure) of any function
+/// that called [`set_reentrancy_guard`].
 pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }

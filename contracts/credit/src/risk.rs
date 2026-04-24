@@ -146,3 +146,10 @@ pub fn update_risk_parameters(
         },
     );
 }
+
+/// Retrieve the rate formula configuration from instance storage, if set.
+pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
+    env.storage()
+        .instance()
+        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
+}
