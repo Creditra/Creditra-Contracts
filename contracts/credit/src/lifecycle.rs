@@ -24,6 +24,9 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         .get(&borrower)
         .expect("Credit line not found");
 
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+
     if credit_line.status != CreditStatus::Active {
         panic!("Only active credit lines can be suspended");
     }
@@ -68,6 +71,9 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .persistent()
         .get(&borrower)
         .expect("Credit line not found");
+
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status == CreditStatus::Closed {
         return;
@@ -129,6 +135,9 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .get(&borrower)
         .expect("Credit line not found");
 
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+
     if credit_line.status == CreditStatus::Closed {
         panic!("cannot default a closed credit line");
     }
@@ -166,6 +175,9 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .expect("Credit line not found");
+
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status != CreditStatus::Defaulted {
         panic!("credit line is not defaulted");

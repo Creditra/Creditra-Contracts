@@ -57,6 +57,12 @@ pub enum ContractError {
     AlreadyInitialized = 14,
     /// All draws are globally frozen by admin for liquidity reserve operations.
     DrawsFrozen = 15,
+    /// The requested draw exceeds the configured per-transaction maximum.
+    DrawExceedsMaxAmount = 16,
+    /// Borrower is blocked from drawing credit.
+    BorrowerBlocked = 17,
+    /// Admin acceptance attempted before the delay window has elapsed.
+    AdminAcceptTooEarly = 18,
 }
 
 /// Stored credit line data for a borrower.
@@ -93,4 +99,32 @@ pub struct RateChangeConfig {
     pub max_rate_change_bps: u32,
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
+}
+
+/// Admin-configurable piecewise-linear rate formula.
+///
+/// When stored in instance storage, `update_risk_parameters` computes
+/// `interest_rate_bps` from the borrower's `risk_score` instead of using
+/// the manually supplied rate.
+///
+/// # Formula
+/// ```text
+/// raw_rate = base_rate_bps + (risk_score * slope_bps_per_score)
+/// effective_rate = clamp(raw_rate, min_rate_bps, min(max_rate_bps, 10_000))
+/// ```
+///
+/// # Invariants
+/// - `min_rate_bps <= max_rate_bps <= 10_000`
+/// - `base_rate_bps <= 10_000`
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RateFormulaConfig {
+    /// Base interest rate in bps applied at risk_score = 0.
+    pub base_rate_bps: u32,
+    /// Additional bps per unit of risk_score (0–100).
+    pub slope_bps_per_score: u32,
+    /// Minimum allowed computed rate (floor).
+    pub min_rate_bps: u32,
+    /// Maximum allowed computed rate (ceiling), must be <= 10_000.
+    pub max_rate_bps: u32,
 }
