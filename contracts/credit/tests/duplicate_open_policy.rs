@@ -147,7 +147,7 @@ mod unit_tests {
     /// with an existing Active credit line fails with the error message
     /// "borrower already has an active credit line".
     #[test]
-    #[should_panic(expected = "borrower already has an active credit line")]
+    #[should_panic(expected = "Error(Contract, #22)")]
     fn test_duplicate_active_credit_line_rejection() {
         let (env, _admin, borrower, contract_id, _credit_limit, _interest_rate_bps, _risk_score) =
             setup_with_active_line();
@@ -1425,7 +1425,7 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_zero_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
@@ -1453,7 +1453,7 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_negative_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
