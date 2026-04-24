@@ -2904,4 +2904,228 @@ mod test_max_draw_amount {
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 500);
     }
+
+    // ── Arithmetic overflow audit: i128 credit paths ──────────────────────────
+
+    /// Test that draw_credit near i128::MAX succeeds without overflow when within limit.
+    #[test]
+    fn test_draw_credit_near_i128_max_succeeds_without_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        // Set credit limit to a large value near i128::MAX
+        let large_limit = i128::MAX / 2;
+        client.open_credit_line(&borrower, &large_limit, &300_u32, &70_u32);
+
+        // Draw a large amount that doesn't overflow
+        let draw_amount = large_limit / 2;
+        client.draw_credit(&borrower, &draw_amount);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, draw_amount);
+    }
+
+    /// Test that draw_credit reverts when utilized_amount + amount would overflow i128.
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn test_draw_credit_overflow_reverts_with_overflow_panic() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        // Open with i128::MAX credit limit
+        client.open_credit_line(&borrower, &i128::MAX, &300_u32, &70_u32);
+
+        // Manually set utilized_amount to i128::MAX - 1
+        env.as_contract(&contract_id, || {
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get::<Address, CreditLineData>(&borrower)
+                .unwrap();
+            line.utilized_amount = i128::MAX - 1;
+            env.storage().persistent().set(&borrower, &line);
+        });
+
+        // Draw 2 units → (i128::MAX - 1) + 2 overflows
+        client.draw_credit(&borrower, &2_i128);
+    }
+
+    /// Test that repay_credit with large amounts doesn't overflow.
+    #[test]
+    fn test_repay_credit_large_amounts_no_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup_with_reserve(&env, &borrower, i128::MAX / 2, 1_000);
+
+        // Draw a large amount
+        let draw_amount = i128::MAX / 4;
+        client.draw_credit(&borrower, &draw_amount);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, draw_amount);
+
+        // Repay a large amount (saturating_sub should handle safely)
+        client.repay_credit(&borrower, &(draw_amount / 2));
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, draw_amount / 2);
+    }
+
+    /// Test that multiple sequential draws accumulate without overflow.
+    #[test]
+    fn test_draw_credit_multiple_sequential_accumulates_safely() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup_with_reserve(&env, &borrower, i128::MAX / 2, 1_000);
+
+        let draw_amount = i128::MAX / 8;
+
+        // Draw 3 times
+        client.draw_credit(&borrower, &draw_amount);
+        client.draw_credit(&borrower, &draw_amount);
+        client.draw_credit(&borrower, &draw_amount);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, draw_amount * 3);
+    }
+
+    /// Test that repay_credit with overpayment uses saturating_sub safely.
+    #[test]
+    fn test_repay_credit_overpayment_saturates_safely() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
+
+        client.draw_credit(&borrower, &500_i128);
+
+        // Repay more than owed (1000 > 500)
+        client.repay_credit(&borrower, &1_000_i128);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        // Should be 0, not negative
+        assert_eq!(line.utilized_amount, 0);
+    }
+
+    // ── get_credit_line_summary query tests ────────────────────────────────────
+
+    /// Test get_credit_line_summary returns correct compact data.
+    #[test]
+    fn test_get_credit_line_summary_returns_compact_data() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        client.open_credit_line(&borrower, &5_000, &300_u32, &70_u32);
+        client.draw_credit(&borrower, &1_000_i128);
+
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.status, CreditStatus::Active);
+        assert_eq!(summary.credit_limit, 5_000);
+        assert_eq!(summary.utilized_amount, 1_000);
+        assert_eq!(summary.accrued_interest, 0);
+    }
+
+    /// Test get_credit_line_summary returns None for nonexistent credit line.
+    #[test]
+    fn test_get_credit_line_summary_nonexistent_returns_none() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let summary = client.get_credit_line_summary(&borrower);
+        assert!(summary.is_none());
+    }
+
+    /// Test get_credit_line_summary after status change.
+    #[test]
+    fn test_get_credit_line_summary_reflects_status_changes() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        client.open_credit_line(&borrower, &5_000, &300_u32, &70_u32);
+
+        // Check Active status
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.status, CreditStatus::Active);
+
+        // Suspend and check
+        client.suspend_credit_line(&borrower);
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.status, CreditStatus::Suspended);
+    }
+
+    /// Test get_credit_line_summary includes all required fields.
+    #[test]
+    fn test_get_credit_line_summary_includes_all_fields() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        client.open_credit_line(&borrower, &10_000, &500_u32, &75_u32);
+        client.draw_credit(&borrower, &2_500_i128);
+
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        
+        // Verify all fields are present and correct
+        assert_eq!(summary.status, CreditStatus::Active);
+        assert_eq!(summary.credit_limit, 10_000);
+        assert_eq!(summary.utilized_amount, 2_500);
+        assert_eq!(summary.accrued_interest, 0);
+        assert!(summary.last_rate_update_ts > 0);
+        assert!(summary.last_accrual_ts > 0);
+    }
+
+    /// Test get_credit_line_summary after multiple operations.
+    #[test]
+    fn test_get_credit_line_summary_after_multiple_operations() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup_with_reserve(&env, &borrower, 10_000, 1_000);
+
+        // Draw
+        client.draw_credit(&borrower, &3_000_i128);
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.utilized_amount, 3_000);
+
+        // Repay
+        client.repay_credit(&borrower, &1_000_i128);
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.utilized_amount, 2_000);
+
+        // Draw again
+        client.draw_credit(&borrower, &2_000_i128);
+        let summary = client.get_credit_line_summary(&borrower).unwrap();
+        assert_eq!(summary.utilized_amount, 4_000);
+    }
 }
