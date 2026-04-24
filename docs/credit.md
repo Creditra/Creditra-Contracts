@@ -82,8 +82,24 @@ Initializes the contract with an admin address. Must be called exactly once.
 #### Security notes
 - Must be called by the deployer immediately after deployment.
 - The guard checks for the presence of the `"admin"` key before writing; no storage is mutated on a rejected second call.
-- The admin address is immutable after initialization. See the Admin Rotation Proposal section for a safe rotation design.
+- Admin rotation is two-step (`propose_admin` then `accept_admin`) with an optional delay.
 - `LiquiditySource` defaults to the contract address and can be updated post-init via `set_liquidity_source` (admin only).
+
+### `propose_admin(env, new_admin, delay_seconds)`
+Creates or overwrites a pending admin proposal (admin only).
+
+- Stores `new_admin` under `"proposed_admin"` and acceptance timestamp under `"proposed_at"`.
+- `delay_seconds = 0` allows immediate acceptance.
+- A second proposal **overwrites** the previous pending proposal and its delay window.
+- Emits `("credit", "admin_prop")` with `AdminRotationProposedEvent`.
+
+### `accept_admin(env)`
+Accepts a pending admin proposal (proposed admin only).
+
+- Caller must be exactly the currently proposed admin.
+- Reverts with `ContractError::AdminAcceptTooEarly` (15) if called before `"proposed_at"`.
+- On success, updates `"admin"` and clears `"proposed_admin"`/`"proposed_at"`.
+- Emits `("credit", "admin_acc")` with `AdminRotationAcceptedEvent`.
 
 ### `set_liquidity_token(env, token_address)`
 Sets the Stellar Asset Contract token used for draws and repayments (admin only).
@@ -132,12 +148,28 @@ Repay outstanding drawn funds.
 **Allowed on**: Active, Suspended, or Defaulted credit lines.  
 **Not allowed on**: Closed credit lines.
 
+**Repayment allocation policy** (applied after pending interest accrual):
+1. **Accrue pending interest** — `apply_pending_accrual` capitalizes any elapsed interest into `utilized_amount` and `accrued_interest` before repayment is applied. This prevents interest evasion through frequent repayments.
+2. **Cap overpayment** — `effective_repay = min(amount, utilized_amount)`. Overpayments beyond total owed are ignored (no refund).
+3. **Interest first** — `interest_repaid = min(effective_repay, accrued_interest)`.
+4. **Principal second** — `principal_repaid = effective_repay - interest_repaid`.
+5. **Update state** — `accrued_interest` and `utilized_amount` are reduced accordingly.
+
 - The borrower must have approved the contract to pull tokens via `transfer_from`.
-- Effective repayment = `min(amount, utilized_amount)` (over-payments are safe).
 - Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change.
+- Repayment failures due to insufficient allowance or balance do not alter `utilized_amount`, `accrued_interest`, or the credit line record.
 - Works even when no liquidity token is configured (state-only update).
 
-Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing the effective amount transferred and new `utilized_amount`.
+Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing:
+- `amount` — effective amount repaid (capped at total owed)
+- `interest_repaid` — portion applied to accrued interest
+- `principal_repaid` — portion applied to principal
+- `new_utilized_amount` — total outstanding debt after repayment
+- `new_accrued_interest` — remaining interest debt after repayment
+
+Integrators can reconcile balances using:
+- `principal_owed = new_utilized_amount - new_accrued_interest`
+- `total_owed = new_utilized_amount`
 
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 Update credit limit, interest rate, and risk score (admin only).
@@ -257,8 +289,8 @@ Mark credit line as Defaulted (admin only).
 
 Emits: `("credit", "default")` event.
 
-### `reinstate_credit_line(env, borrower)`
-Reinstate a Defaulted credit line to Active (admin only).
+### `reinstate_credit_line(env, borrower, target_status)`
+Reinstate a Defaulted credit line to `target_status` (Active or Suspended). Admin only.
 
 Emits: `("credit", "reinstate")` event.
 
@@ -272,7 +304,8 @@ View function — returns credit line data or `None`.
 Arithmetic paths that affect credit limit and utilization stay in integer-only arithmetic.
 
 - `draw_credit`: utilization update uses `checked_add`; arithmetic overflow reverts with `ContractError::Overflow` (`12`).
-- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies an integer floor at zero with `saturating_sub`. This keeps utilization non-negative even for over-repayments.
+- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies the allocation policy (interest first, then principal) using `saturating_sub` and `max(0)` to keep both `accrued_interest` and `utilized_amount` non-negative. Over-repayments are capped at total owed.
+- `apply_pending_accrual`: interest calculation uses checked multiplication and division; overflow reverts with `ContractError::Overflow` (`12`).
 - `update_risk_parameters`: limit/risk bounds are validated before state updates; rate delta uses `abs_diff` for overflow-safe unsigned distance checks.
 
 ### Integer arithmetic assumptions
@@ -327,7 +360,8 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 |----------------------------|------------|-----------------------------|-----------|
 | `("credit", "opened")`     | `opened`   | `open_credit_line`          | New credit line created |
 | `("credit", "drawn")`      | `drawn`    | `draw_credit`               | Funds drawn |
-| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made |
+| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made (includes interest/principal allocation) |
+| `("credit", "accrue")`     | `accrue`   | `apply_pending_accrual`     | Interest capitalized into debt |
 | `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
 | `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
@@ -954,6 +988,8 @@ This section documents all contract errors and their exact error codes for consi
 | 11 | `Reentrancy` | Reentrancy detected during cross-contract calls | Reentrancy guard |
 | 12 | `Overflow` | Math overflow occurred during calculation | Arithmetic operations |
 | 13 | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount | Limit decrease validation |
+| 14 | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once | Initialization guard |
+| 15 | `BorrowerBlocked` | Borrower is blocked from drawing credit | Borrower blocklist enforcement |
 
 ### Rate and Score Validation
 
@@ -984,3 +1020,60 @@ For detailed test implementation, see `boundary_tests.rs` in the source code.
 2. **Handle RateTooHigh/ScoreTooHigh specifically**: These errors indicate input validation failures
 3. **Distinguish between error types**: `RateTooHigh` (8) vs `ScoreTooHigh` (9) for precise validation feedback
 4. **Test boundary conditions**: Include tests for exact bounds and one-past bounds in all integrations
+
+---
+
+## Borrower Blocklist
+
+The borrower blocklist provides an emergency gating mechanism that allows the protocol admin to temporarily prevent specific borrowers from drawing credit without modifying their underlying `CreditStatus` or credit line data. This is useful during investigations, compliance reviews, or when suspicious activity is detected.
+
+### Methods
+
+#### `set_borrower_blocked(env, borrower, blocked)`
+- **Access**: Admin only
+- **Parameters**:
+  - `borrower`: Address to block or unblock
+  - `blocked`: `true` to block, `false` to unblock
+- **Behavior**: Stores the blocked flag in persistent storage keyed by borrower. Emits a `BorrowerBlockedEvent` with topic `("credit", "blocked")` or `("credit", "unblocked")`.
+- **Security**: Requires admin auth. Does not mutate `CreditLineData` or `CreditStatus`.
+
+#### `is_borrower_blocked(env, borrower) -> bool`
+- **Access**: View function (no auth required)
+- **Returns**: `true` if the borrower is currently blocked, `false` otherwise (including if no record exists).
+
+### Enforcement
+
+The blocklist is enforced exclusively in `draw_credit`. If a blocked borrower attempts to draw:
+- The transaction reverts with `ContractError::BorrowerBlocked` (code 15)
+- The reentrancy guard is cleared before reverting
+- Repayments via `repay_credit` remain fully operational regardless of block status
+
+### Operational Use Cases
+
+1. **Investigation Hold**: A borrower's account shows suspicious activity. Admin blocks draws while the investigation proceeds. The borrower's existing utilization and status remain unchanged, and they can still repay.
+2. **Compliance Freeze**: Regulatory requirement to pause new draws for a specific address. Blocking avoids the need to suspend or default the line, preserving the borrower's credit history.
+3. **Temporary Risk Mitigation**: Rapid response to an oracle or off-chain risk signal. The admin can block immediately and unblock once the signal resolves, without going through the `Suspended` -> `Active` state transition.
+
+### State Machine Independence
+
+The blocklist is intentionally decoupled from `CreditStatus`:
+
+| Aspect | Blocklist | `CreditStatus` |
+|---|---|---|
+| Scope | Per-address flag | Per-credit-line enum |
+| Admin action | `set_borrower_blocked` | `suspend_credit_line`, `default_credit_line`, etc. |
+| Affects draws | Yes | Yes (for Suspended, Defaulted, Closed) |
+| Affects repay | No | No (except Closed) |
+| Event topic | `("credit", "blocked")` / `("credit", "unblocked")` | `("credit", "suspend")` / `("credit", "default")` etc. |
+| Persistence | Persistent storage (`DataKey::BlockedBorrower`) | Persistent storage (`CreditLineData`) |
+
+This separation ensures that blocking is a lightweight, reversible operational action that does not interfere with lifecycle transitions or interest accrual logic.
+
+### Testing Requirements
+
+- Block and unblock round-trip
+- Blocked borrower cannot draw
+- Unblocked borrower can draw after being unblocked
+- Repayment remains allowed while blocked
+- Non-admin cannot block or unblock
+- Events emitted with correct topics and payloads
