@@ -185,6 +185,10 @@ Suggested contract for consumers:
 - Never assume field ordering beyond the documented schema.
 - Fail closed on unknown required fields for a known version.
 
+### Contract API version probe
+
+Before ingesting events from a deployed credit contract, indexers should call the read-only `get_contract_version()` query and record the returned `ContractVersion { major, minor, patch }` alongside the contract ID. Route decoders by `major` and gate on unsupported majors so that a re-deployed contract with a breaking schema change cannot silently corrupt downstream state. See `docs/credit.md` for the full versioning policy.
+
 ---
 
 ## 6) Operational and security notes

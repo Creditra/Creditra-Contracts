@@ -179,7 +179,7 @@ mod debt_monotonic {
         assert_eq!(prev_debt, 5_000);
 
         // Simulate interest accrual by writing accrued_interest directly.
-        // last_accrual_ts must match current env timestamp so apply_accrual
+        // last_accrual_ts must be set to current timestamp so apply_accrual
         // sees no elapsed time and preserves the injected value.
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
@@ -247,7 +247,8 @@ mod debt_monotonic {
         client.repay_credit(&borrower, &2_000);
         let line = client.get_credit_line(&borrower).unwrap();
         // Repay 2000: interest first (500), then principal (1500)
-        // utilized_amount: 6000 - 2000 = 4000, accrued_interest: 500 - 500 = 0
+        // utilized_amount: 6000 - 2000 = 4000
+        // accrued_interest: 500 - 500 = 0
         assert_eq!(line.utilized_amount, 4_000);
         assert_eq!(line.accrued_interest, 0);
         assert_eq!(total_debt(&line), 4_000);

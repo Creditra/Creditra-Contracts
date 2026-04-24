@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
-#![cfg_attr(coverage, allow(dead_code))]
 
-//! Core data types for the Credit contract.
+//! Core data types for the Creditra contract.
 
 use soroban_sdk::{contracttype, Address};
 
@@ -68,6 +67,7 @@ pub enum ContractError {
 
 /// Stored credit line data for a borrower.
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreditLineData {
     /// Address of the borrower.
     pub borrower: Address,
@@ -101,6 +101,7 @@ pub struct RateChangeConfig {
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
 }
+}
 
 /// Admin-configurable piecewise-linear rate formula.
 ///
@@ -128,4 +129,16 @@ pub struct RateFormulaConfig {
     pub min_rate_bps: u32,
     /// Maximum allowed computed rate (ceiling), must be <= 10_000.
     pub max_rate_bps: u32,
+}
+
+/// Structured representation of the contract's API version (semver).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContractVersion {
+    /// Incremented on breaking ABI or storage layout changes.
+    pub major: u32,
+    /// Incremented on backward-compatible feature additions.
+    pub minor: u32,
+    /// Incremented on backward-compatible bug fixes.
+    pub patch: u32,
 }

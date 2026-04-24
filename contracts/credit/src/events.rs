@@ -175,6 +175,16 @@ pub struct AdminRotationAcceptedEvent {
     pub new_admin: Address,
 }
 
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events()
+        .publish((symbol_short!("admin"), symbol_short!("proposed")), event);
+}
+
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events()
+        .publish((symbol_short!("admin"), symbol_short!("accepted")), event);
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
@@ -242,6 +252,22 @@ pub struct BorrowerBlockedEvent {
     pub borrower: Address,
     /// New blocked status.
     pub blocked: bool,
+}
+
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
 }
 
 /// Publish a borrower blocked/unblocked event.
