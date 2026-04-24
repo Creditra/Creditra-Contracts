@@ -14,7 +14,6 @@ mod accrual;
 #[cfg(test)]
 mod accrual_tests;
 mod auth;
-mod borrow;
 mod config;
 mod events;
 mod freeze;
@@ -1667,8 +1666,12 @@ mod test_mock_liquidity_token {
     fn setup(env: &Env) -> (CreditClient, Address, Address, MockLiquidityToken) { env.mock_all_auths(); let admin = Address::generate(env); let borrower = Address::generate(env); let contract_id = env.register(Credit, ()); let client = CreditClient::new(env, &contract_id); client.init(&admin); let liquidity = MockLiquidityToken::deploy(env); client.set_liquidity_token(&liquidity.address()); client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32); (client, contract_id, borrower, liquidity) }
     use crate::events::CreditLineEvent;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
+    use std::boxed::Box;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     #[allow(dead_code)]
     fn setup_contract_with_credit_line<'a>(
@@ -1898,6 +1901,118 @@ mod test_mock_liquidity_token {
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.close_credit_line(&borrower, &admin);
         client.draw_credit(&borrower, &100);
+    }
+
+    #[test]
+    fn draw_credit_reserve_depletion_keeps_single_borrower_state_and_events_consistent() {
+        use soroban_sdk::testutils::Ledger;
+
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let borrower = Address::generate(&env);
+        let (client, token, contract_id, _admin) =
+            setup_with_reserve(&env, &borrower, 1_000, 500);
+
+        env.ledger().set_timestamp(100);
+        client.draw_credit(&borrower, &300);
+
+        let credit_line_after_first_draw = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(credit_line_after_first_draw.utilized_amount, 300);
+        assert_eq!(credit_line_after_first_draw.last_accrual_ts, 100);
+        assert_eq!(liquidity_balance(&env, &token, &contract_id), 200);
+
+        let event_count_before_failure = env.events().all().len();
+        let drawn_events_before_failure = count_credit_event(&env, "drawn");
+        let accrue_events_before_failure = count_credit_event(&env, "accrue");
+
+        env.ledger().set_timestamp(200);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.draw_credit(&borrower, &250);
+        }));
+
+        assert!(result.is_err(), "second draw should fail once reserve is depleted");
+        let _ = panic_message_contains_reserve_error(result.unwrap_err());
+
+        let credit_line_after_failure = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            credit_line_after_failure.utilized_amount,
+            credit_line_after_first_draw.utilized_amount
+        );
+        assert_eq!(
+            credit_line_after_failure.accrued_interest,
+            credit_line_after_first_draw.accrued_interest
+        );
+        assert_eq!(
+            credit_line_after_failure.last_accrual_ts,
+            credit_line_after_first_draw.last_accrual_ts
+        );
+        assert_eq!(liquidity_balance(&env, &token, &contract_id), 200);
+        assert_eq!(env.events().all().len(), event_count_before_failure);
+        assert_eq!(count_credit_event(&env, "drawn"), drawn_events_before_failure);
+        assert_eq!(count_credit_event(&env, "accrue"), accrue_events_before_failure);
+
+        mint_liquidity(&env, &token, &contract_id, 50);
+        assert_eq!(liquidity_balance(&env, &token, &contract_id), 250);
+    }
+
+    #[test]
+    fn draw_credit_reserve_depletion_isolated_across_multiple_borrowers() {
+        use soroban_sdk::testutils::Ledger;
+
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let borrower_one = Address::generate(&env);
+        let borrower_two = Address::generate(&env);
+        let (client, token, contract_id, _admin) =
+            setup_with_reserve(&env, &borrower_one, 1_000, 500);
+        client.open_credit_line(&borrower_two, &1_000, &300_u32, &55_u32);
+
+        env.ledger().set_timestamp(100);
+        client.draw_credit(&borrower_one, &300);
+
+        let borrower_one_after_draw = client.get_credit_line(&borrower_one).unwrap();
+        let borrower_two_before_failure = client.get_credit_line(&borrower_two).unwrap();
+        assert_eq!(borrower_one_after_draw.utilized_amount, 300);
+        assert_eq!(borrower_two_before_failure.utilized_amount, 0);
+        assert_eq!(borrower_two_before_failure.last_accrual_ts, 0);
+        assert_eq!(liquidity_balance(&env, &token, &contract_id), 200);
+
+        let event_count_before_failure = env.events().all().len();
+        let drawn_events_before_failure = count_credit_event(&env, "drawn");
+        let accrue_events_before_failure = count_credit_event(&env, "accrue");
+
+        env.ledger().set_timestamp(200);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.draw_credit(&borrower_two, &250);
+        }));
+
+        assert!(result.is_err(), "shared reserve depletion should reject the second borrower draw");
+        let _ = panic_message_contains_reserve_error(result.unwrap_err());
+
+        let borrower_one_after_failure = client.get_credit_line(&borrower_one).unwrap();
+        let borrower_two_after_failure = client.get_credit_line(&borrower_two).unwrap();
+        assert_eq!(
+            borrower_one_after_failure.utilized_amount,
+            borrower_one_after_draw.utilized_amount
+        );
+        assert_eq!(
+            borrower_one_after_failure.last_accrual_ts,
+            borrower_one_after_draw.last_accrual_ts
+        );
+        assert_eq!(
+            borrower_two_after_failure.utilized_amount,
+            borrower_two_before_failure.utilized_amount
+        );
+        assert_eq!(
+            borrower_two_after_failure.last_accrual_ts,
+            borrower_two_before_failure.last_accrual_ts
+        );
+        assert_eq!(liquidity_balance(&env, &token, &contract_id), 200);
+        assert_eq!(env.events().all().len(), event_count_before_failure);
+        assert_eq!(count_credit_event(&env, "drawn"), drawn_events_before_failure);
+        assert_eq!(count_credit_event(&env, "accrue"), accrue_events_before_failure);
     }
 
     // ── update_risk_parameters: rate change interval passes ──────────────────

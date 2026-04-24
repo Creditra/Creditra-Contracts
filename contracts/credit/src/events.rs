@@ -254,6 +254,30 @@ pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
 }
 
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
+}
+
+/// Publish a risk formula configuration event.
+pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rate_cfg")),
+        event,
+    );
+}
+
 /// Publish a risk parameters updated event.
 pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEvent) {
     env.events()
