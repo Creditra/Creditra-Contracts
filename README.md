@@ -13,8 +13,9 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - after `suspend_credit_line`, `draw_credit` for that borrower reverts
 - after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
 - `repay_credit` remains allowed while suspended or defaulted
+- `freeze_draws` globally blocks all `draw_credit` calls without mutating any borrower's `CreditStatus`; `repay_credit` is never affected by the freeze flag
 
-**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`, `set_rate_change_limits`, `get_rate_change_limits`, `set_rate_formula_config`, `get_rate_formula_config`, `clear_rate_formula_config`.
+**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`, `freeze_draws`, `unfreeze_draws`, `is_draws_frozen`, `set_rate_change_limits`, `get_rate_change_limits`, `set_rate_formula_config`, `get_rate_formula_config`, `clear_rate_formula_config`.
 
 ### Liquidity reserve enforcement
 

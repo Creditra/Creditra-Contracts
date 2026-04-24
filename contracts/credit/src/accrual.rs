@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-use soroban_sdk::{Env};
-use crate::types::{CreditLineData};
 use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
+use crate::types::CreditLineData;
+use soroban_sdk::Env;
 
 /// Seconds in a non-leap year (365 days).
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -36,11 +36,11 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     // Formula: accrued = floor(utilized_amount * interest_rate_bps * elapsed_seconds / (10_000 * 31_536_000))
     // We use i128 to prevent overflow during intermediate multiplication.
-    
+
     let utilized = line.utilized_amount;
     let rate = line.interest_rate_bps as i128;
     let seconds = elapsed as i128;
-    
+
     // Total denominator = 10,000 (bps conversion) * 31,536_000 (seconds per year)
     let denominator: i128 = 10_000 * (SECONDS_PER_YEAR as i128);
 
@@ -51,11 +51,17 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     if let Some(val) = intermediate {
         let accrued = val / denominator;
-        
+
         if accrued > 0 {
-            line.utilized_amount = line.utilized_amount.checked_add(accrued).expect("utilized_amount overflow");
-            line.accrued_interest = line.accrued_interest.checked_add(accrued).expect("accrued_interest overflow");
-            
+            line.utilized_amount = line
+                .utilized_amount
+                .checked_add(accrued)
+                .expect("utilized_amount overflow");
+            line.accrued_interest = line
+                .accrued_interest
+                .checked_add(accrued)
+                .expect("accrued_interest overflow");
+
             publish_interest_accrued_event(
                 env,
                 InterestAccruedEvent {
@@ -74,4 +80,17 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     line.last_accrual_ts = now;
     line
+}
+
+/// Load a credit line, apply accrual, and persist the result.
+/// No-op if the credit line does not exist.
+pub fn apply_pending_accrual(env: &Env, borrower: &Address) {
+    if let Some(line) = env
+        .storage()
+        .persistent()
+        .get::<Address, CreditLineData>(borrower)
+    {
+        let updated = apply_accrual(env, line);
+        env.storage().persistent().set(borrower, &updated);
+    }
 }

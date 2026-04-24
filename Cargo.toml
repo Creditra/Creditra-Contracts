@@ -2,6 +2,9 @@
 resolver = "2"
 members = ["contracts/credit"]
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)'] }
+
 [workspace.dependencies]
 soroban-sdk = "22"
 
