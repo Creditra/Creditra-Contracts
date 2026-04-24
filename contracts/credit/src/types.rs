@@ -2,7 +2,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-//! Core data types for the Credit contract.
+//! Core data types for the Creditra contract.
 
 use soroban_sdk::{contracttype, Address};
 
@@ -67,6 +67,7 @@ pub enum ContractError {
 
 /// Stored credit line data for a borrower.
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreditLineData {
     /// Address of the borrower.
     pub borrower: Address,
@@ -99,6 +100,7 @@ pub struct RateChangeConfig {
     pub max_rate_change_bps: u32,
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
+}
 }
 
 /// Admin-configurable piecewise-linear rate formula.
