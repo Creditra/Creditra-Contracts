@@ -1,8 +1,5 @@
 use crate::auth::require_admin_auth;
-use crate::events::{
-    publish_rate_formula_config_event, publish_risk_parameters_updated,
-    RateFormulaConfigEvent, RiskParametersUpdatedEvent,
-};
+use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{rate_cfg_key, rate_formula_key};
 use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
@@ -12,6 +9,13 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 
 /// Maximum risk score (0–100 scale).
 pub const MAX_RISK_SCORE: u32 = 100;
+
+/// Retrieve the rate formula config from instance storage, if set.
+pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
+    env.storage()
+        .instance()
+        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
+}
 
 /// Compute interest rate from risk score using piecewise-linear formula.
 ///

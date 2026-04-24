@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-#![no_std]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Core data types for the Creditra contract.
 
@@ -54,7 +55,14 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    DrawExceedsMaxAmount = 14, 
+    /// All draws are globally frozen by admin for liquidity reserve operations.
+    DrawsFrozen = 15,
+    /// The requested draw exceeds the configured per-transaction maximum.
+    DrawExceedsMaxAmount = 16,
+    /// Borrower is blocked from drawing credit.
+    BorrowerBlocked = 17,
+    /// Admin acceptance attempted before the delay window has elapsed.
+    AdminAcceptTooEarly = 18,
 }
 
 /// Stored credit line data for a borrower.

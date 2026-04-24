@@ -5,7 +5,12 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
+    /// Global emergency switch: when `true`, all `draw_credit` calls revert.
+    /// Does not affect repayments. Distinct from per-line `Suspended` status.
+    DrawsFrozen,
     MaxDrawAmount,
+    /// Per-borrower block flag; when `true`, draw_credit is rejected.
+    BlockedBorrower(Address),
 }
 
 pub fn admin_key(env: &Env) -> Symbol {
@@ -57,6 +62,7 @@ pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
 }
 
 /// Set or clear the blocked status for a borrower.
+#[allow(dead_code)]
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     env.storage()
         .persistent()

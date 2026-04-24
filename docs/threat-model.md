@@ -125,12 +125,29 @@ Threats:
 - Wrong liquidity source address.
 - Inadequate reserve balance.
 - Stale operational processes (no monitoring).
+- `freeze_draws` left active outside a declared maintenance window.
 
 Mitigations:
 
 - pre-deployment and post-change checklist;
 - automated reserve health checks;
-- incident runbooks and rollback plans for config mistakes.
+- incident runbooks and rollback plans for config mistakes;
+- monitoring alert on `DrawsFrozenEvent { frozen: true }` outside declared windows and on freeze durations exceeding operational thresholds (e.g. > 1 hour).
+
+### 7) Admin abuses global draw freeze
+
+Threat: compromised or malicious admin calls `freeze_draws` to block all borrowers from drawing, causing protocol-wide liveness failure.
+
+Impact: all `draw_credit` calls revert with `ContractError::DrawsFrozen` (15) until unfrozen. Repayments are unaffected — borrowers can always reduce their debt.
+
+Mitigations:
+
+- `is_draws_frozen` is publicly readable; off-chain monitoring can detect and alert on unexpected freezes immediately.
+- `DrawsFrozenEvent` includes `actor` and `timestamp` fields for governance audit trails.
+- Operational policy: require multi-party approval or a declared maintenance window before invoking `freeze_draws`.
+- The flag is distinct from per-line `Suspended` — it does not mutate borrower state, so no remediation of individual lines is needed after unfreeze.
+
+Residual risk: admin key compromise remains the root threat. Mitigated operationally by hardware-backed/multisig admin accounts and real-time monitoring.
 
 ## Immutable Upgrade Posture
 
