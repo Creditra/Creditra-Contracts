@@ -39,6 +39,11 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
     raw.clamp(cfg.min_rate_bps, upper)
 }
 
+/// Get the current rate formula configuration from storage.
+pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
+    env.storage().instance().get(&rate_formula_key(&env))
+}
+
 /// Update risk parameters for an existing credit line (admin only).
 ///
 /// This function handles updating the credit limit, risk score, and interest rate.

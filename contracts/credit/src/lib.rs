@@ -12,13 +12,11 @@
 
 mod auth;
 mod borrow;
-mod config;
 mod events;
 mod lifecycle;
 mod risk;
 mod storage;
 pub mod types;
-mod borrow;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
@@ -28,23 +26,24 @@ use soroban_sdk::{
 };
 
 use crate::events::{
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_credit_line_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_repayment_event, CreditLineEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent,
+    publish_repayment_event, AdminRotationAcceptedEvent, AdminRotationProposedEvent,
+    CreditLineEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use auth::require_admin_auth;
-use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
+use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use auth::{require_admin, require_admin_auth};
+use storage::{
+    clear_reentrancy_guard, is_borrower_blocked, proposed_admin_key, proposed_at_key,
+    rate_cfg_key, set_reentrancy_guard, DataKey,
+};
 
 // constants removed - imported from risk module
 
-/// Seconds in a standard year (365 days).
-const SECONDS_PER_YEAR: u64 = 31_536_000;
 
-/// Instance storage key for reentrancy guard.
-fn reentrancy_key(env: &Env) -> Symbol {
-    Symbol::new(env, "reentrancy")
-}
+
+
 
 /// Instance storage key for admin.
 fn admin_key(env: &Env) -> Symbol {
@@ -459,7 +458,7 @@ impl Credit {
         let interest_to_pay = effective_repay.min(credit_line.accrued_interest);
         credit_line.accrued_interest = credit_line.accrued_interest.checked_sub(interest_to_pay).unwrap_or(0);
         
-        let new_utilized = credit_line
+        credit_line.utilized_amount = credit_line
             .utilized_amount
             .saturating_sub(effective_repay)
             .max(0);
@@ -483,8 +482,8 @@ impl Credit {
             RepaymentEvent {
                 borrower: borrower.clone(),
                 amount: effective_repay,
-                interest_repaid,
-                principal_repaid,
+                interest_repaid: interest_to_pay,
+                principal_repaid: effective_repay - interest_to_pay,
                 new_utilized_amount: credit_line.utilized_amount,
                 new_accrued_interest: credit_line.accrued_interest,
                 timestamp,
@@ -593,10 +592,16 @@ impl Credit {
     }
 }
 
+fn apply_pending_accrual(env: &Env, borrower: &Address) {
+    if let Some(mut credit_line) = env.storage().persistent().get::<_, CreditLineData>(borrower) {
+        credit_line = accrual::apply_accrual(env, credit_line);
+        env.storage().persistent().set(borrower, &credit_line);
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test_coverage_gaps::setup_contract_with_credit_line;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::token;
@@ -665,7 +670,7 @@ mod test {
         }
     }
 
-    fn setup_contract_with_credit_line<'a>(
+    fn setup_contract_with_credit_line_v2<'a>(
         env: &'a Env,
         borrower: &Address,
         credit_limit: i128,
@@ -679,8 +684,6 @@ mod test {
         let token_address = token_id.address();
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-        let token_address = token_id.address();
         client.set_liquidity_token(&token_address);
         if draw_amount > 0 {
             StellarAssetClient::new(env, &token_address).mint(&contract_id, &draw_amount);

@@ -107,6 +107,34 @@ pub struct RiskParametersUpdatedEventV2 {
     pub actor: Address,
 }
 
+/// Event emitted when a dynamic rate formula is configured or updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateFormulaConfigEvent {
+    pub base_rate_bps: u32,
+    pub slope_bps_per_score: u32,
+    pub min_rate_bps: u32,
+    pub max_rate_bps: u32,
+    pub timestamp: u64,
+}
+
+/// Event emitted when admin rotation is proposed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationProposedEvent {
+    pub current_admin: Address,
+    pub proposed_admin: Address,
+    pub accept_after: u64,
+}
+
+/// Event emitted when admin rotation is accepted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationAcceptedEvent {
+    pub previous_admin: Address,
+    pub new_admin: Address,
+}
+
 /// Event emitted when a borrower draws credit.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,23 +170,6 @@ pub struct DrawnEventV2 {
     pub amount: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
-}
-
-/// Event emitted when admin rotation is proposed.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AdminRotationProposedEvent {
-    pub current_admin: Address,
-    pub proposed_admin: Address,
-    pub accept_after: u64,
-}
-
-/// Event emitted when admin rotation is accepted.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AdminRotationAcceptedEvent {
-    pub previous_admin: Address,
-    pub new_admin: Address,
 }
 
 /// Publish a credit line lifecycle event.
@@ -211,6 +222,24 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
+}
+
+/// Publish a rate formula config event.
+pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("formula")), event);
+}
+
+/// Publish an admin rotation proposal event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("prop_adm")), event);
+}
+
+/// Publish an admin rotation acceptance event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("acc_adm")), event);
 }
 
 /// Event emitted when a borrower's block status changes.

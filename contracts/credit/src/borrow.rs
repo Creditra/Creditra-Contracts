@@ -1,4 +1,7 @@
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
+use crate::events::{
+    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent,
+};
 use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
 use crate::types::{CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
@@ -78,68 +81,59 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         .get(&borrower)
         .expect("Credit line not found");
 
-        if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
-            panic!("credit line is closed");
-        }
-        if amount <= 0 {
-            clear_reentrancy_guard(&env);
-            panic!("amount must be positive");
-        }
-        let effective_repay = amount.min(credit_line.utilized_amount);
-        let interest_repaid = effective_repay.min(credit_line.accrued_interest);
-        let principal_repaid = effective_repay - interest_repaid;
-
-        let new_utilized = credit_line.utilized_amount.saturating_sub(effective_repay).max(0);
-        let new_accrued_interest = credit_line.accrued_interest.saturating_sub(interest_repaid).max(0);
-
-        credit_line.utilized_amount = new_utilized;
-        credit_line.accrued_interest = new_accrued_interest;
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        let timestamp = env.ledger().timestamp();
-
-        // Emit interest accrual event (currently 0 until full math is implemented)
-        publish_interest_accrued_event(
-            &env,
-            InterestAccruedEvent {
-                borrower: borrower.clone(),
-                accrued_amount: 0,
-                total_accrued_interest: credit_line.accrued_interest,
-                new_utilized_amount: credit_line.utilized_amount,
-                timestamp,
-            },
-        );
-
-        publish_repayment_event(
-            &env,
-            RepaymentEvent {
-                borrower: borrower.clone(),
-                amount: effective_repay,
-                interest_repaid,
-                principal_repaid,
-                new_utilized_amount: new_utilized,
-                new_accrued_interest,
-                timestamp,
-            },
-        );
+    if credit_line.status == CreditStatus::Closed {
+        clear_reentrancy_guard(&env);
+        panic!("credit line is closed");
+    }
+    if amount <= 0 {
         clear_reentrancy_guard(&env);
         panic!("amount must be positive");
     }
-    let new_utilized = credit_line.utilized_amount.saturating_sub(amount).max(0);
+
+    let effective_repay = amount.min(credit_line.utilized_amount);
+    let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+    let principal_repaid = effective_repay - interest_repaid;
+
+    let new_utilized = credit_line
+        .utilized_amount
+        .saturating_sub(effective_repay)
+        .max(0);
+    let new_accrued_interest = credit_line
+        .accrued_interest
+        .saturating_sub(interest_repaid)
+        .max(0);
+
     credit_line.utilized_amount = new_utilized;
+    credit_line.accrued_interest = new_accrued_interest;
     env.storage().persistent().set(&borrower, &credit_line);
 
     let timestamp = env.ledger().timestamp();
+
+    // Emit interest accrual event (currently 0 until full math is implemented)
+    publish_interest_accrued_event(
+        &env,
+        InterestAccruedEvent {
+            borrower: borrower.clone(),
+            accrued_amount: 0,
+            total_accrued_interest: credit_line.accrued_interest,
+            new_utilized_amount: credit_line.utilized_amount,
+            timestamp,
+        },
+    );
+
     publish_repayment_event(
         &env,
         RepaymentEvent {
             borrower: borrower.clone(),
-            amount,
+            amount: effective_repay,
+            interest_repaid,
+            principal_repaid,
             new_utilized_amount: new_utilized,
+            new_accrued_interest,
             timestamp,
         },
     );
+
     clear_reentrancy_guard(&env);
     // TODO: accept token from borrower
 }
