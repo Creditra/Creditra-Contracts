@@ -2,7 +2,7 @@
 
 use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
 use crate::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::Env;
 
 pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 
@@ -118,16 +118,4 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     line.last_accrual_ts = now;
     line
-}
-
-#[allow(dead_code)]
-pub fn apply_pending_accrual(env: &Env, borrower: &Address) {
-    if let Some(line) = env
-        .storage()
-        .persistent()
-        .get::<Address, CreditLineData>(borrower)
-    {
-        let updated = apply_accrual(env, line);
-        env.storage().persistent().set(borrower, &updated);
-    }
 }

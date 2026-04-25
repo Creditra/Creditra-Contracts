@@ -1,5 +1,5 @@
 use crate::types::ContractError;
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 #[contracttype]
@@ -13,8 +13,6 @@ pub enum DataKey {
     /// Does not affect repayments. Distinct from per-line `Suspended` status.
     DrawsFrozen,
     MaxDrawAmount,
-    /// Per-borrower block flag; when `true`, draw_credit is rejected.
-    BlockedBorrower(Address),
     /// Storage schema version for migration tracking.
     SchemaVersion,
 }
@@ -86,34 +84,6 @@ pub fn set_reentrancy_guard(env: &Env) {
 /// - **Value**: `false` (effectively removes the guard)
 pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
-}
-
-/// Check whether a borrower is blocked from drawing credit.
-///
-/// # Storage
-/// - **Type**: Persistent storage (independent TTL per borrower)
-/// - **Key**: `DataKey::BlockedBorrower(borrower)`
-/// - **TTL Note**: Each borrower's block status has its own TTL, independent
-///   of their credit line data. TTL should be extended on access.
-#[allow(dead_code)]
-pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .get(&DataKey::BlockedBorrower(borrower.clone()))
-        .unwrap_or(false)
-}
-
-/// Set or clear the blocked status for a borrower.
-///
-/// # Storage
-/// - **Type**: Persistent storage (independent TTL per borrower)
-/// - **Key**: `DataKey::BlockedBorrower(borrower)`
-/// - **TTL Note**: Writes extend the TTL for this specific borrower's block flag.
-#[allow(dead_code)]
-pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::BlockedBorrower(borrower.clone()), &blocked);
 }
 
 /// Check whether the protocol is paused.

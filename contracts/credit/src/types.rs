@@ -206,11 +206,3 @@ pub struct GracePeriodConfig {
     pub waiver_mode: GraceWaiverMode,
     pub reduced_rate_bps: u32,
 }
-
-/// Global protocol configuration snapshot (not a contracttype due to nested Options).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProtocolConfig {
-    pub liquidity_token: Option<Address>,
-    pub liquidity_source: Option<Address>,
-    pub rate_change_config: Option<RateChangeConfig>,
-}
