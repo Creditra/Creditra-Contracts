@@ -1,3 +1,10 @@
 // SPDX-License-Identifier: MIT
-//! Config module: admin-configurable contract parameters (upstream addition).
-//! Configuration logic (rate limits, formula config) lives in lib.rs and risk.rs.
+use crate::storage::admin_key;
+use soroban_sdk::{Address, Env};
+
+pub fn init(env: Env, admin: Address) {
+    if env.storage().instance().has(&admin_key(&env)) {
+        panic!("already initialized");
+    }
+    env.storage().instance().set(&admin_key(&env), &admin);
+}

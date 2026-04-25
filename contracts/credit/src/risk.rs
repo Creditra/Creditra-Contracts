@@ -11,8 +11,8 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
-use crate::storage::{rate_cfg_key, rate_formula_key};
-use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
+use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key};
+use crate::types::{ContractError, CreditLineData, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -47,7 +47,6 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
     raw.clamp(cfg.min_rate_bps, upper)
 }
 
-
 /// Update risk parameters for an existing credit line (admin only).
 ///
 /// This function handles updating the credit limit, risk score, and interest rate.
@@ -81,19 +80,19 @@ pub fn update_risk_parameters(
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
 
     // Apply interest accrual before any mutation
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_limit < 0 {
-        panic!("credit_limit must be non-negative");
+        env.panic_with_error(ContractError::NegativeLimit);
     }
     if credit_limit < credit_line.utilized_amount {
-        panic!("credit_limit cannot be less than utilized amount");
+        env.panic_with_error(ContractError::OverLimit);
     }
     if risk_score > MAX_RISK_SCORE {
-        panic!("risk_score exceeds maximum");
+        env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
     // Determine the effective interest rate:
@@ -110,7 +109,7 @@ pub fn update_risk_parameters(
     };
 
     if effective_rate > MAX_INTEREST_RATE_BPS {
-        panic!("interest_rate_bps exceeds maximum");
+        env.panic_with_error(ContractError::RateTooHigh);
     }
 
     if effective_rate != credit_line.interest_rate_bps {
@@ -123,14 +122,14 @@ pub fn update_risk_parameters(
             let delta = effective_rate.abs_diff(old_rate);
 
             if delta > cfg.max_rate_change_bps {
-                panic!("rate change exceeds maximum allowed delta");
+                env.panic_with_error(ContractError::RateTooHigh);
             }
 
             if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts != 0 {
                 let now = env.ledger().timestamp();
                 let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
-                    panic!("rate change too soon: minimum interval not elapsed");
+                    env.panic_with_error(ContractError::RateTooHigh); // Or a specific RateChangeTooFrequent
                 }
             }
         }
