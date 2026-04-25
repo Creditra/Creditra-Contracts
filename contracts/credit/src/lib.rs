@@ -13,6 +13,8 @@
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
+#[cfg(test)]
+mod amount_validation_tests;
 mod auth;
 mod config;
 mod events;
@@ -155,53 +157,6 @@ impl Credit {
         lifecycle::open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)
     }
 
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
-        borrow::draw_credit(env, borrower, amount)
-        assert!(credit_limit > 0, "credit_limit must be greater than zero");
-        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
-            env.panic_with_error(ContractError::RateTooHigh);
-        }
-        if risk_score > MAX_RISK_SCORE {
-            env.panic_with_error(ContractError::ScoreTooHigh);
-        }
-
-        if let Some(existing) = env
-            .storage()
-            .persistent()
-            .get::<Address, CreditLineData>(&borrower)
-        {
-            assert!(
-                existing.status != CreditStatus::Active,
-                "borrower already has an active credit line"
-            );
-        }
-
-        let credit_line = CreditLineData {
-            borrower: borrower.clone(),
-            credit_limit,
-            utilized_amount: 0,
-            interest_rate_bps,
-            risk_score,
-            status: CreditStatus::Active,
-            last_rate_update_ts: 0,
-            accrued_interest: 0,
-            last_accrual_ts: env.ledger().timestamp(),
-        };
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), symbol_short!("opened")),
-            CreditLineEvent {
-                event_type: symbol_short!("opened"),
-                borrower: borrower.clone(),
-                status: CreditStatus::Active,
-                credit_limit,
-                interest_rate_bps,
-                risk_score,
-            },
-        );
-    }
 
     /// Draws credit by transferring liquidity tokens to the borrower.
     ///
@@ -229,7 +184,7 @@ impl Credit {
 
         if amount <= 0 {
             clear_reentrancy_guard(&env);
-            panic!("amount must be positive");
+            env.panic_with_error(ContractError::InvalidAmount);
         }
 
         // Global emergency freeze: block all draws during liquidity reserve operations.
@@ -346,8 +301,16 @@ impl Credit {
         clear_reentrancy_guard(&env);
     }
 
+    /// Repay outstanding credit (principal + accrued interest).
+    ///
+    /// Repayment is allowed on Active, Suspended, and Defaulted lines.
+    /// Closed lines cannot accept repayment.
+    ///
+    /// # Errors
+    /// - [`ContractError::InvalidAmount`] — `amount` is zero or negative.
+    /// - [`ContractError::CreditLineNotFound`] — no credit line exists for `borrower`.
+    /// - [`ContractError::CreditLineClosed`] — credit line is closed.
     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
-        borrow::repay_credit(env, borrower, amount)
         // --- Reentrancy guard (defense-in-depth) ---
         set_reentrancy_guard(&env);
         borrower.require_auth();
@@ -633,7 +596,6 @@ impl Credit {
 
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         query::get_credit_line(env, borrower)
-        env.storage().persistent().get(&borrower)
     }
 
     // ── Global draw-freeze switch ─────────────────────────────────────────────
