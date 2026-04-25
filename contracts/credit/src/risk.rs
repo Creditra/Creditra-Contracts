@@ -1,14 +1,18 @@
+// SPDX-License-Identifier: MIT
+
+//! Risk management module: rate formulas, rate change limits, and risk parameter updates.
+//!
+//! # Storage
+//! Rate configuration is stored in **instance storage** (shared TTL):
+//! - `rate_cfg`: Rate change limits (`RateChangeConfig`)
+//! - `rate_form`: Rate formula configuration (`RateFormulaConfig`)
+//!
+//! These are global singleton values — one config per contract deployment.
+
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{rate_cfg_key, rate_formula_key};
 use crate::types::{CreditLineData, RateChangeConfig, RateFormulaConfig};
-
-/// Return the stored rate formula config, or None if unset.
-pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
-    env.storage()
-        .instance()
-        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
-}
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -16,13 +20,6 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 
 /// Maximum risk score (0–100 scale).
 pub const MAX_RISK_SCORE: u32 = 100;
-
-/// Retrieve the rate formula config from instance storage, if set.
-pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
-    env.storage()
-        .instance()
-        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
-}
 
 /// Compute interest rate from risk score using piecewise-linear formula.
 ///
@@ -50,10 +47,6 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
     raw.clamp(cfg.min_rate_bps, upper)
 }
 
-/// Get the current rate formula configuration from storage.
-pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
-    env.storage().instance().get(&rate_formula_key(&env))
-}
 
 /// Update risk parameters for an existing credit line (admin only).
 ///
@@ -162,6 +155,11 @@ pub fn update_risk_parameters(
 }
 
 /// Retrieve the rate formula configuration from instance storage, if set.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("rate_form")`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
     env.storage()
         .instance()

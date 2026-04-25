@@ -285,6 +285,7 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 }
 
 /// Publish an interest accrued event.
+#[allow(dead_code)]
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);

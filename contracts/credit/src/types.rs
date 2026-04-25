@@ -50,6 +50,15 @@ pub enum CreditStatus {
 /// | 16   | `BorrowerBlocked`              | Borrower is on the blocked list |
 /// | 17   | `DrawExceedsMaxAmount`         | Draw amount exceeds per-transaction cap |
 /// | 18   | `Paused`                       | Protocol is paused; operation blocked by circuit breaker |
+/// | 19   | `DrawsFrozen`                  | Draws are globally frozen |
+/// | 20   | `CreditLineSuspended`          | Credit line is suspended |
+/// | 21   | `CreditLineDefaulted`          | Credit line is defaulted |
+/// | 22   | `MissingLiquidityToken`        | Liquidity token is not configured |
+/// | 23   | `MissingLiquiditySource`       | Liquidity source is not configured |
+/// | 24   | `InsufficientLiquidityReserve` | Reserve balance cannot cover the draw |
+/// | 25   | `LiquidityTokenCallFailed`     | Liquidity token call failed where observable |
+/// | 26   | `InsufficientRepaymentAllowance` | Borrower allowance cannot cover repayment |
+/// | 27   | `InsufficientRepaymentBalance` | Borrower balance cannot cover repayment |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -82,14 +91,32 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    /// All draws are globally frozen by admin for liquidity reserve operations.
-    DrawsFrozen = 15,
-    /// The requested draw exceeds the configured per-transaction maximum.
-    DrawExceedsMaxAmount = 16,
-    /// Borrower is blocked from drawing credit.
-    BorrowerBlocked = 17,
     /// Admin acceptance attempted before the delay window has elapsed.
-    AdminAcceptTooEarly = 18,
+    AdminAcceptTooEarly = 15,
+    /// Borrower is blocked from drawing credit.
+    BorrowerBlocked = 16,
+    /// The requested draw exceeds the configured per-transaction maximum.
+    DrawExceedsMaxAmount = 17,
+    /// Protocol is paused by the emergency circuit breaker.
+    Paused = 18,
+    /// All draws are globally frozen by admin for liquidity reserve operations.
+    DrawsFrozen = 19,
+    /// Action cannot be performed because the credit line is suspended.
+    CreditLineSuspended = 20,
+    /// Action cannot be performed because the credit line is defaulted.
+    CreditLineDefaulted = 21,
+    /// Liquidity token has not been configured.
+    MissingLiquidityToken = 22,
+    /// Liquidity source has not been configured.
+    MissingLiquiditySource = 23,
+    /// Liquidity reserve balance is below the requested draw amount.
+    InsufficientLiquidityReserve = 24,
+    /// Liquidity token call failed where the contract can observe it.
+    LiquidityTokenCallFailed = 25,
+    /// Borrower's token allowance is below the effective repayment amount.
+    InsufficientRepaymentAllowance = 26,
+    /// Borrower's token balance is below the effective repayment amount.
+    InsufficientRepaymentBalance = 27,
 }
 
 /// Stored credit line data for a borrower.
