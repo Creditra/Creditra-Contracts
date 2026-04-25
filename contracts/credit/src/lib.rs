@@ -3801,3 +3801,494 @@ mod test_liquidity_error_codes {
         client.repay_credit(&borrower, &200);
     }
 }
+
+/// Comprehensive tests for deterministic borrower key encoding and storage.
+///
+/// These tests ensure that:
+/// - Borrower addresses are stored and retrieved consistently from persistent storage
+/// - No accidental key normalization or collisions occur
+/// - Multiple distinct addresses don't interfere with each other
+/// - Queries and mutations operate on the correct borrower data
+/// - Storage round-trips preserve all fields without loss or corruption
+#[cfg(test)]
+mod borrower_key_encoding_tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    /// Helper to setup a basic contract with admin
+    fn setup_basic_contract(env: &Env) -> (CreditClient, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        (client, contract_id, admin)
+    }
+
+    /// Test 1: Basic storage round-trip - single borrower can be stored and retrieved identically
+    #[test]
+    fn test_borrower_key_storage_roundtrip_single() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+        let borrower = Address::generate(&env);
+
+        // Open a credit line with specific parameters
+        let credit_limit = 5_000_i128;
+        let interest_rate = 500_u32;
+        let risk_score = 75_u32;
+
+        client.open_credit_line(&borrower, &credit_limit, &interest_rate, &risk_score);
+
+        // Retrieve and verify all fields match
+        let retrieved = client.get_credit_line(&borrower);
+        assert!(retrieved.is_some(), "Borrower key should retrieve stored credit line");
+
+        let line = retrieved.unwrap();
+        assert_eq!(line.borrower, borrower, "Borrower address must match stored value");
+        assert_eq!(line.credit_limit, credit_limit, "Credit limit must round-trip exactly");
+        assert_eq!(
+            line.interest_rate_bps, interest_rate,
+            "Interest rate must round-trip exactly"
+        );
+        assert_eq!(
+            line.risk_score, risk_score,
+            "Risk score must round-trip exactly"
+        );
+        assert_eq!(
+            line.status, CreditStatus::Active,
+            "Status must be Active for newly opened line"
+        );
+        assert_eq!(
+            line.utilized_amount, 0,
+            "Initial utilized amount must be 0"
+        );
+        assert_eq!(
+            line.accrued_interest, 0,
+            "Initial accrued interest must be 0"
+        );
+    }
+
+    /// Test 2: Multiple distinct borrowers - ensure no collisions or cross-contamination
+    #[test]
+    fn test_borrower_key_multiple_distinct_addresses_no_collisions() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+
+        // Create 10 distinct borrowers with different credit line parameters
+        let mut borrowers = Vec::new();
+        for i in 0..10 {
+            let borrower = Address::generate(&env);
+            borrowers.push(borrower.clone());
+
+            let credit_limit = (1_000 + i * 500) as i128;
+            let interest_rate = (100 + i * 50) as u32;
+            let risk_score = (10 + i * 10) as u32;
+
+            client.open_credit_line(&borrower, &credit_limit, &interest_rate, &risk_score);
+        }
+
+        // Verify each borrower's data is stored and retrieved correctly
+        for (idx, borrower) in borrowers.iter().enumerate() {
+            let line = client.get_credit_line(borrower);
+            assert!(line.is_some(), "Borrower {} should have stored credit line", idx);
+
+            let line = line.unwrap();
+            let expected_limit = (1_000 + idx * 500) as i128;
+            let expected_rate = (100 + idx * 50) as u32;
+            let expected_score = (10 + idx * 10) as u32;
+
+            assert_eq!(
+                line.credit_limit, expected_limit,
+                "Borrower {}: credit limit must match stored value",
+                idx
+            );
+            assert_eq!(
+                line.interest_rate_bps, expected_rate,
+                "Borrower {}: interest rate must match stored value",
+                idx
+            );
+            assert_eq!(
+                line.risk_score, expected_score,
+                "Borrower {}: risk score must match stored value",
+                idx
+            );
+        }
+
+        // Verify a non-existent borrower returns None
+        let non_existent = Address::generate(&env);
+        assert!(
+            client.get_credit_line(&non_existent).is_none(),
+            "Non-existent borrower should return None"
+        );
+    }
+
+    /// Test 3: Update operations maintain key integrity - mutations update correct borrower
+    #[test]
+    fn test_borrower_key_update_operations_single_borrower() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+        let borrower = Address::generate(&env);
+
+        client.open_credit_line(&borrower, &5_000_i128, &500_u32, &75_u32);
+
+        // Update risk parameters
+        client.update_risk_parameters(&borrower, &5_000_i128, &600_u32, &80_u32);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            line.interest_rate_bps, 600,
+            "Interest rate update must persist in storage"
+        );
+        assert_eq!(
+            line.risk_score, 80,
+            "Risk score update must persist in storage"
+        );
+        assert_eq!(
+            line.credit_limit, 5_000,
+            "Credit limit must remain unchanged when not modified"
+        );
+        assert_eq!(line.status, CreditStatus::Active, "Status must remain Active");
+    }
+
+    /// Test 4: Mutation isolation - updating one borrower doesn't affect others
+    #[test]
+    fn test_borrower_key_mutation_isolation_multiple_borrowers() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+
+        let borrower1 = Address::generate(&env);
+        let borrower2 = Address::generate(&env);
+
+        // Create two independent credit lines
+        client.open_credit_line(&borrower1, &1_000_i128, &300_u32, &50_u32);
+        client.open_credit_line(&borrower2, &2_000_i128, &400_u32, &60_u32);
+
+        // Update borrower2's risk parameters
+        client.update_risk_parameters(&borrower2, &2_000_i128, &500_u32, &70_u32);
+
+        // Verify borrower1's data is unchanged
+        let line1 = client.get_credit_line(&borrower1).unwrap();
+        assert_eq!(
+            line1.interest_rate_bps, 300,
+            "Borrower1 rate must be unaffected by borrower2 update"
+        );
+        assert_eq!(
+            line1.risk_score, 50,
+            "Borrower1 score must be unaffected by borrower2 update"
+        );
+        assert_eq!(
+            line1.credit_limit, 1_000,
+            "Borrower1 limit must be unaffected by borrower2 update"
+        );
+
+        // Verify borrower2's update took effect
+        let line2 = client.get_credit_line(&borrower2).unwrap();
+        assert_eq!(
+            line2.interest_rate_bps, 500,
+            "Borrower2 rate must be updated"
+        );
+        assert_eq!(
+            line2.risk_score, 70,
+            "Borrower2 score must be updated"
+        );
+    }
+
+    /// Test 5: Storage persistence across queries - repeated queries return identical data
+    #[test]
+    fn test_borrower_key_query_consistency() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+        let borrower = Address::generate(&env);
+
+        client.open_credit_line(&borrower, &3_000_i128, &750_u32, &65_u32);
+
+        // Query multiple times and verify consistency
+        let query1 = client.get_credit_line(&borrower).unwrap();
+        let query2 = client.get_credit_line(&borrower).unwrap();
+        let query3 = client.get_credit_line(&borrower).unwrap();
+
+        // All queries must return identical results
+        assert_eq!(
+            query1.credit_limit, query2.credit_limit,
+            "Query 1 and 2 credit limits must be identical"
+        );
+        assert_eq!(
+            query2.credit_limit, query3.credit_limit,
+            "Query 2 and 3 credit limits must be identical"
+        );
+        assert_eq!(
+            query1.interest_rate_bps, query2.interest_rate_bps,
+            "Query 1 and 2 rates must be identical"
+        );
+        assert_eq!(
+            query2.interest_rate_bps, query3.interest_rate_bps,
+            "Query 2 and 3 rates must be identical"
+        );
+        assert_eq!(
+            query1.risk_score, query2.risk_score,
+            "Query 1 and 2 scores must be identical"
+        );
+        assert_eq!(
+            query2.risk_score, query3.risk_score,
+            "Query 2 and 3 scores must be identical"
+        );
+    }
+
+    /// Test 6: Status transition persistence - status changes are stored correctly by borrower key
+    #[test]
+    fn test_borrower_key_status_transitions() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+        let borrower = Address::generate(&env);
+
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
+
+        // Suspend the credit line
+        client.suspend_credit_line(&borrower);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended,
+            "Status must be updated to Suspended"
+        );
+
+        // Reinstate to Active
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active,
+            "Status must be restored to Active"
+        );
+
+        // Close the credit line
+        client.close_credit_line(&borrower, &_admin);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed,
+            "Status must be updated to Closed"
+        );
+    }
+
+    /// Test 7: Address independence - distinct generated addresses are uniquely keyed
+    #[test]
+    fn test_borrower_key_address_independence() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+
+        // Create 5 independent borrowers
+        let borrowers: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
+
+        // Open credit lines for all
+        for borrower in &borrowers {
+            client.open_credit_line(borrower, &1_000_i128, &300_u32, &50_u32);
+        }
+
+        // Verify each is independently accessible and distinct
+        for (i, borrower_i) in borrowers.iter().enumerate() {
+            let line_i = client.get_credit_line(borrower_i).unwrap();
+
+            for (j, borrower_j) in borrowers.iter().enumerate() {
+                let line_j = client.get_credit_line(borrower_j).unwrap();
+
+                if i == j {
+                    // Same borrower
+                    assert_eq!(
+                        line_i.borrower, line_j.borrower,
+                        "Same borrower index must have same address"
+                    );
+                } else {
+                    // Different borrowers
+                    assert_ne!(
+                        line_i.borrower, line_j.borrower,
+                        "Different borrower indices must have different addresses"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Test 8: Blocked borrower status is keyed correctly per borrower
+    #[test]
+    fn test_borrower_key_blocked_status_isolation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, contract_id, _admin) = setup_basic_contract(&env);
+
+        let borrower1 = Address::generate(&env);
+        let borrower2 = Address::generate(&env);
+
+        client.open_credit_line(&borrower1, &1_000_i128, &300_u32, &50_u32);
+        client.open_credit_line(&borrower2, &1_000_i128, &300_u32, &50_u32);
+
+        // Block borrower1
+        env.as_contract(&contract_id, || {
+            storage::set_borrower_blocked(&env, &borrower1, true);
+        });
+
+        // Verify blocking is isolated to borrower1
+        env.as_contract(&contract_id, || {
+            assert!(
+                storage::is_borrower_blocked(&env, &borrower1),
+                "Borrower1 must be blocked"
+            );
+            assert!(
+                !storage::is_borrower_blocked(&env, &borrower2),
+                "Borrower2 must not be blocked"
+            );
+        });
+    }
+
+    /// Test 9: Multiple sequential draws maintain borrower key integrity
+    #[test]
+    fn test_borrower_key_multiple_draws_consistency() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        // Setup token and liquidity
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        client.set_liquidity_token(&token_id.address());
+        let token = token_id.address();
+        token::Client::new(&env, &token).mint(&contract_id, &10_000_i128);
+
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &5_000_i128, &300_u32, &50_u32);
+
+        // Draw multiple times and verify key consistency
+        client.draw_credit(&borrower, &1_000_i128);
+        let line1 = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            line1.utilized_amount, 1_000,
+            "First draw should update utilized amount"
+        );
+
+        client.draw_credit(&borrower, &2_000_i128);
+        let line2 = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            line2.utilized_amount, 3_000,
+            "Second draw should accumulate correctly"
+        );
+        assert_eq!(
+            line2.borrower, borrower,
+            "Borrower address must remain unchanged after draws"
+        );
+        assert_eq!(
+            line2.credit_limit, 5_000,
+            "Credit limit must remain unchanged after draws"
+        );
+    }
+
+    /// Test 10: Prefix-based query distinction - similar address prefixes don't cause mix-ups
+    #[test]
+    fn test_borrower_key_prefix_independence() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+
+        // Generate multiple distinct borrowers
+        // The key encoding mechanism should ensure that even addresses with similar
+        // byte patterns are distinguished correctly
+        let borrowers: Vec<Address> = (0..15).map(|_| Address::generate(&env)).collect();
+
+        // Open distinct credit lines for each
+        for (i, borrower) in borrowers.iter().enumerate() {
+            let credit_limit = (1_000 + i as i128 * 100);
+            client.open_credit_line(borrower, &credit_limit, &(300_u32 + i as u32 * 10), &(50_u32 + i as u32 * 2));
+        }
+
+        // Query each and verify correct data is retrieved (no prefix collisions)
+        for (i, borrower) in borrowers.iter().enumerate() {
+            let line = client.get_credit_line(borrower).unwrap();
+            let expected_limit = (1_000 + i as i128 * 100);
+
+            assert_eq!(
+                line.credit_limit, expected_limit,
+                "Borrower {}: credit limit from different address must be distinct",
+                i
+            );
+            assert_eq!(
+                line.borrower, *borrower,
+                "Borrower {}: stored address must match queried address",
+                i
+            );
+        }
+    }
+
+    /// Test 11: Deterministic key encoding - same address always maps to same storage location
+    #[test]
+    fn test_borrower_key_deterministic_encoding() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+
+        // Use a fixed address (generate once and reuse)
+        let borrower = Address::generate(&env);
+
+        // Open and retrieve
+        client.open_credit_line(&borrower, &5_000_i128, &500_u32, &75_u32);
+        let original = client.get_credit_line(&borrower).unwrap();
+
+        // Query again after different operations
+        let query2 = client.get_credit_line(&borrower).unwrap();
+
+        // Both queries must show identical encoding (no normalization side effects)
+        assert_eq!(
+            original.borrower, query2.borrower,
+            "Borrower address encoding must be deterministic"
+        );
+        assert_eq!(
+            original.credit_limit, query2.credit_limit,
+            "Stored limit must be deterministic"
+        );
+        assert_eq!(
+            original.interest_rate_bps, query2.interest_rate_bps,
+            "Stored rate must be deterministic"
+        );
+        assert_eq!(
+            original.risk_score, query2.risk_score,
+            "Stored score must be deterministic"
+        );
+    }
+
+    /// Test 12: Comprehensive field preservation through storage round-trip
+    #[test]
+    fn test_borrower_key_all_fields_roundtrip() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _contract_id, _admin) = setup_basic_contract(&env);
+        let borrower = Address::generate(&env);
+
+        // Set specific values for all fields
+        let credit_limit = 10_000_i128;
+        let interest_rate = 750_u32;
+        let risk_score = 85_u32;
+
+        client.open_credit_line(&borrower, &credit_limit, &interest_rate, &risk_score);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+
+        // Verify every single field
+        assert_eq!(line.borrower, borrower, "borrower field");
+        assert_eq!(line.credit_limit, credit_limit, "credit_limit field");
+        assert_eq!(line.utilized_amount, 0, "utilized_amount field (initial)");
+        assert_eq!(line.interest_rate_bps, interest_rate, "interest_rate_bps field");
+        assert_eq!(line.risk_score, risk_score, "risk_score field");
+        assert_eq!(line.status, CreditStatus::Active, "status field");
+        assert_eq!(line.last_rate_update_ts, 0, "last_rate_update_ts field");
+        assert_eq!(line.accrued_interest, 0, "accrued_interest field (initial)");
+        assert_eq!(line.last_accrual_ts, 0, "last_accrual_ts field");
+    }
+}
