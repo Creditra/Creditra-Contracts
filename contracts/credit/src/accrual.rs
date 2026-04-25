@@ -2,7 +2,7 @@
 
 use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
 use crate::types::CreditLineData;
-use soroban_sdk::Env;
+use soroban_sdk::{Address, Env};
 
 /// Seconds in a non-leap year (365 days).
 pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;

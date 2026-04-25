@@ -198,7 +198,35 @@ When `RateChangeConfig` is set, rate changes are subject to:
 - Maximum delta ≤ `max_rate_change_bps`
 - Minimum time interval ≥ `rate_change_min_interval`
 
-Emits: `("credit", "risk_updated")` event.
+#### Credit Limit Decrease Behavior
+
+The credit contract implements a **state-transition policy** when a credit limit is decreased:
+
+**Case 1: Limit Decrease Below Utilization**
+- **Trigger**: `new_credit_limit < current_utilized_amount`
+- **Action**: Credit line status transitions to **Restricted**
+- **Effect on draws**: All `draw_credit` calls are rejected (same as Suspended)
+- **Effect on repayment**: `repay_credit` remains fully allowed
+- **Rationale**: This avoids forced liquidation and gives the borrower a grace period to reduce their balance
+
+**Case 2: Limit Remains Above Utilization**
+- **Trigger**: `new_credit_limit >= current_utilized_amount`
+- **Action**: No status change; line remains **Active**
+- **Effect**: Normal operation continues
+
+**Case 3: Recovery from Restricted (Auto-Cure)**
+- **Trigger**: Line is in **Restricted** status AND admin updates `credit_limit >= current_utilized_amount`
+- **Action**: Status automatically transitions back to **Active**
+- **Effect**: Borrower can resume drawing
+
+**Boundary Condition**
+- When `new_credit_limit == current_utilized_amount`, the line is **Active** (equality is safe)
+
+#### Interest and Rate Updates During Restriction
+
+Interest rate, risk score, and accrued interest are updated normally during Restricted status. If conditions improve (borrower repays until `utilized_amount` drops below the new limit), the admin can re-enable the line via another `update_risk_parameters` call.
+
+Emits: `("credit", "risk_updated")` event with the new parameters.
 
 ### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
 Configure rate-change limits (admin only).
@@ -220,33 +248,6 @@ The credit contract stores an explicit schema marker under `DataKey::SchemaVersi
 - Existing key/value layouts are unchanged; the version key is additive metadata.
 - For immutable deployments, the version still gives off-chain tooling a deterministic way to detect schema expectations.
 - For future contract deployments, bump the schema version when storage semantics change and document migration requirements in release notes and deployment playbooks.
-
-### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
-
-Update the risk parameters for an existing credit line. Admin-only.
-
-| Parameter           | Type      | Description                                            |
-| ------------------- | --------- | ------------------------------------------------------ |
-| `borrower`          | `Address` | Borrower whose credit line to update                   |
-| `credit_limit`      | `i128`    | New credit limit (must be ≥ current `utilized_amount`) |
-| `interest_rate_bps` | `u32`     | New interest rate in basis points (0–10000)            |
-| `risk_score`        | `u32`     | New risk score (0–100)                                 |
-
-#### Credit Limit Decrease Behavior
-
-When `credit_limit` is decreased below the current `utilized_amount`:
-
-- The credit line status changes to **Restricted**
-- `utilized_amount` remains unchanged (borrower must repay excess)
-- `draw_credit` is disabled until excess is repaid or limit is increased
-- A `("credit", "limit_dec")` event is emitted with details
-
-When `credit_limit` is decreased but remains ≥ `utilized_amount`:
-
-- The credit line remains **Active**
-- Normal operation continues
-
-When `credit_limit` is increased or unchanged:
 
 - Normal behavior applies
 - If currently Restricted, increasing limit above `utilized_amount` reactivates to **Active**

@@ -160,7 +160,6 @@ pub struct RateChangeConfig {
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
 }
-}
 
 /// Admin-configurable piecewise-linear rate formula.
 ///
@@ -188,6 +187,36 @@ pub struct RateFormulaConfig {
     pub min_rate_bps: u32,
     /// Maximum allowed computed rate (ceiling), must be <= 10_000.
     pub max_rate_bps: u32,
+}
+
+/// Grace period configuration for Suspended credit lines.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GracePeriodConfig {
+    /// Duration of the grace window in seconds.
+    pub grace_period_seconds: u64,
+    /// Type of waiver to apply during the grace period.
+    pub waiver_mode: GraceWaiverMode,
+    /// Reduced rate to apply when waiver_mode is ReducedRate.
+    pub reduced_rate_bps: u32,
+}
+
+/// Grace period waiver modes.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraceWaiverMode {
+    /// Full waiver - zero interest during grace period.
+    FullWaiver = 0,
+    /// Reduced rate - apply reduced_rate_bps during grace period.
+    ReducedRate = 1,
+}
+
+/// Event emitted when the rate formula config is set or cleared.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateFormulaConfigEvent {
+    /// `true` when a config was set; `false` when cleared.
+    pub enabled: bool,
 }
 
 /// Structured representation of the contract's API version (semver).
