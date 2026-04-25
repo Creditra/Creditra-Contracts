@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Event types and topic constants for the Credit contract.
 //! Stable event schemas for indexing and analytics.
@@ -44,27 +46,40 @@ pub struct CreditLineEventV2 {
 }
 
 /// Event emitted when a borrower repays credit.
+///
+/// Allocation policy: accrued interest is repaid first, then principal.
+/// Integrators can reconcile balances using `new_utilized_amount` and
+/// `new_accrued_interest`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepaymentEvent {
     /// Address of the borrower.
     pub borrower: Address,
-    /// Amount repaid.
+    /// Effective amount repaid (capped at total owed).
     pub amount: i128,
-    /// New outstanding principal.
+    /// Portion of the repayment applied to accrued interest.
+    pub interest_repaid: i128,
+    /// Portion of the repayment applied to principal.
+    pub principal_repaid: i128,
+    /// Total outstanding debt after repayment.
     pub new_utilized_amount: i128,
+    /// Remaining accrued interest after repayment.
+    pub new_accrued_interest: i128,
     /// Ledger timestamp of the repayment.
     pub timestamp: u64,
 }
 
-/// Versioned repayment event with explicit payer identifier.
+/// Versioned repayment event with explicit payer identifier and allocation breakdown.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepaymentEventV2 {
     pub borrower: Address,
     pub payer: Address,
     pub amount: i128,
+    pub interest_repaid: i128,
+    pub principal_repaid: i128,
     pub new_utilized_amount: i128,
+    pub new_accrued_interest: i128,
     pub timestamp: u64,
 }
 
@@ -108,6 +123,30 @@ pub struct DrawnEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when an admin reverses an erroneous draw within the reversal window.
+///
+/// This is an accounting-only operation; no token clawback is attempted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawReversedEvent {
+    /// Address of the borrower whose draw was reversed.
+    pub borrower: Address,
+    /// Amount reversed from outstanding utilization.
+    pub amount: i128,
+    /// Timestamp of the original draw being reversed.
+    pub original_ts: u64,
+    /// Admin-provided reason code for audit trails.
+    pub reason_code: u32,
+    /// New outstanding utilization after reversal.
+    pub new_utilized_amount: i128,
+    /// Ledger timestamp when reversal was executed.
+    pub timestamp: u64,
+    /// Admin that executed the reversal.
+    pub admin: Address,
+    /// Always true for this event to make accounting-only semantics explicit.
+    pub accounting_only: bool,
+}
+
 /// Event emitted when interest is accrued and capitalized.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +156,18 @@ pub struct InterestAccruedEvent {
     pub total_accrued_interest: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
+}
+
+/// Event emitted when the global draws-frozen switch is toggled by admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawsFrozenEvent {
+    /// `true` when draws are now frozen; `false` when unfrozen.
+    pub frozen: bool,
+    /// Ledger timestamp of the toggle.
+    pub timestamp: u64,
+    /// Admin address that performed the toggle.
+    pub actor: Address,
 }
 
 /// Versioned draw event with explicit recipient/source identifiers.
@@ -129,6 +180,33 @@ pub struct DrawnEventV2 {
     pub amount: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
+}
+
+/// Event emitted when admin rotation is proposed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationProposedEvent {
+    pub current_admin: Address,
+    pub proposed_admin: Address,
+    pub accept_after: u64,
+}
+
+/// Event emitted when admin rotation is accepted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminRotationAcceptedEvent {
+    pub previous_admin: Address,
+    pub new_admin: Address,
+}
+
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events()
+        .publish((symbol_short!("admin"), symbol_short!("proposed")), event);
+}
+
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events()
+        .publish((symbol_short!("admin"), symbol_short!("accepted")), event);
 }
 
 /// Publish a credit line lifecycle event.
@@ -163,11 +241,41 @@ pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
         .publish((symbol_short!("credit"), symbol_short!("drawn")), event);
 }
 
+/// Publish a draw reversal event.
+pub fn publish_draw_reversed_event(env: &Env, event: DrawReversedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("draw_rev")), event);
+}
+
 /// Publish a v2 drawn event.
 #[allow(dead_code)]
 pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
+}
+
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
+}
+
+/// Publish a risk formula configuration event.
+pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rate_cfg")),
+        event,
+    );
 }
 
 /// Publish a risk parameters updated event.
@@ -181,4 +289,89 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
+}
+
+/// Publish a draws-frozen toggle event.
+pub fn publish_draws_frozen_event(env: &Env, event: DrawsFrozenEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "drw_freeze")),
+        event,
+    );
+}
+
+/// Event emitted when a borrower's block status changes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerBlockedEvent {
+    /// Address of the borrower.
+    pub borrower: Address,
+    /// New blocked status.
+    pub blocked: bool,
+}
+
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
+}
+
+/// Publish a borrower blocked/unblocked event.
+#[allow(dead_code)]
+pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
+    let topic = if event.blocked {
+        symbol_short!("blocked")
+    } else {
+        Symbol::new(env, "unblocked")
+    };
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("adm_prop")), event);
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("admin_acc")), event);
+}
+
+/// Event emitted when the rate formula config is set or cleared.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateFormulaConfigEvent {
+    /// `true` when a config was set; `false` when cleared.
+    pub enabled: bool,
+}
+
+/// Publish a rate formula config change event.
+#[allow(dead_code)]
+pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rate_form")),
+        event,
+    );
+}
+
+/// Publish an admin rotation proposed event.
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
+        event,
+    );
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "admin_acc")),
+        event,
+    );
 }

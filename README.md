@@ -13,8 +13,9 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - after `suspend_credit_line`, `draw_credit` for that borrower reverts
 - after `default_credit_line`, `draw_credit` reverts and `repay_credit` remains allowed
 - `repay_credit` remains allowed while suspended or defaulted
+- `freeze_draws` globally blocks all `draw_credit` calls without mutating any borrower's `CreditStatus`; `repay_credit` is never affected by the freeze flag
 
-**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`.
+**Methods:** `init`, `set_liquidity_token`, `set_liquidity_source`, `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, `suspend_credit_line`, `close_credit_line`, `default_credit_line`, `reinstate_credit_line`, `get_credit_line`, `freeze_draws`, `unfreeze_draws`, `is_draws_frozen`, `set_rate_change_limits`, `get_rate_change_limits`, `set_rate_formula_config`, `get_rate_formula_config`, `clear_rate_formula_config`.
 
 ### Liquidity reserve enforcement
 
@@ -38,6 +39,14 @@ This repo contains the **credit** contract: it maintains credit lines, tracks ut
 - The contract already reserves `accrued_interest` and `last_accrual_ts` in storage for lazy interest accounting.
 - The design note for implementing accrual is documented in [`docs/interest-accrual.md`](docs/interest-accrual.md).
 - Current code does not yet apply periodic accrual to balances; the new document defines the intended behavior before implementation.
+
+### Risk-score based rate formula
+
+- Admin can enable an optional bounded piecewise-linear formula via `set_rate_formula_config(base_rate_bps, slope_bps_per_score, min_rate_bps, max_rate_bps)`.
+- When enabled, `update_risk_parameters` automatically computes `interest_rate_bps` from the borrower's `risk_score`: `rate = clamp(base + score × slope, min, max)`.
+- The computed rate always respects `MAX_INTEREST_RATE_BPS` (10,000 = 100%) and existing `RateChangeConfig` limits.
+- When disabled (default or after `clear_rate_formula_config`), the manually supplied rate is used as before.
+- Full formula documentation: [`docs/risk-based-rate-formula.md`](docs/risk-based-rate-formula.md).
 
 ## Tech Stack
 

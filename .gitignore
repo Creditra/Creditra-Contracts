@@ -5,3 +5,7 @@ Cargo.lock
 /coverage
 test_snapshots/
 *.profraw
+
+# Local workflow artifacts (plans, session notes)
+/docs/superpowers/
+/.remember/
