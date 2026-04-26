@@ -46,21 +46,32 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 
 ### Status transitions
 
-| From       | To         | Trigger |
-|------------|------------|---------|
-| Active     | Suspended  | Admin calls `suspend_credit_line` |
-| Active     | Suspended  | Borrower calls `self_suspend_credit_line` |
-| Active     | Defaulted  | Admin calls `default_credit_line` |
-| Suspended  | Defaulted  | Admin calls `default_credit_line` |
-| Suspended  | Active     | Admin-approved `open_credit_line` reopen workflow |
-| Defaulted  | Active     | Admin calls `reinstate_credit_line` |
-| Defaulted  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
-| Active     | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
-| Suspended  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+The table below is the authoritative source of truth for all valid state machine transitions.
+`close_credit_line` can originate from any non-Closed status and is therefore listed three times.
 
-When status is **Suspended** or **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
+| From       | To         | Trigger                                                       | Authorization                        |
+|------------|------------|---------------------------------------------------------------|--------------------------------------|
+| Active     | Suspended  | Admin calls `suspend_credit_line`                             | Admin only                           |
+| Active     | Defaulted  | Admin calls `default_credit_line`                             | Admin only                           |
+| Active     | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Suspended  | Defaulted  | Admin calls `default_credit_line`                             | Admin only                           |
+| Suspended  | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Defaulted  | Active     | Admin calls `reinstate_credit_line`                           | Admin only                           |
+| Defaulted  | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Closed     | Active     | Admin calls `open_credit_line` for the same borrower address  | Admin (opens a fresh line)           |
 
----
+**Terminal state**: `Closed` is permanent for that credit line record. A new `open_credit_line`
+call for the same borrower address starts a fresh record and resets all fields.
+
+**Draw and repay availability by status**:
+
+| Status     | `draw_credit` | `repay_credit` |
+|------------|---------------|----------------|
+| Active     | ✅ Allowed     | ✅ Allowed      |
+| Suspended  | ❌ Blocked     | ✅ Allowed      |
+| Defaulted  | ❌ Blocked     | ✅ Allowed      |
+| Closed     | ❌ Blocked     | ❌ Blocked      |
+| Restricted | ❌ Blocked     | ✅ Allowed      |
 
 ## Methods
 
