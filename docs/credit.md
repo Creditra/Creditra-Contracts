@@ -483,25 +483,96 @@ These tests validate behavior near `i128::MAX` and confirm overflow handling rem
 
 The `Credit` contract uses standard `u32` discriminants for standardized error handling across the Rust and TypeScript SDK clients. Integrator clients can match these error codes to understand failure reasons.
 
-| Error Code | Variant              | Description                                                                 |
-| ---------- | -------------------- | --------------------------------------------------------------------------- |
-| `1`        | `Unauthorized`       | Caller is not authorized to perform this action.                            |
-| `2`        | `NotAdmin`           | Caller does not have admin privileges.                                      |
-| `3`        | `CreditLineNotFound` | The specified credit line was not found.                                    |
-| `4`        | `CreditLineClosed`   | Action cannot be performed because the credit line is closed.               |
-| `5`        | `InvalidAmount`      | The requested amount is invalid (e.g., zero or negative).                   |
-| `6`        | `OverLimit`          | The requested draw exceeds the available credit limit.                      |
-| `7`        | `NegativeLimit`      | The credit limit cannot be negative.                                        |
-| `8`        | `RateTooHigh`        | The interest rate change exceeds the maximum allowed delta.                 |
-| `9`        | `ScoreTooHigh`       | The risk score is above the acceptable maximum threshold.                   |
-| `10`       | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
-| `11`       | `Reentrancy`         | Reentrancy detected during cross-contract calls.                            |
-| `12`       | `Overflow`           | Math overflow occurred during calculation.                                  |
-| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
-| `14`       | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once.      |
-| `15`       | `DrawsFrozen` | All draws are globally frozen by admin for liquidity reserve operations.    |
+> [!IMPORTANT]
+> Discriminants are **permanent**. Never reorder or renumber existing variants. New variants must be appended at the end with the next available integer.
+
+| Error Code | Variant                          | Description                                                                   |
+| ---------- | -------------------------------- | ----------------------------------------------------------------------------- |
+| `1`        | `Unauthorized`                   | Caller is not authorized to perform this action.                              |
+| `2`        | `NotAdmin`                       | Caller does not have admin privileges.                                        |
+| `3`        | `CreditLineNotFound`             | The specified credit line was not found.                                      |
+| `4`        | `CreditLineClosed`               | Action cannot be performed because the credit line is closed.                 |
+| `5`        | `InvalidAmount`                  | The requested amount is invalid (zero, negative, or otherwise out of range).  |
+| `6`        | `OverLimit`                      | The requested draw exceeds the available credit limit.                        |
+| `7`        | `NegativeLimit`                  | The credit limit cannot be negative.                                          |
+| `8`        | `RateTooHigh`                    | The interest rate change exceeds the maximum allowed delta.                   |
+| `9`        | `ScoreTooHigh`                   | The risk score is above the acceptable maximum threshold.                     |
+| `10`       | `UtilizationNotZero`             | Action cannot be performed because the credit line utilization is not zero.   |
+| `11`       | `Reentrancy`                     | Reentrancy detected during cross-contract calls.                              |
+| `12`       | `Overflow`                       | Math overflow occurred during calculation.                                    |
+| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount.          |
+| `14`       | `AlreadyInitialized`             | Contract has already been initialized; `init` may only be called once.        |
+| `15`       | `AdminAcceptTooEarly`            | Admin acceptance attempted before the delay window has elapsed.               |
+| `16`       | `BorrowerBlocked`                | Borrower is blocked from drawing credit.                                      |
+| `17`       | `DrawExceedsMaxAmount`           | The requested draw exceeds the configured per-transaction maximum.            |
+| `18`       | `Paused`                         | Protocol is paused by the emergency circuit breaker.                          |
+| `19`       | `DrawsFrozen`                    | All draws are globally frozen by admin for liquidity reserve operations.      |
+| `20`       | `CreditLineSuspended`            | Action cannot be performed because the credit line is suspended.              |
+| `21`       | `CreditLineDefaulted`            | Action cannot be performed because the credit line is defaulted.              |
+| `22`       | `MissingLiquidityToken`          | Liquidity token has not been configured.                                      |
+| `23`       | `MissingLiquiditySource`         | Liquidity source has not been configured.                                     |
+| `24`       | `InsufficientLiquidityReserve`   | Liquidity reserve balance is below the requested draw amount.                 |
+| `25`       | `LiquidityTokenCallFailed`       | Liquidity token call failed where the contract can observe it.                |
+| `26`       | `InsufficientRepaymentAllowance` | Borrower's token allowance is below the effective repayment amount.           |
+| `27`       | `InsufficientRepaymentBalance`   | Borrower's token balance is below the effective repayment amount.             |
 
 ---
+
+## Amount Validation Matrix (Issue #236)
+
+All three entrypoints that accept an amount or limit parameter enforce a strict
+positive-only policy at the contract boundary, before any state mutation or
+token transfer occurs.
+
+### Rejection table
+
+| Entrypoint          | Parameter      | Rejected values              | Error                          |
+| ------------------- | -------------- | ----------------------------- | ------------------------------ |
+| `draw_credit`       | `amount`       | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+| `repay_credit`      | `amount`       | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+| `open_credit_line`  | `credit_limit` | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+
+### Minimal positive values (accepted)
+
+| Entrypoint          | Minimal accepted value | Notes                                    |
+| ------------------- | ---------------------- | ---------------------------------------- |
+| `draw_credit`       | `1`                    | Still subject to limit and liquidity checks |
+| `repay_credit`      | `1`                    | Capped at `utilized_amount` if overpaid  |
+| `open_credit_line`  | `1`                    | Still subject to rate/score bounds       |
+
+### Security notes
+
+- The zero-amount guard on `draw_credit` and `repay_credit` fires **before**
+  the reentrancy guard is cleared, so no partial state is observable.
+- `draw_credit` clears the reentrancy guard before panicking, ensuring no
+  guard leaks even when the amount check fails.
+- Negative `i128` amounts are representable in the type system but are always
+  rejected at the first guard in each entrypoint; they never reach token
+  transfer logic.
+- The `open_credit_line` guard fires before storage is written, so a rejected
+  call leaves no credit line record.
+
+### Test coverage
+
+The rejection matrix is covered by the `amount_validation_tests` module
+(`contracts/credit/src/amount_validation_tests.rs`):
+
+- `draw_credit_rejects_invalid_amounts` — zero, -1, -1 000 000, `i128::MIN`
+- `draw_credit_accepts_minimal_positive_amount` — regression guard for `amount=1`
+- `repay_credit_rejects_invalid_amounts` — zero, -1, -1 000 000, `i128::MIN`
+- `repay_credit_accepts_minimal_positive_amount` — regression guard for `amount=1`
+- `open_credit_line_rejects_invalid_credit_limits` — zero, -1, -1 000 000, `i128::MIN`
+- `open_credit_line_accepts_minimal_positive_limit` — regression guard for `credit_limit=1`
+- `invalid_amount_discriminant_is_5` — guards against accidental discriminant renumbering
+- `amount_rejection_matrix_all_entrypoints` — combined matrix, all entrypoints × all invalid amounts
+
+Run with:
+
+```bash
+cargo test -p creditra-credit amount_validation
+```
+
+
 
 ## Events
 

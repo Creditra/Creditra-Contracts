@@ -48,7 +48,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     credit_line = crate::accrual::apply_accrual(env, credit_line);
 
     if credit_line.status != CreditStatus::Active {
-        panic!("Only active credit lines can be suspended");
+        env.panic_with_error(ContractError::CreditLineSuspended);
     }
 
     credit_line.status = CreditStatus::Suspended;
@@ -82,7 +82,9 @@ pub fn open_credit_line(
 ) {
     assert_not_paused(&env);
 
-    assert!(credit_limit > 0, "credit_limit must be greater than zero");
+    if credit_limit <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
     if interest_rate_bps > MAX_INTEREST_RATE_BPS {
         env.panic_with_error(ContractError::RateTooHigh);
     }
@@ -95,10 +97,9 @@ pub fn open_credit_line(
         .persistent()
         .get::<Address, CreditLineData>(&borrower)
     {
-        assert!(
-            existing.status != CreditStatus::Active,
-            "borrower already has an active credit line"
-        );
+        if existing.status == CreditStatus::Active {
+            env.panic_with_error(ContractError::AlreadyInitialized);
+        }
 
         // Prevent borrower-controlled status bypasses on existing lines.
         require_admin_auth(&env);
@@ -278,7 +279,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status == CreditStatus::Closed {
-        panic!("cannot default a closed credit line");
+        env.panic_with_error(ContractError::CreditLineClosed);
     }
 
     if credit_line.status == CreditStatus::Defaulted {
@@ -318,12 +319,12 @@ pub fn settle_default_liquidation(
     require_admin_auth(&env);
 
     if recovered_amount <= 0 {
-        panic!("recovered amount must be positive");
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
     if env.storage().persistent().has(&settlement_key) {
-        panic!("liquidation settlement already applied");
+        env.panic_with_error(ContractError::AlreadyInitialized); // Or a specific LiquidationAlreadyApplied
     }
 
     let mut credit_line: CreditLineData = env
@@ -336,11 +337,11 @@ pub fn settle_default_liquidation(
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status != CreditStatus::Defaulted {
-        panic!("credit line is not defaulted");
+        env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
     if recovered_amount > credit_line.utilized_amount {
-        panic!("recovered amount exceeds utilized amount");
+        env.panic_with_error(ContractError::OverLimit); // Or a specific error
     }
 
     credit_line.utilized_amount = credit_line
@@ -398,7 +399,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
 
     if target_status != CreditStatus::Active && target_status != CreditStatus::Suspended {
-        panic!("invalid target status: must be Active or Suspended");
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let mut credit_line: CreditLineData = env
@@ -410,7 +411,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
     credit_line = crate::accrual::apply_accrual(&env, credit_line);
 
     if credit_line.status != CreditStatus::Defaulted {
-        panic!("credit line is not defaulted");
+        env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
     credit_line.status = target_status;

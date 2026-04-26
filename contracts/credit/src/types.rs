@@ -236,3 +236,37 @@ pub struct GracePeriodConfig {
     pub waiver_mode: GraceWaiverMode,
     pub reduced_rate_bps: u32,
 }
+
+/// Mode of interest rate waiver during a grace period.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraceWaiverMode {
+    /// Zero interest accrues during the grace window.
+    FullWaiver = 0,
+    /// Interest accrues at a reduced rate during the grace window.
+    ReducedRate = 1,
+}
+
+/// Configuration for the grace period applied to Suspended credit lines.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GracePeriodConfig {
+    /// Duration of the grace window in seconds.
+    pub grace_period_seconds: u64,
+    /// The waiver mode applied during the grace window.
+    pub waiver_mode: GraceWaiverMode,
+    /// The reduced rate applied when `waiver_mode` is `ReducedRate`.
+    pub reduced_rate_bps: u32,
+}
+
+/// Global protocol configuration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtocolConfig {
+    /// Configured liquidity token.
+    pub liquidity_token: Option<Address>,
+    /// Configured liquidity source.
+    pub liquidity_source: Option<Address>,
+    /// Configured rate change limits.
+    pub rate_change_config: Option<RateChangeConfig>,
+}
