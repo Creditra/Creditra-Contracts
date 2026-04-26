@@ -118,26 +118,35 @@ Sets the address that holds liquidity for draws and receives repayments (default
 Opens a new credit line for a borrower. Called by the backend or risk engine.
 
 - Creating a brand-new line preserves the existing backend/risk-engine trust boundary.
-- Re-opening any existing non-`Active` line now requires admin auth so a borrower cannot self-suspend and then reactivate themselves on-chain.
+- Re-opening any existing non-`Active` line requires admin auth so a borrower cannot self-suspend and then reactivate themselves on-chain.
+- On reopen, `utilized_amount`, `accrued_interest`, `last_rate_update_ts`, and `suspension_ts` are reset to `0`.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `borrower` | `Address` | Borrower's address |
 | `credit_limit` | `i128` | Maximum drawable amount (must be > 0) |
-| `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000) |
-| `risk_score` | `u32` | Risk score from the risk engine (0–100) |
+| `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000); matches `MAX_INTEREST_RATE_BPS` |
+| `risk_score` | `u32` | Risk score from the risk engine (0–100); matches `MAX_RISK_SCORE` |
 
-`last_rate_update_ts`, `accrued_interest`, and `last_accrual_ts` are initialized to `0`.
+`last_rate_update_ts`, `accrued_interest`, `last_accrual_ts`, and `suspension_ts` are initialized to `0`.
 
 #### Errors
 | Condition | Error |
 |---|---|
-| `credit_limit <= 0` | `ContractError::InvalidAmount` |
-| `interest_rate_bps > 10000` | `ContractError::RateTooHigh` |
-| `risk_score > 100` | `ContractError::ScoreTooHigh` |
-| Borrower already has an Active line | `ContractError::Unauthorized` |
+| `credit_limit <= 0` | panics: `"credit_limit must be greater than zero"` |
+| `interest_rate_bps > 10000` | `ContractError::RateTooHigh` (8) |
+| `risk_score > 100` | `ContractError::ScoreTooHigh` (9) |
+| Borrower already has an `Active` line | panics: `"borrower already has an active credit line"` |
+| Re-opening non-Active line by non-admin | auth error |
+| Protocol is paused | `ContractError::Paused` (18) |
 
-Emits: `("credit", "opened")` event with a `CreditLineEvent` payload.
+#### Events
+Emits `("credit", "opened")` with `CreditLineEvent { event_type, borrower, status: Active, credit_limit, interest_rate_bps, risk_score }`.
+
+#### Security notes
+- Admin auth is required to reopen a non-Active line, preventing borrowers from self-reinstating via self-suspend + reopen.
+- No auth is required for a brand-new line (no existing record); the backend/risk engine is the trusted caller.
+- Validation runs before any storage write — failed calls leave existing state unchanged.
 
 ### `draw_credit(env, borrower, amount)`
 Draw funds from an **Active** credit line. Only the borrower is authorized to call this function.
