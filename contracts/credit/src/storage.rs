@@ -177,3 +177,8 @@ pub fn assert_not_paused(env: &Env) {
         env.panic_with_error(crate::types::ContractError::Paused);
     }
 }
+
+/// Instance storage key for the grace period policy.
+pub fn grace_period_key(env: &Env) -> Symbol {
+    Symbol::new(env, "grace_cfg")
+}

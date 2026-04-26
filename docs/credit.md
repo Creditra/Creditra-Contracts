@@ -359,7 +359,30 @@ Reinstate a Defaulted credit line to Active. Admin only.
 Emits: `("credit", "reinstate")` event.
 
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
-View function — returns credit line data or `None`.
+View function — returns the full [`CreditLineData`] for `borrower`, or `None` if no credit line exists.
+
+#### Authentication
+No authentication required. Any caller — indexer, client SDK, or another contract — may call this freely.
+
+#### Stable serialization
+The returned struct is stable for integrators. Fields are serialized in declaration order (see `types.rs`). New fields will only ever be appended; existing field positions will not change.
+
+#### Accrual note
+Interest accrual is lazy. `accrued_interest` and `utilized_amount` reflect the last mutating call (draw, repay, suspend, etc.). Pending interest since the last checkpoint is **not** applied by this query. To get the current accrued value, trigger a mutating call first or compute it off-chain using `last_accrual_ts` and `interest_rate_bps`.
+
+#### Key fields for indexers
+
+| Field | Description |
+|---|---|
+| `last_rate_update_ts` | Ledger timestamp of the last rate change; `0` means the rate has never been updated |
+| `last_accrual_ts` | Ledger timestamp of the last interest checkpoint; `0` means no accrual has run yet |
+| `accrued_interest` | Capitalized interest included in `utilized_amount` |
+| `status` | Current lifecycle state (`Active`, `Suspended`, `Defaulted`, `Closed`, `Restricted`) |
+
+#### Security notes
+- Pure read — no storage is mutated, no auth is checked, no events are emitted.
+- Safe to call from untrusted contexts; the worst outcome is a stale accrual snapshot (see accrual note above).
+- Returns `None` for addresses that have never had a credit line; callers must handle this case.
 
 ### `freeze_draws(env)`
 Freeze all `draw_credit` calls contract-wide (admin only).

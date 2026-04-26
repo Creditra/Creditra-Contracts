@@ -25,18 +25,17 @@ pub mod types;
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed, publish_credit_line_event,
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event,
-    AdminRotationAcceptedEvent, AdminRotationProposedEvent, CreditLineEvent, DrawnEvent,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
-use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    admin_key, clear_reentrancy_guard, is_borrower_blocked, proposed_admin_key, proposed_at_key,
+    admin_key, assert_not_paused, clear_reentrancy_guard, proposed_admin_key, proposed_at_key,
     rate_cfg_key, set_reentrancy_guard, DataKey,
 };
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env};
+use crate::types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, ProtocolConfig, RateChangeConfig};
+use soroban_sdk::{contract, contractimpl, token, Address, Env};
 
 /// Contract API version (major, minor, patch).
 /// Increment major on breaking ABI/storage changes, minor on additive features, patch on fixes.
@@ -172,7 +171,7 @@ impl Credit {
     /// - [`ContractError::CreditLineClosed`] — credit line is closed.
     /// - [`ContractError::Overflow`] — utilized amount would overflow.
     /// - [`ContractError::DrawExceedsMaxAmount`] — amount exceeds per-tx draw cap.
-    pub fn draw_credit(env: Env, borrower: Address, amount: i128) -> () {
+    pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         assert_not_paused(&env);
         set_reentrancy_guard(&env);
 
@@ -182,12 +181,6 @@ impl Credit {
         if amount <= 0 {
             clear_reentrancy_guard(&env);
             panic!("amount must be positive");
-        }
-
-        // Global emergency freeze: block all draws during liquidity reserve operations.
-        if freeze::is_draws_frozen(&env) {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::DrawsFrozen);
         }
 
         // Global emergency freeze: block all draws during liquidity reserve operations.
@@ -668,6 +661,10 @@ impl Credit {
 
     // duplicate wrapper removed
 
+    /// Return the credit line for `borrower`, or `None` if no line exists.
+    ///
+    /// No authentication required — this is a pure read with no side effects.
+    /// Accrual is lazy; pending interest since the last checkpoint is not applied here.
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
     }
