@@ -218,6 +218,12 @@ Update credit limit, interest rate, and risk score (admin only).
 When `RateChangeConfig` is set, rate changes are subject to:
 - Maximum delta ≤ `max_rate_change_bps`
 - Minimum time interval ≥ `rate_change_min_interval`
+- The interval is enforced only when the effective rate actually changes.
+- On a successful rate change, `last_rate_update_ts` is refreshed to the current ledger timestamp.
+
+If `RateChangeConfig` is absent, `update_risk_parameters` retains the previous
+backward-compatible behavior and accepts any manual rate that stays within the
+global `MAX_INTEREST_RATE_BPS` cap.
 
 #### Credit Limit Decrease Behavior
 
@@ -254,6 +260,12 @@ Configure rate-change limits (admin only).
 
 ### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
 Returns the current rate-change configuration (or `None` if not set).
+
+### Security notes for `update_risk_parameters`
+- Admin auth is required before any mutation.
+- The borrower record must already exist; missing lines fail with `CreditLineNotFound`.
+- Rate-change limits are optional and only affect successful rate changes.
+- Calls that fail validation leave the credit line unchanged, including `last_rate_update_ts`.
 
 ### `get_schema_version(env) -> Option<u32>`
 Returns the stored storage schema version from instance storage.

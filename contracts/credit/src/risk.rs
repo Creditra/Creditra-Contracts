@@ -11,8 +11,9 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
+use crate::storage::assert_not_paused;
 use crate::storage::{rate_cfg_key, rate_formula_key};
-use crate::types::{CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -63,6 +64,10 @@ pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_mi
 /// This function handles updating the credit limit, risk score, and interest rate.
 /// If a dynamic rate formula is configured, the `interest_rate_bps` parameter is
 /// ignored and the rate is re-calculated based on the provided `risk_score`.
+///
+/// When [`RateChangeConfig`] is present, successful rate changes must stay
+/// within the configured per-call delta and minimum elapsed interval. The
+/// `last_rate_update_ts` field is refreshed only after a successful rate change.
 ///
 /// ## Limit Decrease Behavior
 ///
@@ -145,7 +150,7 @@ pub fn update_risk_parameters(
                 let now = env.ledger().timestamp();
                 let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
-                    env.panic_with_error(ContractError::RateTooHigh); // Or a specific RateChangeTooFrequent
+                    env.panic_with_error(ContractError::RateTooHigh);
                 }
             }
         }

@@ -277,14 +277,13 @@ impl Credit {
                 env.panic_with_error(ContractError::MissingLiquiditySource)
             });
 
-            let token_client = token::Client::new(&env, &token_address);
-            let reserve_balance = token_client.balance(&reserve_address);
-            if reserve_balance < amount {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::InsufficientLiquidityReserve);
-            }
-            token_client.transfer(&reserve_address, &borrower, &amount);
+        let token_client = token::Client::new(&env, &token_address);
+        let reserve_balance = token_client.balance(&reserve_address);
+        if reserve_balance < amount {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::InsufficientLiquidityReserve);
         }
+        token_client.transfer(&reserve_address, &borrower, &amount);
 
         credit_line.utilized_amount = updated_utilized;
         env.storage().persistent().set(&borrower, &credit_line);
@@ -610,6 +609,21 @@ mod test_rate_change_limits {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger;
 
+    fn setup(
+        env: &Env,
+        borrower: &Address,
+        credit_limit: i128,
+        interest_rate_bps: u32,
+    ) -> (CreditClient, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(borrower, &credit_limit, &interest_rate_bps, &70_u32);
+        (client, admin)
+    }
+
     #[test]
     fn test_no_limits_configured_allows_any_change() {
         let env = Env::default();
@@ -646,6 +660,67 @@ mod test_rate_change_limits {
             client.get_credit_line(&borrower).unwrap().interest_rate_bps,
             300
         );
+    }
+
+    #[test]
+    fn test_rate_change_within_bounds_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+
+        client.set_rate_change_limits(&100_u32, &60_u64);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
+
+        let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.interest_rate_bps, 350);
+        assert_eq!(line.last_rate_update_ts, 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #8)")]
+    fn test_rate_change_exceeds_max_delta_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+
+        client.set_rate_change_limits(&50_u32, &0_u64);
+        client.update_risk_parameters(&borrower, &5_000_i128, &400_u32, &70_u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #8)")]
+    fn test_rate_change_too_soon_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+
+        client.set_rate_change_limits(&100_u32, &3600_u64);
+
+        env.ledger().with_mut(|li| li.timestamp = 100);
+        client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
+
+        env.ledger().with_mut(|li| li.timestamp = 200);
+        client.update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn test_rate_change_credit_line_not_found_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let borrower = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        client.set_rate_change_limits(&100_u32, &60_u64);
+        client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
     }
 }
 
