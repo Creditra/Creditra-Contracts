@@ -20,7 +20,7 @@
 //! transparent: the current state is readable by anyone via `is_draws_frozen`.
 
 use crate::auth::require_admin_auth;
-use crate::events::{publish_draws_frozen_event, DrawsFrozenEvent};
+use crate::events::publish_draws_frozen_event;
 use crate::storage::DataKey;
 use soroban_sdk::Env;
 
@@ -29,19 +29,18 @@ use soroban_sdk::Env;
 /// Sets [`DataKey::DrawsFrozen`] to `true`. Idempotent: calling when already
 /// frozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+///   If instance is archived, this flag is lost and draws become allowed.
+///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = true`.
 pub fn freeze_draws(env: Env) {
-    let admin = require_admin_auth(&env);
+    require_admin_auth(&env);
     env.storage().instance().set(&DataKey::DrawsFrozen, &true);
-    publish_draws_frozen_event(
-        &env,
-        DrawsFrozenEvent {
-            frozen: true,
-            timestamp: env.ledger().timestamp(),
-            actor: admin,
-        },
-    );
+    publish_draws_frozen_event(&env, true);
 }
 
 /// Unfreeze draws globally (admin only).
@@ -49,24 +48,26 @@ pub fn freeze_draws(env: Env) {
 /// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
 /// unfrozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = false`.
 pub fn unfreeze_draws(env: Env) {
-    let admin = require_admin_auth(&env);
+    require_admin_auth(&env);
     env.storage().instance().set(&DataKey::DrawsFrozen, &false);
-    publish_draws_frozen_event(
-        &env,
-        DrawsFrozenEvent {
-            frozen: false,
-            timestamp: env.ledger().timestamp(),
-            actor: admin,
-        },
-    );
+    publish_draws_frozen_event(&env, false);
 }
 
 /// Returns `true` when draws are globally frozen.
 ///
 /// Defaults to `false` (draws allowed) if the key has never been set.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
 pub fn is_draws_frozen(env: &Env) -> bool {
     env.storage()
         .instance()

@@ -154,7 +154,7 @@ mod debt_monotonic {
         let prev_debt = total_debt(&line);
 
         // -- REINSTATE: debt unchanged --
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Active);
         assert!(
@@ -183,9 +183,10 @@ mod debt_monotonic {
         // sees no elapsed time and preserves the injected value.
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
-            let interest_diff = 250 - line.accrued_interest;
+            let interest_added = 250 - line.accrued_interest;
             line.accrued_interest = 250;
-            line.last_accrual_ts = 1_000; // matches current env timestamp
+            line.utilized_amount += interest_added;
+            line.last_accrual_ts = 1_000;
             env.storage().persistent().set(&borrower, &line);
         });
 
@@ -230,9 +231,10 @@ mod debt_monotonic {
         env.ledger().set_timestamp(2_000);
         env.as_contract(&contract_id, || {
             let mut line: CreditLineData = env.storage().persistent().get(&borrower).unwrap();
-            let interest_diff = 500 - line.accrued_interest;
+            let interest_added = 500 - line.accrued_interest;
             line.accrued_interest = 500;
-            line.last_accrual_ts = 2_000; // matches current env timestamp
+            line.utilized_amount += interest_added;
+            line.last_accrual_ts = 2_000;
             env.storage().persistent().set(&borrower, &line);
         });
 
@@ -248,12 +250,9 @@ mod debt_monotonic {
         // -- REPAY: allowed to decrease --
         client.repay_credit(&borrower, &2_000);
         let line = client.get_credit_line(&borrower).unwrap();
-        // Repay 2000: interest first (500), then principal (1500)
-        // utilized_amount: 6000 - 2000 = 4000
-        // accrued_interest: 500 - 500 = 0
-        assert_eq!(line.utilized_amount, 4_000);
+        assert_eq!(line.utilized_amount, 4_500);
         assert_eq!(line.accrued_interest, 0);
-        assert_eq!(total_debt(&line), 4_000);
+        assert_eq!(total_debt(&line), 4_500);
     }
 
     #[test]
@@ -330,7 +329,7 @@ mod debt_monotonic {
         assert_eq!(total_debt(&line), debt_at_active);
 
         // Defaulted -> Active (reinstate): debt unchanged
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(total_debt(&line), debt_at_active);
         assert_eq!(line.status, CreditStatus::Active);

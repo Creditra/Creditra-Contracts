@@ -10,37 +10,37 @@
 //! - Read-only operations work when paused
 //! - Events are emitted on pause/unpause
 
-use creditra_credit::types::{ContractError, CreditStatus};
+use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{token, Address, Env, Symbol};
+use soroban_sdk::testutils::{Address as _, Events};
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn setup() -> (Env, Address, Address, Address) {
+fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    (env, admin, contract_id, contract_id.clone())
+    (env, admin, contract_id)
 }
 
-fn setup_with_token() -> (Env, Address, Address, Address, Address) {
-    let (env, admin, contract_id, _) = setup();
+fn setup_with_token() -> (Env, Address, Address, Address) {
+    let (env, admin, contract_id) = setup();
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let token_address = token_id.address();
     let client = CreditClient::new(&env, &contract_id);
     client.set_liquidity_token(&token_address);
-    (env, admin, contract_id, token_address, contract_id.clone())
+    (env, admin, contract_id, token_address)
 }
 
 // ── pause/unpause authorization ──────────────────────────────────────────────
 
 #[test]
 fn admin_can_pause_protocol() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     assert!(!client.is_protocol_paused(), "should start unpaused");
@@ -51,7 +51,7 @@ fn admin_can_pause_protocol() {
 
 #[test]
 fn admin_can_unpause_protocol() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_protocol_paused(&true);
@@ -64,7 +64,7 @@ fn admin_can_unpause_protocol() {
 #[test]
 #[should_panic]
 fn non_admin_cannot_pause() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     env.mock_all_auths_allowing_non_root_auth();
     let non_admin = Address::generate(&env);
     let client = CreditClient::new(&env, &contract_id);
@@ -78,7 +78,7 @@ fn non_admin_cannot_pause() {
 
 #[test]
 fn pause_emits_event() {
-    let (env, admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all(); // clear setup events
@@ -97,7 +97,7 @@ fn pause_emits_event() {
 
 #[test]
 fn unpause_emits_event() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_protocol_paused(&true);
@@ -119,7 +119,7 @@ fn unpause_emits_event() {
 
 #[test]
 fn open_credit_line_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -134,7 +134,7 @@ fn open_credit_line_blocked_when_paused() {
 
 #[test]
 fn draw_credit_blocked_when_paused() {
-    let (env, _admin, contract_id, token_address, _) = setup_with_token();
+    let (env, _admin, contract_id, token_address) = setup_with_token();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -157,7 +157,7 @@ fn draw_credit_blocked_when_paused() {
 
 #[test]
 fn update_risk_parameters_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -176,7 +176,7 @@ fn update_risk_parameters_blocked_when_paused() {
 
 #[test]
 fn suspend_credit_line_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -187,15 +187,12 @@ fn suspend_credit_line_blocked_when_paused() {
         client.suspend_credit_line(&borrower);
     }));
 
-    assert!(
-        result.is_err(),
-        "suspend_credit_line must fail when paused"
-    );
+    assert!(result.is_err(), "suspend_credit_line must fail when paused");
 }
 
 #[test]
 fn close_credit_line_blocked_when_paused() {
-    let (env, admin, contract_id, _) = setup();
+    let (env, admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -211,7 +208,7 @@ fn close_credit_line_blocked_when_paused() {
 
 #[test]
 fn default_credit_line_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -222,15 +219,12 @@ fn default_credit_line_blocked_when_paused() {
         client.default_credit_line(&borrower);
     }));
 
-    assert!(
-        result.is_err(),
-        "default_credit_line must fail when paused"
-    );
+    assert!(result.is_err(), "default_credit_line must fail when paused");
 }
 
 #[test]
 fn reinstate_credit_line_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -239,7 +233,7 @@ fn reinstate_credit_line_blocked_when_paused() {
     client.set_protocol_paused(&true);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     }));
 
     assert!(
@@ -250,7 +244,7 @@ fn reinstate_credit_line_blocked_when_paused() {
 
 #[test]
 fn set_liquidity_token_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let token = Address::generate(&env);
 
@@ -260,15 +254,12 @@ fn set_liquidity_token_blocked_when_paused() {
         client.set_liquidity_token(&token);
     }));
 
-    assert!(
-        result.is_err(),
-        "set_liquidity_token must fail when paused"
-    );
+    assert!(result.is_err(), "set_liquidity_token must fail when paused");
 }
 
 #[test]
 fn set_liquidity_source_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let source = Address::generate(&env);
 
@@ -286,7 +277,7 @@ fn set_liquidity_source_blocked_when_paused() {
 
 #[test]
 fn set_rate_change_limits_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_protocol_paused(&true);
@@ -303,7 +294,7 @@ fn set_rate_change_limits_blocked_when_paused() {
 
 #[test]
 fn set_max_draw_amount_blocked_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_protocol_paused(&true);
@@ -312,17 +303,14 @@ fn set_max_draw_amount_blocked_when_paused() {
         client.set_max_draw_amount(&10_000);
     }));
 
-    assert!(
-        result.is_err(),
-        "set_max_draw_amount must fail when paused"
-    );
+    assert!(result.is_err(), "set_max_draw_amount must fail when paused");
 }
 
 // ── repay_credit exception (critical safety feature) ─────────────────────────
 
 #[test]
 fn repay_credit_works_when_paused() {
-    let (env, _admin, contract_id, token_address, _) = setup_with_token();
+    let (env, _admin, contract_id, token_address) = setup_with_token();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -347,12 +335,15 @@ fn repay_credit_works_when_paused() {
     client.repay_credit(&borrower, &200);
 
     let after = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(after.utilized_amount, 300, "repayment must succeed when paused");
+    assert_eq!(
+        after.utilized_amount, 300,
+        "repayment must succeed when paused"
+    );
 }
 
 #[test]
 fn repay_credit_full_repayment_when_paused() {
-    let (env, _admin, contract_id, token_address, _) = setup_with_token();
+    let (env, _admin, contract_id, token_address) = setup_with_token();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -372,14 +363,17 @@ fn repay_credit_full_repayment_when_paused() {
     client.repay_credit(&borrower, &800);
 
     let after = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(after.utilized_amount, 0, "full repayment must work when paused");
+    assert_eq!(
+        after.utilized_amount, 0,
+        "full repayment must work when paused"
+    );
 }
 
 // ── read-only operations work when paused ────────────────────────────────────
 
 #[test]
 fn get_credit_line_works_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
@@ -394,7 +388,7 @@ fn get_credit_line_works_when_paused() {
 
 #[test]
 fn is_protocol_paused_always_works() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     assert!(!client.is_protocol_paused());
@@ -408,19 +402,22 @@ fn is_protocol_paused_always_works() {
 
 #[test]
 fn get_rate_change_limits_works_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_rate_change_limits(&500, &3600);
     client.set_protocol_paused(&true);
 
     let limits = client.get_rate_change_limits();
-    assert!(limits.is_some(), "get_rate_change_limits must work when paused");
+    assert!(
+        limits.is_some(),
+        "get_rate_change_limits must work when paused"
+    );
 }
 
 #[test]
 fn get_max_draw_amount_works_when_paused() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_max_draw_amount(&5_000);
@@ -434,7 +431,7 @@ fn get_max_draw_amount_works_when_paused() {
 
 #[test]
 fn pause_when_already_paused_is_idempotent() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     client.set_protocol_paused(&true);
@@ -447,7 +444,7 @@ fn pause_when_already_paused_is_idempotent() {
 
 #[test]
 fn unpause_when_already_unpaused_is_idempotent() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
     assert!(!client.is_protocol_paused());
@@ -461,7 +458,7 @@ fn unpause_when_already_unpaused_is_idempotent() {
 
 #[test]
 fn operations_resume_after_unpause() {
-    let (env, _admin, contract_id, _) = setup();
+    let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 

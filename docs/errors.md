@@ -46,6 +46,15 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `16` | `BorrowerBlocked`                | The borrower address is on the admin-managed block list; draws are disabled. | Contact the protocol admin to remove the block, or use a different borrower address. |
 | `17` | `DrawExceedsMaxAmount`           | The requested draw amount exceeds the per-transaction cap set via `set_max_draw_amount`. | Split the draw into smaller transactions or request a cap increase from the admin. |
 | `18` | `Paused`                         | The protocol is paused via the emergency circuit breaker; operation is blocked. | Wait for the admin to unpause the protocol via `set_protocol_paused(false)`. `repay_credit` remains active during a pause. |
+| `19` | `DrawsFrozen`                    | Draws are globally frozen during liquidity reserve operations. | Wait for the admin to call `unfreeze_draws`. Repayments remain available. |
+| `20` | `CreditLineSuspended`            | A draw was attempted while the credit line status is `Suspended`. | Reinstate the line or resolve the suspension before drawing. |
+| `21` | `CreditLineDefaulted`            | A draw was attempted while the credit line status is `Defaulted`. | Defaulted lines cannot draw; use repayment or liquidation workflows. |
+| `22` | `MissingLiquidityToken`          | `draw_credit` or `repay_credit` requires a liquidity token, but none is configured. | Admin must call `set_liquidity_token` before liquidity-moving operations. |
+| `23` | `MissingLiquiditySource`         | `draw_credit` or `repay_credit` requires a liquidity source, but none is configured. | Admin must call `set_liquidity_source` or run the configured initialization path. |
+| `24` | `InsufficientLiquidityReserve`   | The reserve token balance is below the requested draw amount. | Fund the liquidity source or reduce the draw amount. |
+| `25` | `LiquidityTokenCallFailed`       | A liquidity token interaction failed where the contract can expose a canonical token-call failure. | Inspect the configured token contract and retry only after the token issue is resolved. |
+| `26` | `InsufficientRepaymentAllowance` | The borrower has not approved enough liquidity token allowance for `repay_credit`. | Approve at least the effective repayment amount for the credit contract. |
+| `27` | `InsufficientRepaymentBalance`   | The borrower's liquidity token balance is below the effective repayment amount. | Transfer or mint enough tokens to the borrower before retrying repayment. |
 
 ---
 
@@ -125,6 +134,14 @@ remains active to allow users to reduce their debt exposure even during an incid
 The pause state is stored in instance storage and checked at the entry of every
 guarded function. Read-only operations (`get_credit_line`, `is_protocol_paused`, etc.)
 are never blocked.
+
+**Liquidity errors (codes 22-27)**
+Liquidity-moving operations use stable `ContractError` codes instead of ad-hoc
+panic strings. `draw_credit` requires both `LiquidityToken` and `LiquiditySource`,
+then checks the source balance before transferring. `repay_credit` requires the
+same configuration and checks allowance and borrower balance before `transfer_from`.
+Soroban token calls that trap internally are not catchable by this contract; the
+canonical token-call variants cover failures observable before state mutation.
 
 ### General Trust Model
 

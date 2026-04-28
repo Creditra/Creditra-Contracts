@@ -33,6 +33,15 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::BorrowerBlocked as u32, 16);
     assert_eq!(ContractError::DrawExceedsMaxAmount as u32, 17);
     assert_eq!(ContractError::Paused as u32, 18);
+    assert_eq!(ContractError::DrawsFrozen as u32, 19);
+    assert_eq!(ContractError::CreditLineSuspended as u32, 20);
+    assert_eq!(ContractError::CreditLineDefaulted as u32, 21);
+    assert_eq!(ContractError::MissingLiquidityToken as u32, 22);
+    assert_eq!(ContractError::MissingLiquiditySource as u32, 23);
+    assert_eq!(ContractError::InsufficientLiquidityReserve as u32, 24);
+    assert_eq!(ContractError::LiquidityTokenCallFailed as u32, 25);
+    assert_eq!(ContractError::InsufficientRepaymentAllowance as u32, 26);
+    assert_eq!(ContractError::InsufficientRepaymentBalance as u32, 27);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -61,6 +70,15 @@ fn no_duplicate_discriminants() {
         ContractError::BorrowerBlocked as u32,
         ContractError::DrawExceedsMaxAmount as u32,
         ContractError::Paused as u32,
+        ContractError::DrawsFrozen as u32,
+        ContractError::CreditLineSuspended as u32,
+        ContractError::CreditLineDefaulted as u32,
+        ContractError::MissingLiquidityToken as u32,
+        ContractError::MissingLiquiditySource as u32,
+        ContractError::InsufficientLiquidityReserve as u32,
+        ContractError::LiquidityTokenCallFailed as u32,
+        ContractError::InsufficientRepaymentAllowance as u32,
+        ContractError::InsufficientRepaymentBalance as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -75,8 +93,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 18 variants as of this writing. Update when adding new ones.
-    const EXPECTED_VARIANT_COUNT: usize = 18;
+    // 27 variants as of this writing. Update when adding new ones.
+    const EXPECTED_VARIANT_COUNT: usize = 27;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -97,6 +115,15 @@ fn variant_count_is_known() {
         ContractError::BorrowerBlocked as u32,
         ContractError::DrawExceedsMaxAmount as u32,
         ContractError::Paused as u32,
+        ContractError::DrawsFrozen as u32,
+        ContractError::CreditLineSuspended as u32,
+        ContractError::CreditLineDefaulted as u32,
+        ContractError::MissingLiquidityToken as u32,
+        ContractError::MissingLiquiditySource as u32,
+        ContractError::InsufficientLiquidityReserve as u32,
+        ContractError::LiquidityTokenCallFailed as u32,
+        ContractError::InsufficientRepaymentAllowance as u32,
+        ContractError::InsufficientRepaymentBalance as u32,
     ];
 
     assert_eq!(

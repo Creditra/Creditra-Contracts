@@ -58,11 +58,11 @@ fn settle_partial_default_liquidation_and_block_replay() {
     let settlement_id = Symbol::new(&env, "auc_001");
 
     client.settle_default_liquidation(&borrower, &300_i128, &settlement_id);
+    assert!(has_event_topic(&env, "liq_setl"));
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Defaulted);
     assert_eq!(line.utilized_amount, 700);
-    assert!(has_event_topic(&env, "liq_setl"));
 
     let replay = catch_unwind(AssertUnwindSafe(|| {
         client.settle_default_liquidation(&borrower, &50_i128, &settlement_id);
@@ -76,12 +76,12 @@ fn settle_full_default_liquidation_closes_credit_line() {
     let client = CreditClient::new(&env, &contract_id);
 
     client.settle_default_liquidation(&borrower, &450_i128, &Symbol::new(&env, "auc_fin"));
+    assert!(has_event_topic(&env, "closed"));
+    assert!(has_event_topic(&env, "liq_setl"));
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Closed);
     assert_eq!(line.utilized_amount, 0);
-    assert!(has_event_topic(&env, "closed"));
-    assert!(has_event_topic(&env, "liq_setl"));
 }
 
 #[test]

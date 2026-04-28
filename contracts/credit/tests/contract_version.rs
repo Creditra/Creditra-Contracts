@@ -18,9 +18,9 @@ fn get_contract_version_returns_expected_value() {
     let (env, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let version = client.get_contract_version();
-    assert_eq!(version.major, 1);
-    assert_eq!(version.minor, 0);
-    assert_eq!(version.patch, 0);
+    assert_eq!(version.0, 1);
+    assert_eq!(version.1, 0);
+    assert_eq!(version.2, 0);
 }
 
 #[test]
@@ -28,10 +28,7 @@ fn get_contract_version_format_is_stable() {
     let (env, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let version = client.get_contract_version();
-    assert!(version.major >= 1, "major version must be at least 1");
-    let _major: u32 = version.major;
-    let _minor: u32 = version.minor;
-    let _patch: u32 = version.patch;
+    assert!(version.0 >= 1, "major version must be at least 1");
 }
 
 #[test]
@@ -39,7 +36,16 @@ fn get_contract_version_matches_module_constant() {
     let (env, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let version = client.get_contract_version();
-    assert_eq!(version.major, CONTRACT_API_VERSION.0, "major must match CONTRACT_API_VERSION");
-    assert_eq!(version.minor, CONTRACT_API_VERSION.1, "minor must match CONTRACT_API_VERSION");
-    assert_eq!(version.patch, CONTRACT_API_VERSION.2, "patch must match CONTRACT_API_VERSION");
+    assert_eq!(
+        version.0, CONTRACT_API_VERSION.0,
+        "major must match CONTRACT_API_VERSION"
+    );
+    assert_eq!(
+        version.1, CONTRACT_API_VERSION.1,
+        "minor must match CONTRACT_API_VERSION"
+    );
+    assert_eq!(
+        version.2, CONTRACT_API_VERSION.2,
+        "patch must match CONTRACT_API_VERSION"
+    );
 }

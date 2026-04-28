@@ -73,12 +73,7 @@ fn setup_env() -> (Env, Address, Address) {
 
 /// Open a credit line and optionally draw `draw_amount` to create principal.
 /// Returns the borrower address.
-fn open_line(
-    env: &Env,
-    contract_id: &Address,
-    credit_limit: i128,
-    draw_amount: i128,
-) -> Address {
+fn open_line(env: &Env, contract_id: &Address, credit_limit: i128, draw_amount: i128) -> Address {
     let borrower = Address::generate(env);
     let client = CreditClient::new(env, contract_id);
     client.open_credit_line(&borrower, &credit_limit, &300_u32, &50_u32);
@@ -446,17 +441,18 @@ fn run_transition(
         admin.clone()
     };
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match (tc.from, tc.to) {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match (tc.from, tc.to) {
             (_, CreditStatus::Suspended) => client.suspend_credit_line(&borrower),
             (_, CreditStatus::Defaulted) => client.default_credit_line(&borrower),
             (_, CreditStatus::Closed) => client.close_credit_line(&borrower, &closer),
-            (_, CreditStatus::Active) => client.reinstate_credit_line(&borrower),
+            (_, CreditStatus::Active) => {
+                client.reinstate_credit_line(&borrower, &CreditStatus::Active)
+            }
             (_, CreditStatus::Restricted) => {
                 panic!("Restricted target not supported in this harness")
             }
-        }
-    }));
+        }));
 
     match result {
         Ok(_) => {
@@ -488,7 +484,10 @@ fn state_transition_matrix() {
                 // Expected failure — pass.
             }
             (true, Err(_)) => {
-                panic!("{}: expected transition to succeed but it panicked", tc.label);
+                panic!(
+                    "{}: expected transition to succeed but it panicked",
+                    tc.label
+                );
             }
             (false, Ok(after)) => {
                 panic!(
@@ -505,7 +504,7 @@ fn state_transition_matrix() {
 /// Debt record is fully preserved across Active → Suspended → Defaulted.
 #[test]
 fn debt_record_preserved_through_suspend_then_default() {
-    let (env, admin, contract_id) = setup_env();
+    let (env, _admin, contract_id) = setup_env();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = open_line(&env, &contract_id, 1_000, 600);
 
@@ -540,7 +539,7 @@ fn debt_record_preserved_through_suspend_then_default() {
 /// No double-counting of interest across Defaulted → Active (reinstate).
 #[test]
 fn no_double_interest_on_reinstate() {
-    let (env, admin, contract_id) = setup_env();
+    let (env, _admin, contract_id) = setup_env();
     let client = CreditClient::new(&env, &contract_id);
     let borrower = open_line(&env, &contract_id, 1_000, 500);
 
@@ -553,7 +552,7 @@ fn no_double_interest_on_reinstate() {
     let interest_at_default = after_default.accrued_interest;
 
     // Reinstate immediately (no time elapsed).
-    client.reinstate_credit_line(&borrower);
+    client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     let after_reinstate = client.get_credit_line(&borrower).unwrap();
     assert_eq!(after_reinstate.status, CreditStatus::Active);
     assert_accounting_invariant(&after_reinstate, "after reinstate");
@@ -656,10 +655,7 @@ fn suspend_only_valid_from_active() {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.suspend_credit_line(&borrower);
         }));
-        assert!(
-            result.is_err(),
-            "suspend from {from:?} must fail"
-        );
+        assert!(result.is_err(), "suspend from {from:?} must fail");
     }
 }
 
@@ -676,12 +672,9 @@ fn reinstate_only_valid_from_defaulted() {
         }
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.reinstate_credit_line(&borrower);
+            client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         }));
-        assert!(
-            result.is_err(),
-            "reinstate from {from:?} must fail"
-        );
+        assert!(result.is_err(), "reinstate from {from:?} must fail");
     }
 }
 
@@ -698,7 +691,10 @@ fn interest_materialized_on_suspend() {
 
     let before = client.get_credit_line(&borrower).unwrap();
     // Before suspend, accrual hasn't fired yet (lazy).
-    assert_eq!(before.accrued_interest, 0, "accrual is lazy before mutation");
+    assert_eq!(
+        before.accrued_interest, 0,
+        "accrual is lazy before mutation"
+    );
 
     client.suspend_credit_line(&borrower);
     let after = client.get_credit_line(&borrower).unwrap();
@@ -757,26 +753,38 @@ fn full_lifecycle_invariant_chain() {
     let c2 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(c2.status, CreditStatus::Suspended);
     assert_accounting_invariant(&c2, "c2 Suspended");
-    assert!(c2.utilized_amount >= c1.utilized_amount, "debt must not decrease");
+    assert!(
+        c2.utilized_amount >= c1.utilized_amount,
+        "debt must not decrease"
+    );
 
     // Default.
     client.default_credit_line(&borrower);
     let c3 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(c3.status, CreditStatus::Defaulted);
     assert_accounting_invariant(&c3, "c3 Defaulted");
-    assert_eq!(c3.utilized_amount, c2.utilized_amount, "no time elapsed, debt unchanged");
+    assert_eq!(
+        c3.utilized_amount, c2.utilized_amount,
+        "no time elapsed, debt unchanged"
+    );
 
     // Reinstate.
-    client.reinstate_credit_line(&borrower);
+    client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     let c4 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(c4.status, CreditStatus::Active);
     assert_accounting_invariant(&c4, "c4 Reinstated");
-    assert_eq!(c4.utilized_amount, c3.utilized_amount, "reinstate must not alter debt");
+    assert_eq!(
+        c4.utilized_amount, c3.utilized_amount,
+        "reinstate must not alter debt"
+    );
 
     // Admin force-close.
     client.close_credit_line(&borrower, &admin);
     let c5 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(c5.status, CreditStatus::Closed);
     assert_accounting_invariant(&c5, "c5 Closed");
-    assert_eq!(c5.utilized_amount, c4.utilized_amount, "close must not alter debt");
+    assert_eq!(
+        c5.utilized_amount, c4.utilized_amount,
+        "close must not alter debt"
+    );
 }

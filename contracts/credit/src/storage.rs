@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::types::ContractError;
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 #[contracttype]
@@ -15,12 +15,15 @@ pub enum DataKey {
     /// Does not affect repayments. Distinct from per-line `Suspended` status.
     DrawsFrozen,
     MaxDrawAmount,
+    /// Minimum interval in seconds required between successive draws for any borrower.
+    DrawMinIntervalSeconds,
+    /// Per-borrower last successful draw timestamp.
+    LastDrawTs(Address),
     /// Per-borrower block flag; when `true`, draw_credit is rejected.
     BlockedBorrower(Address),
-    /// Total count of credit lines opened (for pagination indexing).
-    CreditLineCount,
-    /// Credit line index: maps sequential ID to borrower address.
-    CreditLineById(u64),
+    /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
+    /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
+    UtilizationCapBps(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -57,11 +60,23 @@ pub fn paused_key(env: &Env) -> Symbol {
     Symbol::new(env, "paused")
 }
 
+/// Instance storage key for the grace period configuration.
+pub fn grace_period_key(env: &Env) -> Symbol {
+    Symbol::new(env, "grace_cfg")
+}
+
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 ///
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,
 /// indicating a reentrant call. Caller **must** call [`clear_reentrancy_guard`]
 /// on every success and failure path to release the guard.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("reentrancy")`
+/// - **TTL Note**: Guard is functionally temporary (set on entry, cleared on all exits)
+///   but stored in instance storage for simplicity. Instance TTL must be maintained
+///   separately via `extend_ttl()` calls in frequently-invoked functions.
 pub fn set_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     let current: bool = env.storage().instance().get(&key).unwrap_or(false);
@@ -75,11 +90,22 @@ pub fn set_reentrancy_guard(env: &Env) {
 ///
 /// Must be called on every exit path (success and failure) of any function
 /// that called [`set_reentrancy_guard`].
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `false` (effectively removes the guard)
 pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
 /// Check whether a borrower is blocked from drawing credit.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per borrower)
+/// - **Key**: `DataKey::BlockedBorrower(borrower)`
+/// - **TTL Note**: Each borrower's block status has its own TTL, independent
+///   of their credit line data. TTL should be extended on access.
 pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
     env.storage()
         .persistent()
@@ -88,6 +114,11 @@ pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
 }
 
 /// Set or clear the blocked status for a borrower.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per borrower)
+/// - **Key**: `DataKey::BlockedBorrower(borrower)`
+/// - **TTL Note**: Writes extend the TTL for this specific borrower's block flag.
 #[allow(dead_code)]
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     env.storage()
@@ -95,7 +126,44 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
         .set(&DataKey::BlockedBorrower(borrower.clone()), &blocked);
 }
 
+/// Get the configured minimum draw interval in seconds.
+pub fn get_draw_min_interval(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::DrawMinIntervalSeconds)
+}
+
+/// Set or clear the configured minimum draw interval in seconds.
+pub fn set_draw_min_interval(env: &Env, interval_seconds: u64) {
+    if interval_seconds == 0 {
+        env.storage().instance().remove(&DataKey::DrawMinIntervalSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::DrawMinIntervalSeconds, &interval_seconds);
+    }
+}
+
+/// Get the last successful draw timestamp for a borrower.
+pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastDrawTs(borrower.clone()))
+}
+
+/// Record the last successful draw timestamp for a borrower.
+pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
+}
+
 /// Check whether the protocol is paused.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("paused")`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn is_paused(env: &Env) -> bool {
     env.storage()
         .instance()
@@ -104,6 +172,11 @@ pub fn is_paused(env: &Env) -> bool {
 }
 
 /// Set the protocol pause state (admin only, enforced by caller).
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `Symbol("paused")`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
 }
@@ -116,104 +189,7 @@ pub fn assert_not_paused(env: &Env) {
     }
 }
 
-/// Assert that `new_ts` is strictly greater than `stored_ts` (monotonicity guard).
-///
-/// Reverts with [`ContractError::TimestampRegression`] if `new_ts <= stored_ts`.
-/// A `stored_ts` of zero is treated as "never written" and always passes.
-///
-/// # Ledger timestamp trust assumption
-/// The Soroban ledger timestamp is set by validators and is expected to be
-/// monotonically non-decreasing across ledgers. This guard enforces that
-/// assumption at the application layer: if a validator or test environment
-/// supplies a timestamp that would regress a stored value, the transaction
-/// is rejected rather than silently corrupting state.
-pub fn assert_ts_monotonic(env: &Env, stored_ts: u64, new_ts: u64) {
-    if stored_ts != 0 && new_ts <= stored_ts {
-        env.panic_with_error(crate::types::ContractError::TimestampRegression);
-    }
-}
-
-// ── Credit Line Enumeration ──────────────────────────────────────────────────
-
-/// Get the total count of credit lines opened.
-///
-/// # Storage
-/// - **Type**: Persistent storage (instance-level counter)
-/// - **Key**: `DataKey::CreditLineCount`
-/// - **TTL Note**: Shares persistent storage TTL; extended on each credit line creation.
-pub fn get_credit_line_count(env: &Env) -> u64 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineCount)
-        .unwrap_or(0)
-}
-
-/// Get a page of borrower addresses for credit lines.
-///
-/// Returns up to `limit` borrower addresses starting after `start_after` (exclusive).
-/// Uses sequential IDs assigned at credit line creation for deterministic ordering.
-///
-/// # Parameters
-/// - `start_after`: Optional ID to start after (for pagination). If `None`, starts from the beginning.
-/// - `limit`: Number of entries to return (capped at `MAX_ENUMERATION_LIMIT`).
-///
-/// # Returns
-/// Vector of `(id, borrower_address)` tuples.
-///
-/// # Access Control
-/// Public — anyone can enumerate credit lines for analytics purposes.
-///
-/// # Storage
-/// - **Type**: Persistent storage reads
-/// - **Key**: `DataKey::CreditLineById(u64)`
-/// - **TTL Note**: Read-only; no TTL extension needed.
-///
-/// # Gas Considerations
-/// - Each entry requires one persistent storage read.
-/// - `limit` is capped at `MAX_ENUMERATION_LIMIT` (100) to prevent gas exhaustion.
-pub fn get_credit_lines_page(
-    env: &Env,
-    start_after: Option<u64>,
-    limit: u32,
-) -> Vec<(u64, Address)> {
-    let limit = limit.min(MAX_ENUMERATION_LIMIT);
-    let count = get_credit_line_count(env);
-    let start_id = start_after.map(|id| id + 1).unwrap_or(0);
-    let mut result = Vec::new(env);
-
-    let mut current_id = start_id;
-    while result.len() < limit && current_id < count {
-        if let Some(borrower) = env
-            .storage()
-            .persistent()
-            .get::<_, Address>(&DataKey::CreditLineById(current_id))
-        {
-            result.push_back((current_id, borrower));
-        }
-        current_id += 1;
-    }
-
-    result
-}
-
-/// Add a new credit line to the enumeration index.
-///
-/// Called internally when opening a new credit line. Assigns the next sequential ID
-/// and stores the borrower address at that ID.
-///
-/// # Storage
-/// - Writes `DataKey::CreditLineById(next_id)` with the borrower address
-/// - Increments `DataKey::CreditLineCount`
-///
-/// # Returns
-/// The assigned credit line ID.
-pub fn add_credit_line_to_index(env: &Env, borrower: &Address) -> u64 {
-    let next_id = get_credit_line_count(env);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineById(next_id), borrower);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineCount, &(next_id + 1));
-    next_id
+/// Instance storage key for the grace period policy.
+pub fn grace_period_key(env: &Env) -> Symbol {
+    Symbol::new(env, "grace_cfg")
 }

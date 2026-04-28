@@ -2,12 +2,11 @@
 
 //! Tests for the risk-score-based dynamic interest rate formula (issue #265).
 
-use crate::types::{CreditStatus, RateFormulaConfig};
 use crate::risk::{compute_rate_from_score, MAX_INTEREST_RATE_BPS};
+use crate::types::{CreditStatus, RateFormulaConfig};
 use crate::{Credit, CreditClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
-
 
 fn make_cfg(base: u32, slope: u32, min: u32, max: u32) -> RateFormulaConfig {
     RateFormulaConfig {
@@ -184,7 +183,10 @@ fn formula_clamps_to_min_for_low_score() {
     client.set_rate_formula_config(&100_u32, &10_u32, &500_u32, &5000_u32);
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &0_u32);
 
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 500);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        500
+    );
 }
 
 #[test]
@@ -202,7 +204,10 @@ fn formula_clamps_to_max_for_high_score() {
     client.set_rate_formula_config(&200_u32, &100_u32, &100_u32, &5000_u32);
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &100_u32);
 
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 5000);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        5000
+    );
 }
 
 #[test]
@@ -219,12 +224,18 @@ fn clearing_formula_restores_manual_mode() {
     // Formula mode
     client.set_rate_formula_config(&200_u32, &50_u32, &100_u32, &5000_u32);
     client.update_risk_parameters(&borrower, &10_000_i128, &9999_u32, &60_u32);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 3200);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        3200
+    );
 
     // Back to manual
     client.clear_rate_formula_config();
     client.update_risk_parameters(&borrower, &10_000_i128, &800_u32, &60_u32);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 800);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        800
+    );
 }
 
 // ── Config validation tests ──────────────────────────────────────────────
@@ -307,15 +318,24 @@ fn formula_with_all_boundary_scores() {
 
     // Score 0: raw=300 → 300
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &0_u32);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 300);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        300
+    );
 
     // Score 50: raw=300+3500=3800
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &50_u32);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 3800);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        3800
+    );
 
     // Score 100: raw=300+7000=7300
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &100_u32);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 7300);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        7300
+    );
 }
 
 #[test]
@@ -347,7 +367,7 @@ fn formula_update_respects_rate_change_limits() {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     // Initial rate = 300, score = 0
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &0_u32);
 
@@ -358,7 +378,7 @@ fn formula_update_respects_rate_change_limits() {
     // At score 1, rate = 300 + 1*100 = 400.
     // Delta = 400 - 300 = 100, which exceeds limit 50.
     client.set_rate_formula_config(&300_u32, &100_u32, &100_u32, &5000_u32);
-    
+
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &1_u32);
 }
 
@@ -371,7 +391,7 @@ fn formula_update_within_rate_change_limits_succeeds() {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     // Initial rate = 300, score = 0
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &0_u32);
 
@@ -381,8 +401,11 @@ fn formula_update_within_rate_change_limits_succeeds() {
     // Enable formula: base=300, slope=100.
     // At score 1, rate = 400. Delta = 100 <= 150.
     client.set_rate_formula_config(&300_u32, &100_u32, &100_u32, &5000_u32);
-    
+
     client.update_risk_parameters(&borrower, &10_000_i128, &0_u32, &1_u32);
-    
-    assert_eq!(client.get_credit_line(&borrower).unwrap().interest_rate_bps, 400);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().interest_rate_bps,
+        400
+    );
 }
