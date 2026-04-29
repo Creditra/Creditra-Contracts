@@ -1524,6 +1524,109 @@ pub mod test_helpers {
             TokenClient::new(&self.env, &self.address).allowance(from, spender)
         }
     }
+
+    /// A mock token that can be configured to fail on transfer operations.
+    pub struct FailingToken {
+        pub address: Address,
+        env: Env,
+        should_fail_transfer: bool,
+        should_fail_transfer_from: bool,
+    }
+
+    impl FailingToken {
+        pub fn deploy(env: &Env) -> Self {
+            let admin = Address::generate(env);
+            let token_id = env.register_stellar_asset_contract_v2(admin);
+            Self {
+                address: token_id.address(),
+                env: env.clone(),
+                should_fail_transfer: false,
+                should_fail_transfer_from: false,
+            }
+        }
+
+        pub fn set_fail_transfer(&mut self, fail: bool) {
+            self.should_fail_transfer = fail;
+        }
+
+        pub fn set_fail_transfer_from(&mut self, fail: bool) {
+            self.should_fail_transfer_from = fail;
+        }
+
+        pub fn address(&self) -> Address {
+            self.address.clone()
+        }
+
+        pub fn mint(&self, to: &Address, amount: i128) {
+            StellarAssetClient::new(&self.env, &self.address).mint(to, &amount);
+        }
+
+        pub fn approve(&self, from: &Address, spender: &Address, amount: i128, expiry: u32) {
+            TokenClient::new(&self.env, &self.address).approve(from, spender, &amount, &expiry);
+        }
+
+        pub fn balance(&self, who: &Address) -> i128 {
+            TokenClient::new(&self.env, &self.address).balance(who)
+        }
+
+        pub fn allowance(&self, from: &Address, spender: &Address) -> i128 {
+            TokenClient::new(&self.env, &self.address).allowance(from, spender)
+        }
+
+        pub fn transfer(&self, from: &Address, to: &Address, amount: i128) {
+            if self.should_fail_transfer {
+                panic!("Mock token transfer failure");
+            }
+            TokenClient::new(&self.env, &self.address).transfer(from, to, &amount);
+        }
+
+        pub fn transfer_from(&self, spender: &Address, from: &Address, to: &Address, amount: i128) {
+            if self.should_fail_transfer_from {
+                panic!("Mock token transfer_from failure");
+            }
+            TokenClient::new(&self.env, &self.address).transfer_from(spender, from, to, &amount);
+        }
+    }
+
+    /// A simple token contract that can be configured to fail on transfers.
+    #[contractimpl]
+    pub struct FailingTokenContract {
+        fail_transfer: bool,
+        fail_transfer_from: bool,
+    }
+
+    #[contractimpl]
+    impl FailingTokenContract {
+        pub fn init(env: Env, fail_transfer: bool, fail_transfer_from: bool) {
+            env.storage().instance().set(&symbol_short!("fail_transfer"), &fail_transfer);
+            env.storage().instance().set(&symbol_short!("fail_transfer_from"), &fail_transfer_from);
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let fail: bool = env.storage().instance().get(&symbol_short!("fail_transfer")).unwrap_or(false);
+            if fail {
+                env.panic_with_error(ContractError::InvalidAmount); // arbitrary error
+            }
+            // For simplicity, assume balances are handled elsewhere
+        }
+
+        pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+            spender.require_auth();
+            let fail: bool = env.storage().instance().get(&symbol_short!("fail_transfer_from")).unwrap_or(false);
+            if fail {
+                env.panic_with_error(ContractError::InvalidAmount);
+            }
+        }
+
+        pub fn balance(env: Env, _id: Address) -> i128 {
+            1_000_000 // dummy balance
+        }
+
+        pub fn allowance(env: Env, _from: Address, _spender: Address) -> i128 {
+            1_000_000 // dummy allowance
+        }
+    }
 }
 #[cfg(test)]
 mod test_mock_liquidity_token {

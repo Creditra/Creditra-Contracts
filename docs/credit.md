@@ -73,6 +73,18 @@ call for the same borrower address starts a fresh record and resets all fields.
 | Closed     | ❌ Blocked     | ❌ Blocked      |
 | Restricted | ❌ Blocked     | ✅ Allowed      |
 
+## Soroban Atomicity Guarantees
+
+The Credit contract relies on Soroban's transaction atomicity guarantees for state consistency:
+
+- **Atomic execution**: All operations within a single contract call either succeed completely or fail completely. Partial state changes are impossible.
+- **Token transfer safety**: External token contract calls (e.g., `transfer`, `transfer_from`) are integrated into the atomic transaction. If a token transfer fails, all storage updates are rolled back.
+- **Reentrancy protection**: A reentrancy guard is set at the start of `draw_credit` and `repay_credit` and cleared at the end. If the transaction fails (e.g., due to token transfer failure), the guard is automatically rolled back, preventing stuck guards.
+- **Ordering**: Token transfers occur before storage updates in both `draw_credit` and `repay_credit`. This ensures that failed transfers do not leave inconsistent utilization state.
+- **No inconsistent states**: Failures never result in updated `utilized_amount` without corresponding token movement, or vice versa.
+
+These guarantees ensure that the contract maintains invariants even under adversarial token contract behavior or unexpected failures.
+
 ## Methods
 
 ### `init(env, admin)`
@@ -170,7 +182,8 @@ Draw funds from an **Active** credit line. Only the borrower is authorized to ca
 - Reverts with `ContractError::DrawCooldownActive` (29) when a borrower attempts to draw again before the configured cooldown interval has elapsed.
 - Reverts with `ContractError::OverLimit` (6) if draw exceeds `credit_limit`.
 - Reverts with `ContractError::InsufficientLiquidityReserve` (24) if the configured reserve balance is lower than the requested draw amount.
-- Transfers tokens from liquidity source → borrower.
+- Transfers tokens from liquidity source → borrower **before** updating storage. If the transfer fails, the call reverts with no state change due to Soroban transaction atomicity.
+- Updates `utilized_amount` and sets draw timestamp after successful transfer.
 
 Emits: `("credit", "drawn")` event.
 
@@ -198,7 +211,7 @@ Repay outstanding drawn funds.
 5. **Update state** — `accrued_interest` and `utilized_amount` are reduced accordingly.
 
 - The borrower must have approved the contract to pull tokens via `transfer_from`.
-- Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change.
+- Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change due to Soroban transaction atomicity.
 - Repayment failures due to insufficient allowance or balance do not alter `utilized_amount`, `accrued_interest`, or the credit line record.
 - Works even when no liquidity token is configured (state-only update).
 
