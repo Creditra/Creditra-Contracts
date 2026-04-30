@@ -96,6 +96,21 @@ impl Credit {
         publish_admin_rotation_accepted(&env, &proposed_admin);
     }
 
+    /// Sets the SAC (Stellar Asset Contract) or compatible token contract used for
+    /// reserve balance checks, draw transfers, and repayment transfers.
+    ///
+    /// # Authorization
+    /// Requires administrative privileges. The configured admin must authorize this
+    /// call via `require_auth()`; unauthorized callers are rejected before any
+    /// storage mutation occurs.
+    ///
+    /// # Storage
+    /// Writes `token_address` to instance storage under [`DataKey::LiquidityToken`].
+    /// Calling this function a second time overwrites the previously stored address.
+    ///
+    /// # Errors
+    /// - Panics with [`ContractError::Paused`] if the protocol circuit-breaker is active.
+    /// - Panics with auth error if the caller is not the configured admin.
     pub fn set_liquidity_token(env: Env, token_address: Address) {
         assert_not_paused(&env);
         require_admin_auth(&env);
@@ -892,6 +907,40 @@ mod test_coverage {
         let client2 = CreditClient::new(&env2, &contract_id);
         let token = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client2.set_liquidity_token(&token.address());
+    }
+
+    /// Verifies that calling `set_liquidity_token` a second time overwrites the
+    /// previously stored address with the new one.
+    #[test]
+    fn config_set_liquidity_token_overwrite_replaces_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        // Set an initial token address.
+        let token_a = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
+        client.set_liquidity_token(&token_a);
+
+        // Overwrite with a different token address.
+        let token_b = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
+        client.set_liquidity_token(&token_b);
+
+        // The stored value must reflect the latest address.
+        let stored: Address = env
+            .as_contract(&contract_id, || {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::LiquidityToken)
+                    .expect("LiquidityToken must be set")
+            });
+        assert_eq!(stored, token_b, "overwrite should replace the stored token");
     }
 
     #[test]
