@@ -2,6 +2,10 @@
 
 //! Credit line lifecycle management: suspend, close, default, reinstate, and liquidation settlement.
 //!
+//! Restricted is handled by the risk-update and draw-policy paths: it is not a
+//! separate lifecycle transition target, but a repayment-capable cure state
+//! created when a limit decrease drops below current utilization.
+//!
 //! # Storage
 //! - **Borrower credit lines**: Persistent storage (independent TTL per borrower)
 //!   - Key: `borrower: Address`
@@ -500,7 +504,7 @@ mod test_close_credit_line {
         }
 
         pub fn reinstate(env: Env, borrower: Address) {
-            reinstate_credit_line(env, borrower);
+            reinstate_credit_line(env, borrower, CreditStatus::Active);
         }
 
         pub fn get(env: Env, borrower: Address) -> Option<CreditLineData> {

@@ -56,7 +56,7 @@ fn draw_credit_insufficient_reserve_rolls_back() {
     assert!(result.is_err(), "draw_credit should fail on insufficient reserve");
 
     // Verify state is unchanged
-    let line = client.get_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 0, "utilized_amount should remain 0");
     assert_eq!(line.status, creditra_credit::types::CreditStatus::Active, "status should remain Active");
 
@@ -88,7 +88,7 @@ fn repay_credit_insufficient_allowance_rolls_back() {
     assert!(result.is_err(), "repay_credit should fail on insufficient allowance");
 
     // Verify state is unchanged
-    let line = client.get_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 500, "utilized_amount should remain 500");
     assert_eq!(line.accrued_interest, 0, "accrued_interest should remain 0");
 
@@ -119,7 +119,7 @@ fn repay_credit_insufficient_balance_rolls_back() {
     assert!(result.is_err(), "repay_credit should fail on insufficient balance");
 
     // Verify state is unchanged
-    let line = client.get_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 500, "utilized_amount should remain 500");
 
     // Verify no repayment event
@@ -148,7 +148,7 @@ fn reentrancy_guard_cleared_on_draw_failure() {
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &100);
     client.draw_credit(&borrower, &500);
 
-    let line = client.get_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 500, "should succeed after fixing reserve");
 }
 
@@ -176,6 +176,6 @@ fn reentrancy_guard_cleared_on_repay_failure() {
     token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &500);
     client.repay_credit(&borrower, &500);
 
-    let line = client.get_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 0, "should succeed after fixing allowance");
 }

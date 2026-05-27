@@ -13,6 +13,7 @@
 | `Suspended` | 1 | Draws are blocked. Repayments remain allowed. |
 | `Defaulted` | 2 | Draws are blocked. Repayments remain allowed. |
 | `Closed` | 3 | Terminal state for the current line record. |
+| `Restricted` | 4 | Limit is below utilization; repayment remains allowed, and draw attempts stay blocked until the line is cured back to `Active`. |
 
 ---
 
@@ -51,6 +52,7 @@
 3. `self_suspend_credit_line` requires borrower auth and does not create any borrower-controlled reactivation path.
 4. Returning a self-suspended line to `Active` requires an admin-approved reopen workflow.
 5. Re-opening any existing non-`Active` line requires admin auth to prevent borrowers from bypassing self-suspend or other admin controls.
+6. `Restricted` is a cure state created by a limit decrease below utilization: repayment remains allowed, but draw attempts do not create new net borrowing and stay blocked until the admin restores the line to `Active`.
 
 ---
 

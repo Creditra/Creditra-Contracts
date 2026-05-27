@@ -2,9 +2,9 @@
 
 //! Tests for credit line enumeration with pagination.
 
-use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
-soroban_sdk::contractimport!(file = "../target/wasm32-unknown-unknown/release/creditra_credit.wasm");
+soroban_sdk::contractimport!(file = "../../../target/wasm32-unknown-unknown/release/creditra_credit.wasm");
 
 pub struct TestEnv {
     env: Env,
@@ -99,7 +99,7 @@ fn test_enumerate_pagination_first_page() {
     let test_env = TestEnv::new();
 
     // Create 5 credit lines
-    let borrowers: Vec<Address> = (0..5)
+    let borrowers: std::vec::Vec<Address> = (0..5)
         .map(|_| Address::generate(&test_env.env))
         .collect();
 
@@ -119,7 +119,7 @@ fn test_enumerate_pagination_second_page() {
     let test_env = TestEnv::new();
 
     // Create 5 credit lines
-    let borrowers: Vec<Address> = (0..5)
+    let borrowers: std::vec::Vec<Address> = (0..5)
         .map(|_| Address::generate(&test_env.env))
         .collect();
 
@@ -143,7 +143,7 @@ fn test_enumerate_pagination_last_page_partial() {
     let test_env = TestEnv::new();
 
     // Create 5 credit lines
-    let borrowers: Vec<Address> = (0..5)
+    let borrowers: std::vec::Vec<Address> = (0..5)
         .map(|_| Address::generate(&test_env.env))
         .collect();
 

@@ -181,10 +181,10 @@ fn get_liquidity_source_returns_configured_source() {
 }
 
 #[test]
-fn get_schema_version_returns_none_initially() {
+fn get_contract_version_returns_expected_default() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
-    assert!(client.get_schema_version().is_none());
+    assert_eq!(client.get_contract_version(), (1, 0, 0));
 }
 
 #[test]
