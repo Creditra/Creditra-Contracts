@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use crate::types::ContractError;
+use crate::types::{ContractError, CreditLineData};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.

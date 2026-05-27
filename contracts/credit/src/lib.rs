@@ -30,15 +30,15 @@ use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_credit_line_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_repayment_event, AdminRotationAcceptedEvent,
-    AdminRotationProposedEvent, CreditLineEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
+    publish_interest_accrued_event, publish_repayment_event, CreditLineEvent, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent,
 };
 use crate::math_utils::{mul_div, Rounding};
 use crate::storage::{
-    admin_key, assert_not_paused, clear_reentrancy_guard,
-    is_borrower_blocked as storage_is_borrower_blocked, proposed_admin_key, proposed_at_key,
-    rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked, set_borrower_unblocked,
-    set_reentrancy_guard, DataKey,
+    admin_key, assert_not_paused, clear_reentrancy_guard, get_borrower_by_credit_line_id,
+    is_borrower_blocked as storage_is_borrower_blocked, persist_credit_line, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
+    set_borrower_unblocked, set_reentrancy_guard, DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
