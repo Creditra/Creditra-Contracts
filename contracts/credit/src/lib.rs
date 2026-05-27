@@ -42,6 +42,7 @@ use crate::events::{
     AdminRotationAcceptedEvent, AdminRotationProposedEvent, CreditLineEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
+use crate::math_utils::{mul_div, Rounding};
 use crate::storage::{
     admin_key, assert_not_paused, clear_reentrancy_guard, proposed_admin_key, proposed_at_key,
     rate_cfg_key, set_reentrancy_guard, DataKey,
@@ -326,14 +327,20 @@ impl Credit {
             .instance()
             .get::<_, u32>(&DataKey::UtilizationCapBps(borrower.clone()))
         {
-            let cap_amount = credit_line
-                .credit_limit
-                .checked_mul(cap_bps as i128)
-                .and_then(|v| v.checked_div(10_000))
-                .unwrap_or_else(|| {
-                    clear_reentrancy_guard(&env);
-                    env.panic_with_error(ContractError::Overflow)
-                });
+            let credit_limit_u128 = u128::try_from(credit_line.credit_limit).unwrap_or_else(|_| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::Overflow)
+            });
+            let cap_amount = i128::try_from(mul_div(
+                credit_limit_u128,
+                cap_bps as u128,
+                10_000,
+                Rounding::Floor,
+            ))
+            .unwrap_or_else(|_| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::Overflow)
+            });
             if updated_utilized > cap_amount {
                 clear_reentrancy_guard(&env);
                 panic!("exceeds utilization cap");
@@ -3957,22 +3964,22 @@ mod test_max_repay_amount {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
-        
+
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
-        
+
         // Mint to contract to allow draw
         StellarAssetClient::new(env, &token).mint(&contract_id, &5_000_i128);
-        
+
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-        
+
         // Draw some credit to repay later
         client.draw_credit(&borrower, &500_i128);
-        
+
         // Mint to borrower so they have funds to repay
         StellarAssetClient::new(env, &token).mint(&borrower, &5_000_i128);
-        
+
         (client, admin, borrower, token)
     }
 
@@ -3980,9 +3987,9 @@ mod test_max_repay_amount {
     fn test_unset_max_repay_amount_allows_any() {
         let env = Env::default();
         let (client, _admin, borrower, _token) = setup_with_token(&env);
-        
+
         assert_eq!(client.get_max_repay_amount(), None);
-        
+
         client.repay_credit(&borrower, &400_i128);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.utilized_amount, 100);
@@ -3992,7 +3999,7 @@ mod test_max_repay_amount {
     fn test_set_and_get_max_repay_amount() {
         let env = Env::default();
         let (client, _admin, _borrower, _token) = setup_with_token(&env);
-        
+
         client.set_max_repay_amount(&300_i128);
         assert_eq!(client.get_max_repay_amount(), Some(300_i128));
     }
@@ -4002,7 +4009,7 @@ mod test_max_repay_amount {
     fn test_repay_exceeds_max_cap_reverts() {
         let env = Env::default();
         let (client, _admin, borrower, _token) = setup_with_token(&env);
-        
+
         client.set_max_repay_amount(&300_i128);
         client.repay_credit(&borrower, &400_i128);
     }
@@ -4011,7 +4018,7 @@ mod test_max_repay_amount {
     fn test_repay_within_max_cap_succeeds() {
         let env = Env::default();
         let (client, _admin, borrower, _token) = setup_with_token(&env);
-        
+
         client.set_max_repay_amount(&300_i128);
         client.repay_credit(&borrower, &300_i128);
         let line = client.get_credit_line(&borrower).unwrap();
@@ -4023,7 +4030,7 @@ mod test_max_repay_amount {
     fn test_set_max_repay_amount_zero_or_negative() {
         let env = Env::default();
         let (client, _admin, _borrower, _token) = setup_with_token(&env);
-        
+
         client.set_max_repay_amount(&0_i128);
     }
 }
