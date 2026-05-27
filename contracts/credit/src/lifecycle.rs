@@ -174,3 +174,67 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         },
     );
 }
+
+/// Allow a borrower to voluntarily suspend their own credit line.
+///
+/// This function enables borrowers to freeze their own line of credit without admin intervention.
+/// Only the borrower who owns the credit line can invoke this action.
+///
+/// # Parameters
+/// - `borrower`: The borrower's address (must authorize this call).
+///
+/// # Authorization
+/// - Requires authorization from the `borrower` address.
+/// - Admin cannot invoke this function on behalf of a borrower.
+///
+/// # State Transitions
+/// - Valid: `Active` → `Suspended`
+/// - Invalid: Any other status (Suspended, Defaulted, Closed) will cause a panic.
+///
+/// # Post-Suspension Behavior
+/// - Draw operations are blocked while the line is self-suspended.
+/// - Repayment operations remain allowed.
+/// - Admin can reinstate the line to Active status via `reinstate_credit_line`.
+/// - Admin can force-close the line via `close_credit_line`.
+///
+/// # Panics
+/// - If no credit line exists for the given borrower.
+/// - If the credit line status is not `Active`.
+/// - If the caller is not the borrower (authorization failure).
+///
+/// # Events
+/// Emits a `("credit", "selfsus")` [`CreditLineEvent`] with the updated status.
+pub fn self_suspend_credit_line(env: Env, borrower: Address) {
+    // Require authorization from the borrower (not admin)
+    borrower.require_auth();
+
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+
+    // Only allow self-suspension from Active status
+    if credit_line.status != CreditStatus::Active {
+        panic!("Only active credit lines can be self-suspended");
+    }
+
+    credit_line.status = CreditStatus::Suspended;
+    env.storage().persistent().set(&borrower, &credit_line);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("selfsus")),
+        CreditLineEvent {
+            event_type: symbol_short!("selfsus"),
+            borrower: borrower.clone(),
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
+}

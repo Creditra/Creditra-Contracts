@@ -577,12 +577,20 @@ impl Credit {
         lifecycle::suspend_credit_line(env, borrower)
     }
 
+    pub fn self_suspend_credit_line(env: Env, borrower: Address) {
+        lifecycle::self_suspend_credit_line(env, borrower)
+    }
+
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         lifecycle::close_credit_line(env, borrower, closer)
     }
 
     pub fn default_credit_line(env: Env, borrower: Address) {
         lifecycle::default_credit_line(env, borrower)
+    }
+
+    pub fn reinstate_credit_line(env: Env, borrower: Address) {
+        lifecycle::reinstate_credit_line(env, borrower)
     }
 
 // duplicate wrapper removed
