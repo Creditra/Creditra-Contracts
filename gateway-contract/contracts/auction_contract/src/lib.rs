@@ -7,7 +7,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 
 use crate::types::*;
 use events::{
-    publish_auction_closed_event, publish_bid_refunded_event, publish_default_liquidation_settlement_event,
+    publish_auction_closed_event, publish_bid_refunded_event,
+    publish_default_liquidation_settlement_event,
 };
 
 #[contract]
@@ -22,7 +23,13 @@ pub enum AuctionKey {
 
 #[contractimpl]
 impl Auction {
-    pub fn init_auction(env: Env, auction_id: Symbol, start_time: u64, end_time: u64, min_bid: i128) {
+    pub fn init_auction(
+        env: Env,
+        auction_id: Symbol,
+        start_time: u64,
+        end_time: u64,
+        min_bid: i128,
+    ) {
         if start_time >= end_time {
             panic!("invalid times");
         }
@@ -99,7 +106,11 @@ impl Auction {
             if let Some(tkn) = token_addr {
                 let token_client = token::Client::new(&env, &tkn);
                 // Contract is the sender of refund transfers (for tests this will be mocked)
-                token_client.transfer(&env.current_contract_address(), prev_bidder, &state.highest_bid);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    prev_bidder,
+                    &state.highest_bid,
+                );
             }
         }
 
@@ -142,7 +153,10 @@ impl Auction {
 
         env.storage().persistent().set(&settlement_key, &true);
 
-        let winner = state.highest_bidder.clone().unwrap_or_else(|| borrower.clone());
+        let winner = state
+            .highest_bidder
+            .clone()
+            .unwrap_or_else(|| borrower.clone());
         publish_default_liquidation_settlement_event(
             &env,
             auction_id,
@@ -169,7 +183,10 @@ impl Auction {
             panic!("auction not closed");
         }
 
-        let winner = state.highest_bidder.clone().unwrap_or_else(|| panic!("no winner"));
+        let winner = state
+            .highest_bidder
+            .clone()
+            .unwrap_or_else(|| panic!("no winner"));
         winner.require_auth();
 
         if state.status == AuctionStatus::Claimed {

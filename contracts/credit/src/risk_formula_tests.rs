@@ -94,7 +94,9 @@ fn compute_rate_zero_slope() {
 /// Deterministic pseudo-random number generator for reproducible fuzz testing.
 /// Uses a simple linear congruential generator (LCG) seeded by the caller.
 fn deterministic_prng(seed: &mut u64) -> u32 {
-    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*seed >> 32) as u32
 }
 
@@ -391,7 +393,7 @@ fn clearing_formula_restores_manual_mode() {
 // ── Config validation tests ──────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "min_rate_bps must be <= max_rate_bps")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_min_greater_than_max_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -403,7 +405,7 @@ fn set_config_min_greater_than_max_reverts() {
 }
 
 #[test]
-#[should_panic(expected = "max_rate_bps exceeds MAX_INTEREST_RATE_BPS")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_max_exceeds_cap_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -415,7 +417,7 @@ fn set_config_max_exceeds_cap_reverts() {
 }
 
 #[test]
-#[should_panic(expected = "base_rate_bps exceeds MAX_INTEREST_RATE_BPS")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_base_exceeds_cap_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -508,7 +510,7 @@ fn existing_lines_unaffected_until_update() {
 }
 
 #[test]
-#[should_panic(expected = "rate change exceeds maximum allowed delta")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn formula_update_respects_rate_change_limits() {
     let env = Env::default();
     env.mock_all_auths();

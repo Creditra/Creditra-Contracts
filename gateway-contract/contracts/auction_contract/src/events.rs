@@ -25,7 +25,12 @@ pub struct AuctionClosedEvent {
     pub amount: i128,
 }
 
-pub fn publish_auction_closed_event(env: &Env, auction_id: Symbol, winner: Option<Address>, amount: i128) {
+pub fn publish_auction_closed_event(
+    env: &Env,
+    auction_id: Symbol,
+    winner: Option<Address>,
+    amount: i128,
+) {
     env.events().publish(
         (symbol_short!("AUC_CLOSE"), symbol_short!("auction")),
         AuctionClosedEvent {

@@ -76,6 +76,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
 /// Creating a brand-new line preserves the existing backend/risk-engine trust
 /// boundary. Re-opening any existing non-Active line requires admin auth so a
 /// borrower cannot self-suspend and then reactivate themselves on-chain.
+#[allow(dead_code)]
 pub fn open_credit_line(
     env: Env,
     borrower: Address,
@@ -211,6 +212,7 @@ pub fn self_suspend_credit_line(env: Env, borrower: Address) {
 /// - Closing does **not** require prior suspension or default; admin can force-close from any
 ///   non-closed status. This is intentional for operational efficiency.
 pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
+    assert_not_paused(&env);
     // Authenticate the closer before any storage access.
     closer.require_auth();
 
@@ -789,13 +791,12 @@ mod test_close_credit_line {
         open_line(&client, &borrower);
 
         client.close(&borrower, &admin);
-        let event_count_after_first = env.events().all().len();
 
         client.close(&borrower, &admin); // idempotent
         let event_count_after_second = env.events().all().len();
 
         assert_eq!(
-            event_count_after_first, event_count_after_second,
+            event_count_after_second, 0,
             "idempotent close must not emit a second event"
         );
     }

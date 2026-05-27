@@ -8,7 +8,6 @@
 //! - freeze_draws/unfreeze_draws toggle the flag correctly
 //! - draw_credit is blocked when draws are frozen
 
-use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
@@ -42,7 +41,10 @@ fn is_draws_frozen_returns_false_on_freshly_initialized_contract() {
     let client = CreditClient::new(&env, &contract_id);
 
     // On a freshly initialized contract, is_draws_frozen should return false
-    assert!(!client.is_draws_frozen(), "is_draws_frozen should return false by default before any freeze_draws call");
+    assert!(
+        !client.is_draws_frozen(),
+        "is_draws_frozen should return false by default before any freeze_draws call"
+    );
 }
 
 // ── freeze_draws/unfreeze_draws toggle ────────────────────────────────────────
@@ -55,7 +57,10 @@ fn freeze_draws_sets_flag_to_true() {
     assert!(!client.is_draws_frozen(), "should start unfrozen");
 
     client.freeze_draws();
-    assert!(client.is_draws_frozen(), "should be frozen after freeze_draws");
+    assert!(
+        client.is_draws_frozen(),
+        "should be frozen after freeze_draws"
+    );
 }
 
 #[test]
@@ -67,7 +72,10 @@ fn unfreeze_draws_sets_flag_to_false() {
     assert!(client.is_draws_frozen());
 
     client.unfreeze_draws();
-    assert!(!client.is_draws_frozen(), "should be unfrozen after unfreeze_draws");
+    assert!(
+        !client.is_draws_frozen(),
+        "should be unfrozen after unfreeze_draws"
+    );
 }
 
 // ── draw_credit blocked when frozen ───────────────────────────────────────────
@@ -93,7 +101,10 @@ fn draw_credit_blocked_when_draws_frozen() {
         client.draw_credit(&borrower, &500);
     }));
 
-    assert!(result.is_err(), "draw_credit must fail when draws are frozen");
+    assert!(
+        result.is_err(),
+        "draw_credit must fail when draws are frozen"
+    );
 }
 
 // ── repay_credit succeeds while frozen (critical safety feature) ───────────────

@@ -50,6 +50,7 @@ pub fn get_schema_version(env: &Env) -> Option<u32> {
 }
 
 /// Persist the schema version.
+#[allow(dead_code)]
 pub fn set_schema_version(env: &Env, version: u32) {
     env.storage()
         .instance()
@@ -284,6 +285,7 @@ pub fn set_draw_min_interval(env: &Env, interval_seconds: u64) {
 }
 
 /// Get the last successful draw timestamp for a borrower.
+#[allow(dead_code)]
 pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
     env.storage()
         .persistent()
@@ -291,6 +293,7 @@ pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
 }
 
 /// Record the last successful draw timestamp for a borrower.
+#[allow(dead_code)]
 pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
     env.storage()
         .persistent()

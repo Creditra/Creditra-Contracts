@@ -26,7 +26,7 @@ use soroban_sdk::{Address, Env};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
+fn setup(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let borrower = Address::generate(env);
@@ -46,7 +46,10 @@ fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
     (client, admin, borrower, contract_id)
 }
 
-fn setup_multi(env: &Env, borrower_count: usize) -> (CreditClient, Address, std::vec::Vec<Address>, Address) {
+fn setup_multi(
+    env: &Env,
+    borrower_count: usize,
+) -> (CreditClient<'_>, Address, std::vec::Vec<Address>, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -357,7 +360,7 @@ fn total_utilized_matches_sum_of_credit_lines_with_cap_active() {
     // Verify by summing individual credit lines.
     let mut total_from_lines = 0_i128;
     for b in borrowers.iter() {
-        total_from_lines += client.get_credit_line(&b).unwrap().utilized_amount;
+        total_from_lines += client.get_credit_line(b).unwrap().utilized_amount;
     }
 
     assert_eq!(total_from_accumulator, total_from_lines);

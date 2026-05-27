@@ -21,7 +21,7 @@ use creditra_credit::{Credit, CreditClient};
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn deploy(env: &Env) -> (CreditClient, Address) {
+fn deploy(env: &Env) -> (CreditClient<'_>, Address) {
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(env, &contract_id);
@@ -145,8 +145,8 @@ fn admin_gated_call_before_init_reverts() {
     let client = CreditClient::new(&env, &contract_id);
 
     // No init call — admin is not set — this must panic.
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+    // freeze_draws requires admin auth and will fail because no admin is stored.
+    client.freeze_draws();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

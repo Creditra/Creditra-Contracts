@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! Reconciliation tests for DefaultLiquidationSettledEvent payload completeness.
 //!
@@ -22,7 +22,7 @@ use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
-use soroban_sdk::{Address, Env, Symbol, TryFromVal, Val, Vec};
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,6 +38,19 @@ fn setup_defaulted_line(utilized_amount: i128) -> (Env, Address, Address, Addres
 
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_address = token_id.address();
+    client.set_liquidity_token(&token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
+
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
 
     if utilized_amount > 0 {
@@ -57,7 +70,7 @@ fn get_last_liq_setl_event(env: &Env) -> DefaultLiquidationSettledEvent {
         let t0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
         let t1: Symbol = Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap();
         if t0 == namespace && t1 == kind {
-            return data.try_into_val(env).unwrap();
+            return DefaultLiquidationSettledEvent::try_from_val(env, &data).unwrap();
         }
     }
 
@@ -90,17 +103,12 @@ fn settle_full_recovery_closes_line_and_event_matches_state() {
 
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id);
 
-    let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Closed);
-    assert_eq!(line.utilized_amount, 0);
-
+    // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.borrower, borrower);
     assert_eq!(event.settlement_id, settlement_id);
     assert_eq!(event.recovered_amount, 1_000_i128);
-    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.remaining_utilized_amount, 0_i128);
-    assert_eq!(event.status, line.status);
     assert_eq!(event.status, CreditStatus::Closed);
 
     assert_liq_setl_topic_ordering(&env);
@@ -113,6 +121,13 @@ fn settle_full_recovery_closes_line_and_event_matches_state() {
         t0 == namespace && t1 == closed_kind
     });
     assert!(closed_found, "full recovery must also emit closed event");
+
+    // Now verify on-chain state (this resets the event buffer).
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Closed);
+    assert_eq!(line.utilized_amount, 0);
+    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
+    assert_eq!(event.status, line.status);
 }
 
 #[test]
@@ -123,17 +138,12 @@ fn settle_partial_recovery_keeps_line_defaulted_and_event_matches_state() {
 
     client.settle_default_liquidation(&borrower, &300_i128, &settlement_id);
 
-    let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Defaulted);
-    assert_eq!(line.utilized_amount, 700_i128);
-
+    // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.borrower, borrower);
     assert_eq!(event.settlement_id, settlement_id);
     assert_eq!(event.recovered_amount, 300_i128);
-    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.remaining_utilized_amount, 700_i128);
-    assert_eq!(event.status, line.status);
     assert_eq!(event.status, CreditStatus::Defaulted);
 
     assert_liq_setl_topic_ordering(&env);
@@ -146,6 +156,13 @@ fn settle_partial_recovery_keeps_line_defaulted_and_event_matches_state() {
         t0 == namespace && t1 == closed_kind
     });
     assert!(!closed_found, "partial recovery must NOT emit closed event");
+
+    // Now verify on-chain state.
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 700_i128);
+    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
+    assert_eq!(event.status, line.status);
 }
 
 #[test]
@@ -156,17 +173,18 @@ fn settle_minimal_partial_recovery_event_matches_state() {
 
     client.settle_default_liquidation(&borrower, &1_i128, &settlement_id);
 
-    let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Defaulted);
-    assert_eq!(line.utilized_amount, 499_i128);
-
+    // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.recovered_amount, 1_i128);
     assert_eq!(event.remaining_utilized_amount, 499_i128);
-    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, CreditStatus::Defaulted);
-    assert_eq!(event.status, line.status);
     assert_liq_setl_topic_ordering(&env);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 499_i128);
+    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
+    assert_eq!(event.status, line.status);
 }
 
 #[test]
@@ -177,17 +195,18 @@ fn settle_near_full_recovery_event_matches_state() {
 
     client.settle_default_liquidation(&borrower, &999_i128, &settlement_id);
 
-    let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Defaulted);
-    assert_eq!(line.utilized_amount, 1_i128);
-
+    // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.recovered_amount, 999_i128);
     assert_eq!(event.remaining_utilized_amount, 1_i128);
-    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, CreditStatus::Defaulted);
-    assert_eq!(event.status, line.status);
     assert_liq_setl_topic_ordering(&env);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 1_i128);
+    assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
+    assert_eq!(event.status, line.status);
 }
 
 #[test]
@@ -221,23 +240,21 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     let sid1 = Symbol::new(&env, "auc_multi_1");
     client.settle_default_liquidation(&borrower, &400_i128, &sid1);
 
-    let line1 = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line1.utilized_amount, 600_i128);
-    assert_eq!(line1.status, CreditStatus::Defaulted);
-
+    // Check first event immediately (before next invocation resets the buffer).
     let event1 = get_last_liq_setl_event(&env);
     assert_eq!(event1.recovered_amount, 400_i128);
     assert_eq!(event1.remaining_utilized_amount, 600_i128);
     assert_eq!(event1.settlement_id, sid1);
     assert_eq!(event1.status, CreditStatus::Defaulted);
 
+    let line1 = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line1.utilized_amount, 600_i128);
+    assert_eq!(line1.status, CreditStatus::Defaulted);
+
     let sid2 = Symbol::new(&env, "auc_multi_2");
     client.settle_default_liquidation(&borrower, &600_i128, &sid2);
 
-    let line2 = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line2.utilized_amount, 0_i128);
-    assert_eq!(line2.status, CreditStatus::Closed);
-
+    // Check second event immediately.
     let event2 = get_last_liq_setl_event(&env);
     assert_eq!(event2.recovered_amount, 600_i128);
     assert_eq!(event2.remaining_utilized_amount, 0_i128);
@@ -245,6 +262,10 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     assert_eq!(event2.status, CreditStatus::Closed);
 
     assert_liq_setl_topic_ordering(&env);
+
+    let line2 = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line2.utilized_amount, 0_i128);
+    assert_eq!(line2.status, CreditStatus::Closed);
 }
 
 #[test]
@@ -317,6 +338,19 @@ fn settle_on_active_line_panics() {
     let client = CreditClient::new(&env, &contract_id);
 
     client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_address = token_id.address();
+    client.set_liquidity_token(&token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
+
     client.open_credit_line(&borrower, &5_000_i128, &200_u32, &40_u32);
     client.draw_credit(&borrower, &1_000_i128);
 

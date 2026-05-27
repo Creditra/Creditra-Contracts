@@ -14,28 +14,41 @@ fn setup() -> (Env, Address, Address) {
     (env, admin, contract_id)
 }
 
-fn setup_with_credit_line() -> (Env, Address, Address, Address) {
+fn setup_with_credit_line() -> (Env, Address, Address, Address, Address) {
     let (env, admin, contract_id) = setup();
     let borrower = Address::generate(&env);
     let client = CreditClient::new(&env, &contract_id);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_address = token_id.address();
+    client.set_liquidity_token(&token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
+
     client.open_credit_line(&borrower, &10_000, &500, &50);
-    (env, admin, contract_id, borrower)
+    (env, admin, contract_id, borrower, token_address)
 }
 
 // ── draw_credit error paths ────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn draw_credit_zero_amount_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &0);
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn draw_credit_negative_amount_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &-100);
 }
@@ -43,7 +56,7 @@ fn draw_credit_negative_amount_panics() {
 #[test]
 #[should_panic(expected = "Error(Contract, #19)")]
 fn draw_credit_when_draws_frozen() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.freeze_draws();
     client.draw_credit(&borrower, &100);
@@ -52,7 +65,7 @@ fn draw_credit_when_draws_frozen() {
 #[test]
 #[should_panic(expected = "Error(Contract, #17)")]
 fn draw_credit_exceeds_max_draw_amount() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.set_max_draw_amount(&500);
     client.draw_credit(&borrower, &600);
@@ -60,7 +73,7 @@ fn draw_credit_exceeds_max_draw_amount() {
 
 #[test]
 fn draw_credit_within_max_draw_amount() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.set_max_draw_amount(&500);
     client.draw_credit(&borrower, &500);
@@ -80,7 +93,7 @@ fn draw_credit_nonexistent_borrower() {
 #[test]
 #[should_panic(expected = "Error(Contract, #20)")]
 fn draw_credit_on_suspended_line() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.suspend_credit_line(&borrower);
     client.draw_credit(&borrower, &100);
@@ -89,7 +102,7 @@ fn draw_credit_on_suspended_line() {
 #[test]
 #[should_panic(expected = "Error(Contract, #21)")]
 fn draw_credit_on_defaulted_line() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.default_credit_line(&borrower);
     client.draw_credit(&borrower, &100);
@@ -98,7 +111,7 @@ fn draw_credit_on_defaulted_line() {
 #[test]
 #[should_panic(expected = "Error(Contract, #4)")]
 fn draw_credit_on_closed_line() {
-    let (env, admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.close_credit_line(&borrower, &admin);
     client.draw_credit(&borrower, &100);
@@ -107,7 +120,7 @@ fn draw_credit_on_closed_line() {
 #[test]
 #[should_panic(expected = "Error(Contract, #6)")]
 fn draw_credit_over_limit() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &10_001);
 }
@@ -117,7 +130,7 @@ fn draw_credit_over_limit() {
 #[test]
 #[should_panic(expected = "Error(Contract, #5)")]
 fn repay_credit_zero_amount_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &100);
     client.repay_credit(&borrower, &0);
@@ -126,7 +139,7 @@ fn repay_credit_zero_amount_panics() {
 #[test]
 #[should_panic(expected = "Error(Contract, #5)")]
 fn repay_credit_negative_amount_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &100);
     client.repay_credit(&borrower, &-50);
@@ -144,7 +157,7 @@ fn repay_credit_nonexistent_borrower() {
 #[test]
 #[should_panic(expected = "Error(Contract, #4)")]
 fn repay_credit_on_closed_line() {
-    let (env, admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.close_credit_line(&borrower, &admin);
     client.repay_credit(&borrower, &100);
@@ -152,7 +165,7 @@ fn repay_credit_on_closed_line() {
 
 #[test]
 fn repay_credit_overpayment_capped() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &100);
     client.repay_credit(&borrower, &500);
@@ -254,7 +267,7 @@ fn init_already_initialized_panics() {
 
 #[test]
 fn draw_and_repay_with_liquidity_token() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
@@ -295,7 +308,7 @@ fn set_and_get_liquidity_source() {
 #[test]
 #[should_panic(expected = "Error(Contract, #24)")]
 fn draw_with_insufficient_liquidity_reserve() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
@@ -312,7 +325,7 @@ fn draw_with_insufficient_liquidity_reserve() {
 
 #[test]
 fn repay_with_zero_effective_amount() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
 
     client.repay_credit(&borrower, &100);
@@ -325,7 +338,7 @@ fn repay_with_zero_effective_amount() {
 
 #[test]
 fn draw_without_liquidity_token_skips_transfer() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
 
     client.draw_credit(&borrower, &5_000);
@@ -340,18 +353,20 @@ fn draw_without_liquidity_token_skips_transfer() {
 // ── risk parameter edge cases ──────────────────────────────────────────────
 
 #[test]
-#[should_panic]
-fn update_risk_limit_below_utilization_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+fn update_risk_limit_below_utilization_restricts_line() {
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.draw_credit(&borrower, &5_000);
     client.update_risk_parameters(&borrower, &4_000, &500, &50);
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, creditra_credit::types::CreditStatus::Restricted);
+    assert_eq!(line.credit_limit, 4_000);
 }
 
 #[test]
 #[should_panic]
 fn update_risk_negative_limit_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.update_risk_parameters(&borrower, &-100, &500, &50);
 }
@@ -359,7 +374,7 @@ fn update_risk_negative_limit_panics() {
 #[test]
 #[should_panic]
 fn update_risk_score_too_high_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.update_risk_parameters(&borrower, &10_000, &500, &101);
 }
@@ -367,7 +382,7 @@ fn update_risk_score_too_high_panics() {
 #[test]
 #[should_panic]
 fn update_risk_rate_too_high_panics() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.update_risk_parameters(&borrower, &10_000, &10_001, &50);
 }
@@ -375,9 +390,9 @@ fn update_risk_rate_too_high_panics() {
 // ── rate change limits enforcement ─────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "rate change exceeds maximum allowed delta")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn update_risk_rate_change_exceeds_limit() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.set_rate_change_limits(&100, &0);
     client.update_risk_parameters(&borrower, &10_000, &700, &50);
@@ -385,7 +400,7 @@ fn update_risk_rate_change_exceeds_limit() {
 
 #[test]
 fn update_risk_rate_change_within_limit() {
-    let (env, _admin, contract_id, borrower) = setup_with_credit_line();
+    let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
     client.set_rate_change_limits(&200, &0);
     client.update_risk_parameters(&borrower, &10_000, &600, &50);

@@ -208,10 +208,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -224,7 +221,8 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
@@ -238,5 +236,3 @@ pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bo
         },
     );
 }
-
-

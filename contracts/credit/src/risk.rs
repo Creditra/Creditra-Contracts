@@ -31,7 +31,6 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 pub const MAX_RISK_SCORE: u32 = 100;
 
-
 /// Compute interest rate from risk score using piecewise-linear formula.
 ///
 /// # Formula
@@ -139,6 +138,7 @@ pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_mi
 /// * If validation fails (score > 100, etc.).
 /// * If rate change exceeds configured limits.
 /// * If the protocol is paused.
+#[allow(clippy::doc_overindented_list_items)]
 pub fn update_risk_parameters(
     env: Env,
     borrower: Address,
@@ -243,6 +243,7 @@ pub fn update_risk_parameters(
 /// `Some(RateChangeConfig)` if guardrails have been configured via
 /// [`set_rate_change_limits`], or `None` if no configuration exists (meaning
 /// rate changes are unconstrained).
+#[allow(dead_code)]
 pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
     env.storage().instance().get(&rate_cfg_key(&env))
 }

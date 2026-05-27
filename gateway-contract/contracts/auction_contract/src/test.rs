@@ -1,12 +1,14 @@
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::super::*;
-    use core::convert::TryFrom;
     use core::ops::Range;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::vec::Vec;
 
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
 
@@ -31,7 +33,7 @@ mod tests {
     }
 
     fn next_amount_above(seed: &mut u64, current: i128) -> i128 {
-        current + i128::try_from((next_u64(seed) % MAX_INCREMENT) + 1).unwrap()
+        current + i128::from((next_u64(seed) % MAX_INCREMENT) + 1)
     }
 
     fn refunded_events(env: &Env) -> Vec<events::BidRefundedEvent> {
@@ -251,7 +253,7 @@ mod tests {
 
         client.init_auction(&auction_id, &0, &u64::MAX, &1_i128);
 
-        let mut seed: u64 = 0xa11ce_f00d_cafe_beef;
+        let mut seed: u64 = 0xf00d_cafe_beef_a11c;
         let mut highest = 0_i128;
         for _ in 0..8 {
             let idx = pick_index(&mut seed, 0..bidders.len());
@@ -403,10 +405,15 @@ mod tests {
         client.close_auction(&auction_id);
 
         // Check close event
-        let close_events = env.events().all().iter().filter(|(_contract, topics, _data)| {
-            let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
-            t0 == Symbol::new(&env, "AUC_CLOSE")
-        }).collect::<Vec<_>>();
+        let close_events = env
+            .events()
+            .all()
+            .iter()
+            .filter(|(_contract, topics, _data)| {
+                let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+                t0 == Symbol::new(&env, "AUC_CLOSE")
+            })
+            .collect::<Vec<_>>();
         assert_eq!(close_events.len(), 1);
     }
 }

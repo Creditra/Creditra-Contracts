@@ -5,7 +5,7 @@ use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
 use soroban_sdk::{Address, Env, IntoVal};
 
-fn setup_active_line() -> (Env, Address, Address, Address) {
+fn setup_active_line() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -15,9 +15,13 @@ fn setup_active_line() -> (Env, Address, Address, Address) {
     let client = CreditClient::new(&env, &contract_id);
 
     client.init(&admin);
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = token_id.address();
+    client.set_liquidity_token(&token);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_i128);
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
 
-    (env, admin, borrower, contract_id)
+    (env, admin, borrower, contract_id, token)
 }
 
 #[test]
@@ -57,7 +61,7 @@ fn self_suspend_requires_only_borrower_auth() {
 
 #[test]
 fn self_suspend_blocks_draws_but_allows_repayments() {
-    let (env, _admin, borrower, contract_id) = setup_active_line();
+    let (env, _admin, borrower, contract_id, token) = setup_active_line();
     let client = CreditClient::new(&env, &contract_id);
 
     client.draw_credit(&borrower, &600_i128);
@@ -68,6 +72,9 @@ fn self_suspend_blocks_draws_but_allows_repayments() {
     }));
     assert!(draw_result.is_err(), "draws must fail while self-suspended");
 
+    soroban_sdk::token::Client::new(&env, &token).approve(
+        &borrower, &contract_id, &1_000_i128, &1_000_000_u32,
+    );
     client.repay_credit(&borrower, &200_i128);
 
     let line = client.get_credit_line(&borrower).unwrap();

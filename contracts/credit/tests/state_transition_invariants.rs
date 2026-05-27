@@ -29,7 +29,7 @@
 use creditra_credit::types::{CreditLineData, CreditStatus};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{token, Address, Env};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,13 +61,20 @@ fn assert_accounting_invariant(line: &CreditLineData, label: &str) {
     );
 }
 
-/// Minimal contract setup: returns (env, admin, contract_id, client).
+/// Minimal contract setup: returns (env, admin, contract_id).
 fn setup_env() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let contract_id = env.register(Credit, ());
-    CreditClient::new(&env, &contract_id).init(&admin);
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let tok = token_id.address();
+    client.set_liquidity_token(&tok);
+    token::StellarAssetClient::new(&env, &tok).mint(&contract_id, &100_000_000_i128);
+
     (env, admin, contract_id)
 }
 
