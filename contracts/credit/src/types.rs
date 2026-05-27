@@ -159,7 +159,7 @@ pub struct CreditLineData {
 
 /// Admin-configurable limits on interest-rate changes.
 #[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateChangeConfig {
     /// Maximum absolute change in `interest_rate_bps` allowed per single update.
     pub max_rate_change_bps: u32,
@@ -233,6 +233,10 @@ pub struct ProtocolConfig {
     pub liquidity_token: Option<Address>,
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
-    /// Configured rate change limits.
-    pub rate_change_config: Option<RateChangeConfig>,
+    /// Maximum absolute change in `interest_rate_bps` allowed per single update.
+    /// `None` when rate-change guardrails are not configured.
+    pub max_rate_change_bps: Option<u32>,
+    /// Minimum elapsed seconds between two consecutive rate changes.
+    /// `None` when rate-change guardrails are not configured.
+    pub rate_change_min_interval: Option<u64>,
 }

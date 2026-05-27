@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use crate::types::ContractError;
+use crate::types::{ContractError, CreditLineData};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -35,13 +35,60 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
-    /// Storage schema version, written once during init.
-    SchemaVersion,
+    // (SchemaVersion intentionally defined once; duplicate variants break Soroban encoding.)
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
+
+// ── Persistent storage TTL policy ────────────────────────────────────────────
+//
+// Soroban persistent entries can be archived if their TTL is not periodically
+// extended. The credit contract stores live per-borrower state in persistent
+// storage, so we proactively bump TTL on every read/write path.
+//
+// `extend_ttl(key, threshold, extend_to)` only writes when the remaining TTL is
+// below `threshold`, so we can safely call these helpers frequently.
+//
+// Numbers below assume ~5 seconds/ledger close.
+pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
+pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
+
+/// Instance storage TTL policy (covers global config like admin/liquidity token).
+pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
+pub const INSTANCE_BUMP_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
+
+pub fn bump_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
+
+fn bump_persistent_ttl<K>(env: &Env, key: &K)
+where
+    K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+{
+    bump_instance_ttl(env);
+    env.storage()
+        .persistent()
+        .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+}
+
+/// Bump TTL for the borrower's `CreditLineData` entry (keyed by borrower address).
+pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
+    bump_persistent_ttl(env, borrower);
+}
+
+/// Return the credit line for `borrower` and bump TTL if present.
+pub fn get_credit_line(env: &Env, borrower: &Address) -> Option<CreditLineData> {
+    if env.storage().persistent().has(borrower) {
+        bump_credit_line_ttl(env, borrower);
+        env.storage().persistent().get(borrower)
+    } else {
+        None
+    }
+}
 
 /// Return the configured schema version, if any.
 pub fn get_schema_version(env: &Env) -> Option<u32> {
@@ -131,6 +178,7 @@ pub fn persist_credit_line(
 ) {
     ensure_credit_line_id(env, borrower);
     env.storage().persistent().set(borrower, line);
+    bump_credit_line_ttl(env, borrower);
     adjust_total_utilized(env, previous_utilized, line.utilized_amount);
 }
 
@@ -268,16 +316,47 @@ pub fn set_draw_min_interval(env: &Env, interval_seconds: u64) {
 
 /// Get the last successful draw timestamp for a borrower.
 pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::LastDrawTs(borrower.clone()))
+    let key = DataKey::LastDrawTs(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
 }
 
 /// Record the last successful draw timestamp for a borrower.
 pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
+    let key = DataKey::LastDrawTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
+/// Get the per-borrower utilization cap in bps (persistent) and bump TTL on hit.
+pub fn get_utilization_cap_bps(env: &Env, borrower: &Address) -> Option<u32> {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
+}
+
+/// Set or clear the per-borrower utilization cap in bps (persistent). Bumps TTL on set.
+pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    match cap_bps {
+        Some(v) => {
+            env.storage().persistent().set(&key, &v);
+            bump_persistent_ttl(env, &key);
+        }
+        None => {
+            if env.storage().persistent().has(&key) {
+                env.storage().persistent().remove(&key);
+            }
+        }
+    }
 }
 
 /// Check whether the protocol is paused.

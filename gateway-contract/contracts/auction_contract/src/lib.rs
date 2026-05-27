@@ -83,13 +83,13 @@ impl Auction {
             panic!("bid too low");
         }
 
-        if let Some(prev_bidder) = state.highest_bidder {
+        if let Some(prev_bidder) = state.highest_bidder.clone() {
             if amount <= state.highest_bid {
                 panic!("bid must be higher than current highest bid");
             }
 
             // Emit refund event before performing token transfer
-            publish_bid_refunded_event(&env, prev_bidder, state.highest_bid);
+            publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
 
             // Attempt refund token transfer if token address configured in instance storage
             let token_addr: Option<Address> = env
@@ -99,7 +99,11 @@ impl Auction {
             if let Some(tkn) = token_addr {
                 let token_client = token::Client::new(&env, &tkn);
                 // Contract is the sender of refund transfers (for tests this will be mocked)
-                token_client.transfer(&env.current_contract_address(), &prev_bidder, &state.highest_bid);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &prev_bidder,
+                    &state.highest_bid,
+                );
             }
         }
 
@@ -142,7 +146,7 @@ impl Auction {
 
         env.storage().persistent().set(&settlement_key, &true);
 
-        let winner = state.highest_bidder.unwrap_or(borrower);
+        let winner = state.highest_bidder.unwrap_or_else(|| borrower.clone());
         publish_default_liquidation_settlement_event(
             &env,
             auction_id,
@@ -169,7 +173,10 @@ impl Auction {
             panic!("auction not closed");
         }
 
-        let winner = state.highest_bidder.unwrap_or_else(|| panic!("no winner"));
+        let winner = state
+            .highest_bidder
+            .clone()
+            .unwrap_or_else(|| panic!("no winner"));
         winner.require_auth();
 
         if state.status == AuctionStatus::Claimed {
