@@ -70,6 +70,10 @@ const SCHEMA_VERSION: u32 = 1;
 /// Prevents unbounded gas consumption. Adjust after gas profiling.
 const BULK_BLOCK_MAX: u32 = 50;
 
+/// Maximum borrowers that can be processed in a single keeper accrual batch.
+/// Keeps the entrypoint within Soroban resource limits.
+const ACCRUE_BATCH_MAX: u32 = 50;
+
 #[contract]
 pub struct Credit;
 
@@ -818,6 +822,21 @@ impl Credit {
         }
     }
 
+    /// Materialize interest accrual for a bounded list of borrowers.
+    ///
+    /// No auth is required: the call only updates accounting state for lines
+    /// that already exist and are `Active`. Missing lines and non-active lines
+    /// are skipped without reverting the whole batch. Only non-zero accruals
+    /// emit `InterestAccruedEvent`.
+    pub fn accrue_batch(env: Env, borrowers: Vec<Address>) {
+        assert_not_paused(&env);
+        if borrowers.len() as u32 > ACCRUE_BATCH_MAX {
+            panic!("accrue_batch: exceeds max batch size of {}", ACCRUE_BATCH_MAX);
+        }
+
+        accrual::accrue_batch(&env, borrowers);
+    }
+
     /// Return the credit line for `borrower`, or `None` if no line exists.
     ///
     /// No authentication required — this is a pure read with no side effects.
@@ -855,6 +874,7 @@ impl Credit {
         }
     }
 }
+
 #[cfg(test)]
 mod test_rate_change_limits {
     use super::*;
@@ -4132,4 +4152,5 @@ mod test_max_repay_amount {
 
         client.set_max_repay_amount(&0_i128);
     }
+}
 }
