@@ -41,6 +41,7 @@ use crate::storage::{
     set_borrower_blocked as storage_set_borrower_blocked,
     set_borrower_unblocked,
     is_borrower_blocked as storage_is_borrower_blocked,
+    clear_repayment_schedule,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
@@ -63,6 +64,10 @@ const SCHEMA_VERSION: u32 = 1;
 /// Maximum borrowers that can be blocked in a single `bulk_block_borrowers` call.
 /// Prevents unbounded gas consumption. Adjust after gas profiling.
 const BULK_BLOCK_MAX: u32 = 50;
+
+/// Maximum borrowers that can be processed in a single keeper accrual batch.
+/// Keeps the entrypoint within Soroban resource limits.
+const ACCRUE_BATCH_MAX: u32 = 50;
 
 #[contract]
 pub struct Credit;
@@ -162,7 +167,57 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
-        lifecycle::open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        assert!(credit_limit > 0, "credit_limit must be greater than zero");
+        if interest_rate_bps > crate::risk::MAX_INTEREST_RATE_BPS {
+            env.panic_with_error(ContractError::RateTooHigh);
+        }
+        if risk_score > crate::risk::MAX_RISK_SCORE {
+            env.panic_with_error(ContractError::ScoreTooHigh);
+        }
+
+        let previous_utilized = if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<Address, CreditLineData>(&borrower)
+        {
+            assert!(
+                existing.status != CreditStatus::Active,
+                "borrower already has an active credit line"
+            );
+            existing.utilized_amount
+        } else {
+            0
+        };
+
+        let credit_line = CreditLineData {
+            borrower: borrower.clone(),
+            credit_limit,
+            utilized_amount: 0,
+            interest_rate_bps,
+            risk_score,
+            status: CreditStatus::Active,
+            last_rate_update_ts: 0,
+            accrued_interest: 0,
+            last_accrual_ts: 0,
+            suspension_ts: 0,
+        };
+
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        clear_repayment_schedule(&env, &borrower);
+
+        publish_credit_line_event(
+            &env,
+            (symbol_short!("credit"), symbol_short!("opened")),
+            CreditLineEvent {
+                borrower,
+                status: CreditStatus::Active,
+                credit_limit,
+                interest_rate_bps,
+                risk_score,
+            },
+        );
     }
 
     /// Draws credit by transferring liquidity tokens to the borrower.
@@ -441,6 +496,7 @@ impl Credit {
         credit_line.utilized_amount = new_utilized;
 
         persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
 
         let _timestamp = env.ledger().timestamp();
         publish_interest_accrued_event(
@@ -556,6 +612,33 @@ impl Credit {
         env.storage()
             .instance()
             .get(&crate::storage::grace_period_key(&env))
+    }
+
+    pub fn set_repayment_schedule(
+        env: Env,
+        borrower: Address,
+        amount_per_period: i128,
+        period_seconds: u64,
+        first_due_ts: u64,
+    ) {
+        lifecycle::set_repayment_schedule(
+            &env,
+            borrower,
+            amount_per_period,
+            period_seconds,
+            first_due_ts,
+        )
+    }
+
+    pub fn get_repayment_schedule(
+        env: Env,
+        borrower: Address,
+    ) -> Option<crate::types::RepaymentSchedule> {
+        query::get_repayment_schedule(env, borrower)
+    }
+
+    pub fn is_delinquent(env: Env, borrower: Address) -> bool {
+        query::is_delinquent(env, borrower)
     }
 
     pub fn set_max_draw_amount(env: Env, amount: i128) {
@@ -816,6 +899,21 @@ impl Credit {
         }
     }
 
+    /// Materialize interest accrual for a bounded list of borrowers.
+    ///
+    /// No auth is required: the call only updates accounting state for lines
+    /// that already exist and are `Active`. Missing lines and non-active lines
+    /// are skipped without reverting the whole batch. Only non-zero accruals
+    /// emit `InterestAccruedEvent`.
+    pub fn accrue_batch(env: Env, borrowers: Vec<Address>) {
+        assert_not_paused(&env);
+        if borrowers.len() as u32 > ACCRUE_BATCH_MAX {
+            panic!("accrue_batch: exceeds max batch size of {}", ACCRUE_BATCH_MAX);
+        }
+
+        accrual::accrue_batch(&env, borrowers);
+    }
+
     /// Return the credit line for `borrower`, or `None` if no line exists.
     ///
     /// No authentication required — this is a pure read with no side effects.
@@ -965,13 +1063,6 @@ impl Credit {
         }
     }
 }
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod test_rate_change_limits {
@@ -5067,3 +5158,5 @@ mod test_max_repay_amount {
     }
 
     }
+}
+}
