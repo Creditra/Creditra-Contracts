@@ -8,7 +8,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 
 use crate::types::*;
 use events::{
-    publish_auction_closed_event, publish_bid_refunded_event, publish_default_liquidation_settlement_event,
+    publish_auction_closed_event, publish_bid_refunded_event,
+    publish_default_liquidation_settlement_event,
 };
 use storage::{bump_auction_state_ttl, bump_settlement_marker_ttl};
 
@@ -52,7 +53,6 @@ impl Auction {
         start_time: u64,
         end_time: u64,
         min_bid: i128,
-        min_increment_bps: u32,
     ) {
         if start_time >= end_time {
             panic!("invalid times");
@@ -123,7 +123,7 @@ impl Auction {
             panic!("bid too low");
         }
 
-        if let Some(prev_bidder) = state.highest_bidder.clone() {
+        if let Some(prev_bidder) = &state.highest_bidder {
             if amount <= state.highest_bid {
                 panic!("bid must be higher than current highest bid");
             }
@@ -141,7 +141,7 @@ impl Auction {
                 // Contract is the sender of refund transfers (for tests this will be mocked)
                 token_client.transfer(
                     &env.current_contract_address(),
-                    &prev_bidder,
+                    prev_bidder,
                     &state.highest_bid,
                 );
             }
@@ -190,7 +190,10 @@ impl Auction {
         env.storage().persistent().set(&settlement_key, &true);
         bump_settlement_marker_ttl(&env, &settlement_key);
 
-        let winner = state.highest_bidder.unwrap_or_else(|| borrower.clone());
+        let winner = state
+            .highest_bidder
+            .clone()
+            .unwrap_or_else(|| borrower.clone());
         publish_default_liquidation_settlement_event(
             &env,
             auction_id,

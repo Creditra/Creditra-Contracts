@@ -35,7 +35,9 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
-    // (SchemaVersion intentionally defined once; duplicate variants break Soroban encoding.)
+    /// Protocol-wide maximum total utilization across all credit lines.
+    /// When set, draw_credit reverts if total_utilized + amount > max_total_exposure.
+    MaxTotalExposure,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -96,6 +98,7 @@ pub fn get_schema_version(env: &Env) -> Option<u32> {
 }
 
 /// Persist the schema version.
+#[allow(dead_code)]
 pub fn set_schema_version(env: &Env, version: u32) {
     env.storage()
         .instance()
@@ -116,6 +119,22 @@ pub fn get_credit_line_count(env: &Env) -> u32 {
         .instance()
         .get(&DataKey::CreditLineCount)
         .unwrap_or(0)
+}
+
+/// Return the configured global exposure cap, if set.
+pub fn get_max_total_exposure(env: &Env) -> Option<i128> {
+    env.storage().instance().get(&DataKey::MaxTotalExposure)
+}
+
+/// Set the global exposure cap. Passing `0` removes the cap.
+pub fn set_max_total_exposure(env: &Env, cap: i128) {
+    if cap == 0 {
+        env.storage().instance().remove(&DataKey::MaxTotalExposure);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxTotalExposure, &cap);
+    }
 }
 
 /// Return the stable id for a borrower, if present.
@@ -315,6 +334,7 @@ pub fn set_draw_min_interval(env: &Env, interval_seconds: u64) {
 }
 
 /// Get the last successful draw timestamp for a borrower.
+#[allow(dead_code)]
 pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
     let key = DataKey::LastDrawTs(borrower.clone());
     if env.storage().persistent().has(&key) {
@@ -326,6 +346,7 @@ pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
 }
 
 /// Record the last successful draw timestamp for a borrower.
+#[allow(dead_code)]
 pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
     let key = DataKey::LastDrawTs(borrower.clone());
     env.storage().persistent().set(&key, &ts);

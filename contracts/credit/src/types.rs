@@ -61,7 +61,7 @@ pub enum CreditStatus {
 /// | 27   | `InsufficientRepaymentBalance` | Borrower balance cannot cover repayment |
 /// | 28   | `RepayExceedsMaxAmount`        | Repay amount exceeds per-transaction cap |
 /// | 29   | `DrawCooldownActive`          | Borrower attempted to draw before cooldown elapsed |
-/// | 30   | `TimestampRegression`         | Timestamp would move backward (monotonicity violation) |
+/// | 30   | `ExposureCapExceeded`         | Draw would exceed the global protocol exposure cap |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -124,8 +124,8 @@ pub enum ContractError {
     RepayExceedsMaxAmount = 28,
     /// Borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
-    /// A timestamp write would move the stored value backward (monotonicity violation).
-    TimestampRegression = 30,
+    /// Draw would push total protocol utilization above the configured global exposure cap.
+    ExposureCapExceeded = 30,
 }
 
 /// Stored credit line data for a borrower.
@@ -238,11 +238,9 @@ pub struct ProtocolConfig {
     pub liquidity_token: Option<Address>,
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
-    /// Maximum absolute change in `interest_rate_bps` allowed per single update.
-    /// `None` when rate-change guardrails are not configured.
+    /// Max absolute rate change per update, if limits are configured.
     pub max_rate_change_bps: Option<u32>,
-    /// Minimum elapsed seconds between two consecutive rate changes.
-    /// `None` when rate-change guardrails are not configured.
+    /// Minimum seconds between rate changes, if limits are configured.
     pub rate_change_min_interval: Option<u64>,
 }
 >>>>>>> upstream/main

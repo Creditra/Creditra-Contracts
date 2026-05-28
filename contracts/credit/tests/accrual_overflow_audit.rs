@@ -9,7 +9,6 @@
 //! - The overflow path is deterministic: the same inputs always produce
 //!   `ContractError::Overflow`, never a wrong numeric result.
 
-use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -146,7 +145,7 @@ fn overflow_path_returns_contract_error_overflow_deterministically() {
 fn overflow_path_is_deterministic_same_inputs_same_error() {
     let huge_principal: i128 = i128::MAX / 2;
 
-    for _ in 0..2 {
+    for run in 0..2_usize {
         let (env, contract_id, _admin, _token) = setup_with_token(huge_principal);
         let client = CreditClient::new(&env, &contract_id);
         let borrower = Address::generate(&env);
@@ -161,7 +160,7 @@ fn overflow_path_is_deterministic_same_inputs_same_error() {
             client.update_risk_parameters(&borrower, &i128::MAX, &10_000_u32, &50_u32);
         }));
 
-        assert!(result.is_err(), "must revert on overflow (run {})", _ + 1);
+        assert!(result.is_err(), "must revert on overflow (run {})", run + 1);
 
         let err = result.unwrap_err();
         let err_str = if let Some(s) = err.downcast_ref::<String>() {
@@ -175,7 +174,7 @@ fn overflow_path_is_deterministic_same_inputs_same_error() {
         assert!(
             err_str.contains("#12"),
             "run {}: expected #12 but got: {:?}",
-            _ + 1,
+            run + 1,
             err_str
         );
     }

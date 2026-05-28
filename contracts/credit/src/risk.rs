@@ -58,19 +58,77 @@ pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_mi
     env.storage().instance().set(&rate_cfg_key(&env), &cfg);
 }
 
-/// Retrieve the current rate-change guardrails, if configured.
-pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
-    env.storage().instance().get(&rate_cfg_key(&env))
-}
-
-/// Retrieve the dynamic rate-formula configuration, if configured.
-pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
-    env.storage()
-        .instance()
-        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
-}
-
-/// Update the borrower's credit limit, risk score, and effective rate.
+/// Update risk parameters for an existing credit line (admin only).
+///
+/// Loads the borrower's [`CreditLineData`], validates all inputs, applies
+/// optional rate-change guardrails from [`RateChangeConfig`], then persists
+/// the updated record and emits a [`RiskParametersUpdatedEvent`].
+///
+/// # Parameters
+/// - `env`:              The Soroban environment.
+/// - `borrower`:         Address of the borrower whose credit line to update.
+/// - `credit_limit`:     New maximum borrowable amount. Must be `>= 0` and
+///                       `>= credit_line.utilized_amount`.
+/// - `interest_rate_bps`: New annual interest rate in basis points
+///                       (`0 ..= 10_000`).
+/// - `risk_score`:       New risk score (`0 ..= 100`).
+///
+/// # Panics
+/// - If the caller is not the contract admin.
+/// - If no credit line exists for `borrower`.
+/// - If `credit_limit < 0`.
+/// - If `credit_limit < credit_line.utilized_amount` (would strand debt above limit).
+/// - If `interest_rate_bps > 10_000` (exceeds 100%).
+/// - If `risk_score > 100`.
+/// - If a [`RateChangeConfig`] is active and the absolute rate delta
+///   `|new_rate - old_rate|` exceeds `max_rate_change_bps`.
+/// - If a [`RateChangeConfig`] is active with `rate_change_min_interval > 0`,
+///   a prior rate change exists, and the elapsed time since the last change
+///   is less than `rate_change_min_interval`.
+///
+/// # Rate-change guardrails
+/// When [`set_rate_change_limits`] has been called, every rate change is
+/// subject to two additional checks:
+///
+/// 1. **Delta cap** — `|new_rate - old_rate| <= max_rate_change_bps`.
+/// 2. **Interval floor** — seconds since `last_rate_update_ts` must be
+///    `>= rate_change_min_interval` (skipped when `rate_change_min_interval`
+///    is `0` or when no prior rate change has been recorded).
+///
+/// If the new rate equals the old rate, neither check is evaluated.
+///
+/// # Events
+/// Emits [`RiskParametersUpdatedEvent`] on success.
+/// This function handles updating the credit limit, risk score, and interest rate.
+/// If a dynamic rate formula is configured, the `interest_rate_bps` parameter is
+/// ignored and the rate is re-calculated based on the provided `risk_score`.
+///
+/// When [`RateChangeConfig`] is present, successful rate changes must stay
+/// within the configured per-call delta and minimum elapsed interval. The
+/// `last_rate_update_ts` field is refreshed only after a successful rate change.
+///
+/// ## Limit Decrease Behavior
+///
+/// When the new `credit_limit` is below the current `utilized_amount`:
+/// - The credit line transitions to `Restricted` status.
+/// - The borrower **cannot draw additional credit** until the utilization is reduced.
+/// - **Repayments are still allowed**, enabling the borrower to reduce utilization back below the new limit.
+/// - This avoids forced liquidation and gives the borrower a grace period to cure.
+///
+/// # Arguments
+/// * `env` - The Soroban environment.
+/// * `borrower` - The address of the borrower.
+/// * `credit_limit` - The new credit limit (must be >= 0).
+/// * `interest_rate_bps` - The manual interest rate (ignored if formula is enabled).
+/// * `risk_score` - The new risk score (0-100).
+///
+/// # Panics
+/// * If caller is not admin.
+/// * If credit line does not exist.
+/// * If validation fails (score > 100, etc.).
+/// * If rate change exceeds configured limits.
+/// * If the protocol is paused.
+#[allow(clippy::doc_overindented_list_items)]
 pub fn update_risk_parameters(
     env: Env,
     borrower: Address,
@@ -148,6 +206,7 @@ pub fn update_risk_parameters(
 /// `Some(RateChangeConfig)` if guardrails have been configured via
 /// [`set_rate_change_limits`], or `None` if no configuration exists (meaning
 /// rate changes are unconstrained).
+#[allow(dead_code)]
 pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
     env.storage().instance().get(&rate_cfg_key(&env))
 }

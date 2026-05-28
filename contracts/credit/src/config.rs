@@ -12,7 +12,7 @@
 //! See `docs/deploy.md` for the required deployment sequence.
 
 use crate::auth::require_admin_auth;
-use crate::storage::{admin_key, set_schema_version, DataKey};
+use crate::storage::{admin_key, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env};
 
@@ -39,6 +39,7 @@ pub fn init(env: Env, admin: Address) {
 
 /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
 /// @dev Admin-only.
+#[allow(dead_code)]
 pub fn set_liquidity_token(env: Env, token_address: Address) {
     require_admin_auth(&env);
     env.storage()
@@ -48,6 +49,7 @@ pub fn set_liquidity_token(env: Env, token_address: Address) {
 
 /// @notice Sets the address that provides liquidity for draw operations.
 /// @dev Admin-only. If unset, init config uses the contract address.
+#[allow(dead_code)]
 pub fn set_liquidity_source(env: Env, reserve_address: Address) {
     require_admin_auth(&env);
     env.storage()

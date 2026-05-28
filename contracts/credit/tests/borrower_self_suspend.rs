@@ -31,26 +31,7 @@
 //! - ✓ Credit parameters (limit, rate, score) remain unchanged
 //! - ✓ Idempotency check: calling self-suspend on already suspended line fails
 
-use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{token, Address, Env, Symbol};
-
-use creditra_credit::types::{CreditLineData, CreditStatus};
-use creditra_credit::{Credit, CreditClient};
-
-// ============================================================================
-// Test Helper Functions
-// ============================================================================
-
-/// Standard test credit line parameters
-const CREDIT_LIMIT: i128 = 10_000;
-const INTEREST_RATE_BPS: u32 = 500; // 5%
-const RISK_SCORE: u32 = 75;
-const RESERVE_AMOUNT: i128 = 50_000;
-
-/// Setup a test environment with initialized contract and token.
-///
-/// Returns: (env, admin, borrower, contract_id, token_address)
-fn setup() -> (Env, Address, Address, Address, Address) {
+fn setup_active_line() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -60,16 +41,13 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-
-    // Setup liquidity token
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-    let token_address = token_id.address();
-    client.set_liquidity_token(&token_address);
+    let token = token_id.address();
+    client.set_liquidity_token(&token);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_i128);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
 
-    // Mint tokens to contract for liquidity
-    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &RESERVE_AMOUNT);
-
-    (env, admin, borrower, contract_id, token_address)
+    (env, admin, borrower, contract_id, token)
 }
 
 /// Setup with an active credit line ready for testing.
@@ -88,11 +66,10 @@ fn setup_with_active_line() -> (Env, Address, Address, Address, Address, CreditC
     (env, admin, borrower, contract_id, token_address, client)
 }
 
-/// Setup with an active credit line that has drawn funds (non-zero utilization).
-///
-/// Returns: (env, admin, borrower, contract_id, token_address, client, drawn_amount)
-fn setup_with_utilized_line() -> (Env, Address, Address, Address, Address, CreditClient, i128) {
-    let (env, admin, borrower, contract_id, token_address, client) = setup_with_active_line();
+#[test]
+fn self_suspend_blocks_draws_but_allows_repayments() {
+    let (env, _admin, borrower, contract_id, token) = setup_active_line();
+    let client = CreditClient::new(&env, &contract_id);
 
     let draw_amount = 3_000_i128;
     client.draw_credit(&borrower, &draw_amount);
@@ -154,13 +131,19 @@ fn test_self_suspend_success_when_borrower_authorized() {
     // Borrower self-suspends their line
     client.self_suspend_credit_line(&borrower);
 
-    // Verify status changed to Suspended
-    let credit_line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(
-        credit_line.status,
-        CreditStatus::Suspended,
-        "Credit line should be suspended after self-suspension"
+    let draw_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.draw_credit(&borrower, &100_i128);
+    }));
+    assert!(draw_result.is_err(), "draws must fail while self-suspended");
+
+    soroban_sdk::token::Client::new(&env, &token).approve(
+        &borrower, &contract_id, &1_000_i128, &1_000_000_u32,
     );
+    client.repay_credit(&borrower, &200_i128);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Suspended);
+    assert_eq!(line.utilized_amount, 400);
 }
 
 /// Test: Admin cannot invoke self_suspend_credit_line.

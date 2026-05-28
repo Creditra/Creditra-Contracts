@@ -45,7 +45,10 @@ fn cap_10000_is_no_op_effective_ceiling_equals_credit_limit() {
     assert_eq!(ceiling, credit_limit);
 
     client.draw_credit(&borrower, &ceiling);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, ceiling);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        ceiling
+    );
 }
 
 #[test]
@@ -60,7 +63,10 @@ fn draws_are_capped_at_min_credit_limit_and_cap_amount() {
     assert_eq!(ceiling, 600);
 
     client.draw_credit(&borrower, &ceiling);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 600);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        600
+    );
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.draw_credit(&borrower, &1_i128);
@@ -94,7 +100,10 @@ fn cap_below_current_utilization_blocks_new_draws_until_cap_removed() {
     assert!(client.get_utilization_cap(&borrower).is_none());
 
     client.draw_credit(&borrower, &300_i128);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 1_000_i128);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        1_000_i128
+    );
 }
 
 #[test]
@@ -110,7 +119,10 @@ fn cap_composes_with_credit_limit_updates_documented_in_docs() {
     assert_eq!(raised_limit_ceiling, 1_600);
 
     client.draw_credit(&borrower, &800_i128);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 1_600_i128);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        1_600_i128
+    );
 
     let over_new_cap = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.draw_credit(&borrower, &1_i128);

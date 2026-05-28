@@ -58,12 +58,7 @@ fn setup_defaulted_credit(env: &Env, draw_amount: i128) -> Deployment {
 
     StellarAssetClient::new(env, &token_address).mint(&credit_id, &CREDIT_LIMIT);
 
-    credit.open_credit_line(
-        &borrower,
-        &CREDIT_LIMIT,
-        &INTEREST_RATE_BPS,
-        &RISK_SCORE,
-    );
+    credit.open_credit_line(&borrower, &CREDIT_LIMIT, &INTEREST_RATE_BPS, &RISK_SCORE);
     credit.draw_credit(&borrower, &draw_amount);
 
     let drawn = credit.get_credit_line(&borrower).unwrap();
@@ -71,11 +66,11 @@ fn setup_defaulted_credit(env: &Env, draw_amount: i128) -> Deployment {
     assert_eq!(drawn.utilized_amount, draw_amount);
 
     credit.default_credit_line(&borrower);
+    assert_event_topic(env, &credit_id, "credit", "liq_req");
 
     let defaulted = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(defaulted.status, CreditStatus::Defaulted);
     assert_eq!(defaulted.utilized_amount, draw_amount);
-    assert_event_topic(env, &credit_id, "credit", "liq_req");
 
     Deployment {
         credit_id,
@@ -109,11 +104,7 @@ fn run_auction_to_settlement(
     });
 
     auction.close_auction(settlement_id);
-    auction.settle_default_liquidation(
-        settlement_id,
-        &deployment.credit_id,
-        &deployment.borrower,
-    );
+    auction.settle_default_liquidation(settlement_id, &deployment.credit_id, &deployment.borrower);
 
     let settlement = auction_settlement_event(env, &deployment.auction_id);
     assert_eq!(settlement.auction_id, settlement_id.clone());

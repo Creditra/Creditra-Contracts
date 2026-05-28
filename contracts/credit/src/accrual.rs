@@ -9,9 +9,30 @@
 #![warn(missing_docs)]
 
 use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
-use crate::types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
-use crate::math_utils::{prorate_interest, Rounding};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
+};
 use soroban_sdk::Env;
+
+pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
+
+/// Compute simple interest: `utilized * rate_bps * seconds / (10_000 * SECONDS_PER_YEAR)`.
+///
+/// # Overflow behavior — **revert with `ContractError::Overflow`**
+/// All intermediate multiplications use `checked_mul`. If any step would exceed
+/// `i128::MAX` the function returns `Err(ContractError::Overflow)` so the caller
+/// can propagate it via `env.panic_with_error`. No silent wrapping or saturation
+/// occurs; the contract reverts deterministically.
+fn compute_interest(utilized: i128, rate_bps: i128, seconds: i128) -> Result<i128, ContractError> {
+    let denominator: i128 = 10_000 * (SECONDS_PER_YEAR as i128);
+    let intermediate = utilized
+        .checked_mul(rate_bps)
+        .and_then(|v| v.checked_mul(seconds));
+    match intermediate {
+        Some(val) => Ok(val / denominator),
+        None => Err(ContractError::Overflow),
+    }
+}
 
 /// Apply interest accrual to a credit line and return the updated line.
 ///
@@ -107,12 +128,8 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
             ),
         }
     } else {
-        prorate_interest(
-            line.utilized_amount as u128,
-            line.interest_rate_bps,
-            (now - accrual_start) as u64,
-            Rounding::Floor,
-        )
+        let seconds = (now - accrual_start) as i128;
+        compute_interest(utilized, full_rate, seconds).unwrap_or_else(|e| env.panic_with_error(e))
     };
 
     let accrued_i: i128 = u128_to_i128(accrued_u);

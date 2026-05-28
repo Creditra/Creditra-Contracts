@@ -22,6 +22,7 @@ use soroban_sdk::{Address, Env};
 /// Interest accrual is lazy: `accrued_interest` and `utilized_amount` reflect
 /// the last mutating call (draw, repay, suspend, etc.). Pending interest since
 /// the last checkpoint is **not** applied by this query.
+#[allow(dead_code)]
 pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
     crate::storage::get_credit_line(&env, &borrower)
 }
