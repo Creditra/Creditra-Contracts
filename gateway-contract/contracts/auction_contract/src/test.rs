@@ -1337,4 +1337,140 @@ mod tests {
         assert_eq!(stored.highest_bidder.unwrap(), bob);
         assert_eq!(stored.highest_bid, 200_i128);
     }
+
+    // === Dutch Auction Tests ===
+
+    #[test]
+    fn dutch_auction_price_at_start() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let auction_id = Symbol::new(&env, "dutch_start");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::Dutch,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &Some(500_i128),
+            &Some(100_i128),
+        );
+
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+        client.place_bid(&auction_id, &alice, &500_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+
+        assert_eq!(stored.status, AuctionStatus::Closed);
+        assert_eq!(stored.highest_bidder.unwrap(), alice);
+        assert_eq!(stored.highest_bid, 500_i128);
+    }
+
+    #[test]
+    fn dutch_auction_price_at_mid() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let auction_id = Symbol::new(&env, "dutch_mid");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::Dutch,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &Some(500_i128),
+            &Some(100_i128),
+        );
+
+        env.ledger().with_mut(|li| li.timestamp = 1500);
+        client.place_bid(&auction_id, &alice, &300_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+
+        assert_eq!(stored.status, AuctionStatus::Closed);
+        assert_eq!(stored.highest_bidder.unwrap(), alice);
+        assert_eq!(stored.highest_bid, 300_i128);
+    }
+
+    #[test]
+    fn dutch_auction_bid_below_current_price_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let auction_id = Symbol::new(&env, "dutch_low_bid");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::Dutch,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &Some(500_i128),
+            &Some(100_i128),
+        );
+
+        env.ledger().with_mut(|li| li.timestamp = 1500);
+        let result = client.try_place_bid(&auction_id, &alice, &250_i128);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn english_mode_unchanged_with_new_signature() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let auction_id = Symbol::new(&env, "english_unchanged");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &1000,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+        );
+
+        client.place_bid(&auction_id, &alice, &100_i128);
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+
+        assert_eq!(stored.status, AuctionStatus::Open);
+        assert_eq!(stored.highest_bidder.unwrap(), bob);
+        assert_eq!(stored.highest_bid, 200_i128);
+    }
 }
