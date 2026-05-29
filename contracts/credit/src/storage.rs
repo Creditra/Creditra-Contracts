@@ -44,6 +44,10 @@ pub enum DataKey {
     MinCreditLimit,
     /// Maximum allowed credit limit for new credit lines (admin-configurable).
     MaxCreditLimit,
+    /// Address of the auction contract used for default-liquidation settlement hooks.
+    /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
+    /// is skipped and settlement proceeds as an accounting-only operation.
+    AuctionContract,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -485,6 +489,22 @@ pub fn get_max_credit_limit(env: &Env) -> Option<i128> {
 /// Set the maximum credit limit (admin only, enforced by caller).
 pub fn set_max_credit_limit(env: &Env, max: i128) {
     env.storage().instance().set(&DataKey::MaxCreditLimit, &max);
+}
+
+// ── Auction contract hook ─────────────────────────────────────────────────────
+
+/// Return the configured auction contract address, if set.
+///
+/// Used by `settle_default_liquidation` to validate cross-contract settlement
+/// hooks. When absent, the hook is skipped and settlement proceeds as an
+/// accounting-only operation.
+pub fn get_auction_contract(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::AuctionContract)
+}
+
+/// Persist the auction contract address (admin only, enforced by caller).
+pub fn set_auction_contract(env: &Env, addr: &Address) {
+    env.storage().instance().set(&DataKey::AuctionContract, addr);
 }
 
 /// Return the installment schedule for a borrower, if configured.

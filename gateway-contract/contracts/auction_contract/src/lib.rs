@@ -9,7 +9,6 @@ use errors::AuctionError;
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
-use crate::errors::AuctionError;
 use crate::storage::{get_factory_contract, set_factory_contract};
 use crate::types::*;
 use events::{
@@ -182,7 +181,7 @@ impl Auction {
         auction_id: Symbol,
         credit_contract: Address,
         borrower: Address,
-    ) {
+    ) -> i128 {
         let factory = get_factory_contract(&env).unwrap_or_else(|| panic!(AuctionError::NoFactoryContract));
         if env.invoker() != factory {
             panic!(AuctionError::Unauthorized);
@@ -213,7 +212,6 @@ impl Auction {
         env.storage().persistent().set(&settlement_key, &true);
         bump_settlement_marker_ttl(&env, &settlement_key);
 
-        let winner = state.highest_bidder.unwrap_or(borrower.clone());
         let winner = state.highest_bidder.unwrap_or_else(|| borrower.clone());
         publish_default_liquidation_settlement_event(
             &env,
@@ -223,6 +221,8 @@ impl Auction {
             winner,
             state.highest_bid,
         );
+
+        state.highest_bid
     }
 
     /// Claim the auction proceeds for the winner.
