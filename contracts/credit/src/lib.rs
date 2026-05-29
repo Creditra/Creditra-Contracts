@@ -183,6 +183,9 @@ impl Credit {
             env.panic_with_error(ContractError::ScoreTooHigh);
         }
 
+        // Validate credit limit is within configured bounds
+        lifecycle::validate_credit_limit_bounds(&env, credit_limit);
+
         let previous_utilized = if let Some(existing) = env
             .storage()
             .persistent()
@@ -812,6 +815,42 @@ impl Credit {
     /// Get the configured global exposure cap, or `None` if uncapped.
     pub fn get_max_total_exposure(env: Env) -> Option<i128> {
         crate::storage::get_max_total_exposure(&env)
+    }
+
+    /// Set global credit limit bounds (admin only).
+    ///
+    /// Configures the minimum and maximum allowed credit limits for all credit lines.
+    /// These bounds are enforced when opening new credit lines or increasing existing limits.
+    ///
+    /// # Parameters
+    /// - `min`: Minimum allowed credit limit. Must be >= 0.
+    /// - `max`: Maximum allowed credit limit. Must be >= min.
+    ///
+    /// # Authorization
+    /// Requires admin authorization.
+    ///
+    /// # Errors
+    /// - `ContractError::InvalidAmount` if `min < 0`
+    /// - `ContractError::LimitOutOfBounds` if `max < min`
+    /// - `ContractError::Paused` if protocol is paused
+    ///
+    /// # Example
+    /// ```ignore
+    /// client.set_credit_limit_bounds(&1_000, &1_000_000_000);
+    /// // Now all credit lines must have limits between 1,000 and 1,000,000,000
+    /// ```
+    pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
+        lifecycle::set_credit_limit_bounds(env, min, max)
+    }
+
+    /// Get the configured global credit limit bounds.
+    ///
+    /// Returns the minimum and maximum allowed credit limits, if configured.
+    ///
+    /// # Returns
+    /// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
+    pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
+        lifecycle::get_credit_limit_bounds(env)
     }
 
     /// Get the number of indexed credit lines.

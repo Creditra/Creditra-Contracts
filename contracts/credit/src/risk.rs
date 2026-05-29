@@ -197,14 +197,9 @@ pub fn update_risk_parameters(
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
-    // Determine the effective interest rate:
-    // - If a rate formula config is stored, compute from risk_score (ignore passed rate).
-    // - Otherwise, use the manually supplied interest_rate_bps (existing behavior).
-    let mut effective_rate = if let Some(formula_cfg) = env
-        .storage()
-        .instance()
-        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
-    {
+    // Validate credit limit is within configured bounds
+    crate::lifecycle::validate_credit_limit_bounds(&env, credit_limit);
+
     let effective_rate = if let Some(formula_cfg) = get_rate_formula_config(env.clone()) {
         compute_rate_from_score(&formula_cfg, risk_score)
     } else {

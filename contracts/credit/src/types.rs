@@ -65,6 +65,7 @@ pub enum CreditStatus {
 /// | 31   | `ExposureCapExceeded`         | Draw would exceed the global protocol exposure cap |
 /// | 32   | `AdminNotInitialized`         | Admin address has not been initialized |
 /// | 33   | `TimestampRegression`         | Timestamp regression detected |
+/// | 34   | `LimitOutOfBounds`            | Credit limit is outside configured min/max bounds |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -135,6 +136,8 @@ pub enum ContractError {
     AdminNotInitialized = 32,
     /// Timestamp regression detected (new timestamp is not greater than stored timestamp).
     TimestampRegression = 33,
+    /// Credit limit is outside the configured minimum/maximum bounds.
+    LimitOutOfBounds = 34,
 }
 
 /// Stored credit line data for a borrower.

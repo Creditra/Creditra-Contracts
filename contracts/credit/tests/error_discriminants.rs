@@ -48,6 +48,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::ExposureCapExceeded as u32, 31);
     assert_eq!(ContractError::AdminNotInitialized as u32, 32);
     assert_eq!(ContractError::TimestampRegression as u32, 33);
+    assert_eq!(ContractError::LimitOutOfBounds as u32, 34);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -91,6 +92,7 @@ fn no_duplicate_discriminants() {
         ContractError::ExposureCapExceeded as u32,
         ContractError::AdminNotInitialized as u32,
         ContractError::TimestampRegression as u32,
+        ContractError::LimitOutOfBounds as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -105,8 +107,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 33 variants as of this writing. Update when adding new ones.
-    const EXPECTED_VARIANT_COUNT: usize = 33;
+    // 34 variants as of this writing. Update when adding new ones.
+    const EXPECTED_VARIANT_COUNT: usize = 34;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -142,6 +144,7 @@ fn variant_count_is_known() {
         ContractError::ExposureCapExceeded as u32,
         ContractError::AdminNotInitialized as u32,
         ContractError::TimestampRegression as u32,
+        ContractError::LimitOutOfBounds as u32,
     ];
 
     assert_eq!(

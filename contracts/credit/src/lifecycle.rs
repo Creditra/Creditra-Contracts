@@ -24,6 +24,8 @@ use crate::storage::{
     assert_not_paused, assert_ts_monotonic, clear_repayment_schedule, persist_credit_line,
     get_repayment_schedule as storage_get_repayment_schedule,
     set_repayment_schedule as storage_set_repayment_schedule,
+    get_min_credit_limit, set_min_credit_limit,
+    get_max_credit_limit, set_max_credit_limit,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
@@ -44,6 +46,103 @@ fn liquidation_settlement_key(
         settlement_id.clone(),
     )
 }
+
+// ── Credit Limit Bounds Management ───────────────────────────────────────────
+
+/// Set global credit limit bounds (admin only).
+///
+/// Configures the minimum and maximum allowed credit limits for all credit lines.
+/// These bounds are enforced when opening new credit lines or increasing existing limits.
+///
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `min`: Minimum allowed credit limit. Must be >= 0.
+/// - `max`: Maximum allowed credit limit. Must be >= min.
+///
+/// # Authorization
+/// Requires admin authorization via `require_admin_auth()`.
+///
+/// # Panics
+/// - `ContractError::InvalidAmount` if `min < 0`
+/// - `ContractError::LimitOutOfBounds` if `max < min`
+///
+/// # Storage
+/// - Writes `min` to instance storage under `DataKey::MinCreditLimit`
+/// - Writes `max` to instance storage under `DataKey::MaxCreditLimit`
+///
+/// # Example
+/// ```ignore
+/// set_credit_limit_bounds(env, 1_000, 1_000_000_000);
+/// // Now all credit lines must have limits between 1,000 and 1,000,000,000
+/// ```
+pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+
+    // Validate minimum is non-negative
+    if min < 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    // Validate max >= min
+    if max < min {
+        env.panic_with_error(ContractError::LimitOutOfBounds);
+    }
+
+    // Store bounds in instance storage
+    set_min_credit_limit(&env, min);
+    set_max_credit_limit(&env, max);
+}
+
+/// Get the configured global credit limit bounds.
+///
+/// Returns the minimum and maximum allowed credit limits, if configured.
+///
+/// # Returns
+/// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
+///
+/// # Storage
+/// - Reads from instance storage keys `DataKey::MinCreditLimit` and `DataKey::MaxCreditLimit`
+pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
+    let min = get_min_credit_limit(&env);
+    let max = get_max_credit_limit(&env);
+    (min, max)
+}
+
+/// Validate that a credit limit falls within configured bounds.
+///
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `credit_limit`: The credit limit to validate.
+///
+/// # Panics
+/// - `ContractError::LimitOutOfBounds` if the limit is outside configured bounds
+///
+/// # Behavior
+/// - If bounds are not configured, validation passes (no restrictions)
+/// - If only min is configured, validates `credit_limit >= min`
+/// - If only max is configured, validates `credit_limit <= max`
+/// - If both are configured, validates `min <= credit_limit <= max`
+pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
+    let min = get_min_credit_limit(env);
+    let max = get_max_credit_limit(env);
+
+    // Check minimum bound if configured
+    if let Some(min_limit) = min {
+        if credit_limit < min_limit {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+
+    // Check maximum bound if configured
+    if let Some(max_limit) = max {
+        if credit_limit > max_limit {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     let stored_line: CreditLineData = env
@@ -163,6 +262,9 @@ pub fn open_credit_line(
     if risk_score > MAX_RISK_SCORE {
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
+
+    // Validate credit limit is within configured bounds
+    validate_credit_limit_bounds(&env, credit_limit);
 
     if let Some(existing) = env
         .storage()

@@ -40,9 +40,10 @@ pub enum DataKey {
     RateFloorBps(Address),
     /// Per-borrower installment schedule for delinquency tracking.
     RepaymentSchedule(Address),
-    CollateralToken,
-    MinCollateralRatioBps,
-    CollateralBalance(Address),
+    /// Minimum allowed credit limit for new credit lines (admin-configurable).
+    MinCreditLimit,
+    /// Maximum allowed credit limit for new credit lines (admin-configurable).
+    MaxCreditLimit,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -464,6 +465,26 @@ pub fn add_treasury_balance(env: &Env, amount: i128) {
 /// Clear the treasury balance (set to zero).
 pub fn clear_treasury_balance(env: &Env) {
     env.storage().instance().set(&DataKey::TreasuryBalance, &0_i128);
+}
+
+/// Get the configured minimum credit limit, if set.
+pub fn get_min_credit_limit(env: &Env) -> Option<i128> {
+    env.storage().instance().get(&DataKey::MinCreditLimit)
+}
+
+/// Set the minimum credit limit (admin only, enforced by caller).
+pub fn set_min_credit_limit(env: &Env, min: i128) {
+    env.storage().instance().set(&DataKey::MinCreditLimit, &min);
+}
+
+/// Get the configured maximum credit limit, if set.
+pub fn get_max_credit_limit(env: &Env) -> Option<i128> {
+    env.storage().instance().get(&DataKey::MaxCreditLimit)
+}
+
+/// Set the maximum credit limit (admin only, enforced by caller).
+pub fn set_max_credit_limit(env: &Env, max: i128) {
+    env.storage().instance().set(&DataKey::MaxCreditLimit, &max);
 }
 
 /// Return the installment schedule for a borrower, if configured.
