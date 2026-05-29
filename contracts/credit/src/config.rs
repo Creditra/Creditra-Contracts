@@ -1,14 +1,58 @@
 // SPDX-License-Identifier: MIT
-//! Config module: contract initialization.
 
-use crate::storage::admin_key;
+//! Contract initialization and configuration helpers.
+//!
+//! # Initialization contract
+//!
+//! [`init`] is a **one-time** operation. It stores the admin address and sets
+//! the default liquidity source. Calling it a second time reverts with
+//! [`ContractError::AlreadyInitialized`] so the admin cannot be overwritten
+//! after deployment.
+//!
+//! See `docs/deploy.md` for the required deployment sequence.
+
+use crate::auth::require_admin_auth;
+use crate::storage::{admin_key, set_schema_version, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env};
 
+/// Initialize the contract exactly once.
 pub fn init(env: Env, admin: Address) {
-    let key = admin_key(&env);
-    if env.storage().instance().has(&key) {
+    // Guard: prevent re-initialization and admin takeover.
+    if env.storage().instance().has(&admin_key(&env)) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
-    env.storage().instance().set(&key, &admin);
+    env.storage().instance().set(&admin_key(&env), &admin);
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquiditySource, &env.current_contract_address());
+
+    // Initialize global counters and schema marker.
+    env.storage()
+        .instance()
+        .set(&DataKey::CreditLineCount, &0_u32);
+    env.storage()
+        .instance()
+        .set(&DataKey::TotalUtilized, &0_i128);
+    set_schema_version(&env, crate::SCHEMA_VERSION);
+}
+
+/// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
+/// @dev Admin-only.
+#[allow(dead_code)]
+pub fn set_liquidity_token(env: Env, token_address: Address) {
+    require_admin_auth(&env);
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquidityToken, &token_address);
+}
+
+/// @notice Sets the address that provides liquidity for draw operations.
+/// @dev Admin-only. If unset, init config uses the contract address.
+#[allow(dead_code)]
+pub fn set_liquidity_source(env: Env, reserve_address: Address) {
+    require_admin_auth(&env);
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquiditySource, &reserve_address);
 }

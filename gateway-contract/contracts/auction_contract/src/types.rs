@@ -38,6 +38,10 @@ pub struct AuctionConfig {
     pub start_time: u64,
     pub end_time: u64,
     pub min_bid: i128,
+    /// Minimum outbid increment expressed in basis points (1 bps = 0.01%).
+    /// Each new bid must be at least `highest * (1 + min_increment_bps / 10_000)`.
+    /// Capped at 10_000 (100%) on init. Use 0 to require only a 1-stroop increment.
+    pub min_increment_bps: u32,
 }
 
 #[contracttype]

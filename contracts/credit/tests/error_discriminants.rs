@@ -44,6 +44,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::InsufficientRepaymentBalance as u32, 27);
     assert_eq!(ContractError::RepayExceedsMaxAmount as u32, 28);
     assert_eq!(ContractError::DrawCooldownActive as u32, 29);
+    assert_eq!(ContractError::TimestampRegression as u32, 30);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -83,6 +84,7 @@ fn no_duplicate_discriminants() {
         ContractError::InsufficientRepaymentBalance as u32,
         ContractError::RepayExceedsMaxAmount as u32,
         ContractError::DrawCooldownActive as u32,
+        ContractError::TimestampRegression as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -97,8 +99,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 29 variants as of this writing. Update when adding new ones.
-    const EXPECTED_VARIANT_COUNT: usize = 29;
+    // 30 variants as of this writing. Update when adding new ones.
+    const EXPECTED_VARIANT_COUNT: usize = 30;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -130,6 +132,7 @@ fn variant_count_is_known() {
         ContractError::InsufficientRepaymentBalance as u32,
         ContractError::RepayExceedsMaxAmount as u32,
         ContractError::DrawCooldownActive as u32,
+        ContractError::TimestampRegression as u32,
     ];
 
     assert_eq!(

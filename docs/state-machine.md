@@ -13,6 +13,7 @@
 | `Suspended` | 1 | Draws are blocked. Repayments remain allowed. |
 | `Defaulted` | 2 | Draws are blocked. Repayments remain allowed. |
 | `Closed` | 3 | Terminal state for the current line record. |
+| `Restricted` | 4 | Limit is below utilization; repayment remains allowed, and draw attempts stay blocked until the line is cured back to `Active`. |
 
 ---
 
@@ -30,7 +31,8 @@
 | `Suspended` | `Active` | `open_credit_line` reopen | Admin-approved workflow | Yes | Re-opening an existing non-Active line now requires admin auth. |
 | `Suspended` | `Closed` | `close_credit_line` | Admin | Yes | Admin force-close remains available. |
 | `Suspended` | `Closed` | `close_credit_line` | Borrower | Yes | Borrower may close only when `utilized_amount == 0`. |
-| `Defaulted` | `Active` | `reinstate_credit_line` | Admin | Yes | `reinstate_credit_line` is only for `Defaulted -> Active`. |
+| `Defaulted` | `Active` | `reinstate_credit_line` | Admin | Yes | Reinstate to Active: draws re-enabled immediately. |
+| `Defaulted` | `Restricted` | `reinstate_credit_line` | Admin | Yes | Reinstate to Restricted: draws blocked until excess balance is repaid. |
 | `Defaulted` | `Closed` | `close_credit_line` | Admin | Yes | Admin force-close remains available. |
 | `Defaulted` | `Closed` | `close_credit_line` | Borrower | Yes | Borrower may close only when `utilized_amount == 0`. |
 | `Suspended` | `Suspended` | `suspend_credit_line` / `self_suspend_credit_line` | Admin / Borrower | No | Suspend is Active-only. |
@@ -40,6 +42,8 @@
 | `Active` | `Active` | `reinstate_credit_line` | Admin | No | Reinstate rejects non-Defaulted lines. |
 | `Suspended` | `Active` | `reinstate_credit_line` | Admin | No | Suspended lines are not directly reinstated by this entrypoint. |
 | `Closed` | `Active` | `reinstate_credit_line` | Admin | No | Closed lines are not defaulted, so reinstate fails. |
+| `Defaulted` | `Suspended` | `reinstate_credit_line` | Admin | No | Suspended is not a valid reinstate target. |
+| `Defaulted` | `Defaulted` | `reinstate_credit_line` | Admin | No | Cannot reinstate to Defaulted. |
 | `Closed` | `Closed` | `close_credit_line` | Admin / Borrower | Idempotent | Returns early without mutating state. |
 
 ---
@@ -51,6 +55,7 @@
 3. `self_suspend_credit_line` requires borrower auth and does not create any borrower-controlled reactivation path.
 4. Returning a self-suspended line to `Active` requires an admin-approved reopen workflow.
 5. Re-opening any existing non-`Active` line requires admin auth to prevent borrowers from bypassing self-suspend or other admin controls.
+6. `Restricted` is a cure state created by a limit decrease below utilization: repayment remains allowed, but draw attempts do not create new net borrowing and stay blocked until the admin restores the line to `Active`.
 
 ---
 
@@ -77,4 +82,7 @@
 | `self_suspend_blocks_draws_but_allows_repayments` | Self-suspend blocks draws while leaving repayment available. |
 | `self_suspended_line_cannot_be_reopened_without_admin_auth` | Borrower cannot bypass self-suspend by reopening without admin approval. |
 | `suspend_only_valid_from_active` | Suspend remains Active-only. |
-| `reinstate_only_valid_from_defaulted` | Reinstate remains limited to `Defaulted -> Active`. |
+| `reinstate_only_valid_from_defaulted` | Reinstate rejects non-Defaulted source lines. |
+| `reinstate_defaulted_to_active` | `Defaulted → Active` accepted; debt unchanged. |
+| `reinstate_defaulted_to_restricted` | `Defaulted → Restricted` accepted; debt unchanged. |
+| `reinstate_invalid_targets_revert` | `Closed`, `Defaulted`, `Suspended` targets revert; line stays `Defaulted`. |

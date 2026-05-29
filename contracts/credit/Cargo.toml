@@ -14,5 +14,6 @@ crate-type = ["cdylib", "rlib"]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
+gateway-auction = { path = "../../gateway-contract/contracts/auction_contract" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 proptest = "1.4"

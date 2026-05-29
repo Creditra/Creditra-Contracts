@@ -5,7 +5,7 @@ use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{symbol_short, Address, Env, TryFromVal};
 
-fn setup(env: &Env) -> (CreditClient, Address) {
+fn setup(env: &Env) -> (CreditClient<'_>, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -74,7 +74,7 @@ fn open_emits_opened_event_with_correct_topics() {
 // ── invalid parameters ────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "credit_limit must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn open_rejects_zero_credit_limit() {
     let env = Env::default();
     let (client, _) = setup(&env);
@@ -83,7 +83,7 @@ fn open_rejects_zero_credit_limit() {
 }
 
 #[test]
-#[should_panic(expected = "credit_limit must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn open_rejects_negative_credit_limit() {
     let env = Env::default();
     let (client, _) = setup(&env);
@@ -119,7 +119,7 @@ fn open_rejects_score_above_max() {
 // ── duplicate / reopen policy ─────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "borrower already has an active credit line")]
+#[should_panic(expected = "Error(Contract, #14)")]
 fn open_rejects_duplicate_active_line() {
     let env = Env::default();
     let (client, _) = setup(&env);

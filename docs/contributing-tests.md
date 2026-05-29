@@ -36,6 +36,22 @@ the failing call:
 Cover both a single borrower issuing sequential draws and multiple borrowers
 sharing the same reserve so shared-liquidity regressions are caught.
 
+## Reentrancy guard lifecycle (`token_failure_rollback.rs`)
+
+Integration tests in `contracts/credit/tests/token_failure_rollback.rs` assert
+that `draw_credit` / `repay_credit` clear the reentrancy guard after both
+pre-transfer validation failures and mid-transfer CPI failures:
+
+```bash
+cargo test -p creditra-credit --test token_failure_rollback rollback
+```
+
+- **Pre-transfer failures** use the real Stellar asset contract (insufficient
+  reserve / allowance) with `catch_unwind` to continue the same test after panic.
+- **Mid-transfer failures** use the in-test `FailingTokenContract` mock (internal
+  balances, configurable `set_fail_transfer` / `set_fail_transfer_from`) for
+  draw-fail-then-draw and repay-fail-then-repay sequencing.
+
 ## Scope Boundary
 
 `MockLiquidityToken` is test-only (`#[cfg(test)]`) and must not be imported

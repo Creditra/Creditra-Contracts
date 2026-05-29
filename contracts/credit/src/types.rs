@@ -61,6 +61,7 @@ pub enum CreditStatus {
 /// | 27   | `InsufficientRepaymentBalance` | Borrower balance cannot cover repayment |
 /// | 28   | `RepayExceedsMaxAmount`        | Repay amount exceeds per-transaction cap |
 /// | 29   | `DrawCooldownActive`          | Borrower attempted to draw before cooldown elapsed |
+/// | 30   | `ExposureCapExceeded`         | Draw would exceed the global protocol exposure cap |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -123,6 +124,8 @@ pub enum ContractError {
     RepayExceedsMaxAmount = 28,
     /// Borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
+    /// Treasury address is not configured when attempting a treasury withdrawal.
+    TreasuryNotSet = 30,
 }
 
 /// Stored credit line data for a borrower.
@@ -157,9 +160,21 @@ pub struct CreditLineData {
     pub suspension_ts: u64,
 }
 
-/// Admin-configurable limits on interest-rate changes.
+/// Optional installment repayment schedule attached to a credit line.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RepaymentSchedule {
+    /// Required repayment amount for each installment period.
+    pub amount_per_period: i128,
+    /// Duration of a single installment period in seconds.
+    pub period_seconds: u64,
+    /// Timestamp at which the next installment is due.
+    pub next_due_ts: u64,
+}
+
+/// Admin-configurable limits on interest-rate changes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateChangeConfig {
     /// Maximum absolute change in `interest_rate_bps` allowed per single update.
     pub max_rate_change_bps: u32,
@@ -225,54 +240,14 @@ pub struct RateFormulaConfigEvent {
     pub enabled: bool,
 }
 
-/// Structured representation of the contract's API version (semver).
-/// Grace period waiver mode for suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GraceWaiverMode {
-    FullWaiver = 0,
-    ReducedRate = 1,
-}
-
-/// Admin-configurable grace period policy for suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GracePeriodConfig {
-    pub grace_period_seconds: u64,
-    pub waiver_mode: GraceWaiverMode,
-    pub reduced_rate_bps: u32,
-}
-
-/// Mode of interest rate waiver during a grace period.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GraceWaiverMode {
-    /// Zero interest accrues during the grace window.
-    FullWaiver = 0,
-    /// Interest accrues at a reduced rate during the grace window.
-    ReducedRate = 1,
-}
-
-/// Configuration for the grace period applied to Suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GracePeriodConfig {
-    /// Duration of the grace window in seconds.
-    pub grace_period_seconds: u64,
-    /// The waiver mode applied during the grace window.
-    pub waiver_mode: GraceWaiverMode,
-    /// The reduced rate applied when `waiver_mode` is `ReducedRate`.
-    pub reduced_rate_bps: u32,
-}
-
+<<<<<<< HEAD
+=======
 /// Global protocol configuration.
-#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
     /// Configured liquidity token.
     pub liquidity_token: Option<Address>,
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
-    /// Configured rate change limits.
-    pub rate_change_config: Option<RateChangeConfig>,
 }
+>>>>>>> upstream/main

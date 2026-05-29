@@ -6,7 +6,7 @@ use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
-use soroban_sdk::{Address, Env, Symbol, TryFromVal};
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 fn setup_defaulted_line(utilized_amount: i128) -> (Env, Address, Address) {
     let env = Env::default();
@@ -18,6 +18,19 @@ fn setup_defaulted_line(utilized_amount: i128) -> (Env, Address, Address) {
 
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_address = token_id.address();
+    client.set_liquidity_token(&token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
+
     client.open_credit_line(&borrower, &10_000, &300_u32, &60_u32);
 
     if utilized_amount > 0 {
@@ -95,6 +108,19 @@ fn settle_default_liquidation_requires_defaulted_status() {
     let client = CreditClient::new(&env, &contract_id);
 
     client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_address = token_id.address();
+    client.set_liquidity_token(&token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
+
     client.open_credit_line(&borrower, &5_000, &200_u32, &40_u32);
     client.draw_credit(&borrower, &500_i128);
 

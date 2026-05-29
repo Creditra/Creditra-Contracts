@@ -1,51 +1,52 @@
 // SPDX-License-Identifier: MIT
+// (Extended fixed-point helpers below — module docs at file top.)
 
-//! # Fixed-Point Interest Math Utilities
-//!
-//! This module provides deterministic, integer-only arithmetic helpers for
-//! computing interest accruals inside the Creditra credit contract.
-//!
-//! ## Scaling Factor
-//!
-//! All intermediate products are scaled by `SCALE = 10^18` before division so
-//! that the final result retains sub-unit precision up to 18 decimal places.
-//! The caller chooses whether the remainder is discarded (floor) or rounded up
-//! (ceiling) via the [`Rounding`] enum.
-//!
-//! ## Basis Points
-//!
-//! Interest rates are expressed in **basis points** (bps), where
-//! `1 bps = 0.01% = 1 / 10_000`.  The annual rate in bps is therefore divided
-//! by `BPS_DENOMINATOR = 10_000` when computing the fractional rate.
-//!
-//! ## Annual Seconds
-//!
-//! Time is measured in ledger seconds.  One Julian year is defined as
-//! `SECONDS_PER_YEAR = 31_557_600` (365.25 × 86 400), matching the convention
-//! used by most on-chain interest protocols.
-//!
-//! ## Overflow Safety
-//!
-//! The prorate helper promotes all operands to `u128` before multiplying.
-//! The worst-case intermediate product is:
-//!
-//! ```text
-//! principal  ≤ i128::MAX  ≈ 1.7 × 10^38
-//! rate_bps   ≤ 10_000
-//! time_delta ≤ u64::MAX   ≈ 1.8 × 10^19
-//! SCALE      = 10^18
-//! ```
-//!
-//! `principal × rate_bps × time_delta` can reach ~3 × 10^61, which overflows
-//! `u128` (max ~3.4 × 10^38).  To prevent this the multiplication is split
-//! into two checked steps:
-//!
-//! 1. `a = principal × rate_bps`  — fits in u128 for any realistic principal
-//!    (≤ 10^28 × 10^4 = 10^32 < 10^38).
-//! 2. `b = a × time_delta`        — checked; panics on overflow.
-//!
-//! The denominator `BPS_DENOMINATOR × SECONDS_PER_YEAR` is pre-computed as a
-//! `u128` constant so the final division is a single operation.
+// # Fixed-Point Interest Math Utilities
+//
+// This module provides deterministic, integer-only arithmetic helpers for
+// computing interest accruals inside the Creditra credit contract.
+//
+// ## Scaling Factor
+//
+// All intermediate products are scaled by `SCALE = 10^18` before division so
+// that the final result retains sub-unit precision up to 18 decimal places.
+// The caller chooses whether the remainder is discarded (floor) or rounded up
+// (ceiling) via the [`Rounding`] enum.
+//
+// ## Basis Points
+//
+// Interest rates are expressed in **basis points** (bps), where
+// `1 bps = 0.01% = 1 / 10_000`.  The annual rate in bps is therefore divided
+// by `BPS_DENOMINATOR = 10_000` when computing the fractional rate.
+//
+// ## Annual Seconds
+//
+// Time is measured in ledger seconds.  One Julian year is defined as
+// `SECONDS_PER_YEAR = 31_557_600` (365.25 × 86 400), matching the convention
+// used by most on-chain interest protocols.
+//
+// ## Overflow Safety
+//
+// The prorate helper promotes all operands to `u128` before multiplying.
+// The worst-case intermediate product is:
+//
+// ```text
+// principal  ≤ i128::MAX  ≈ 1.7 × 10^38
+// rate_bps   ≤ 10_000
+// time_delta ≤ u64::MAX   ≈ 1.8 × 10^19
+// SCALE      = 10^18
+// ```
+//
+// `principal × rate_bps × time_delta` can reach ~3 × 10^61, which overflows
+// `u128` (max ~3.4 × 10^38).  To prevent this the multiplication is split
+// into two checked steps:
+//
+// 1. `a = principal × rate_bps`  — fits in u128 for any realistic principal
+//    (≤ 10^28 × 10^4 = 10^32 < 10^38).
+// 2. `b = a × time_delta`        — checked; panics on overflow.
+//
+// The denominator `BPS_DENOMINATOR × SECONDS_PER_YEAR` is pre-computed as a
+// `u128` constant so the final division is a single operation.
 
 #![allow(dead_code)]
 
@@ -280,6 +281,47 @@ pub fn prorate_interest(
 mod tests {
     use super::*;
 
+    // ── mul_div ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn mul_div_basic() {
+        assert_eq!(mul_div(1_000, 300, 10_000), 30);
+    }
+
+    #[test]
+    fn mul_div_truncates_toward_zero() {
+        // 7 * 1 / 3 = 2.33… → 2
+        assert_eq!(mul_div(7, 1, 3), 2);
+    }
+
+    #[test]
+    fn mul_div_identity_denominator() {
+        assert_eq!(mul_div(42, 1, 1), 42);
+    }
+
+    #[test]
+    #[should_panic(expected = "denominator must not be zero")]
+    fn mul_div_zero_denominator_panics() {
+        mul_div(1, 1, 0);
+    }
+
+    // ── apply_bps ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_bps_three_percent() {
+        assert_eq!(apply_bps(1_000, 300), 30);
+    }
+
+    #[test]
+    fn apply_bps_half_percent_truncates() {
+        assert_eq!(apply_bps(200, 50), 1);
+    }
+
+    #[test]
+    fn apply_bps_sub_unit_truncates_to_zero() {
+        assert_eq!(apply_bps(50, 1), 0);
+    }
+
     // ── mul_div ───────────────────────────────────────────────────────────────
 
     #[test]
@@ -393,12 +435,27 @@ mod tests {
 
     #[test]
     fn apply_bps_full_rate() {
+        assert_eq!(apply_bps(500, 10_000), 500);
         // 10 000 tokens × 10 000 bps (100 %) = 10 000 tokens
         assert_eq!(apply_bps(10_000, 10_000, Rounding::Floor), 10_000);
     }
 
     #[test]
     fn apply_bps_zero_rate() {
+        assert_eq!(apply_bps(1_000_000, 0), 0);
+    }
+
+    // ── prorate_interest ─────────────────────────────────────────────────────
+
+    #[test]
+    fn prorate_interest_one_day() {
+        // 5% annual on 1_000_000 for 1 day
+        assert_eq!(prorate_interest(1_000_000, 500, 86_400), 137);
+    }
+
+    #[test]
+    fn prorate_interest_zero_elapsed() {
+        assert_eq!(prorate_interest(1_000_000, 500, 0), 0);
         assert_eq!(apply_bps(1_000_000, 0, Rounding::Floor), 0);
         assert_eq!(apply_bps(1_000_000, 0, Rounding::Ceil), 0);
     }
@@ -477,6 +534,19 @@ mod tests {
 
     #[test]
     fn prorate_interest_zero_principal() {
+        assert_eq!(prorate_interest(0, 500, 86_400), 0);
+    }
+
+    #[test]
+    fn prorate_interest_full_year() {
+        // 10% on 100_000 for exactly 1 year = 10_000
+        assert_eq!(prorate_interest(100_000, 1_000, 31_536_000), 10_000);
+    }
+
+    #[test]
+    fn prorate_interest_one_hour() {
+        // 5% on 1_000_000 for 3_600 s ≈ 5
+        assert_eq!(prorate_interest(1_000_000, 500, 3_600), 5);
         assert_eq!(prorate_interest(0, 300, 86_400, Rounding::Floor), 0);
     }
 

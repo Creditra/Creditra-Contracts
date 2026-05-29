@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["contracts/credit"]
+members = [
+    "contracts/credit",
+    "gateway-contract/contracts/auction_contract",
+]
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)'] }

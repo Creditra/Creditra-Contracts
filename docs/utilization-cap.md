@@ -6,7 +6,8 @@ The utilization cap allows an admin to restrict how much of a borrower's nominal
 
 ## Semantics
 
-- **Cap formula:** `cap_amount = credit_limit * cap_bps / 10_000`
+- **Cap formula:** `cap_amount = floor(credit_limit * cap_bps / 10_000)`, computed with overflow-safe `mul_div` math.
+- **Effective ceiling:** Because `draw_credit` already enforces `utilized_amount + draw_amount <= credit_limit`, the real draw ceiling is always `min(credit_limit, cap_amount)`. For valid configured caps (`cap_bps <= 10_000`), this reduces to `cap_amount`, while `cap_bps = 10_000` is a no-op.
 - **Enforcement:** In `draw_credit`, after the credit-limit check, if a cap is configured the contract verifies: `utilized_amount + draw_amount <= cap_amount`. If not, the transaction reverts with `"exceeds utilization cap"`.
 - **No cap set:** If no cap is configured for a borrower, the full credit limit applies (existing behavior is unchanged).
 
@@ -28,7 +29,7 @@ The utilization cap allows an admin to restrict how much of a borrower's nominal
 
 ## Interaction with credit limit updates
 
-When `update_risk_parameters` changes `credit_limit`, the cap ratio (bps) is unchanged. The effective cap amount recalculates automatically on the next draw because it is derived from the current `credit_limit` at draw time.
+When `update_risk_parameters` changes `credit_limit`, the cap ratio (bps) is unchanged. The effective cap amount recalculates automatically on the next draw because it is derived from the current `credit_limit` at draw time. This composes with the underlying credit-limit rule: after an update, the borrower may draw only up to `min(new_credit_limit, floor(new_credit_limit * cap_bps / 10_000))`.
 
 **Example:** borrower has `credit_limit=1_000`, `cap_bps=8_000` (cap_amount=800). Admin raises limit to 2_000. On the next draw, cap_amount becomes 1_600 automatically — no cap reconfiguration needed.
 

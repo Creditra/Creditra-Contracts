@@ -97,7 +97,10 @@ pub struct DrawsFrozenEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowerBlockedEvent {
     pub borrower: Address,
+    /// true = borrower was blocked; false = borrower was unblocked
     pub blocked: bool,
+    /// Ledger sequence at time of change (for off-chain indexers)
+    pub ledger: u32,
 }
 
 #[contracttype]
@@ -109,6 +112,14 @@ pub struct DrawnEventV2 {
     pub amount: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeAccruedEvent {
+    pub borrower: Address,
+    pub fee_amount: i128,
+    pub new_treasury_balance: i128,
 }
 
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
@@ -136,6 +147,11 @@ pub fn publish_draw_reversed_event(env: &Env, event: DrawReversedEvent) {
 pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
+}
+
+pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
+    env.events()
+    .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
 }
 
 pub fn publish_admin_rotation_proposed(env: &Env, proposed_admin: &Address, accept_after: u64) {
@@ -205,10 +221,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -221,14 +234,18 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
-#[allow(dead_code)]
-pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
-    env.events()
-        .publish((symbol_short!("credit"), symbol_short!("blk_chg")), event);
+pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bool) {
+    env.events().publish(
+        (Symbol::new(env, "blk_chg"),),
+        BorrowerBlockedEvent {
+            borrower: borrower.clone(),
+            blocked,
+            ledger: env.ledger().sequence(),
+        },
+    );
 }
-
-
