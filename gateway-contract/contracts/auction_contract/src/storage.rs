@@ -26,11 +26,9 @@ pub(crate) fn bump_auction_state_ttl(env: &Env, auction_id: &Symbol) {
 /// Extend TTL for settlement replay-protection markers (only when the key exists).
 pub(crate) fn bump_settlement_marker_ttl(env: &Env, key: &crate::AuctionKey) {
     if env.storage().persistent().has(key) {
-        env.storage().persistent().extend_ttl(
-            key,
-            PERSISTENT_BUMP_AMOUNT,
-            PERSISTENT_BUMP_AMOUNT,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(key, PERSISTENT_BUMP_AMOUNT, PERSISTENT_BUMP_AMOUNT);
     }
 }
 
