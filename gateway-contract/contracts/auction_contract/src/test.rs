@@ -5,6 +5,7 @@ mod tests {
     use crate::errors::AuctionError;
     use core::convert::TryFrom;
     use core::ops::Range;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::vec::Vec;
 
     use soroban_sdk::testutils::{Address as _, Ledger};
@@ -81,7 +82,7 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
 
         let auction_id = Symbol::new(&env, "auc1");
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32); // start 0, end 1000, min 50, 0 bps
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32); // start 0, end 1000, min 50, 0 bps, no anti-snipe
 
         client.place_bid(&auction_id, &alice, &100_i128);
         client.place_bid(&auction_id, &bob, &200_i128);
@@ -105,7 +106,7 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
 
         let auction_id = Symbol::new(&env, "eq_highest");
-        client.init_auction(&auction_id, &0, &1000, &50_i128);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
 
         client.place_bid(&auction_id, &alice, &100_i128);
 
@@ -143,7 +144,7 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
         let auction_id = Symbol::new(&env, AUCTION_ID);
 
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32); // long auction, min 1, 0 bps
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32, &0_u64, &0_u64, &0_u32); // long auction, min 1, 0 bps, no anti-snipe
 
         let mut seed: u64 = 0xdeadbeefcafebabe;
         let mut expected: Option<(Address, i128)> = None;
@@ -222,7 +223,7 @@ mod tests {
         let mut seed: u64 = 0x1234_5678_9abc_def0;
         let auction_id = Symbol::new(&env, "refund_auc");
 
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32, &0_u64, &0_u64, &0_u32);
 
         for _ in 0..FUZZ_STEPS {
             let bidder_idx = pick_index(&mut seed, 0..bidders.len());
@@ -282,7 +283,7 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
         let auction_id = Symbol::new(&env, "close_auc");
 
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32, &0_u64, &0_u64, &0_u32);
 
         let mut seed: u64 = 0xdeadbeef_cafe_beef;
         let mut highest = 0_i128;
@@ -326,7 +327,7 @@ mod tests {
         let bidder = Address::generate(&env);
         let auction_id = Symbol::new(&env, "liq_open");
 
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &bidder, &100_i128);
 
         let result = client.try_settle_default_liquidation(
@@ -350,7 +351,7 @@ mod tests {
         let credit_contract = Address::generate(&env);
         let auction_id = Symbol::new(&env, "liq_closed");
 
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &bidder, &420_i128);
         client.close_auction(&auction_id);
         client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
@@ -381,7 +382,7 @@ mod tests {
         let credit_contract = Address::generate(&env);
         let auction_id = Symbol::new(&env, "zero_bid");
 
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         // no bids
         client.close_auction(&auction_id);
         client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
@@ -405,7 +406,7 @@ mod tests {
         let bidder = Address::generate(&env);
         let auction_id = Symbol::new(&env, "timed_out");
 
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
 
         let attempt = client.try_place_bid(&auction_id, &bidder, &100_i128);
         assert!(attempt.is_err(), "bid after end time should be rejected");
@@ -422,7 +423,7 @@ mod tests {
         let bidder = Address::generate(&env);
         let auction_id = Symbol::new(&env, "close_event");
 
-        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &1000, &50_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &bidder, &100_i128);
         client.close_auction(&auction_id);
 
@@ -450,7 +451,7 @@ mod tests {
         let auction_id = Symbol::new(&env, "bad_bps");
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            client.init_auction(&auction_id, &0, &1000, &50_i128, &10_001_u32);
+            client.init_auction(&auction_id, &0, &1000, &50_i128, &10_001_u32, &0_u64, &0_u64, &0_u32);
         }));
         assert!(result.is_err(), "bps > 10000 should be rejected at init");
     }
@@ -463,9 +464,9 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
 
         // 0 bps (no percentage requirement) is valid
-        client.init_auction(&Symbol::new(&env, "bps0"), &0, &1000, &1_i128, &0_u32);
+        client.init_auction(&Symbol::new(&env, "bps0"), &0, &1000, &1_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         // 10_000 bps (100% increment) is the maximum valid value
-        client.init_auction(&Symbol::new(&env, "bps10k"), &0, &1000, &1_i128, &10_000_u32);
+        client.init_auction(&Symbol::new(&env, "bps10k"), &0, &1000, &1_i128, &10_000_u32, &0_u64, &0_u64, &0_u32);
     }
 
     // ── min_increment_bps: bid threshold enforcement ───────────────────────
@@ -482,7 +483,7 @@ mod tests {
         let bob = Address::generate(&env);
 
         // 100 bps = 1%; threshold after 1000 = 1000 + ceil(1000*100/10000) = 1010
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &100_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &100_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &alice, &1_000_i128);
 
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -510,7 +511,7 @@ mod tests {
         let bob = Address::generate(&env);
 
         // 100 bps = 1%; threshold after 1000 = 1010
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &100_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &100_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &alice, &1_000_i128);
         client.place_bid(&auction_id, &bob, &1_010_i128); // exactly at threshold
 
@@ -534,7 +535,7 @@ mod tests {
         let carol = Address::generate(&env);
 
         // 333 bps = 3.33%; increment on 1000 = ceil(1000*333/10000) = ceil(33.3) = 34; threshold = 1034
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &333_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &333_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &alice, &1_000_i128);
 
         let just_below = catch_unwind(AssertUnwindSafe(|| {
@@ -564,7 +565,7 @@ mod tests {
         let carol = Address::generate(&env);
 
         // 0 bps: any strictly higher bid is accepted; equal bid must be rejected
-        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32);
+        client.init_auction(&auction_id, &0, &u64::MAX, &1_i128, &0_u32, &0_u64, &0_u64, &0_u32);
         client.place_bid(&auction_id, &alice, &500_i128);
 
         let equal = catch_unwind(AssertUnwindSafe(|| {
@@ -580,4 +581,304 @@ mod tests {
             .unwrap();
         assert_eq!(state.highest_bid, 501_i128);
     }
+
+    // ── Anti-Snipe Mechanism Tests ─────────────────────────────────────────
+
+    /// Test that a bid placed before the extension window does not trigger an extension.
+    #[test]
+    fn anti_snipe_pre_window_bid_no_extension() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_pre");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction: start=0, end=1000, extension_window=100, extension_amount=60, max_extensions=3
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &60_u64, &3_u32);
+
+        // Place first bid at time 500 (well before extension window threshold of 900)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1000, "end_time should remain unchanged");
+        assert_eq!(state.config.extensions_count, 0, "extensions_count should be 0");
+
+        // Place second bid at time 899 (still 1 second before extension window)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 899;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1000, "end_time should still be unchanged");
+        assert_eq!(state.config.extensions_count, 0, "extensions_count should still be 0");
+    }
+
+    /// Test that a bid placed within the extension window triggers an extension.
+    #[test]
+    fn anti_snipe_late_bid_triggers_extension() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_late");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction: start=0, end=1000, extension_window=100, extension_amount=60, max_extensions=3
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &60_u64, &3_u32);
+
+        // Place first bid early
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Place second bid at time 950 (within extension window: 950 >= 900 and 950 < 1000)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 950;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        // Expected new end_time = 950 + 60 = 1010
+        assert_eq!(state.config.end_time, 1010, "end_time should be extended to 1010");
+        assert_eq!(state.config.extensions_count, 1, "extensions_count should be 1");
+    }
+
+    /// Test that extensions stop after reaching max_extensions limit.
+    #[test]
+    fn anti_snipe_extension_cap_enforced() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_cap");
+
+        let bidders: [Address; 5] = [
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        ];
+
+        // Auction: start=0, end=1000, extension_window=100, extension_amount=60, max_extensions=2
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &60_u64, &2_u32);
+
+        // First bid early (no extension)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &bidders[0], &100_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1000);
+        assert_eq!(state.config.extensions_count, 0);
+
+        // Second bid at 950 (first extension: 950 + 60 = 1010)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 950;
+        });
+        client.place_bid(&auction_id, &bidders[1], &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1010, "first extension should set end_time to 1010");
+        assert_eq!(state.config.extensions_count, 1);
+
+        // Third bid at 970 (second extension: 970 + 60 = 1030, but current end is 1010, so max(1010, 1030) = 1030)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 970;
+        });
+        client.place_bid(&auction_id, &bidders[2], &300_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1030, "second extension should set end_time to 1030");
+        assert_eq!(state.config.extensions_count, 2, "extensions_count should be 2");
+
+        // Fourth bid at 990 (would be third extension, but max_extensions=2, so no extension)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 990;
+        });
+        client.place_bid(&auction_id, &bidders[3], &400_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1030, "end_time should remain 1030 (no third extension)");
+        assert_eq!(state.config.extensions_count, 2, "extensions_count should still be 2");
+
+        // Fifth bid at 1000 (still within extension window but max reached)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1000;
+        });
+        client.place_bid(&auction_id, &bidders[4], &500_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1030, "end_time should still be 1030");
+        assert_eq!(state.config.extensions_count, 2, "extensions_count should still be 2");
+    }
+
+    /// Test that anti-snipe is disabled when extension_window is 0.
+    #[test]
+    fn anti_snipe_disabled_when_extension_window_zero() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_disabled");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction with extension_window=0 (anti-snipe disabled)
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &0_u64, &60_u64, &3_u32);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid at 950 (would be in extension window if enabled)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 950;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1000, "end_time should not change when extension_window=0");
+        assert_eq!(state.config.extensions_count, 0);
+    }
+
+    /// Test that anti-snipe is disabled when extension_amount is 0.
+    #[test]
+    fn anti_snipe_disabled_when_extension_amount_zero() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_no_amount");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction with extension_amount=0 (anti-snipe disabled)
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &0_u64, &3_u32);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid at 950 (within extension window but extension_amount=0)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 950;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 1000, "end_time should not change when extension_amount=0");
+        assert_eq!(state.config.extensions_count, 0);
+    }
+
+    /// Test that a bid exactly at the extension window threshold triggers extension.
+    #[test]
+    fn anti_snipe_bid_at_exact_threshold() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_exact");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction: end=1000, extension_window=100 (threshold at 900)
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &60_u64, &3_u32);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid exactly at threshold (900)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 900;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(state.config.end_time, 960, "end_time should be extended to 960");
+        assert_eq!(state.config.extensions_count, 1);
+    }
+
+    /// Test that extension only happens if proposed_end > current end_time.
+    #[test]
+    fn anti_snipe_no_extension_if_proposed_end_not_greater() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "snipe_no_extend");
+
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        // Auction: end=1000, extension_window=100, extension_amount=10
+        client.init_auction(&auction_id, &0, &1000, &1_i128, &0_u32, &100_u64, &10_u64, &3_u32);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 500;
+        });
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid at 990 (proposed_end = 990 + 10 = 1000, which equals current end_time)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 990;
+        });
+        client.place_bid(&auction_id, &bob, &200_i128);
+
+        let state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        // Since proposed_end (1000) is not > current end_time (1000), no extension occurs
+        // But extensions_count should still increment since we're in the window
+        assert_eq!(state.config.end_time, 1000, "end_time should remain 1000");
+        assert_eq!(state.config.extensions_count, 0, "extensions_count should remain 0 since no actual extension occurred");
+    }
 }
+

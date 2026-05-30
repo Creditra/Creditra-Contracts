@@ -56,6 +56,10 @@ impl Auction {
         start_time: u64,
         end_time: u64,
         min_bid: i128,
+        min_increment_bps: u32,
+        extension_window: u64,
+        extension_amount: u64,
+        max_extensions: u32,
     ) {
         if start_time >= end_time {
             panic!("invalid times");
@@ -70,6 +74,10 @@ impl Auction {
             end_time,
             min_bid,
             min_increment_bps,
+            extension_window,
+            extension_amount,
+            max_extensions,
+            extensions_count: 0,
         };
         let state = AuctionState {
             config,
@@ -105,6 +113,10 @@ impl Auction {
     ///
     /// When outbidding, the previous highest bidder is refunded exactly `highest_bid`
     /// (event first, then token transfer when `bid_token` is configured).
+    ///
+    /// Anti-snipe mechanism: If a qualifying bid arrives within the `extension_window`
+    /// (final seconds before end_time) and extensions haven't reached `max_extensions`,
+    /// the auction's `end_time` is extended by `extension_amount` seconds.
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
@@ -123,7 +135,9 @@ impl Auction {
             panic!("auction not open");
         }
 
-        if env.ledger().timestamp() >= state.config.end_time {
+        let now = env.ledger().timestamp();
+        
+        if now >= state.config.end_time {
             panic!("auction closed");
         }
 
@@ -137,10 +151,13 @@ impl Auction {
             env.panic_with_error(AuctionError::BidTooLow);
         }
 
-        let token_addr: Option<Address> = env
-            .storage()
-            .instance()
-            .get(&Symbol::new(&env, "bid_token"));
+        // Refund previous bidder if exists
+        if let Some(prev_bidder) = state.highest_bidder.clone() {
+            let refund_amount = state.highest_bid;
+            let token_addr: Option<Address> = env
+                .storage()
+                .instance()
+                .get(&Symbol::new(&env, "bid_token"));
 
             // Emit refund event before performing token transfer
             publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
@@ -152,6 +169,37 @@ impl Auction {
                     &prev_bidder,
                     &refund_amount,
                 );
+            }
+        }
+
+        // Anti-snipe logic: check if bid is within extension window
+        if state.config.extension_window > 0 && state.config.extension_amount > 0 {
+            // Calculate the extension window threshold using checked arithmetic
+            let extension_threshold = state
+                .config
+                .end_time
+                .checked_sub(state.config.extension_window)
+                .unwrap_or(0);
+
+            // Check if bid is within the extension window and before end_time
+            if now >= extension_threshold && now < state.config.end_time {
+                // Check if we haven't exceeded max extensions
+                if state.config.extensions_count < state.config.max_extensions {
+                    // Calculate proposed new end time
+                    let proposed_end = now
+                        .checked_add(state.config.extension_amount)
+                        .expect("overflow calculating proposed end time");
+
+                    // Extend end_time to the maximum of current end_time and proposed_end
+                    if proposed_end > state.config.end_time {
+                        state.config.end_time = proposed_end;
+                        state.config.extensions_count = state
+                            .config
+                            .extensions_count
+                            .checked_add(1)
+                            .expect("overflow incrementing extensions count");
+                    }
+                }
             }
         }
 
