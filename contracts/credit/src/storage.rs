@@ -48,6 +48,28 @@ pub enum DataKey {
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
     AuctionContract,
+    /// Maximum total exposure allowed across all credit lines (admin-configurable).
+    MaxTotalExposure,
+    /// Protocol fee in basis points applied to interest portion of repayments.
+    ProtocolFeeBps,
+    /// Treasury address where withdrawn fees will be sent.
+    TreasuryAddress,
+    /// Accumulated treasury balance held in contract (fees collected).
+    TreasuryBalance,
+    /// Per-borrower collateral balance.
+    CollateralBalance(Address),
+    /// Minimum collateral ratio in basis points.
+    MinCollateralRatioBps,
+    /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
+    DrawAudit(Address, u64),
+    /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
+    DrawReversedAmount(Address, u64),
+    /// Oracle circuit-breaker configuration.
+    OracleConfig,
+    /// Last accepted oracle price.
+    OracleLastPrice,
+    /// Timestamp of the last accepted oracle price.
+    OracleLastPriceTs,
 }
 
 /// Maximum number of credit lines returned per page.

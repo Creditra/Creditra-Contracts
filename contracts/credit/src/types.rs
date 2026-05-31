@@ -66,6 +66,10 @@ pub enum CreditStatus {
 /// | 32   | `AdminNotInitialized`         | Admin address has not been initialized |
 /// | 33   | `TimestampRegression`         | Timestamp regression detected |
 /// | 34   | `LimitOutOfBounds`            | Credit limit is outside configured min/max bounds |
+/// | 35   | `CollateralRatioBelowMinimum` | Collateral ratio is below the minimum required ratio |
+/// | 36   | `OraclePriceInvalid`          | Oracle price is invalid (zero, negative, or malformed) |
+/// | 37   | `OraclePriceStale`            | Oracle price is stale (exceeds max_age_seconds) |
+/// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -138,6 +142,14 @@ pub enum ContractError {
     TimestampRegression = 33,
     /// Credit limit is outside the configured minimum/maximum bounds.
     LimitOutOfBounds = 34,
+    /// Collateral ratio is below the minimum required ratio.
+    CollateralRatioBelowMinimum = 35,
+    /// Oracle price is invalid (zero, negative, or malformed).
+    OraclePriceInvalid = 36,
+    /// Oracle price is stale (exceeds max_age_seconds).
+    OraclePriceStale = 37,
+    /// Oracle price deviation exceeds the configured maximum.
+    OraclePriceDeviation = 38,
 }
 
 /// Stored credit line data for a borrower.

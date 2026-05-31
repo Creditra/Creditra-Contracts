@@ -15,6 +15,7 @@ mod config;
 pub mod events;
 mod freeze;
 mod collateral;
+mod lifecycle;
 mod query;
 mod math_utils;
 mod risk;
@@ -33,6 +34,7 @@ use crate::events::{
     publish_interest_accrued_event, publish_repayment_event, CreditLineEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
+    publish_contract_upgraded_event, ContractUpgradedEvent,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -53,7 +55,7 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
     OracleConfig, RateChangeConfig,
 };
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -1276,6 +1278,72 @@ impl Credit {
             liquidity_token: env.storage().instance().get(&DataKey::LiquidityToken),
             liquidity_source: env.storage().instance().get(&DataKey::LiquiditySource),
         }
+    }
+
+    // ── Contract Upgrade ──────────────────────────────────────────────────────
+
+    /// Upgrade the contract WASM to a new version (admin only).
+    ///
+    /// This entrypoint allows the protocol to ship bug fixes and feature additions
+    /// without migrating borrower state. The upgrade is atomic and preserves all
+    /// existing storage.
+    ///
+    /// # Security Gates
+    /// - **Admin authentication**: Only the configured admin can authorize upgrades.
+    /// - **Pause check**: Upgrades are blocked when the protocol circuit breaker is active.
+    ///
+    /// # State Updates
+    /// - Bumps `SCHEMA_VERSION` in instance storage to track upgrade history.
+    /// - Calls `env.deployer().update_current_contract_wasm(new_wasm_hash)` to perform
+    ///   the atomic WASM replacement.
+    ///
+    /// # Events
+    /// Emits `ContractUpgradedEvent` with both the old and new WASM hashes for
+    /// off-chain indexers and audit trails.
+    ///
+    /// # Parameters
+    /// - `new_wasm_hash`: The 32-byte hash of the new WASM binary to deploy.
+    ///
+    /// # Authorization
+    /// Requires admin authorization via `require_admin_auth()`.
+    ///
+    /// # Errors
+    /// - `ContractError::Paused` — Protocol is paused by the emergency circuit breaker.
+    /// - Auth error — Caller is not the configured admin.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Deploy new WASM and get its hash
+    /// let new_wasm_hash = env.deployer().upload_contract_wasm(new_wasm);
+    /// 
+    /// // Upgrade the contract
+    /// client.upgrade(&new_wasm_hash);
+    /// ```
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        // Enforce pause check: upgrades are blocked during emergency circuit breaker.
+        assert_not_paused(&env);
+        
+        // Enforce admin authentication: only the configured admin can upgrade.
+        require_admin_auth(&env);
+
+        // Retrieve the current WASM hash before upgrade for event emission.
+        let old_wasm_hash = env.deployer().get_current_contract_wasm();
+
+        // Bump schema version to track upgrade history.
+        let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);
+        crate::storage::set_schema_version(&env, current_version.saturating_add(1));
+
+        // Perform the atomic WASM upgrade.
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Emit upgrade event for off-chain indexers and audit trails.
+        publish_contract_upgraded_event(
+            &env,
+            ContractUpgradedEvent {
+                old_wasm_hash,
+                new_wasm_hash,
+            },
+        );
     }
 }
 
@@ -5369,9 +5437,5 @@ mod test_max_repay_amount {
         let (client, _admin, _borrower, _token) = setup_with_token(&env);
 
         client.set_max_repay_amount(&0_i128);
-        }
     }
-
-    }
-}
 }

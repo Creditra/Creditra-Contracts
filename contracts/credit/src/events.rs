@@ -275,3 +275,28 @@ pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnE
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
 }
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUpgradedEvent {
+    pub old_wasm_hash: soroban_sdk::BytesN<32>,
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+}
+
+pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "upgraded")), event);
+}
+
+pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_cfg")),
+        (max_deviation_bps, max_age_seconds),
+    );
+}
+
+pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_price")),
+        (price, timestamp),
+    );
+}
