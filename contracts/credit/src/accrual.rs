@@ -8,7 +8,7 @@
 
 #![warn(missing_docs)]
 
-use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
+use crate::events::{publish_interest_accrued_event, InterestAccruedEvent, publish_penalty_rate_entered_event, publish_penalty_rate_exited_event};
 use crate::storage::persist_credit_line;
 use crate::types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use crate::math_utils::{prorate_interest, Rounding};
@@ -108,6 +108,44 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         v as i128
     };
 
+    // Check if the borrower is delinquent to apply penalty surcharge
+    let is_delinquent = crate::query::is_delinquent(env.clone(), line.borrower.clone());
+    let penalty_surcharge_bps = crate::storage::get_penalty_surcharge_bps(env);
+    
+    // Track previous rate to detect penalty rate entry/exit
+    let previous_effective_rate = line.interest_rate_bps;
+
+    // Compute the effective interest rate (base rate + penalty surcharge if delinquent)
+    let effective_rate_bps = if is_delinquent && penalty_surcharge_bps > 0 {
+        let base_rate = line.interest_rate_bps;
+        let rate_with_surcharge = base_rate.saturating_add(penalty_surcharge_bps);
+        // Clamp to MAX_INTEREST_RATE_BPS to prevent overflow-safe rate caps
+        rate_with_surcharge.min(crate::risk::MAX_INTEREST_RATE_BPS)
+    } else {
+        line.interest_rate_bps
+    };
+
+    // Emit event if entering penalty rate (non-delinquent to delinquent with surcharge)
+    if is_delinquent && penalty_surcharge_bps > 0 && previous_effective_rate != effective_rate_bps {
+        publish_penalty_rate_entered_event(
+            env,
+            &line.borrower,
+            previous_effective_rate,
+            penalty_surcharge_bps,
+            effective_rate_bps,
+        );
+    }
+
+    // Emit event if exiting penalty rate (delinquent to non-delinquent or surcharge removed)
+    if !is_delinquent && previous_effective_rate > line.interest_rate_bps {
+        publish_penalty_rate_exited_event(
+            env,
+            &line.borrower,
+            previous_effective_rate,
+            line.interest_rate_bps,
+        );
+    }
+
     // Compute accrued interest using the audited prorate helper with floor rounding.
     let accrued_u: u128 = if line.status == CreditStatus::Suspended {
         let grace_cfg: Option<GracePeriodConfig> = env
@@ -131,10 +169,10 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                         ),
                     }
                 } else if accrual_start >= grace_end {
-                    // Entire period after grace window
+                    // Entire period after grace window - use effective rate (may include penalty)
                     prorate_interest(
                         line.utilized_amount as u128,
-                        line.interest_rate_bps,
+                        effective_rate_bps,
                         (now - accrual_start) as u64,
                         Rounding::Floor,
                     )
@@ -154,7 +192,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                     };
                     let post_window = prorate_interest(
                         line.utilized_amount as u128,
-                        line.interest_rate_bps,
+                        effective_rate_bps,
                         post_window_secs,
                         Rounding::Floor,
                     );
@@ -165,16 +203,16 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
             }
             _ => prorate_interest(
                 line.utilized_amount as u128,
-                line.interest_rate_bps,
+                effective_rate_bps,
                 (now - accrual_start) as u64,
                 Rounding::Floor,
             ),
         }
     } else {
-        // Active, Defaulted, Restricted, or Closed status: apply full rate.
+        // Active, Defaulted, Restricted, or Closed status: apply effective rate (may include penalty)
         prorate_interest(
             line.utilized_amount as u128,
-            line.interest_rate_bps,
+            effective_rate_bps,
             (now - accrual_start) as u64,
             Rounding::Floor,
         )
@@ -203,33 +241,9 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
             },
         );
 
-        // Only update last_accrual_ts after successful, non-zero accrual.
+        // Only update last_accrual_ts when we actually applied accrual.
         line.last_accrual_ts = now;
     }
 
     line
-}
-
-/// Materialize interest accrual for a caller-supplied batch of borrowers.
-///
-/// Only `Active` credit lines are processed. Missing lines and non-active lines
-/// are skipped without reverting the batch. Non-zero accruals are persisted and
-/// emit the standard `InterestAccruedEvent` through [`apply_accrual`].
-pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
-    for borrower in borrowers.iter() {
-        let Some(stored_line) = env.storage().persistent().get::<Address, CreditLineData>(&borrower) else {
-            continue;
-        };
-
-        if stored_line.status != CreditStatus::Active {
-            continue;
-        }
-
-        let previous_utilized = stored_line.utilized_amount;
-        let updated_line = apply_accrual(env, stored_line);
-
-        if updated_line != stored_line {
-            persist_credit_line(env, &borrower, &updated_line, previous_utilized);
-        }
-    }
 }

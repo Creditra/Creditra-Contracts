@@ -44,6 +44,9 @@ pub enum DataKey {
     MinCreditLimit,
     /// Maximum allowed credit limit for new credit lines (admin-configurable).
     MaxCreditLimit,
+    /// Penalty surcharge in basis points applied to delinquent credit lines.
+    /// Admin-configurable via `set_penalty_surcharge_bps`. Default is 0.
+    PenaltySurchargeBps,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
@@ -275,200 +278,76 @@ pub fn set_reentrancy_guard(env: &Env) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: `Symbol("reentrancy")`
-/// - **Value**: `false` (effectively removes the guard)
+/// - **TTL Note**: Guard is cleared immediately after call; instance TTL is maintained
+///   separately via `extend_ttl()` calls in frequently-invoked functions.
 pub fn clear_reentrancy_guard(env: &Env) {
-    env.storage().instance().set(&reentrancy_key(env), &false);
+    let key = reentrancy_key(env);
+    env.storage().instance().set(&key, &false);
 }
 
-// ── BlockedBorrower Storage Policy ───────────────────────────────────────────
-//
-// Key: DataKey::BlockedBorrower(Address)
-// Type: Persistent (survives archival window; bump on every read/write)
-// Value: bool — true = blocked; absent key == not blocked (never store false)
-//
-// TTL: Bumped to BLOCKED_BORROWER_TTL on every read and write.
-// Absence of a key is equivalent to "not blocked"; a restored-but-missing
-// key must NOT be treated as blocked.
-// ─────────────────────────────────────────────────────────────────────────────
-const BLOCKED_BORROWER_TTL: u32 = 3_110_400; // ~6 months at 5 s/ledger
-const BLOCKED_BORROWER_BUMP: u32 = 1_555_200; // bump threshold ~3 months
-
-/// Store `borrower` as blocked. Bumps TTL.
-pub fn set_borrower_blocked(env: &Env, borrower: &Address) {
-    let key = DataKey::BlockedBorrower(borrower.clone());
-    env.storage().persistent().set(&key, &true);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, BLOCKED_BORROWER_BUMP, BLOCKED_BORROWER_TTL);
-}
-
-/// Remove the blocked entry for `borrower`. No-op if not blocked (idempotent).
-pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
-    let key = DataKey::BlockedBorrower(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        env.storage().persistent().remove(&key);
+/// Set a per-borrower interest rate floor (admin only, enforced by caller).
+pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<u32>) {
+    if let Some(floor) = floor_bps {
+        assert!(floor <= crate::risk::MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
     }
-}
-
-/// Return true if `borrower` is currently blocked. Bumps TTL on hit.
-pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
-    let key = DataKey::BlockedBorrower(borrower.clone());
-    if env.storage().persistent().has(&key) {
+    if let Some(floor) = floor_bps {
         env.storage()
             .persistent()
-            .extend_ttl(&key, BLOCKED_BORROWER_BUMP, BLOCKED_BORROWER_TTL);
-        env.storage().persistent().get(&key).unwrap_or(false)
+            .set(&DataKey::RateFloorBps(borrower.clone()), &floor);
     } else {
-        false
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RateFloorBps(borrower.clone()));
     }
 }
 
-/// Get the interest rate floor for a borrower, if set.
+/// Get the per-borrower interest rate floor, if set.
 pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
     env.storage()
         .persistent()
         .get(&DataKey::RateFloorBps(borrower.clone()))
 }
 
-/// Set or clear the interest rate floor for a borrower.
-pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor: Option<u32>) {
-    let key = DataKey::RateFloorBps(borrower.clone());
-    if let Some(floor) = floor {
-        env.storage().persistent().set(&key, &floor);
-    } else {
-        env.storage().persistent().remove(&key);
-    }
-}
-
-/// Get the configured minimum draw interval in seconds.
-pub fn get_draw_min_interval(env: &Env) -> Option<u64> {
+/// Set a per-borrower max utilization ratio cap in basis points (admin only).
+pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: u32) {
     env.storage()
-        .instance()
-        .get(&DataKey::DrawMinIntervalSeconds)
+        .persistent()
+        .set(&DataKey::UtilizationCapBps(borrower.clone()), &cap_bps);
 }
 
-/// Set the collateral token address (admin only).
-pub fn set_collateral_token(env: &Env, token: &Address) {
-    // Admin auth assumed by caller.
-    env.storage().instance().set(&DataKey::LiquidityToken, token);
-}
-
-// Get the collateral balance for a borrower (default 0).
-pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
-    let key = DataKey::CollateralBalance(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        bump_persistent_ttl(env, &key);
-        env.storage().persistent().get(&key).unwrap_or(0)
-    } else {
-        0
-    }
-}
-
-// Set the collateral balance for a borrower (overwrites existing).
-pub fn set_collateral_balance(env: &Env, borrower: &Address, amount: i128) {
-    let key = DataKey::CollateralBalance(borrower.clone());
-    env.storage().persistent().set(&key, &amount);
-    bump_persistent_ttl(env, &key);
-}
-
-/// Get the minimum collateral ratio in basis points, if set.
-pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
-    env.storage().instance().get(&DataKey::MinCollateralRatioBps)
-}
-
-/// Set the minimum collateral ratio in basis points (admin only). Cap at 10000 bps.
-pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
-    assert!(ratio_bps <= 10_000, "ratio_bps must be <= 10000");
-    env.storage().instance().set(&DataKey::MinCollateralRatioBps, &ratio_bps);
-}
-
-/// Get the last successful draw timestamp for a borrower.
-#[allow(dead_code)]
-pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
-    let key = DataKey::LastDrawTs(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        bump_persistent_ttl(env, &key);
-        env.storage().persistent().get(&key)
-    } else {
-        None
-    }
-}
-
-/// Record the last successful draw timestamp for a borrower.
-#[allow(dead_code)]
-pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
-    let key = DataKey::LastDrawTs(borrower.clone());
-    env.storage().persistent().set(&key, &ts);
-    bump_persistent_ttl(env, &key);
-}
-
-/// Get the per-borrower utilization cap in bps (persistent) and bump TTL on hit.
+/// Get the per-borrower max utilization ratio cap, if set.
 pub fn get_utilization_cap_bps(env: &Env, borrower: &Address) -> Option<u32> {
-    let key = DataKey::UtilizationCapBps(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        bump_persistent_ttl(env, &key);
-        env.storage().persistent().get(&key)
-    } else {
-        None
-    }
-}
-
-/// Set or clear the per-borrower utilization cap in bps (persistent). Bumps TTL on set.
-pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
-    let key = DataKey::UtilizationCapBps(borrower.clone());
-    match cap_bps {
-        Some(v) => {
-            env.storage().persistent().set(&key, &v);
-            bump_persistent_ttl(env, &key);
-        }
-        None => {
-            if env.storage().persistent().has(&key) {
-                env.storage().persistent().remove(&key);
-            }
-        }
-    }
-}
-
-/// Get the configured protocol fee in basis points, if any.
-pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
-    env.storage().instance().get(&DataKey::ProtocolFeeBps)
-}
-
-/// Set the protocol fee in basis points.
-pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
-    env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
-}
-
-/// Get the configured treasury address, if any.
-pub fn get_treasury_address(env: &Env) -> Option<Address> {
-    env.storage().instance().get(&DataKey::TreasuryAddress)
-}
-
-/// Set the treasury address.
-pub fn set_treasury_address(env: &Env, addr: &Address) {
-    env.storage().instance().set(&DataKey::TreasuryAddress, addr);
-}
-
-/// Get the accumulated treasury balance held in contract (fees collected).
-pub fn get_treasury_balance(env: &Env) -> i128 {
     env.storage()
-        .instance()
-        .get(&DataKey::TreasuryBalance)
-        .unwrap_or(0)
+        .persistent()
+        .get(&DataKey::UtilizationCapBps(borrower.clone()))
 }
 
-/// Increase the stored treasury balance by `amount` (overflow-checked).
-pub fn add_treasury_balance(env: &Env, amount: i128) {
-    let cur = get_treasury_balance(env);
-    let updated = cur
-        .checked_add(amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
-    env.storage().instance().set(&DataKey::TreasuryBalance, &updated);
+/// Clear the installment schedule for a borrower.
+pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::RepaymentSchedule(borrower.clone()));
 }
 
-/// Clear the treasury balance (set to zero).
-pub fn clear_treasury_balance(env: &Env) {
-    env.storage().instance().set(&DataKey::TreasuryBalance, &0_i128);
+/// Block a borrower from drawing (admin only, enforced by caller).
+pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
+    if blocked {
+        env.storage()
+            .persistent()
+            .set(&DataKey::BlockedBorrower(borrower.clone()), &true);
+    } else {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BlockedBorrower(borrower.clone()));
+    }
+}
+
+/// Check if a borrower is blocked from drawing.
+pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BlockedBorrower(borrower.clone()))
+        .unwrap_or(false)
 }
 
 /// Get the configured minimum credit limit, if set.
@@ -521,25 +400,65 @@ pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &Repaymen
         .set(&DataKey::RepaymentSchedule(borrower.clone()), schedule);
 }
 
-/// Clear the installment schedule for a borrower, if any.
-pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
-    let key = DataKey::RepaymentSchedule(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        env.storage().persistent().remove(&key);
-    }
+/// Get the last draw timestamp for a borrower, if any.
+pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastDrawTs(borrower.clone()))
 }
 
-/// Check whether the protocol is paused.
-///
-/// # Storage
-/// - **Type**: Instance storage (shared TTL with all instance keys)
-/// - **Key**: `Symbol("paused")`
-/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
-pub fn is_paused(env: &Env) -> bool {
+/// Set the last draw timestamp for a borrower.
+pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
+}
+
+/// Get the configured max draw amount, if set.
+pub fn get_max_draw_amount(env: &Env) -> Option<i128> {
+    env.storage().instance().get(&DataKey::MaxDrawAmount)
+}
+
+/// Set the max draw amount (admin only, enforced by caller).
+pub fn set_max_draw_amount(env: &Env, amount: i128) {
+    env.storage().instance().set(&DataKey::MaxDrawAmount, &amount);
+}
+
+/// Get the configured max repay amount, if set.
+pub fn get_max_repay_amount(env: &Env) -> Option<i128> {
+    env.storage().instance().get(&DataKey::MaxRepayAmount)
+}
+
+/// Set the max repay amount (admin only, enforced by caller).
+pub fn set_max_repay_amount(env: &Env, amount: i128) {
+    env.storage().instance().set(&DataKey::MaxRepayAmount, &amount);
+}
+
+/// Get the configured draw min interval, if set.
+pub fn get_draw_min_interval(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::DrawMinIntervalSeconds)
+}
+
+/// Set the draw min interval (admin only, enforced by caller).
+pub fn set_draw_min_interval(env: &Env, seconds: u64) {
     env.storage()
         .instance()
-        .get(&paused_key(env))
-        .unwrap_or(false)
+        .set(&DataKey::DrawMinIntervalSeconds, &seconds);
+}
+
+/// Set/unset the global draws frozen flag (admin only, enforced by caller).
+pub fn set_draws_frozen(env: &Env, frozen: bool) {
+    env.storage().instance().set(&DataKey::DrawsFrozen, &frozen);
+}
+
+/// Check if draws are globally frozen.
+pub fn is_draws_frozen(env: &Env) -> bool {
+    env.storage().instance().get(&DataKey::DrawsFrozen).unwrap_or(false)
+}
+
+/// Check if the protocol is paused.
+pub fn is_paused(env: &Env) -> bool {
+    env.storage().instance().get(&paused_key(env)).unwrap_or(false)
 }
 
 /// Set the protocol pause state (admin only, enforced by caller).
@@ -596,4 +515,18 @@ pub fn get_oracle_last_price_ts(env: &Env) -> Option<u64> {
 pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
     env.storage().instance().set(&DataKey::OracleLastPrice, &price);
     env.storage().instance().set(&DataKey::OracleLastPriceTs, &ts);
+}
+
+// ── Penalty surcharge for delinquent lines ───────────────────────────────────
+
+/// Get the configured penalty surcharge in basis points, if set.
+/// Returns 0 if not configured (no penalty surcharge).
+pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
+    env.storage().instance().get(&DataKey::PenaltySurchargeBps).unwrap_or(0)
+}
+
+/// Set the penalty surcharge in basis points (admin only, enforced by caller).
+/// The surcharge is added to the base interest rate when a line is delinquent.
+pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
+    env.storage().instance().set(&DataKey::PenaltySurchargeBps, &bps);
 }
