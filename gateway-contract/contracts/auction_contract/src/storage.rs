@@ -1,3 +1,4 @@
+use crate::errors::AuctionError;
 use crate::types::{AuctionStatus, DataKey};
 use soroban_sdk::{Address, Env, Symbol};
 
@@ -61,6 +62,48 @@ pub fn set_factory_contract(env: &Env, factory: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::FactoryContract, factory);
+}
+
+// ── Reentrancy guard ──────────────────────────────────────────────────────────
+
+/// Returns the instance-storage key used for the reentrancy flag.
+/// Mirrors the identical key used in `contracts/credit/src/storage.rs`.
+pub fn reentrancy_key(env: &Env) -> Symbol {
+    Symbol::new(env, "reentrancy")
+}
+
+/// Assert the reentrancy guard is not set, then set it.
+///
+/// Panics with [`AuctionError::Reentrancy`] if the guard is already active,
+/// indicating a reentrant cross-contract callback. The caller **must** call
+/// [`clear_reentrancy_guard`] on every exit path (success and failure) to
+/// release the guard and prevent the contract from being permanently locked.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `true` while a token transfer is in progress
+pub fn set_reentrancy_guard(env: &Env) {
+    let key = reentrancy_key(env);
+    let current: bool = env.storage().instance().get(&key).unwrap_or(false);
+    if current {
+        env.panic_with_error(AuctionError::Reentrancy);
+    }
+    env.storage().instance().set(&key, &true);
+}
+
+/// Clear the reentrancy guard set by [`set_reentrancy_guard`].
+///
+/// Must be called on every exit path (success and failure) of any function
+/// that called [`set_reentrancy_guard`]. Writing `false` is idempotent and
+/// safe to call even if the guard was never set.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `false` (guard released)
+pub fn clear_reentrancy_guard(env: &Env) {
+    env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
 pub fn get_end_time(env: &Env) -> u64 {

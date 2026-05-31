@@ -13,4 +13,7 @@ pub enum AuctionError {
     BidTooLow = 7,
     AuctionNotOpen = 8,
     AuctionNotClosed = 9,
+    Reentrancy = 10,
+    NoWinner = 11,
+    NotFound = 12,
 }
