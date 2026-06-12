@@ -572,13 +572,27 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
 // ── Penalty surcharge for delinquent lines ───────────────────────────────────
 
 /// Get the configured penalty surcharge in basis points, if set.
-/// Returns 0 if not configured (no penalty surcharge).
+///
+/// Returns `0` when the key is absent. A return of `0` is indistinguishable
+/// from an explicit `0`-bps setting, which is fine because both mean the same
+/// thing: no extra surcharge above the base rate.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
     env.storage().instance().get(&DataKey::PenaltySurchargeBps).unwrap_or(0)
 }
 
-/// Set the penalty surcharge in basis points (admin only, enforced by caller).
-/// The surcharge is added to the base interest rate when a line is delinquent.
+/// Set the penalty surcharge in basis points.
+///
+/// The surcharge is added to the base interest rate when a line is delinquent
+/// (i.e. [`crate::query::is_delinquent`] returns `true`). Admin auth must be
+/// enforced by the caller — this helper does not check authorization itself.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::PenaltySurchargeBps, &bps);
 }
