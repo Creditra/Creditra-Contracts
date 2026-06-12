@@ -120,6 +120,21 @@ Current result:
 
 This satisfies the 95% minimum coverage target.
 
+## Helper scripts
+
+The `scripts/` directory contains operator-facing utilities. None of the
+scripts are required for the contract to compile or run — they exist to
+keep common chores reproducible.
+
+| Script | Use |
+| ------ | --- |
+| `scripts/build_wasm.sh [all\|credit\|auction]` | Build release-mode WASM artifacts. |
+| `scripts/check_workspace.sh [args]` | `cargo check --workspace` wrapper, forwards extra args. |
+| `scripts/clean_profraw.sh [--dry-run]` | Remove stray `*.profraw` coverage profiles outside `target/`. |
+| `scripts/list_contract_errors.py [--json]` | Print every `ContractError` variant with its discriminant. |
+
+See [`scripts/README.md`](scripts/README.md) for conventions.
+
 ## Security Documentation
 
 - Threat model and trust assumptions: [`docs/threat-model.md`](docs/threat-model.md)
