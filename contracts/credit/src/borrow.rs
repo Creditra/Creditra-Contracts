@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: MIT
 //! Borrow module: draw and repay helpers.
 //!
-//! Restricted lines are repayment-capable cure states. Draw requests still
-//! flow through the normal utilization check, so they cannot create new net
-//! borrowing while the line remains over its reduced limit.
+//! # Status semantics
+//!
+//! - [`CreditStatus::Active`]: full borrowing capability.
+//! - [`CreditStatus::Restricted`]: cure state. Repayments are allowed and
+//!   draws still flow through the numeric limit check, so they cannot create
+//!   new net borrowing while the line remains over its reduced limit.
+//! - [`CreditStatus::Suspended`]: draws blocked, repayments allowed.
+//! - [`CreditStatus::Defaulted`]: draws blocked, repayments allowed.
+//! - [`CreditStatus::Closed`]: draws blocked, repayments blocked.
+//!
+//! See [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+//! authoritative transition diagram.
 
 use crate::types::{ContractError, CreditStatus};
 
