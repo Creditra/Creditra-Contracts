@@ -44,6 +44,16 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 }
 
 /// Return `true` when the borrower has missed an installment past the grace window.
+///
+/// Returns `false` for the following short-circuit cases:
+/// - The borrower has no credit line.
+/// - The line is `Closed` or has zero outstanding principal.
+/// - The line has no configured [`RepaymentSchedule`].
+///
+/// The grace window is determined by the global [`GracePeriodConfig`]. When no
+/// config is set, `grace_seconds` defaults to `0`, so any timestamp strictly
+/// greater than `next_due_ts` is treated as delinquent. The comparison uses
+/// `saturating_add` to ensure timestamps near `u64::MAX` do not wrap.
 pub fn is_delinquent(env: Env, borrower: Address) -> bool {
     let Some(line) = get_credit_line(env.clone(), borrower.clone()) else {
         return false;
