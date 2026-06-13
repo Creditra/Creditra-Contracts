@@ -2,7 +2,93 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
 
-//! Creditra credit contract: credit lines, draw/repay, risk parameters.
+//! # Creditra credit contract
+//!
+//! Per-borrower credit lines on Stellar/Soroban with **algorithmic
+//! risk-priced underwriting** rather than overcollateralization. This is the
+//! single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
+//! block below.
+//!
+//! ## What
+//!
+//! Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
+//! `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
+//! `status`, and accrual timestamps. The contract orchestrates:
+//!
+//! - **Origination** — `open_credit_line` (admin) validates against
+//!   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
+//!   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
+//! - **Draw** — `draw_credit` performs a 25-step validation chain
+//!   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
+//!   utilization cap, exposure cap, liquidity reserve) before a token CPI
+//!   into the configured `LiquidityToken`.
+//! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
+//!   be able to deleverage. Interest-first allocation with optional
+//!   protocol-fee-on-interest routed to the treasury accumulator.
+//! - **Risk update** — `update_risk_parameters` either computes the new rate
+//!   from `risk_score` via the piecewise-linear formula (if configured) or
+//!   accepts an admin-supplied rate; both paths are clamped and gated by the
+//!   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+//! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
+//!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
+//!   mutation. See [`crate::lifecycle`].
+//! - **Settlement** — `settle_default_liquidation` is admin-only,
+//!   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
+//!   cross-contract call to the configured `AuctionContract`. The return
+//!   value is asserted against the admin-supplied `recovered_amount` and the
+//!   `(borrower, settlement_id)` pair is replay-protected via a persistent
+//!   marker.
+//! - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
+//!   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
+//!   reversal.
+//! - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
+//!
+//! ## How
+//!
+//! - **Storage tiers.** Hot configuration in Instance storage (admin,
+//!   pause flag, reentrancy guard, oracle config, rate formula, treasury,
+//!   global caps); per-borrower state in Persistent storage with TTL
+//!   auto-bumped on every access. See [`crate::storage`].
+//! - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
+//!   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
+//!   external token CPIs cannot re-enter.
+//! - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
+//!   primitives; the release profile sets `overflow-checks = true` so a
+//!   numeric edge case reverts with `ContractError::Overflow = 12` rather
+//!   than wrapping.
+//! - **Lazy accrual.** Interest is realized only on mutation; the math is
+//!   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
+//!   [`crate::math_utils::prorate_interest`], with grace and penalty
+//!   branches in [`crate::accrual::apply_accrual`].
+//!
+//! ## Why
+//!
+//! Overcollateralized lending (Aave / Compound / Maker) gates the median
+//! wallet out of on-chain credit. Creditra prices and sizes the credit line
+//! from a deterministic function of behavioral signal plus an optional
+//! collateral floor, configurable from "fully unsecured" to "150 % LTV"
+//! at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+//! the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+//! for the algorithm with worked examples.
+//!
+//! ## Security invariants
+//!
+//! - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+//!   `persist_credit_line` with `previous_utilized` capture).
+//! - `interest_rate_bps <= 10_000` after every mutation.
+//! - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+//!   `suspension_ts`; backward writes revert
+//!   `ContractError::TimestampRegression = 33`.
+//! - `(borrower, settlement_id)` is the dedup key for cross-contract
+//!   settlement replay safety.
+//! - 38 `ContractError` discriminants are ABI-stable; CI test
+//!   `tests/error_discriminants.rs` reverts on reorder.
+//! - 25+ event topics under the `credit` namespace are stability-pinned by
+//!   `tests/event_topic_stability.rs`.
+//!
+//! See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+//! per-entrypoint contract surface and
+//! [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
 
 mod accrual;
 #[cfg(test)]
