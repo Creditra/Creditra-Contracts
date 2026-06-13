@@ -2,9 +2,55 @@
 
 //! Interest accrual logic for credit lines.
 //!
-//! This module computes and applies pro-rated interest to a [`CreditLineData`]
-//! record. Interest is computed via the audited [`math_utils::prorate_interest`]
-//! helper with explicit `Rounding` and is capitalised into `accrued_interest`.
+//! # What
+//!
+//! Owns [`apply_accrual`], the chokepoint that every state-mutating
+//! entrypoint calls at the head of its flow. Computes pro-rated interest
+//! since `last_accrual_ts`, capitalizes it into both `accrued_interest`
+//! and `utilized_amount`, and conditionally emits
+//! [`InterestAccruedEvent`], [`PenaltyRateEnteredEvent`], and
+//! [`PenaltyRateExitedEvent`].
+//!
+//! # How (three branches)
+//!
+//! The effective rate `r_eff` depends on line state and delinquency:
+//!
+//! 1. **Active, current**: `r_eff = interest_rate_bps`.
+//! 2. **Active, delinquent** (past `next_due_ts + grace`): `r_eff =
+//!    min(interest_rate_bps + penalty_surcharge_bps, 10_000)`. First
+//!    delinquent accrual emits [`PenaltyRateEnteredEvent`]; first
+//!    non-delinquent accrual after a delinquency period emits
+//!    [`PenaltyRateExitedEvent`].
+//! 3. **Suspended with grace policy**: Δt is split into in-grace
+//!    `min(Δt, T_g)` and post-grace remainder. In FullWaiver mode the
+//!    in-grace portion is waived; in ReducedRate mode it accrues at
+//!    `reduced_rate_bps`.
+//!
+//! The math primitive is [`crate::math_utils::prorate_interest`] with
+//! [`crate::math_utils::Rounding::Floor`], so every `ΔI` rounds **down**.
+//! The denominator uses [`crate::math_utils::SECONDS_PER_YEAR`] = 31 557 600
+//! (Julian year).
+//!
+//! # Invariants
+//!
+//! - If `utilized_amount == 0` or `now <= last_accrual_ts`: no-op, and
+//!   crucially `last_accrual_ts` is NOT advanced (avoids silently zeroing
+//!   sub-tick deltas on chains with sub-second ledger close times).
+//! - `last_accrual_ts` is advanced only when `ΔI > 0`.
+//! - The fold uses `checked_add` on both the new utilized amount and the
+//!   new accrued-interest total; overflow translates to
+//!   `ContractError::Overflow = 12`.
+//!
+//! # Why (capitalize-on-mutation)
+//!
+//! Periodic accrual via a keeper or per-block hook would either bloat
+//! storage (a write per block per borrower) or require unbounded loops at
+//! settlement. The capitalize-on-mutation model is O(1) per call, has no
+//! liveness assumption, and is auditable in isolation — see
+//! [`docs/interest-accrual.md`](../../../docs/interest-accrual.md) for the
+//! normative reference and
+//! [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md) §4 for the
+//! formal derivation with worked examples.
 
 #![warn(missing_docs)]
 
