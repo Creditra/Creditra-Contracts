@@ -1,3 +1,39 @@
+//! Auction storage helpers and TTL primitives.
+//!
+//! # What
+//!
+//! Typed getters / setters for the auction contract's instance state
+//! (current auction config, status, highest bidder, highest bid, factory
+//! pointer) plus an id-scoped alternate API for multi-auction deployments
+//! (`auction_*` family operating on [`crate::types::AuctionKey`]).
+//!
+//! Also owns the reentrancy guard primitive
+//! ([`set_reentrancy_guard`] / [`clear_reentrancy_guard`]) which wraps the
+//! prior-bid refund in English mode and the (placeholder) winner payout in
+//! `claim_auction`.
+//!
+//! # How
+//!
+//! Both instance and persistent reads/writes go through helpers that bump
+//! TTL when remaining lifetime drops below
+//! [`PERSISTENT_LIFETIME_THRESHOLD`] (~7 days), extending the entry by
+//! [`PERSISTENT_BUMP_AMOUNT`] (~30 days). Auction state is short-lived by
+//! nature, so the cadence is more aggressive than the credit contract's
+//! ~3 / ~6 month cycle.
+//!
+//! # Why
+//!
+//! Concentrating storage access here lets the auction contract enforce two
+//! invariants:
+//!
+//! 1. **Single-shot settlement** — the persistent flag
+//!    `AuctionKey::LiquidationSettled(auction_id)` is set on the first
+//!    `settle_default_liquidation` and consulted on subsequent calls,
+//!    making replay return `AuctionError::AlreadyClaimed = 2`.
+//! 2. **CEI ordering on refund** — the reentrancy guard ensures a
+//!    malicious bid token cannot re-enter `place_bid` during the refund
+//!    CPI.
+
 use crate::errors::AuctionError;
 use crate::types::{AuctionStatus, DataKey};
 use soroban_sdk::{Address, Env, Symbol};
