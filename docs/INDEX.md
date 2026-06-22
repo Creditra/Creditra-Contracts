@@ -79,12 +79,14 @@ For the rate / accrual formulas:
 Read in this order:
 
 1. [`docs/deploy.md`](./deploy.md) — quick deploy sequence.
-2. [`docs/EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) §6 — testnet and
+2. [`docs/integration-initialization.md`](./integration-initialization.md) —
+   deploy order, operator setup, and error recovery.
+3. [`docs/EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) §6 — testnet and
    mainnet checklists.
-3. [`docs/upgrade-policy.md`](./upgrade-policy.md) — admin-gated WASM upgrade
+4. [`docs/upgrade-policy.md`](./upgrade-policy.md) — admin-gated WASM upgrade
    procedure.
-4. [`docs/scripts.md`](./scripts.md) — helper scripts.
-5. [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](../CIRCUIT_BREAKER_IMPLEMENTATION.md)
+5. [`docs/scripts.md`](./scripts.md) — helper scripts.
+6. [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](../CIRCUIT_BREAKER_IMPLEMENTATION.md)
    — pause / unpause semantics.
 
 For the off-chain orchestrator that handles default auctions:
@@ -140,6 +142,7 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `upgrade-policy.md` | ~3 | Upgrade procedure |
 | `utilization-cap.md` | ~3 | Per-borrower utilization cap |
 | `indexer-integration.md` | ~4 | Off-chain event decoding |
+| `integration-initialization.md` | ~4 | Deploy order, operator setup, error recovery |
 | `deploy.md` | ~2 | Deploy quickstart |
 | `contributing-tests.md` | ~3 | Test helper conventions |
 | `scripts.md` | ~2 | Helper script reference |
