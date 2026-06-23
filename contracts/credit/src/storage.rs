@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-use crate::types::ContractError;
-use soroban_sdk::{contracttype, Env, Symbol};
+use crate::types::{ContractError, OracleConfig};
+use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 #[contracttype]
@@ -25,6 +25,10 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
+    /// Storage schema version (see [`crate::Credit::get_schema_version`]).
+    /// Populated on `init` and used by off-chain tooling to detect
+    /// migration expectations.
+    SchemaVersion,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -190,11 +194,6 @@ pub fn assert_not_paused(env: &Env) {
     }
 }
 
-/// Instance storage key for the grace period policy.
-pub fn grace_period_key(env: &Env) -> Symbol {
-    Symbol::new(env, "grace_cfg")
-}
-
 /// Assert that a timestamp update is monotonic.
 ///
 /// Reverts if `new_ts <= stored_ts` and `stored_ts != 0`.
@@ -203,4 +202,33 @@ pub fn assert_ts_monotonic(env: &Env, stored_ts: u64, new_ts: u64) {
     if stored_ts != 0 && new_ts <= stored_ts {
         env.panic_with_error(crate::types::ContractError::Paused);
     }
+}
+
+// ── Default oracle config (issue #343) ───────────────────────────────────────────────────────────
+
+/// Read the default-oracle configuration from instance storage.
+#[allow(dead_code)]
+pub fn get_default_oracle_config(env: &Env) -> Option<OracleConfig> {
+    crate::default_oracle::get_oracle_config(env)
+}
+
+/// Persist the default-oracle configuration to instance storage.
+///
+/// This thin wrapper around [`crate::default_oracle::set_oracle_config`]
+/// exists to keep all instance-storage writes observable through this
+/// `storage` module, matching the audit table in `docs/credit.md`.
+#[allow(dead_code)]
+pub fn set_default_oracle_config(env: &Env, cfg: &OracleConfig) {
+    crate::default_oracle::set_oracle_config(env, cfg);
+}
+
+/// Remove the default-oracle configuration from instance storage.
+///
+/// After this returns, [`crate::lifecycle::settle_default_liquidation`]
+/// reverts with [`crate::types::ContractError::MissingOracle`] until a new
+/// config is set. The removal path is exposed for admin tooling that wants
+/// to opt out of oracle-bound settlements.
+#[allow(dead_code)]
+pub fn clear_default_oracle_config(env: &Env) {
+    crate::default_oracle::clear_oracle_config(env);
 }

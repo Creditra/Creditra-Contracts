@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use crate::events::{publish_interest_accrued_event, InterestAccruedEvent};
-use crate::types::CreditLineData;
-use soroban_sdk::{Address, Env};
+use crate::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
+use soroban_sdk::Env;
 
 pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 

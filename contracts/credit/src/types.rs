@@ -37,7 +37,7 @@ pub enum CreditStatus {
 /// | 3    | `CreditLineNotFound`           | Credit line does not exist |
 /// | 4    | `CreditLineClosed`             | Credit line is permanently closed |
 /// | 5    | `InvalidAmount`                | Amount is zero, negative, or otherwise invalid |
-/// | 6    | `OverLimit`                    | Draw would exceed the credit limit |
+/// | 6    | `OverLimit`                    | Draw or recovery exceeded an oracle-derived bound |
 /// | 7    | `NegativeLimit`                | Credit limit cannot be negative |
 /// | 8    | `RateTooHigh`                  | Interest rate exceeds the maximum allowed |
 /// | 9    | `ScoreTooHigh`                 | Risk score exceeds the maximum allowed (100) |
@@ -60,7 +60,11 @@ pub enum CreditStatus {
 /// | 26   | `InsufficientRepaymentAllowance` | Borrower allowance cannot cover repayment |
 /// | 27   | `InsufficientRepaymentBalance` | Borrower balance cannot cover repayment |
 /// | 28   | `RepayExceedsMaxAmount`        | Repay amount exceeds per-transaction cap |
-/// | 29   | `DrawCooldownActive`          | Borrower attempted to draw before cooldown elapsed |
+/// | 29   | `DrawCooldownActive`           | Borrower attempted to draw before cooldown elapsed |
+/// | 30   | `MissingOracle`                | Default oracle is not configured for liquidation valuation |
+/// | 31   | `OraclePriceStale`             | Oracle price is older than the configured freshness window |
+/// | 32   | `OraclePriceInvalid`           | Oracle price is non-positive, or its timestamp is in the future |
+/// | 33   | `OracleRecoveryExceedsBound`   | Recovered amount exceeds the oracle-derived upper-bound on recovery value |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -123,6 +127,24 @@ pub enum ContractError {
     RepayExceedsMaxAmount = 28,
     /// Borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
+    /// `settle_default_liquidation` was called but no default oracle is configured.
+    ///
+    /// Resolution: admin must call [`crate::Credit::set_default_oracle`]
+    /// with a valid oracle contract and freshness bound before settling
+    /// defaulted lines.
+    MissingOracle = 30,
+    /// Oracle price's timestamp is older than the configured freshness window
+    /// (`OracleConfig::max_price_age_seconds`). On-chain accounting rejected
+    /// the liquidation settlement to prevent stale-price exploitation.
+    OraclePriceStale = 31,
+    /// Oracle price is non-positive, or its timestamp lies in the future.
+    /// Either condition indicates a misbehaving oracle and is treated as a
+    /// hard reject to keep accounting deterministic.
+    OraclePriceInvalid = 32,
+    /// The requested `recovered_amount` exceeds the oracle-derived upper bound
+    /// (`oracle_price * utilized / ORACLE_PRICE_SCALE`). This caps recovery to
+    /// an oracle-attested value range.
+    OracleRecoveryExceedsBound = 33,
 }
 
 /// Stored credit line data for a borrower.
@@ -196,6 +218,12 @@ pub struct RateFormulaConfig {
 }
 
 /// Grace period configuration for Suspended credit lines.
+///
+/// Encodes an admin-configurable interest-rate waiver window that starts when
+/// a credit line transitions into `Suspended` status. During the window,
+/// accrued interest is either zeroed (`FullWaiver`) or computed at a reduced
+/// rate (`ReducedRate`). After the window expires, accrual resumes at the
+/// line's full contractual rate.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GracePeriodConfig {
@@ -203,7 +231,8 @@ pub struct GracePeriodConfig {
     pub grace_period_seconds: u64,
     /// Type of waiver to apply during the grace period.
     pub waiver_mode: GraceWaiverMode,
-    /// Reduced rate to apply when waiver_mode is ReducedRate.
+    /// Reduced rate to apply when `waiver_mode == ReducedRate`.
+    /// Ignored for `FullWaiver`.
     pub reduced_rate_bps: u32,
 }
 
@@ -211,10 +240,43 @@ pub struct GracePeriodConfig {
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GraceWaiverMode {
-    /// Full waiver - zero interest during grace period.
+    /// Zero interest accrues during the grace window.
     FullWaiver = 0,
-    /// Reduced rate - apply reduced_rate_bps during grace period.
+    /// Interest accrues at a reduced rate (`reduced_rate_bps`) during
+    /// the grace window.
     ReducedRate = 1,
+}
+
+/// Admin-configurable default-oracle integration (issue #343).
+///
+/// When stored in instance storage, `settle_default_liquidation` queries the
+/// oracle contract before applying proceeds. See [`crate::default_oracle`]
+/// and [`crate::storage`] for the consumer side.
+///
+/// # Price semantics
+/// Oracle prices are denominated in **1e-scaled fixed-point** with
+/// [`crate::default_oracle::ORACLE_PRICE_SCALE`] as the scale factor. A price
+/// equal to `ORACLE_PRICE_SCALE` implies parity (one base unit is worth one
+/// unit of itself). `max_recovery_value` is then computed as
+/// `price * utilized / ORACLE_PRICE_SCALE`.
+///
+/// # Freshness
+/// A returned price whose `timestamp` is more than `max_price_age_seconds`
+/// before the current ledger timestamp is rejected with
+/// [`ContractError::OraclePriceStale`].
+///
+/// # Invariants
+/// - `max_price_age_seconds == 0` is **not** allowed by the setter; it would
+///   effectively disable freshness, which is unsafe.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleConfig {
+    /// Address of the oracle contract that implements `latest_price()`,
+    /// returning `(i128 price, u64 timestamp)`.
+    pub oracle_address: Address,
+    /// Maximum allowed age (in seconds) for an oracle price before it is
+    /// rejected as stale. Boundary: `1..=365 * 24 * 3600`.
+    pub max_price_age_seconds: u64,
 }
 
 /// Event emitted when the rate formula config is set or cleared.
@@ -225,47 +287,12 @@ pub struct RateFormulaConfigEvent {
     pub enabled: bool,
 }
 
-/// Structured representation of the contract's API version (semver).
-/// Grace period waiver mode for suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GraceWaiverMode {
-    FullWaiver = 0,
-    ReducedRate = 1,
-}
-
-/// Admin-configurable grace period policy for suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GracePeriodConfig {
-    pub grace_period_seconds: u64,
-    pub waiver_mode: GraceWaiverMode,
-    pub reduced_rate_bps: u32,
-}
-
-/// Mode of interest rate waiver during a grace period.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GraceWaiverMode {
-    /// Zero interest accrues during the grace window.
-    FullWaiver = 0,
-    /// Interest accrues at a reduced rate during the grace window.
-    ReducedRate = 1,
-}
-
-/// Configuration for the grace period applied to Suspended credit lines.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GracePeriodConfig {
-    /// Duration of the grace window in seconds.
-    pub grace_period_seconds: u64,
-    /// The waiver mode applied during the grace window.
-    pub waiver_mode: GraceWaiverMode,
-    /// The reduced rate applied when `waiver_mode` is `ReducedRate`.
-    pub reduced_rate_bps: u32,
-}
-
 /// Global protocol configuration.
+///
+/// Note: `RateChangeConfig` fields are flattened into primitive `Option` types
+/// to avoid cross-crate serialization trait issues with `#[contracttype]`
+/// (soroban-sdk / testutils compatibility). Use `get_rate_change_limits()` for
+/// the structured `RateChangeConfig` form.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
@@ -273,6 +300,8 @@ pub struct ProtocolConfig {
     pub liquidity_token: Option<Address>,
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
-    /// Configured rate change limits.
-    pub rate_change_config: Option<RateChangeConfig>,
+    /// Max allowed rate change in bps per single update (`None` = no limits).
+    pub rate_change_max_bps: Option<u32>,
+    /// Min seconds between rate changes (`None` = no limits).
+    pub rate_change_min_interval: Option<u64>,
 }

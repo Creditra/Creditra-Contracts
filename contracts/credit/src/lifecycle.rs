@@ -312,6 +312,26 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 /// This hook is accounting-only and intentionally performs no token transfer.
 /// Off-chain orchestration is responsible for ensuring auction proceeds are settled
 /// into protocol custody before this function is called.
+///
+/// # Issue #343 (default oracle)
+///
+/// When the admin has configured a default oracle via
+/// [`crate::Credit::set_default_oracle`], this entrypoint requires the oracle
+/// to attest a fresh, non-negative price for the underlying loan unit. The
+/// oracle price is also used to compute an upper bound on the recorded
+/// recovery value, computed as `floor(price * utilized / 1e9)`. The
+/// cross-contract oracle read is fail-closed: any oracle trap, stale price,
+/// zero price, or future timestamp results in a deterministic revert.
+///
+/// Rejection paths:
+/// - [`ContractError::MissingOracle`] — no `OracleConfig` is configured.
+/// - [`ContractError::OraclePriceStale`] — the price is older than the bound.
+/// - [`ContractError::OraclePriceInvalid`] — zero/negative price or future
+///   timestamp.
+/// - [`ContractError::OracleRecoveryExceedsBound`] — `recovered_amount`
+///   exceeds `price * utilized / 1e9`.
+/// - [`ContractError::OverLimit`] — `recovered_amount` exceeds
+///   `credit_line.utilized_amount`.
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
@@ -340,6 +360,34 @@ pub fn settle_default_liquidation(
 
     if credit_line.status != CreditStatus::Defaulted {
         env.panic_with_error(ContractError::CreditLineDefaulted);
+    }
+
+    // ── Oracle price validation (issue #343) ──────────────────────────────────────────
+    //
+    // The oracle is fetched and validated BEFORE any state mutation. The
+    // requested `recovered_amount` is then bounded by an oracle-derived
+    // ceiling to prevent over-recording of recovery value in scenarios
+    // where the oracle reports a price below parity.
+
+    let oracle_cfg = crate::storage::get_default_oracle_config(&env).unwrap_or_else(|| {
+        env.panic_with_error(ContractError::MissingOracle);
+    });
+
+    let latest =
+        crate::default_oracle::read_oracle_price(&env, &oracle_cfg.oracle_address);
+    crate::default_oracle::validate_oracle_price(
+        &env,
+        &latest,
+        oracle_cfg.max_price_age_seconds,
+    );
+
+    let max_recovery = crate::default_oracle::compute_max_recovery(
+        &env,
+        latest.price,
+        credit_line.utilized_amount,
+    );
+    if recovered_amount > max_recovery {
+        env.panic_with_error(ContractError::OracleRecoveryExceedsBound);
     }
 
     if recovered_amount > credit_line.utilized_amount {
@@ -380,6 +428,10 @@ pub fn settle_default_liquidation(
             recovered_amount,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
+            oracle_price: Some(latest.price),
+            oracle_price_ts: Some(latest.timestamp),
+            oracle_address: Some(oracle_cfg.oracle_address),
+            max_recovery_value: Some(max_recovery),
         },
     );
 }

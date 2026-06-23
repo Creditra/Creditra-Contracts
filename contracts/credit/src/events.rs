@@ -50,6 +50,35 @@ pub struct DefaultLiquidationSettledEvent {
     pub recovered_amount: i128,
     pub remaining_utilized_amount: i128,
     pub status: CreditStatus,
+    /// Oracle price applied to bound the recovery, when an oracle was configured.
+    ///
+    /// `Some(price)` ⇒ an oracle config existed at settlement time and we
+    /// validated and used its price. `None` ⇒ no oracle was configured
+    /// (legacy path, see [`crate::lifecycle::settle_default_liquidation`]).
+    ///
+    /// Field is appended at the end of the struct to preserve backward
+    /// compatibility with indexers that only decode the first five fields.
+    pub oracle_price: Option<i128>,
+    /// Timestamp from the latest oracle price point, when an oracle was used.
+    pub oracle_price_ts: Option<u64>,
+    /// Address of the oracle contract that returned the applied price.
+    pub oracle_address: Option<Address>,
+    /// Computed upper bound on `recovered_amount` (`floor(price * utilized / 1e9)`).
+    pub max_recovery_value: Option<i128>,
+}
+
+/// Event emitted when the default-oracle configuration is set or cleared.
+///
+/// Topic: `("credit", "oracle_cfg")`. Payload carries the oracle address and
+/// max age on `set_default_oracle`; `oracle_address` is `None` when the admin
+/// removes the config. Indexers can rely on the topic alone for routing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DefaultOracleConfigEvent {
+    /// `Some(addr)` on `set_default_oracle`, `None` when removed.
+    pub oracle_address: Option<Address>,
+    /// Max price age in seconds (unset when `oracle_address` is `None`).
+    pub max_price_age_seconds: u64,
 }
 
 #[contracttype]
@@ -211,6 +240,17 @@ pub fn publish_default_liquidation_settled_event(
 ) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
+        event,
+    );
+}
+
+/// Publish a `("credit", "oracle_cfg")` event on default-oracle config changes.
+pub fn publish_default_oracle_config_event(
+    env: &Env,
+    event: DefaultOracleConfigEvent,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "oracle_cfg")),
         event,
     );
 }

@@ -12,6 +12,7 @@ mod amount_validation_tests;
 mod auth;
 mod borrow;
 mod config;
+mod default_oracle;
 mod events;
 mod freeze;
 mod lifecycle;
@@ -28,15 +29,22 @@ use crate::auth::require_admin_auth;
 use crate::events::{
     publish_credit_line_event,
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event,
-    AdminRotationAcceptedEvent, AdminRotationProposedEvent, CreditLineEvent, DrawnEvent,
+    publish_default_oracle_config_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_repayment_event,
+    CreditLineEvent, DefaultOracleConfigEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
 use crate::storage::{
     admin_key, assert_not_paused, clear_reentrancy_guard, proposed_admin_key, proposed_at_key,
     rate_cfg_key, set_reentrancy_guard, DataKey,
 };
-use crate::types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, ProtocolConfig, RateChangeConfig};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
+    OracleConfig, ProtocolConfig, RateChangeConfig,
+};
+use crate::default_oracle::{
+    MAX_PRICE_AGE_BOUND_SECONDS,
+};
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
@@ -655,6 +663,106 @@ impl Credit {
         lifecycle::settle_default_liquidation(env, borrower, recovered_amount, settlement_id)
     }
 
+    // ── Default oracle configuration (issue #343) ─────────────────────────────────────────
+
+    /// Configure the default oracle used to validate liquidation settlements
+    /// (admin only).
+    ///
+    /// Establishes a fail-closed settlement path: from this point on,
+    /// [`settle_default_liquidation`] will reject with
+    /// [`ContractError::MissingOracle`] until the oracle is removed, and the
+    /// oracle-driven recovery bound will be enforced for every settlement.
+    ///
+    /// # Authorization
+    ///
+    /// Requires the configured admin to authorize via `require_auth()`.
+    /// Unauthorized callers are rejected by the host before any storage write.
+    ///
+    /// # Arguments
+    ///
+    /// - `oracle_address`: address of a contract that exposes a public
+    ///   function `latest_price() -> (i128, u64)`. The tuple is decoded into
+    ///   [`crate::default_oracle::LatestPrice`] (price scaled by
+    ///   [`ORACLE_PRICE_SCALE`], timestamp in unix seconds).
+    /// - `max_price_age_seconds`: maximum allowed age for a returned price
+    ///   before it is treated as stale. Must satisfy
+    ///   `1..=MAX_PRICE_AGE_BOUND_SECONDS`. Setting `0` is rejected to avoid
+    ///   silently disabling the freshness check.
+    ///
+    /// # Errors
+    ///
+    /// - [`ContractError::Paused`] — protocol circuit breaker is active.
+    /// - [`ContractError::InvalidAmount`] — `max_price_age_seconds` is out of
+    ///   the allowed range (zero, or greater than
+    ///   `MAX_PRICE_AGE_BOUND_SECONDS`).
+    ///
+    /// # Storage
+    ///
+    /// Persists [`OracleConfig`] under
+    /// [`crate::default_oracle::oracle_config_key`].
+    ///
+    /// # Events
+    ///
+    /// Emits [`DefaultOracleConfigEvent`] under topic
+    /// `("credit", "oracle_cfg")` with `config = Some(OracleConfig)`.
+    pub fn set_default_oracle(
+        env: Env,
+        oracle_address: Address,
+        max_price_age_seconds: u64,
+    ) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        if max_price_age_seconds == 0 || max_price_age_seconds > MAX_PRICE_AGE_BOUND_SECONDS {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        let cfg = OracleConfig {
+            oracle_address,
+            max_price_age_seconds,
+        };
+        crate::storage::set_default_oracle_config(&env, &cfg);
+        publish_default_oracle_config_event(
+            &env,
+            DefaultOracleConfigEvent {
+                oracle_address: Some(cfg.oracle_address),
+                max_price_age_seconds: cfg.max_price_age_seconds,
+            },
+        );
+    }
+
+    /// Remove the default-oracle configuration (admin only).
+    ///
+    /// After this call, [`settle_default_liquidation`] reverts with
+    /// [`ContractError::MissingOracle`] until a new oracle config is set.
+    /// This is the explicit off-ramp from the oracle-bound settlement flow.
+    ///
+    /// # Errors
+    ///
+    /// - [`ContractError::Paused`] — protocol circuit breaker is active.
+    ///
+    /// # Events
+    ///
+    /// Emits [`DefaultOracleConfigEvent`] under topic
+    /// `("credit", "oracle_cfg")` with `config = None`.
+    pub fn clear_default_oracle(env: Env) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        crate::storage::clear_default_oracle_config(&env);
+        publish_default_oracle_config_event(
+            &env,
+            DefaultOracleConfigEvent {
+                oracle_address: None,
+                max_price_age_seconds: 0,
+            },
+        );
+    }
+
+    /// Get the currently-configured [`OracleConfig`], or `None` if unset.
+    ///
+    /// Public view function; no authentication required.
+    pub fn get_default_oracle(env: Env) -> Option<OracleConfig> {
+        crate::storage::get_default_oracle_config(&env)
+    }
+
     /// Return the credit line for `borrower`, or `None` if no line exists.
     ///
     /// No authentication required — this is a pure read with no side effects.
@@ -683,12 +791,17 @@ impl Credit {
     ///
     /// - `liquidity_token`: `None` until `set_liquidity_token` is called.
     /// - `liquidity_source`: `None` until `init` is called (defaults to contract address).
-    /// - `rate_change_config`: `None` until `set_rate_change_limits` is called.
+    /// - `rate_change_max_bps` / `rate_change_min_interval`: `None` until
+    ///   `set_rate_change_limits` is called.
+    /// - For oracle config, use [`get_default_oracle`] (issue #343).
     pub fn get_protocol_config(env: Env) -> ProtocolConfig {
+        let rate_cfg: Option<RateChangeConfig> =
+            env.storage().instance().get(&rate_cfg_key(&env));
         ProtocolConfig {
             liquidity_token: env.storage().instance().get(&DataKey::LiquidityToken),
             liquidity_source: env.storage().instance().get(&DataKey::LiquiditySource),
-            rate_change_config: env.storage().instance().get(&rate_cfg_key(&env)),
+            rate_change_max_bps: rate_cfg.as_ref().map(|c| c.max_rate_change_bps),
+            rate_change_min_interval: rate_cfg.map(|c| c.rate_change_min_interval),
         }
     }
 }
