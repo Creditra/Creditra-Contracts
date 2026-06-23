@@ -3,6 +3,49 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Event types and publishers for the Credit contract.
+//!
+//! # What
+//!
+//! Every event the credit contract emits is defined here as a
+//! `#[contracttype]` payload struct paired with a `publish_*` helper that
+//! calls `env.events().publish((topic_a, topic_b), payload)`.
+//!
+//! 25+ event topics are published under the `credit` namespace
+//! (`("credit","opened")`, `("credit","drawn")`, `("credit","repay")`,
+//! `("credit","accrue")`, `("credit","defaulted")`,
+//! `("credit","liq_req")`, `("credit","liq_setl")`, etc.) plus the
+//! single-element `("blk_chg",)` topic for borrower blocklist changes.
+//! The full catalog is in
+//! [`docs/indexer-integration.md`](../../../docs/indexer-integration.md).
+//!
+//! # How
+//!
+//! All topic strings are encoded with `symbol_short!` (≤ 9 characters) so
+//! the on-chain encoding is the cheap `SCV_SYMBOL` variant. Payload structs
+//! use plain Soroban host types (`Address`, `i128`, `u32`, `u64`,
+//! `CreditStatus`) so off-chain indexers can decode them with just the
+//! Soroban SDK and the `CreditStatus` discriminant table.
+//!
+//! # Why (ABI stability)
+//!
+//! Event topics and payload field layouts are part of the contract's
+//! public ABI. The CI test `tests/event_topic_stability.rs` pins every
+//! topic string and asserts the payload struct layout has not changed.
+//! Breaking changes to the event surface require a major version bump in
+//! [`crate::CONTRACT_API_VERSION`].
+//!
+//! Additive evolution is safe:
+//!
+//! - New event topics are safe to add (existing topics keep working).
+//! - New fields on an existing payload struct can be added at the end
+//!   *only* via a new event topic with a versioned suffix (e.g.
+//!   `("credit","drawn_v2")`, which already appears here as
+//!   [`DrawnEventV2`] reserved for the next event-schema iteration).
+//!
+//! See [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for the
+//! end-to-end event topology and
+//! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+//! per-entrypoint event-emission table.
 
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
@@ -126,7 +169,10 @@ pub struct DrawsFrozenEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowerBlockedEvent {
     pub borrower: Address,
+    /// true = borrower was blocked; false = borrower was unblocked
     pub blocked: bool,
+    /// Ledger sequence at time of change (for off-chain indexers)
+    pub ledger: u32,
 }
 
 #[contracttype]
@@ -138,6 +184,31 @@ pub struct DrawnEventV2 {
     pub amount: i128,
     pub new_utilized_amount: i128,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeAccruedEvent {
+    pub borrower: Address,
+    pub fee_amount: i128,
+    pub new_treasury_balance: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateEnteredEvent {
+    pub borrower: Address,
+    pub base_rate_bps: u32,
+    pub penalty_surcharge_bps: u32,
+    pub effective_rate_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateExitedEvent {
+    pub borrower: Address,
+    pub previous_rate_bps: u32,
+    pub new_rate_bps: u32,
 }
 
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
@@ -165,6 +236,11 @@ pub fn publish_draw_reversed_event(env: &Env, event: DrawReversedEvent) {
 pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
+}
+
+pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
 }
 
 pub fn publish_admin_rotation_proposed(env: &Env, proposed_admin: &Address, accept_after: u64) {
@@ -234,10 +310,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -261,14 +334,105 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
-#[allow(dead_code)]
-pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
-    env.events()
-        .publish((symbol_short!("credit"), symbol_short!("blk_chg")), event);
+pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bool) {
+    env.events().publish(
+        (Symbol::new(env, "blk_chg"),),
+        BorrowerBlockedEvent {
+            borrower: borrower.clone(),
+            blocked,
+            ledger: env.ledger().sequence(),
+        },
+    );
 }
 
+/// Publish a penalty rate entered event when a line becomes delinquent.
+pub fn publish_penalty_rate_entered_event(
+    env: &Env,
+    borrower: &Address,
+    base_rate_bps: u32,
+    penalty_surcharge_bps: u32,
+    effective_rate_bps: u32,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "pen_enter")),
+        PenaltyRateEnteredEvent {
+            borrower: borrower.clone(),
+            base_rate_bps,
+            penalty_surcharge_bps,
+            effective_rate_bps,
+        },
+    );
+}
 
+/// Publish a penalty rate exited event when a line is no longer delinquent.
+pub fn publish_penalty_rate_exited_event(
+    env: &Env,
+    borrower: &Address,
+    previous_rate_bps: u32,
+    new_rate_bps: u32,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "pen_exit")),
+        PenaltyRateExitedEvent {
+            borrower: borrower.clone(),
+            previous_rate_bps,
+            new_rate_bps,
+        },
+    );
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralDepositedEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub new_balance: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralWithdrawnEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub new_balance: i128,
+}
+
+pub fn publish_collateral_deposited_event(env: &Env, event: CollateralDepositedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("col_dep")), event);
+}
+
+pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUpgradedEvent {
+    pub old_wasm_hash: soroban_sdk::BytesN<32>,
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+}
+
+pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "upgraded")), event);
+}
+
+pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_cfg")),
+        (max_deviation_bps, max_age_seconds),
+    );
+}
+
+pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_price")),
+        (price, timestamp),
+    );
+}

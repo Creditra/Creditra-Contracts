@@ -2,31 +2,39 @@
 
 //! # Fixed-Point Interest Math Utilities
 //!
-//! This module provides deterministic, integer-only arithmetic helpers for
-//! computing interest accruals inside the Creditra credit contract.
+//! Deterministic, integer-only arithmetic helpers used by the interest
+//! accrual path in [`crate::accrual`] and by oracle deviation checks in
+//! [`crate::lib::settle_default_liquidation`].
 //!
-//! ## Scaling Factor
+//! ## What
 //!
-//! All intermediate products are scaled by `SCALE = 10^18` before division so
-//! that the final result retains sub-unit precision up to 18 decimal places.
-//! The caller chooses whether the remainder is discarded (floor) or rounded up
-//! (ceiling) via the [`Rounding`] enum.
+//! - [`mul_div`] — checked `a * num / denom` with explicit [`Rounding`].
+//! - [`apply_bps`] — apply a `bps` rate to a `u128` principal.
+//! - [`prorate_interest`] — the live accrual primitive:
+//!   `floor((u * r * Δt) / (10_000 * 31_557_600))`.
+//! - [`compute_deviation_bps`] — oracle deviation in bps between two
+//!   prices; `None` when the prior price is non-positive; saturates to
+//!   `u32::MAX` on absurd new prices to ensure the circuit breaker still
+//!   trips.
+//! - [`scale_up`] / [`scale_down`] — 10^18 fixed-point helpers.
 //!
-//! ## Basis Points
+//! ## How
 //!
-//! Interest rates are expressed in **basis points** (bps), where
-//! `1 bps = 0.01% = 1 / 10_000`.  The annual rate in bps is therefore divided
-//! by `BPS_DENOMINATOR = 10_000` when computing the fractional rate.
+//! All intermediate products are promoted to `u128` and multiplied with
+//! checked primitives; overflow panics (which in `apply_accrual`'s caller
+//! is translated into `ContractError::Overflow = 12`). The caller chooses
+//! whether the division remainder is discarded (floor) or rounded up
+//! (ceiling) via [`Rounding`].
 //!
-//! ## Annual Seconds
+//! Interest rates are in **basis points** (`1 bps = 1 / 10_000`). Time is in
+//! ledger seconds; one **Julian year** is defined as
+//! [`SECONDS_PER_YEAR`] `= 31_557_600` (365.25 × 86 400), matching the
+//! convention used by most on-chain interest protocols. The pre-computed
+//! constant [`BPS_YEAR_DENOM`] `= BPS_DENOMINATOR * SECONDS_PER_YEAR` lets
+//! the final division be a single `u128` operation.
 //!
-//! Time is measured in ledger seconds.  One Julian year is defined as
-//! `SECONDS_PER_YEAR = 31_557_600` (365.25 × 86 400), matching the convention
-//! used by most on-chain interest protocols.
+//! ## Why (overflow safety)
 //!
-//! ## Overflow Safety
-//!
-//! The prorate helper promotes all operands to `u128` before multiplying.
 //! The worst-case intermediate product is:
 //!
 //! ```text
@@ -36,16 +44,24 @@
 //! SCALE      = 10^18
 //! ```
 //!
-//! `principal × rate_bps × time_delta` can reach ~3 × 10^61, which overflows
-//! `u128` (max ~3.4 × 10^38).  To prevent this the multiplication is split
-//! into two checked steps:
+//! `principal * rate_bps * time_delta` can reach ~3 × 10^61, which overflows
+//! `u128` (max ~3.4 × 10^38). The multiplication is therefore split into two
+//! checked steps:
 //!
-//! 1. `a = principal × rate_bps`  — fits in u128 for any realistic principal
+//! 1. `a = principal * rate_bps` — fits in u128 for any realistic principal
 //!    (≤ 10^28 × 10^4 = 10^32 < 10^38).
-//! 2. `b = a × time_delta`        — checked; panics on overflow.
+//! 2. `b = a * time_delta` — checked; panics on overflow.
 //!
-//! The denominator `BPS_DENOMINATOR × SECONDS_PER_YEAR` is pre-computed as a
-//! `u128` constant so the final division is a single operation.
+//! The combination of `checked_mul` here and `overflow-checks = true` in
+//! the release profile (see workspace `Cargo.toml`) is what makes the
+//! accounting layer formally overflow-safe.
+//!
+//! ## Rounding direction
+//!
+//! For accrual the caller passes [`Rounding::Floor`], so every realized
+//! `ΔI` rounds **down**. This biases the rounding error against protocol
+//! revenue and never against the borrower's balance — a deliberate safety
+//! property documented in [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md).
 
 #![allow(dead_code)]
 
@@ -274,11 +290,92 @@ pub fn prorate_interest(
     }
 }
 
+// ─── Oracle deviation helper ──────────────────────────────────────────────────
+
+/// Compute the absolute deviation between `new_price` and `last_price` in basis points.
+///
+/// # Formula
+/// ```text
+/// deviation_bps = |new_price - last_price| * 10_000 / last_price
+/// ```
+///
+/// Returns `None` if `last_price` is zero (undefined).
+///
+/// # Overflow safety
+/// Intermediate arithmetic is performed in `u128`. For realistic price values
+/// (≤ i128::MAX ≈ 1.7 × 10^38) the product `diff * 10_000` fits in u128.
+///
+/// # Examples
+/// ```rust
+/// use creditra_credit::math_utils::compute_deviation_bps;
+///
+/// // 5% deviation: last=1000, new=1050 → 500 bps
+/// assert_eq!(compute_deviation_bps(1050, 1000), Some(500));
+///
+/// // 5% deviation downward: last=1000, new=950 → 500 bps
+/// assert_eq!(compute_deviation_bps(950, 1000), Some(500));
+///
+/// // Zero last price → None
+/// assert_eq!(compute_deviation_bps(100, 0), None);
+/// ```
+pub fn compute_deviation_bps(new_price: i128, last_price: i128) -> Option<u32> {
+    if last_price <= 0 {
+        return None;
+    }
+    let diff = (new_price - last_price).unsigned_abs();
+    // diff * 10_000 / last_price — both operands are u128
+    let numerator = diff.checked_mul(BPS_DENOMINATOR)?;
+    let deviation = numerator / (last_price as u128);
+    // Cap at u32::MAX to avoid truncation; any value > 10_000 already exceeds any threshold
+    Some(deviation.min(u32::MAX as u128) as u32)
+}
+
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── mul_div ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn mul_div_basic() {
+        assert_eq!(mul_div(1_000, 300, 10_000), 30);
+    }
+
+    #[test]
+    fn mul_div_truncates_toward_zero() {
+        // 7 * 1 / 3 = 2.33… → 2
+        assert_eq!(mul_div(7, 1, 3), 2);
+    }
+
+    #[test]
+    fn mul_div_identity_denominator() {
+        assert_eq!(mul_div(42, 1, 1), 42);
+    }
+
+    #[test]
+    #[should_panic(expected = "denominator must not be zero")]
+    fn mul_div_zero_denominator_panics() {
+        mul_div(1, 1, 0);
+    }
+
+    // ── apply_bps ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_bps_three_percent() {
+        assert_eq!(apply_bps(1_000, 300), 30);
+    }
+
+    #[test]
+    fn apply_bps_half_percent_truncates() {
+        assert_eq!(apply_bps(200, 50), 1);
+    }
+
+    #[test]
+    fn apply_bps_sub_unit_truncates_to_zero() {
+        assert_eq!(apply_bps(50, 1), 0);
+    }
 
     // ── mul_div ───────────────────────────────────────────────────────────────
 
@@ -393,12 +490,27 @@ mod tests {
 
     #[test]
     fn apply_bps_full_rate() {
+        assert_eq!(apply_bps(500, 10_000), 500);
         // 10 000 tokens × 10 000 bps (100 %) = 10 000 tokens
         assert_eq!(apply_bps(10_000, 10_000, Rounding::Floor), 10_000);
     }
 
     #[test]
     fn apply_bps_zero_rate() {
+        assert_eq!(apply_bps(1_000_000, 0), 0);
+    }
+
+    // ── prorate_interest ─────────────────────────────────────────────────────
+
+    #[test]
+    fn prorate_interest_one_day() {
+        // 5% annual on 1_000_000 for 1 day
+        assert_eq!(prorate_interest(1_000_000, 500, 86_400), 137);
+    }
+
+    #[test]
+    fn prorate_interest_zero_elapsed() {
+        assert_eq!(prorate_interest(1_000_000, 500, 0), 0);
         assert_eq!(apply_bps(1_000_000, 0, Rounding::Floor), 0);
         assert_eq!(apply_bps(1_000_000, 0, Rounding::Ceil), 0);
     }
@@ -477,6 +589,19 @@ mod tests {
 
     #[test]
     fn prorate_interest_zero_principal() {
+        assert_eq!(prorate_interest(0, 500, 86_400), 0);
+    }
+
+    #[test]
+    fn prorate_interest_full_year() {
+        // 10% on 100_000 for exactly 1 year = 10_000
+        assert_eq!(prorate_interest(100_000, 1_000, 31_536_000), 10_000);
+    }
+
+    #[test]
+    fn prorate_interest_one_hour() {
+        // 5% on 1_000_000 for 3_600 s ≈ 5
+        assert_eq!(prorate_interest(1_000_000, 500, 3_600), 5);
         assert_eq!(prorate_interest(0, 300, 86_400, Rounding::Floor), 0);
     }
 
@@ -617,5 +742,46 @@ mod tests {
         let floor = prorate_interest(p, r, t, Rounding::Floor);
         let ceil = prorate_interest(p, r, t, Rounding::Ceil);
         assert_eq!(floor, ceil, "exact division should give floor == ceil");
+    }
+
+    // ── compute_deviation_bps ─────────────────────────────────────────────────
+
+    #[test]
+    fn deviation_five_percent_up() {
+        // 1050 vs 1000 → 50/1000 * 10_000 = 500 bps
+        assert_eq!(compute_deviation_bps(1_050, 1_000), Some(500));
+    }
+
+    #[test]
+    fn deviation_five_percent_down() {
+        // 950 vs 1000 → 50/1000 * 10_000 = 500 bps
+        assert_eq!(compute_deviation_bps(950, 1_000), Some(500));
+    }
+
+    #[test]
+    fn deviation_zero_change() {
+        assert_eq!(compute_deviation_bps(1_000, 1_000), Some(0));
+    }
+
+    #[test]
+    fn deviation_one_bps() {
+        // 10_001 vs 10_000 → 1/10_000 * 10_000 = 1 bps
+        assert_eq!(compute_deviation_bps(10_001, 10_000), Some(1));
+    }
+
+    #[test]
+    fn deviation_hundred_percent() {
+        // 2000 vs 1000 → 1000/1000 * 10_000 = 10_000 bps
+        assert_eq!(compute_deviation_bps(2_000, 1_000), Some(10_000));
+    }
+
+    #[test]
+    fn deviation_zero_last_price_returns_none() {
+        assert_eq!(compute_deviation_bps(100, 0), None);
+    }
+
+    #[test]
+    fn deviation_negative_last_price_returns_none() {
+        assert_eq!(compute_deviation_bps(100, -1), None);
     }
 }

@@ -3,6 +3,10 @@ name = "gateway-auction"
 version = "0.1.0"
 edition = "2021"
 description = "Simple auction contract for testing BidRefundedEvent emission"
+license = "MIT"
+keywords = ["soroban", "stellar", "auction", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "no-std"]
+readme = "auction.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

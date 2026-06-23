@@ -3,22 +3,81 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Core data types for the Creditra contract.
+//!
+//! # What
+//!
+//! ABI-stable types that cross the contract boundary:
+//!
+//! - [`ContractError`] — 38-variant `#[repr(u32)]` error enum (discriminants
+//!   pinned by `tests/error_discriminants.rs`). See
+//!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
+//!   categorized reference.
+//! - [`CreditStatus`] — 5-variant state-machine label (Active=0,
+//!   Suspended=1, Defaulted=2, Closed=3, Restricted=4). See
+//!   [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+//!   transition graph.
+//! - [`CreditLineData`] — the per-borrower record (limit, utilized, rate,
+//!   score, status, accrual + suspension timestamps, accrued interest).
+//! - [`RepaymentSchedule`] — installment metadata
+//!   (`amount_per_period`, `period_seconds`, `next_due_ts`).
+//! - [`RateChangeConfig`] — magnitude + cadence cap on
+//!   `update_risk_parameters`.
+//! - [`RateFormulaConfig`] — piecewise-linear rate formula parameters
+//!   `(base_rate_bps, slope_bps_per_score, min_rate_bps, max_rate_bps)`.
+//! - [`GracePeriodConfig`] / [`GraceWaiverMode`] — suspension grace policy
+//!   (FullWaiver vs ReducedRate) consumed by [`crate::accrual`].
+//! - [`OracleConfig`] — price-feed circuit-breaker parameters
+//!   `(max_deviation_bps, max_age_seconds)`.
+//! - [`ProtocolConfig`] — host-side projection used by
+//!   `get_protocol_config` (NOT `#[contracttype]`).
+//!
+//! # How
+//!
+//! All types are `#[contracttype]`-tagged unless explicitly marked
+//! otherwise; this makes them cross the Soroban host ABI as structured
+//! values. Discriminants on the two enums are ABI-stable; new variants must
+//! be appended to preserve indexer and SDK compatibility.
+//!
+//! # Why
+//!
+//! These types are the protocol's externalized vocabulary. They are
+//! consumed by off-chain indexers (`docs/indexer-integration.md`), by
+//! SDK clients building transactions, and by integrators reading the
+//! contract state for risk dashboards. Stability of the discriminants and
+//! field layout is enforced by CI tests so a downstream consumer can pin
+//! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
+//! `(1, 0, 0)`).
 
 use soroban_sdk::{contracttype, Address};
 
 /// Status of a borrower's credit line.
+///
+/// # Discriminant stability
+/// The discriminants are part of the contract ABI. They must never be
+/// reordered or renumbered; new variants must be appended.
+///
+/// # Transitions
+/// See [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+/// authoritative state-transition diagram. In short:
+///
+/// - `Active` is the only state that permits new draws.
+/// - `Restricted` allows draws but the numeric limit check will fail until
+///   the borrower repays under the reduced ceiling.
+/// - `Suspended` and `Defaulted` both block draws and allow repayments.
+/// - `Closed` is terminal — no draws, no repayments.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CreditStatus {
-    /// Credit line is active and draws are allowed.
+    /// Credit line is active; draws and repayments allowed.
     Active = 0,
-    /// Credit line is temporarily frozen by admin.
+    /// Credit line is temporarily frozen by admin. Draws blocked, repayments allowed.
     Suspended = 1,
-    /// Credit line is in default; draws are disabled.
+    /// Credit line is in default; draws blocked, repayments allowed for cure.
     Defaulted = 2,
-    /// Credit line is permanently closed.
+    /// Credit line is permanently closed. Draws blocked, repayments blocked.
     Closed = 3,
     /// Credit limit was decreased below utilized amount; excess must be repaid.
+    /// Draws are not flat-blocked but will fail the numeric limit check until cured.
     Restricted = 4,
 }
 
@@ -60,11 +119,16 @@ pub enum CreditStatus {
 /// | 26   | `InsufficientRepaymentAllowance` | Borrower allowance cannot cover repayment |
 /// | 27   | `InsufficientRepaymentBalance` | Borrower balance cannot cover repayment |
 /// | 28   | `RepayExceedsMaxAmount`        | Repay amount exceeds per-transaction cap |
-/// | 29   | `DrawCooldownActive`           | Borrower attempted to draw before cooldown elapsed |
-/// | 30   | `MissingOracle`                | Default oracle is not configured for liquidation valuation |
-/// | 31   | `OraclePriceStale`             | Oracle price is older than the configured freshness window |
-/// | 32   | `OraclePriceInvalid`           | Oracle price is non-positive, or its timestamp is in the future |
-/// | 33   | `OracleRecoveryExceedsBound`   | Recovered amount exceeds the oracle-derived upper-bound on recovery value |
+/// | 29   | `DrawCooldownActive`          | Borrower attempted to draw before cooldown elapsed |
+/// | 30   | `TreasuryNotSet`              | Treasury address is not configured |
+/// | 31   | `ExposureCapExceeded`         | Draw would exceed the global protocol exposure cap |
+/// | 32   | `AdminNotInitialized`         | Admin address has not been initialized |
+/// | 33   | `TimestampRegression`         | Timestamp regression detected |
+/// | 34   | `LimitOutOfBounds`            | Credit limit is outside configured min/max bounds |
+/// | 35   | `CollateralRatioBelowMinimum` | Collateral ratio is below the minimum required ratio |
+/// | 36   | `OraclePriceInvalid`          | Oracle price is invalid (zero, negative, or malformed) |
+/// | 37   | `OraclePriceStale`            | Oracle price is stale (exceeds max_age_seconds) |
+/// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -127,24 +191,24 @@ pub enum ContractError {
     RepayExceedsMaxAmount = 28,
     /// Borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
-    /// `settle_default_liquidation` was called but no default oracle is configured.
-    ///
-    /// Resolution: admin must call [`crate::Credit::set_default_oracle`]
-    /// with a valid oracle contract and freshness bound before settling
-    /// defaulted lines.
-    MissingOracle = 30,
-    /// Oracle price's timestamp is older than the configured freshness window
-    /// (`OracleConfig::max_price_age_seconds`). On-chain accounting rejected
-    /// the liquidation settlement to prevent stale-price exploitation.
-    OraclePriceStale = 31,
-    /// Oracle price is non-positive, or its timestamp lies in the future.
-    /// Either condition indicates a misbehaving oracle and is treated as a
-    /// hard reject to keep accounting deterministic.
-    OraclePriceInvalid = 32,
-    /// The requested `recovered_amount` exceeds the oracle-derived upper bound
-    /// (`oracle_price * utilized / ORACLE_PRICE_SCALE`). This caps recovery to
-    /// an oracle-attested value range.
-    OracleRecoveryExceedsBound = 33,
+    /// Treasury address is not configured when attempting a treasury withdrawal.
+    TreasuryNotSet = 30,
+    /// Draw would exceed the global protocol exposure cap.
+    ExposureCapExceeded = 31,
+    /// Admin address has not been initialized in contract storage.
+    AdminNotInitialized = 32,
+    /// Timestamp regression detected (new timestamp is not greater than stored timestamp).
+    TimestampRegression = 33,
+    /// Credit limit is outside the configured minimum/maximum bounds.
+    LimitOutOfBounds = 34,
+    /// Collateral ratio is below the minimum required ratio.
+    CollateralRatioBelowMinimum = 35,
+    /// Oracle price is invalid (zero, negative, or malformed).
+    OraclePriceInvalid = 36,
+    /// Oracle price is stale (exceeds max_age_seconds).
+    OraclePriceStale = 37,
+    /// Oracle price deviation exceeds the configured maximum.
+    OraclePriceDeviation = 38,
 }
 
 /// Stored credit line data for a borrower.
@@ -179,9 +243,21 @@ pub struct CreditLineData {
     pub suspension_ts: u64,
 }
 
-/// Admin-configurable limits on interest-rate changes.
+/// Optional installment repayment schedule attached to a credit line.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RepaymentSchedule {
+    /// Required repayment amount for each installment period.
+    pub amount_per_period: i128,
+    /// Duration of a single installment period in seconds.
+    pub period_seconds: u64,
+    /// Timestamp at which the next installment is due.
+    pub next_due_ts: u64,
+}
+
+/// Admin-configurable limits on interest-rate changes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateChangeConfig {
     /// Maximum absolute change in `interest_rate_bps` allowed per single update.
     pub max_rate_change_bps: u32,
@@ -247,36 +323,23 @@ pub enum GraceWaiverMode {
     ReducedRate = 1,
 }
 
-/// Admin-configurable default-oracle integration (issue #343).
+/// Oracle circuit-breaker configuration.
 ///
-/// When stored in instance storage, `settle_default_liquidation` queries the
-/// oracle contract before applying proceeds. See [`crate::default_oracle`]
-/// and [`crate::storage`] for the consumer side.
-///
-/// # Price semantics
-/// Oracle prices are denominated in **1e-scaled fixed-point** with
-/// [`crate::default_oracle::ORACLE_PRICE_SCALE`] as the scale factor. A price
-/// equal to `ORACLE_PRICE_SCALE` implies parity (one base unit is worth one
-/// unit of itself). `max_recovery_value` is then computed as
-/// `price * utilized / ORACLE_PRICE_SCALE`.
-///
-/// # Freshness
-/// A returned price whose `timestamp` is more than `max_price_age_seconds`
-/// before the current ledger timestamp is rejected with
-/// [`ContractError::OraclePriceStale`].
+/// When set, `settle_default_liquidation` validates the supplied `oracle_price`
+/// against the last accepted price and the current ledger timestamp before
+/// applying the settlement.
 ///
 /// # Invariants
-/// - `max_price_age_seconds == 0` is **not** allowed by the setter; it would
-///   effectively disable freshness, which is unsafe.
+/// - `max_deviation_bps` must be in `1..=10_000` (0.01 % – 100 %).
+/// - `max_age_seconds` must be > 0.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OracleConfig {
-    /// Address of the oracle contract that implements `latest_price()`,
-    /// returning `(i128 price, u64 timestamp)`.
-    pub oracle_address: Address,
-    /// Maximum allowed age (in seconds) for an oracle price before it is
-    /// rejected as stale. Boundary: `1..=365 * 24 * 3600`.
-    pub max_price_age_seconds: u64,
+    /// Maximum allowed price deviation from the last accepted price, in basis points.
+    /// E.g. 500 = 5 %.
+    pub max_deviation_bps: u32,
+    /// Maximum age of an oracle price in seconds before it is considered stale.
+    pub max_age_seconds: u64,
 }
 
 /// Event emitted when the rate formula config is set or cleared.
@@ -289,19 +352,20 @@ pub struct RateFormulaConfigEvent {
 
 /// Global protocol configuration.
 ///
-/// Note: `RateChangeConfig` fields are flattened into primitive `Option` types
-/// to avoid cross-crate serialization trait issues with `#[contracttype]`
-/// (soroban-sdk / testutils compatibility). Use `get_rate_change_limits()` for
-/// the structured `RateChangeConfig` form.
-#[contracttype]
+/// This is **not** a `#[contracttype]` — it never crosses the host boundary.
+/// It is a Rust-side projection of the instance-storage keys
+/// [`crate::storage::DataKey::LiquidityToken`] and
+/// [`crate::storage::DataKey::LiquiditySource`], used by helpers that want to
+/// inspect both values together (e.g. during the draw pre-flight check).
+///
+/// Either field may be `None` if the corresponding key has not been set; in
+/// that case the relevant entrypoints panic with
+/// [`ContractError::MissingLiquidityToken`] or
+/// [`ContractError::MissingLiquiditySource`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
     /// Configured liquidity token.
     pub liquidity_token: Option<Address>,
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
-    /// Max allowed rate change in bps per single update (`None` = no limits).
-    pub rate_change_max_bps: Option<u32>,
-    /// Min seconds between rate changes (`None` = no limits).
-    pub rate_change_min_interval: Option<u64>,
 }

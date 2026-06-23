@@ -4,7 +4,7 @@ use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
-fn setup(env: &Env) -> (CreditClient, Address) {
+fn setup(env: &Env) -> (CreditClient<'_>, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -51,9 +51,8 @@ fn get_credit_line_returns_some_after_close() {
     client.open_credit_line(&borrower, &1_000_i128, &200_u32, &30_u32);
     client.close_credit_line(&borrower, &admin);
 
-    let line = client.get_credit_line(&borrower).expect("expected Some after close");
-    assert_eq!(
-        line.status,
-        CreditStatus::Closed
-    );
+    let line = client
+        .get_credit_line(&borrower)
+        .expect("expected Some after close");
+    assert_eq!(line.status, CreditStatus::Closed);
 }

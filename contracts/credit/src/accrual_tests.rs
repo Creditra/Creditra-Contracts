@@ -6,6 +6,7 @@ mod tests {
     use crate::CreditClient;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
         Address, Env,
     };
 
@@ -17,6 +18,21 @@ mod tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        // Mint a large reserve to the contract (default liquidity source).
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &i128::MAX);
+        // Mint tokens to the borrower for repayments and approve the contract.
+        StellarAssetClient::new(&env, &token).mint(&borrower, &1_000_000_000_000_i128);
+        soroban_sdk::token::Client::new(&env, &token).approve(
+            &borrower,
+            &contract_id,
+            &1_000_000_000_000_i128,
+            &1_000_000_u32,
+        );
+
         (env, admin, borrower, client)
     }
 
@@ -203,6 +219,7 @@ mod grace_period_tests {
     use crate::CreditClient;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
         Address, Env,
     };
 
@@ -221,6 +238,12 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(env, &token).mint(&contract_id, &1_000_000_000_000_i128);
+
         client.open_credit_line(&borrower, &credit_limit, &rate_bps, &50_u32);
 
         // Draw at t=1 (non-zero) to establish a valid accrual checkpoint.
@@ -413,6 +436,10 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_000_i128);
         client.open_credit_line(&borrower, &1_000_000, &1000, &50);
 
         // Draw at t=1 to establish a valid accrual checkpoint.

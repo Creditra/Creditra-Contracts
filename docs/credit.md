@@ -26,6 +26,16 @@ Stored in persistent storage keyed by the borrower's address.
 | `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
 | `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
 
+### `RepaymentSchedule`
+
+Optional per-borrower installment schedule stored in persistent storage under the borrower address.
+
+| Field | Type | Description |
+|---|---|---|
+| `amount_per_period` | `i128` | Required amount for each installment |
+| `period_seconds` | `u64` | Installment interval in seconds |
+| `next_due_ts` | `u64` | Timestamp for the next installment due date |
+
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
 
@@ -221,6 +231,16 @@ Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing:
 - `principal_repaid` — portion applied to principal
 - `new_utilized_amount` — total outstanding debt after repayment
 - `new_accrued_interest` — remaining interest debt after repayment
+
+### `set_repayment_schedule(env, borrower, amount_per_period, period_seconds, first_due_ts)`
+Sets or replaces the installment schedule for a borrower credit line. Admin only.
+
+- `amount_per_period` must be positive.
+- `period_seconds` must be positive.
+- The schedule is cleared automatically when the line is reopened or closed.
+
+### `is_delinquent(env, borrower)`
+Returns `true` when a borrower has a repayment schedule, still has debt, and the current time is past `next_due_ts + grace_period_seconds`.
 
 Integrators can reconcile balances using:
 - `principal_owed = new_utilized_amount - new_accrued_interest`
@@ -497,6 +517,8 @@ Set the per-borrower draw cooldown interval in seconds (admin only).
 
 ### `is_draws_frozen(env) -> bool`
 Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
+
+**Note for contributors**: On a freshly initialized contract (before any `freeze_draws` call), `is_draws_frozen` returns `false` by default. This is a safe default that allows draws immediately after deployment. Importantly, the freeze flag only affects `draw_credit` calls — `repay_credit` is never blocked by this flag, ensuring borrowers can always repay their debt even during emergency liquidity operations.
 
 ---
 

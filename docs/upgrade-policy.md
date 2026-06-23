@@ -1,88 +1,258 @@
-# Upgrade Policy: Immutability and Migration
+# Upgrade Policy: Native WASM Upgrade Path
 
-## Contract Immutability
+## Overview
 
-Creditra smart contracts are deployed as **immutable WASM** on the Stellar network.
-Once a contract is deployed, its logic cannot be patched or upgraded in place.
-This is a deliberate design choice aligned with Stellar's Soroban security model.
+The Creditra credit contract implements an admin-gated upgrade path using Soroban's
+native `env.deployer().update_current_contract_wasm()` mechanism. This allows the
+protocol to ship bug fixes and feature additions without migrating borrower state.
 
-> **Stellar ecosystem reference:**
-> [Soroban Smart Contracts — Deployment & Lifecycle](https://developers.stellar.org/docs/smart-contracts/getting-started/deploy-to-testnet)
-> Soroban does not support in-place WASM upgrades; a new contract instance must
-> be deployed for any logic change.
+## Upgrade Mechanism
 
-## Migration Policy
+### Implementation
 
-When a bug fix, feature addition, or breaking change is required, the following
-process applies:
+The contract provides a public `upgrade` entrypoint that:
 
-### 1. Deploy a New Contract
+1. **Enforces security gates:**
+   - Admin authentication via `require_admin_auth()`
+   - Pause check via `assert_not_paused()` — upgrades are blocked during circuit breaker activation
 
-- Compile the updated contract:
-```bash
-  cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+2. **Updates state:**
+   - Bumps `SCHEMA_VERSION` in instance storage to track upgrade history
+   - Retrieves the current WASM hash before upgrade for event emission
+
+3. **Performs atomic upgrade:**
+   - Calls `env.deployer().update_current_contract_wasm(new_wasm_hash)`
+   - This is an atomic operation that replaces the contract's WASM while preserving all storage
+
+4. **Emits audit event:**
+   - Publishes `ContractUpgradedEvent` with both old and new WASM hashes
+   - Event topic: `("credit", "upgraded")`
+
+### Usage
+
+```rust
+// 1. Deploy new WASM and get its hash
+let new_wasm = include_bytes!("../target/wasm32-unknown-unknown/release/creditra_credit.wasm");
+let new_wasm_hash = env.deployer().upload_contract_wasm(new_wasm.into());
+
+// 2. Upgrade the contract (admin only)
+client.upgrade(&new_wasm_hash);
 ```
-- Deploy the new WASM to Stellar:
+
+### Command-Line Workflow
+
 ```bash
-  soroban contract deploy \
-    --wasm target/wasm32-unknown-unknown/release/creditra_credit.wasm \
-    --source <identity> \
-    --network <network>
+# 1. Build the new contract version
+cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+
+# 2. Upload the new WASM to get its hash
+soroban contract install \
+  --wasm target/wasm32-unknown-unknown/release/creditra_credit.wasm \
+  --source <admin-identity> \
+  --network <network>
+
+# Output: <new_wasm_hash>
+
+# 3. Invoke the upgrade entrypoint
+soroban contract invoke \
+  --id <contract-address> \
+  --source <admin-identity> \
+  --network <network> \
+  -- \
+  upgrade \
+  --new_wasm_hash <new_wasm_hash>
 ```
-- The new contract receives a **new contract address**.
 
-### 2. Operational Data Migration
+## Rollback Process
 
-Because contract storage is bound to a specific contract address, all on-chain
-state must be migrated manually:
+If an upgrade introduces a regression, the admin can roll back to the previous version:
 
-1. **Export** all `CreditLineData` records from the old contract using
-   `get_credit_line` for each known borrower address.
-2. **Re-initialize** the new contract via `init` with the same admin, liquidity
-   token, and liquidity source configuration.
-3. **Re-import** each credit line by calling `open_credit_line` on the new
-   contract with the exported parameters (`borrower`, `credit_limit`,
-   `interest_rate_bps`, `risk_score`).
-4. **Replay utilization** — restore `utilized_amount` via `draw_credit` calls
-   (or a dedicated migration entry-point if added in the new contract).
-5. **Restore status** — apply `suspend_credit_line`, `default_credit_line`, or
-   `close_credit_line` as needed to match the old contract's state.
+1. **Retrieve the old WASM hash** from the `ContractUpgradedEvent` emitted during the upgrade
+   - Event data contains: `{ old_wasm_hash, new_wasm_hash }`
+   - Query the event log or use an off-chain indexer
 
-> ⚠️ Migration must be performed by the **admin** account. Ensure admin key
-> continuity across deployments.
+2. **Re-upload the old WASM** (if not already available on-chain):
+   ```bash
+   soroban contract install \
+     --wasm <path-to-old-wasm> \
+     --source <admin-identity> \
+     --network <network>
+   ```
 
-### 3. Backend Synchronization Tasks
+3. **Invoke upgrade with the old hash**:
+   ```bash
+   soroban contract invoke \
+     --id <contract-address> \
+     --source <admin-identity> \
+     --network <network> \
+     -- \
+     upgrade \
+     --new_wasm_hash <old_wasm_hash>
+   ```
 
-The off-chain backend must be updated in coordination with any contract migration:
+4. **Verify rollback**:
+   - Check that the `ContractUpgradedEvent` was emitted with the old hash as `new_wasm_hash`
+   - Verify contract behavior matches the previous version
+   - Run integration tests against the rolled-back contract
 
-| Task | Description |
-|------|-------------|
-| **Update contract address** | Replace the old contract address with the new one in all backend configuration files and environment variables. |
-| **Re-index events** | Re-index contract events from the new contract's deployment ledger to rebuild the backend's credit-line cache. |
-| **Pause API writes** | Halt any write operations (draw, repay, open) during the migration window to prevent state divergence. |
-| **Verify state parity** | After migration, compare backend-held state against on-chain `get_credit_line` responses for all borrowers. |
-| **Update webhook/notification config** | Point event listeners and webhook subscribers to the new contract address. |
-| **Communicate to integrators** | Notify downstream integrators (wallets, dApps) of the new contract address with a transition deadline for the old address. |
+### Rollback Time Window
 
-## Assumptions and Trust Boundaries
+- Rollback can be performed **at any time** after an upgrade
+- No time-based restrictions (unlike admin rotation which has a delay)
+- The old WASM must still be available on-chain or re-uploaded
 
-- Only the **admin** key may execute migration steps. Compromise of the admin key
-  invalidates the migration's integrity.
-- The migration window is a **trust-sensitive period**: no user-facing transactions
-  should be processed until state parity is verified.
-- The old contract remains on-chain indefinitely but should be treated as
-  **deprecated** — the backend must enforce routing exclusively to the new address.
+## Review Process
+
+### Pre-Upgrade Checklist
+
+Before invoking the upgrade entrypoint, the admin must:
+
+1. **Run the full test suite:**
+   ```bash
+   cargo test -p creditra-credit
+   ```
+
+2. **Verify test coverage** (minimum 95% line coverage):
+   ```bash
+   cargo llvm-cov --workspace --all-targets --fail-under-lines 95
+   ```
+
+3. **Review the diff** between current and new WASM:
+   - Audit all changes to entrypoints, storage keys, and error codes
+   - Verify no breaking changes to event schemas or public APIs
+   - Confirm all new features have corresponding tests
+
+4. **Test on testnet first:**
+   - Deploy to Stellar testnet
+   - Run integration tests against the testnet deployment
+   - Verify all critical paths (draw, repay, admin operations)
+
+5. **Prepare rollback plan:**
+   - Document the current WASM hash before upgrade
+   - Keep the old WASM binary accessible for quick rollback
+   - Have the rollback command ready to execute
+
+### Post-Upgrade Verification
+
+After a successful upgrade:
+
+1. **Verify the upgrade event:**
+   ```bash
+   soroban events --id <contract-address> --start-ledger <upgrade-ledger>
+   ```
+   - Confirm `ContractUpgradedEvent` was emitted
+   - Verify `old_wasm_hash` and `new_wasm_hash` are correct
+
+2. **Check schema version:**
+   ```bash
+   soroban contract invoke \
+     --id <contract-address> \
+     --network <network> \
+     -- \
+     get_schema_version
+   ```
+   - Confirm version was incremented
+
+3. **Smoke test critical operations:**
+   - Query existing credit lines: `get_credit_line`
+   - Test draw/repay on a test borrower
+   - Verify admin operations still work
+
+4. **Monitor for anomalies:**
+   - Watch for unexpected errors in logs
+   - Monitor gas consumption for regressions
+   - Track event emission patterns
+
+## State Preservation Guarantees
+
+The native upgrade mechanism preserves:
+
+- ✅ All persistent storage (credit lines, borrower data)
+- ✅ All instance storage (admin, liquidity token, global config)
+- ✅ Contract address (remains unchanged)
+- ✅ Storage TTLs (no reset or archival)
+
+The upgrade **does not** preserve:
+
+- ❌ In-flight transactions (must be retried after upgrade)
+- ❌ Reentrancy guard state (cleared on upgrade, safe to proceed)
+
+## Security Considerations
+
+### Admin Key Protection
+
+- The admin key is the **only** authorization required for upgrades
+- Compromise of the admin key allows arbitrary WASM replacement
+- **Recommendation:** Use a multisig or hardware wallet for the admin key
+
+### Pause Enforcement
+
+- Upgrades are blocked when the protocol is paused (`ContractError::Paused`)
+- This prevents upgrades during emergency situations
+- To upgrade during a pause, the admin must first unpause the protocol
+
+### Audit Trail
+
+- Every upgrade emits a `ContractUpgradedEvent` with both WASM hashes
+- Off-chain indexers can track the full upgrade history
+- The `SCHEMA_VERSION` provides an on-chain monotonic upgrade counter
 
 ## Failure Modes
 
 | Scenario | Impact | Mitigation |
 |----------|--------|------------|
-| Partial data migration | Some borrowers missing in new contract | Complete export/import before routing traffic |
-| Admin key lost | Migration cannot be authorized | Use a multisig or key recovery policy |
-| Backend not updated | Writes go to old contract | Automated config validation on deploy CI |
-| State divergence after migration | Incorrect credit limits or utilization | Post-migration parity check script (compare all borrowers) |
+| Admin key lost | Upgrades permanently disabled | Use multisig or key recovery policy |
+| Malicious upgrade | Arbitrary code execution | Admin key protection + code review process |
+| Upgrade during pause | Upgrade reverts with `ContractError::Paused` | Unpause first, or wait for automatic unpause |
+| Rollback WASM unavailable | Cannot roll back to previous version | Archive all WASM binaries off-chain |
+| Schema version overflow | Version counter wraps (unlikely) | Monitor version and plan migration at high values |
 
-## Running Tests Before Migration
+## Testing
+
+The upgrade functionality is covered by comprehensive integration tests in
+`contracts/credit/tests/upgrade.rs`:
+
+- ✅ Happy path: admin successfully upgrades
+- ✅ Sad path: unauthorized caller rejected
+- ✅ Event emission: correct old/new WASM hashes
+- ✅ State preservation: credit lines survive upgrade
+- ✅ Schema version: incremented after upgrade
+- ✅ Pause enforcement: upgrades blocked when paused
+- ✅ Multiple upgrades: can be called repeatedly
+- ✅ Rollback: can revert to previous WASM
+
+Run the upgrade tests:
+```bash
+cargo test -p creditra-credit upgrade
+```
+
+## Comparison to Migration-Based Upgrades
+
+### Native Upgrade (Current Implementation)
+
+**Pros:**
+- ✅ No state migration required
+- ✅ Atomic operation (no downtime)
+- ✅ Contract address unchanged
+- ✅ Instant rollback capability
+
+**Cons:**
+- ❌ Requires admin key security
+- ❌ No multi-step approval process (single admin call)
+
+### Migration-Based Upgrade (Legacy Approach)
+
+**Pros:**
+- ✅ Can change contract address
+- ✅ Can restructure storage layout
+
+**Cons:**
+- ❌ Requires manual state export/import
+- ❌ Downtime during migration
+- ❌ New contract address breaks integrations
+- ❌ Complex rollback (must re-migrate)
+
+## Running Tests Before Upgrade
 
 Always run the full test suite before deploying a new contract version:
 ```bash
@@ -93,5 +263,40 @@ For coverage validation (minimum 95% line coverage required):
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
-```
+
+## Operational Checklist
+
+### Pre-Upgrade
+
+- [ ] Run full test suite (`cargo test -p creditra-credit`)
+- [ ] Verify 95%+ test coverage
+- [ ] Review code diff and audit changes
+- [ ] Test on Stellar testnet
+- [ ] Document current WASM hash
+- [ ] Prepare rollback command
+- [ ] Notify integrators of planned upgrade
+
+### During Upgrade
+
+- [ ] Verify admin key is available
+- [ ] Confirm protocol is not paused
+- [ ] Upload new WASM and get hash
+- [ ] Invoke `upgrade` entrypoint
+- [ ] Wait for transaction confirmation
+
+### Post-Upgrade
+
+- [ ] Verify `ContractUpgradedEvent` emission
+- [ ] Check schema version increment
+- [ ] Smoke test critical operations
+- [ ] Monitor for anomalies
+- [ ] Update documentation with new version
+- [ ] Notify integrators of successful upgrade
+
+## References
+
+- [Soroban Contract Deployment](https://developers.stellar.org/docs/smart-contracts/getting-started/deploy-to-testnet)
+- [Soroban Deployer Interface](https://docs.rs/soroban-sdk/latest/soroban_sdk/deploy/struct.Deployer.html)
+- [Contract Upgrade Best Practices](https://developers.stellar.org/docs/smart-contracts/guides/upgrading-contracts)
+
 
