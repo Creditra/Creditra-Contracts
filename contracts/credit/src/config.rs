@@ -2,14 +2,44 @@
 
 //! Contract initialization and configuration helpers.
 //!
-//! # Initialization contract
+//! # What
 //!
-//! [`init`] is a **one-time** operation. It stores the admin address and sets
-//! the default liquidity source. Calling it a second time reverts with
-//! [`ContractError::AlreadyInitialized`] so the admin cannot be overwritten
-//! after deployment.
+//! - [`init`] — one-time initialization. Sets the admin address, the
+//!   default liquidity source (the contract's own address), the schema
+//!   version, the initial global accumulators (`CreditLineCount = 0`,
+//!   `TotalUtilized = 0`), and a default minimum collateral ratio of
+//!   15 000 bps (150 %) — i.e. the contract ships in a conservative
+//!   collateral-required mode and is loosened by admin policy.
+//! - [`set_liquidity_token`] — admin sets the SAC / token contract used
+//!   for `transfer` and `transfer_from` operations on draw, repay, and
+//!   collateral movement.
+//! - [`set_liquidity_source`] — admin sets the reserve address that
+//!   funds draws. Defaults to the credit contract's own address; a
+//!   production deployment typically points this at a separate reserve
+//!   pool contract.
 //!
-//! See `docs/deploy.md` for the required deployment sequence.
+//! # How
+//!
+//! `init`'s re-init guard checks `Symbol("admin")` presence in instance
+//! storage. A second `init` call reverts with
+//! [`ContractError::AlreadyInitialized`]; the admin address therefore
+//! cannot be overwritten by re-initialization, only by the two-step
+//! rotation in [`crate::lib::propose_admin`] /
+//! [`crate::lib::accept_admin`].
+//!
+//! # Why (deployment-safe defaults)
+//!
+//! Shipping `init` with conservative defaults — 150 % collateral floor,
+//! contract-as-its-own-reserve-source, schema version 1 — means a
+//! freshly deployed contract is immediately safe to attach to a
+//! liquidity token without exposure to the protocol's untuned risk
+//! parameters. The admin then dials in the rate formula, exposure caps,
+//! and so on before opening the first credit line.
+//!
+//! See [`docs/deploy.md`](../../../docs/deploy.md) for the required
+//! deployment sequence and
+//! [`docs/EXECUTION_QUALITY.md`](../../../docs/EXECUTION_QUALITY.md) §6
+//! for the full testnet / mainnet checklist.
 
 use crate::auth::require_admin_auth;
 use crate::storage::{admin_key, set_schema_version, DataKey};

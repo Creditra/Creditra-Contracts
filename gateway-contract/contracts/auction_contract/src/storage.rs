@@ -1,3 +1,40 @@
+//! Auction storage helpers and TTL primitives.
+//!
+//! # What
+//!
+//! Typed getters / setters for the auction contract's instance state
+//! (current auction config, status, highest bidder, highest bid, factory
+//! pointer) plus an id-scoped alternate API for multi-auction deployments
+//! (`auction_*` family operating on [`crate::types::AuctionKey`]).
+//!
+//! Also owns the reentrancy guard primitive
+//! ([`set_reentrancy_guard`] / [`clear_reentrancy_guard`]) which wraps the
+//! prior-bid refund in English mode and the (placeholder) winner payout in
+//! `claim_auction`.
+//!
+//! # How
+//!
+//! Both instance and persistent reads/writes go through helpers that bump
+//! TTL when remaining lifetime drops below
+//! [`PERSISTENT_LIFETIME_THRESHOLD`] (~7 days), extending the entry by
+//! [`PERSISTENT_BUMP_AMOUNT`] (~30 days). Auction state is short-lived by
+//! nature, so the cadence is more aggressive than the credit contract's
+//! ~3 / ~6 month cycle.
+//!
+//! # Why
+//!
+//! Concentrating storage access here lets the auction contract enforce two
+//! invariants:
+//!
+//! 1. **Single-shot settlement** — the persistent flag
+//!    `AuctionKey::LiquidationSettled(auction_id)` is set on the first
+//!    `settle_default_liquidation` and consulted on subsequent calls,
+//!    making replay return `AuctionError::AlreadyClaimed = 2`.
+//! 2. **CEI ordering on refund** — the reentrancy guard ensures a
+//!    malicious bid token cannot re-enter `place_bid` during the refund
+//!    CPI.
+
+use crate::errors::AuctionError;
 use crate::types::{AuctionStatus, DataKey};
 use soroban_sdk::{Address, Env, Symbol};
 
@@ -26,11 +63,9 @@ pub(crate) fn bump_auction_state_ttl(env: &Env, auction_id: &Symbol) {
 /// Extend TTL for settlement replay-protection markers (only when the key exists).
 pub(crate) fn bump_settlement_marker_ttl(env: &Env, key: &crate::AuctionKey) {
     if env.storage().persistent().has(key) {
-        env.storage().persistent().extend_ttl(
-            key,
-            PERSISTENT_BUMP_AMOUNT,
-            PERSISTENT_BUMP_AMOUNT,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(key, PERSISTENT_BUMP_AMOUNT, PERSISTENT_BUMP_AMOUNT);
     }
 }
 
@@ -63,6 +98,48 @@ pub fn set_factory_contract(env: &Env, factory: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::FactoryContract, factory);
+}
+
+// ── Reentrancy guard ──────────────────────────────────────────────────────────
+
+/// Returns the instance-storage key used for the reentrancy flag.
+/// Mirrors the identical key used in `contracts/credit/src/storage.rs`.
+pub fn reentrancy_key(env: &Env) -> Symbol {
+    Symbol::new(env, "reentrancy")
+}
+
+/// Assert the reentrancy guard is not set, then set it.
+///
+/// Panics with [`AuctionError::Reentrancy`] if the guard is already active,
+/// indicating a reentrant cross-contract callback. The caller **must** call
+/// [`clear_reentrancy_guard`] on every exit path (success and failure) to
+/// release the guard and prevent the contract from being permanently locked.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `true` while a token transfer is in progress
+pub fn set_reentrancy_guard(env: &Env) {
+    let key = reentrancy_key(env);
+    let current: bool = env.storage().instance().get(&key).unwrap_or(false);
+    if current {
+        env.panic_with_error(AuctionError::Reentrancy);
+    }
+    env.storage().instance().set(&key, &true);
+}
+
+/// Clear the reentrancy guard set by [`set_reentrancy_guard`].
+///
+/// Must be called on every exit path (success and failure) of any function
+/// that called [`set_reentrancy_guard`]. Writing `false` is idempotent and
+/// safe to call even if the guard was never set.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: `Symbol("reentrancy")`
+/// - **Value**: `false` (guard released)
+pub fn clear_reentrancy_guard(env: &Env) {
+    env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
 pub fn get_end_time(env: &Env) -> u64 {

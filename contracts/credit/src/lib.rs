@@ -2,7 +2,93 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
 
-//! Creditra credit contract: credit lines, draw/repay, risk parameters.
+//! # Creditra credit contract
+//!
+//! Per-borrower credit lines on Stellar/Soroban with **algorithmic
+//! risk-priced underwriting** rather than overcollateralization. This is the
+//! single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
+//! block below.
+//!
+//! ## What
+//!
+//! Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
+//! `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
+//! `status`, and accrual timestamps. The contract orchestrates:
+//!
+//! - **Origination** — `open_credit_line` (admin) validates against
+//!   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
+//!   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
+//! - **Draw** — `draw_credit` performs a 25-step validation chain
+//!   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
+//!   utilization cap, exposure cap, liquidity reserve) before a token CPI
+//!   into the configured `LiquidityToken`.
+//! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
+//!   be able to deleverage. Interest-first allocation with optional
+//!   protocol-fee-on-interest routed to the treasury accumulator.
+//! - **Risk update** — `update_risk_parameters` either computes the new rate
+//!   from `risk_score` via the piecewise-linear formula (if configured) or
+//!   accepts an admin-supplied rate; both paths are clamped and gated by the
+//!   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+//! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
+//!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
+//!   mutation. See [`crate::lifecycle`].
+//! - **Settlement** — `settle_default_liquidation` is admin-only,
+//!   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
+//!   cross-contract call to the configured `AuctionContract`. The return
+//!   value is asserted against the admin-supplied `recovered_amount` and the
+//!   `(borrower, settlement_id)` pair is replay-protected via a persistent
+//!   marker.
+//! - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
+//!   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
+//!   reversal.
+//! - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
+//!
+//! ## How
+//!
+//! - **Storage tiers.** Hot configuration in Instance storage (admin,
+//!   pause flag, reentrancy guard, oracle config, rate formula, treasury,
+//!   global caps); per-borrower state in Persistent storage with TTL
+//!   auto-bumped on every access. See [`crate::storage`].
+//! - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
+//!   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
+//!   external token CPIs cannot re-enter.
+//! - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
+//!   primitives; the release profile sets `overflow-checks = true` so a
+//!   numeric edge case reverts with `ContractError::Overflow = 12` rather
+//!   than wrapping.
+//! - **Lazy accrual.** Interest is realized only on mutation; the math is
+//!   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
+//!   [`crate::math_utils::prorate_interest`], with grace and penalty
+//!   branches in [`crate::accrual::apply_accrual`].
+//!
+//! ## Why
+//!
+//! Overcollateralized lending (Aave / Compound / Maker) gates the median
+//! wallet out of on-chain credit. Creditra prices and sizes the credit line
+//! from a deterministic function of behavioral signal plus an optional
+//! collateral floor, configurable from "fully unsecured" to "150 % LTV"
+//! at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+//! the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+//! for the algorithm with worked examples.
+//!
+//! ## Security invariants
+//!
+//! - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+//!   `persist_credit_line` with `previous_utilized` capture).
+//! - `interest_rate_bps <= 10_000` after every mutation.
+//! - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+//!   `suspension_ts`; backward writes revert
+//!   `ContractError::TimestampRegression = 33`.
+//! - `(borrower, settlement_id)` is the dedup key for cross-contract
+//!   settlement replay safety.
+//! - 38 `ContractError` discriminants are ABI-stable; CI test
+//!   `tests/error_discriminants.rs` reverts on reorder.
+//! - 25+ event topics under the `credit` namespace are stability-pinned by
+//!   `tests/event_topic_stability.rs`.
+//!
+//! See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+//! per-entrypoint contract surface and
+//! [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
 
 mod accrual;
 #[cfg(test)]
@@ -15,6 +101,7 @@ mod config;
 pub mod events;
 mod freeze;
 mod collateral;
+mod lifecycle;
 mod query;
 mod math_utils;
 mod risk;
@@ -33,7 +120,7 @@ use crate::events::{
     publish_interest_accrued_event, publish_repayment_event, CreditLineEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_rescue_token_event, RescueTokenEvent,
+    publish_contract_upgraded_event, ContractUpgradedEvent,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -54,7 +141,7 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
     OracleConfig, RateChangeConfig,
 };
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -75,6 +162,16 @@ const BULK_BLOCK_MAX: u32 = 50;
 /// Maximum borrowers that can be processed in a single keeper accrual batch.
 /// Keeps the entrypoint within Soroban resource limits.
 const ACCRUE_BATCH_MAX: u32 = 50;
+
+#[soroban_sdk::contractclient(name = "AuctionClient")]
+pub trait Auction {
+    fn settle_default_liquidation(
+        env: soroban_sdk::Env,
+        auction_id: soroban_sdk::Symbol,
+        credit_contract: soroban_sdk::Address,
+        borrower: soroban_sdk::Address,
+    ) -> i128;
+}
 
 #[contract]
 pub struct Credit;
@@ -573,6 +670,14 @@ impl Credit {
         storage::get_borrower_rate_floor(&env, &borrower)
     }
 
+    pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
+        risk::set_penalty_surcharge_bps(env, bps)
+    }
+
+    pub fn get_penalty_surcharge_bps(env: Env) -> u32 {
+        risk::get_penalty_surcharge_bps(env)
+    }
+
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         env.storage().instance().get(&rate_cfg_key(&env))
     }
@@ -922,6 +1027,15 @@ impl Credit {
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
 
+    /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
+    ///
+    /// This is accounting-only: no token transfer occurs here. Off-chain
+    /// orchestration must ensure auction proceeds are in protocol custody
+    /// before invoking this function.
+    ///
+    /// # Reentrancy
+    /// Protected by the contract-wide reentrancy guard to prevent cross-contract
+    /// callback attacks during settlement.
     pub fn settle_default_liquidation(
         env: Env,
         borrower: Address,
@@ -929,43 +1043,85 @@ impl Credit {
         settlement_id: Symbol,
         oracle_price: Option<i128>,
     ) {
+        // Reentrancy guard: settlement touches accounting and may interact
+        // with an external auction contract, so we guard the full path.
+        set_reentrancy_guard(&env);
+
         // Oracle price-feed circuit breaker: validate price before settlement.
-        if let Some(cfg) = get_oracle_config(&env) {
+        if let Some(cfg) = crate::storage::get_oracle_config(&env) {
             let price = oracle_price.unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid)
             });
 
             if price <= 0 {
+                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid);
             }
 
             let now = env.ledger().timestamp();
 
-            // Staleness check: price timestamp must be recent enough.
-            // The caller supplies the oracle price; we track when it was last accepted.
-            // On first call (no stored price), we accept and store without deviation check.
-            if let Some(last_ts) = get_oracle_last_price_ts(&env) {
+            if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
                 let age = now.saturating_sub(last_ts);
                 if age > cfg.max_age_seconds {
+                    clear_reentrancy_guard(&env);
                     env.panic_with_error(ContractError::OraclePriceStale);
                 }
 
-                // Deviation check against last accepted price.
-                if let Some(last_price) = get_oracle_last_price(&env) {
+                if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
                     let deviation = compute_deviation_bps(price, last_price)
-                        .unwrap_or_else(|| env.panic_with_error(ContractError::OraclePriceInvalid));
+                        .unwrap_or_else(|| {
+                            clear_reentrancy_guard(&env);
+                            env.panic_with_error(ContractError::OraclePriceInvalid)
+                        });
                     if deviation > cfg.max_deviation_bps {
+                        clear_reentrancy_guard(&env);
                         env.panic_with_error(ContractError::OraclePriceDeviation);
                     }
                 }
             }
 
-            // Accept and persist the new price.
-            set_oracle_last_price(&env, price, now);
+            crate::storage::set_oracle_last_price(&env, price, now);
             publish_oracle_price_accepted_event(&env, price, now);
         }
 
-        lifecycle::settle_default_liquidation(env, borrower, recovered_amount, settlement_id)
+        // Wire the auction contract settlement hook if configured.
+        if let Some(auction_addr) = crate::storage::get_auction_contract(&env) {
+            let auction_client = AuctionClient::new(&env, &auction_addr);
+            let auction_recovered = auction_client.settle_default_liquidation(
+                &settlement_id,
+                &env.current_contract_address(),
+                &borrower,
+            );
+            if auction_recovered != recovered_amount {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::InvalidAmount);
+            }
+        }
+
+        lifecycle::settle_default_liquidation(env.clone(), borrower, recovered_amount, settlement_id);
+        clear_reentrancy_guard(&env);
+    }
+
+    // ── Auction contract admin ────────────────────────────────────────────────
+
+    /// Configure the auction contract address for default-liquidation hooks.
+    ///
+    /// When set, the credit contract records which auction contract is
+    /// authorized to participate in the liquidation settlement flow. This
+    /// address is stored in instance storage and can be updated by the admin.
+    ///
+    /// # Authorization
+    /// Admin only.
+    pub fn set_auction_contract(env: Env, auction_address: Address) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        crate::storage::set_auction_contract(&env, &auction_address);
+    }
+
+    /// Return the configured auction contract address, if set.
+    pub fn get_auction_contract(env: Env) -> Option<Address> {
+        crate::storage::get_auction_contract(&env)
     }
 
     // ── Oracle circuit-breaker admin ──────────────────────────────────────────
@@ -1272,6 +1428,72 @@ impl Credit {
             liquidity_token: env.storage().instance().get(&DataKey::LiquidityToken),
             liquidity_source: env.storage().instance().get(&DataKey::LiquiditySource),
         }
+    }
+
+    // ── Contract Upgrade ──────────────────────────────────────────────────────
+
+    /// Upgrade the contract WASM to a new version (admin only).
+    ///
+    /// This entrypoint allows the protocol to ship bug fixes and feature additions
+    /// without migrating borrower state. The upgrade is atomic and preserves all
+    /// existing storage.
+    ///
+    /// # Security Gates
+    /// - **Admin authentication**: Only the configured admin can authorize upgrades.
+    /// - **Pause check**: Upgrades are blocked when the protocol circuit breaker is active.
+    ///
+    /// # State Updates
+    /// - Bumps `SCHEMA_VERSION` in instance storage to track upgrade history.
+    /// - Calls `env.deployer().update_current_contract_wasm(new_wasm_hash)` to perform
+    ///   the atomic WASM replacement.
+    ///
+    /// # Events
+    /// Emits `ContractUpgradedEvent` with both the old and new WASM hashes for
+    /// off-chain indexers and audit trails.
+    ///
+    /// # Parameters
+    /// - `new_wasm_hash`: The 32-byte hash of the new WASM binary to deploy.
+    ///
+    /// # Authorization
+    /// Requires admin authorization via `require_admin_auth()`.
+    ///
+    /// # Errors
+    /// - `ContractError::Paused` — Protocol is paused by the emergency circuit breaker.
+    /// - Auth error — Caller is not the configured admin.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Deploy new WASM and get its hash
+    /// let new_wasm_hash = env.deployer().upload_contract_wasm(new_wasm);
+    /// 
+    /// // Upgrade the contract
+    /// client.upgrade(&new_wasm_hash);
+    /// ```
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        // Enforce pause check: upgrades are blocked during emergency circuit breaker.
+        assert_not_paused(&env);
+        
+        // Enforce admin authentication: only the configured admin can upgrade.
+        require_admin_auth(&env);
+
+        // Retrieve the current WASM hash before upgrade for event emission.
+        let old_wasm_hash = env.deployer().get_current_contract_wasm();
+
+        // Bump schema version to track upgrade history.
+        let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);
+        crate::storage::set_schema_version(&env, current_version.saturating_add(1));
+
+        // Perform the atomic WASM upgrade.
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Emit upgrade event for off-chain indexers and audit trails.
+        publish_contract_upgraded_event(
+            &env,
+            ContractUpgradedEvent {
+                old_wasm_hash,
+                new_wasm_hash,
+            },
+        );
     }
 }
 

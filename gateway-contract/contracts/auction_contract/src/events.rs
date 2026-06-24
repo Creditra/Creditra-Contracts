@@ -1,3 +1,46 @@
+//! Auction event payloads and publishers.
+//!
+//! # What
+//!
+//! Three `#[contracttype]` event payload structs and their topic-publishing
+//! helpers:
+//!
+//! - [`BidRefundedEvent`] on topic `(BID_RFDN, auction)` — emitted when an
+//!   English-mode auction atomically refunds the previous highest bidder.
+//!   This event is emitted *before* the refund token CPI under the
+//!   reentrancy guard, so indexers can pair it with the on-chain transfer.
+//! - [`AuctionClosedEvent`] on topic `(AUC_CLOSE, auction)` — emitted on
+//!   English manual close and on Dutch auto-close from a qualifying bid.
+//! - [`DefaultLiquidationSettlementEvent`] on topic
+//!   `(LIQ_SETL, auction)` — emitted once per auction when the credit
+//!   contract calls `settle_default_liquidation`. Replay-protected by a
+//!   persistent marker (see [`crate::storage`]).
+//!
+//! # How
+//!
+//! All topics are `symbol_short!` (≤ 9 characters) so encoding is cheap and
+//! deterministic. Publishers take `&Env` plus the event-specific payload
+//! fields and call `env.events().publish(topic, payload)`. No mutation of
+//! contract state happens in this module.
+//!
+//! # Why
+//!
+//! These three events are the auction contract's entire outward
+//! signaling surface — together with the credit contract's
+//! `("credit","liq_req")` and `("credit","liq_setl")` topics, they let an
+//! off-chain orchestrator deterministically reconstruct the cross-contract
+//! default-liquidation flow. See
+//! [`docs/indexer-integration.md`](../../../../docs/indexer-integration.md)
+//! for the indexer schema and
+//! [`docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md) for the
+//! sequence diagram.
+//!
+//! # Stability
+//!
+//! Topic strings and payload field layouts are ABI-stable. Breaking changes
+//! require a new event topic suffix (e.g. `LIQ_SETL2`) and a major version
+//! bump.
+
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 #[contracttype]

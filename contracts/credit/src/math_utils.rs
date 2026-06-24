@@ -1,52 +1,67 @@
 // SPDX-License-Identifier: MIT
-// (Extended fixed-point helpers below — module docs at file top.)
 
-// # Fixed-Point Interest Math Utilities
-//
-// This module provides deterministic, integer-only arithmetic helpers for
-// computing interest accruals inside the Creditra credit contract.
-//
-// ## Scaling Factor
-//
-// All intermediate products are scaled by `SCALE = 10^18` before division so
-// that the final result retains sub-unit precision up to 18 decimal places.
-// The caller chooses whether the remainder is discarded (floor) or rounded up
-// (ceiling) via the [`Rounding`] enum.
-//
-// ## Basis Points
-//
-// Interest rates are expressed in **basis points** (bps), where
-// `1 bps = 0.01% = 1 / 10_000`.  The annual rate in bps is therefore divided
-// by `BPS_DENOMINATOR = 10_000` when computing the fractional rate.
-//
-// ## Annual Seconds
-//
-// Time is measured in ledger seconds.  One Julian year is defined as
-// `SECONDS_PER_YEAR = 31_557_600` (365.25 × 86 400), matching the convention
-// used by most on-chain interest protocols.
-//
-// ## Overflow Safety
-//
-// The prorate helper promotes all operands to `u128` before multiplying.
-// The worst-case intermediate product is:
-//
-// ```text
-// principal  ≤ i128::MAX  ≈ 1.7 × 10^38
-// rate_bps   ≤ 10_000
-// time_delta ≤ u64::MAX   ≈ 1.8 × 10^19
-// SCALE      = 10^18
-// ```
-//
-// `principal × rate_bps × time_delta` can reach ~3 × 10^61, which overflows
-// `u128` (max ~3.4 × 10^38).  To prevent this the multiplication is split
-// into two checked steps:
-//
-// 1. `a = principal × rate_bps`  — fits in u128 for any realistic principal
-//    (≤ 10^28 × 10^4 = 10^32 < 10^38).
-// 2. `b = a × time_delta`        — checked; panics on overflow.
-//
-// The denominator `BPS_DENOMINATOR × SECONDS_PER_YEAR` is pre-computed as a
-// `u128` constant so the final division is a single operation.
+//! # Fixed-Point Interest Math Utilities
+//!
+//! Deterministic, integer-only arithmetic helpers used by the interest
+//! accrual path in [`crate::accrual`] and by oracle deviation checks in
+//! [`crate::lib::settle_default_liquidation`].
+//!
+//! ## What
+//!
+//! - [`mul_div`] — checked `a * num / denom` with explicit [`Rounding`].
+//! - [`apply_bps`] — apply a `bps` rate to a `u128` principal.
+//! - [`prorate_interest`] — the live accrual primitive:
+//!   `floor((u * r * Δt) / (10_000 * 31_557_600))`.
+//! - [`compute_deviation_bps`] — oracle deviation in bps between two
+//!   prices; `None` when the prior price is non-positive; saturates to
+//!   `u32::MAX` on absurd new prices to ensure the circuit breaker still
+//!   trips.
+//! - [`scale_up`] / [`scale_down`] — 10^18 fixed-point helpers.
+//!
+//! ## How
+//!
+//! All intermediate products are promoted to `u128` and multiplied with
+//! checked primitives; overflow panics (which in `apply_accrual`'s caller
+//! is translated into `ContractError::Overflow = 12`). The caller chooses
+//! whether the division remainder is discarded (floor) or rounded up
+//! (ceiling) via [`Rounding`].
+//!
+//! Interest rates are in **basis points** (`1 bps = 1 / 10_000`). Time is in
+//! ledger seconds; one **Julian year** is defined as
+//! [`SECONDS_PER_YEAR`] `= 31_557_600` (365.25 × 86 400), matching the
+//! convention used by most on-chain interest protocols. The pre-computed
+//! constant [`BPS_YEAR_DENOM`] `= BPS_DENOMINATOR * SECONDS_PER_YEAR` lets
+//! the final division be a single `u128` operation.
+//!
+//! ## Why (overflow safety)
+//!
+//! The worst-case intermediate product is:
+//!
+//! ```text
+//! principal  ≤ i128::MAX  ≈ 1.7 × 10^38
+//! rate_bps   ≤ 10_000
+//! time_delta ≤ u64::MAX   ≈ 1.8 × 10^19
+//! SCALE      = 10^18
+//! ```
+//!
+//! `principal * rate_bps * time_delta` can reach ~3 × 10^61, which overflows
+//! `u128` (max ~3.4 × 10^38). The multiplication is therefore split into two
+//! checked steps:
+//!
+//! 1. `a = principal * rate_bps` — fits in u128 for any realistic principal
+//!    (≤ 10^28 × 10^4 = 10^32 < 10^38).
+//! 2. `b = a * time_delta` — checked; panics on overflow.
+//!
+//! The combination of `checked_mul` here and `overflow-checks = true` in
+//! the release profile (see workspace `Cargo.toml`) is what makes the
+//! accounting layer formally overflow-safe.
+//!
+//! ## Rounding direction
+//!
+//! For accrual the caller passes [`Rounding::Floor`], so every realized
+//! `ΔI` rounds **down**. This biases the rounding error against protocol
+//! revenue and never against the borrower's balance — a deliberate safety
+//! property documented in [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md).
 
 #![allow(dead_code)]
 

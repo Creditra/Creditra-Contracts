@@ -1,5 +1,50 @@
 // SPDX-License-Identifier: MIT
 
+//! Collateral deposits and withdrawals.
+//!
+//! # What (the optional collateral floor)
+//!
+//! Creditra's key differentiator from Aave / Compound is that collateral
+//! is an **optional, dial-able floor** rather than the eligibility
+//! predicate. The on-chain function:
+//!
+//! - At deployment, `MinCollateralRatioBps` defaults to 15 000 bps (150 %),
+//!   matching Aave's typical floor — i.e. the contract ships in a
+//!   conservative collateralized mode.
+//! - The admin can dial `MinCollateralRatioBps` down to 0, removing the
+//!   ratio check entirely and making the credit line purely
+//!   behavior-priced. Or up further, into Maker-style over-collateral
+//!   territory.
+//!
+//! This module enforces the floor on `withdraw_collateral` and on
+//! `draw_credit` (step 13 of the draw chain). [`deposit_collateral`] has
+//! no ratio check — depositing more collateral is always safe.
+//!
+//! # Trust boundary
+//!
+//! Both [`deposit_collateral`] and [`withdraw_collateral`] require the
+//! borrower's `require_auth` and validate the amount is strictly positive.
+//! Withdrawals additionally enforce the configured
+//! `MinCollateralRatioBps` floor against the borrower's outstanding
+//! utilization, so a withdrawal can never push an active credit line
+//! under-collateralized.
+//!
+//! # Storage
+//!
+//! Per-borrower collateral balances live in persistent storage under
+//! [`crate::storage::DataKey::CollateralBalance`]; the minimum ratio lives
+//! under [`crate::storage::DataKey::MinCollateralRatioBps`] in instance
+//! storage. See [`docs/storage-layout.md`](../../../docs/storage-layout.md).
+//!
+//! # Error reuse note
+//!
+//! Over-withdraw reverts with [`ContractError::InsufficientRepaymentBalance`]
+//! (`= 27`). This reuses the repay-side error variant rather than
+//! introducing a fourth balance-related error. SDK consumers must
+//! disambiguate by entrypoint context. See
+//! [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
+//! full error table.
+
 use crate::storage::{
     get_collateral_balance, set_collateral_balance, get_min_collateral_ratio_bps,
     get_credit_line, get_collateral_token,
@@ -57,8 +102,11 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
     // Get current collateral balance
     let cur_balance = get_collateral_balance(env, borrower);
     if amount > cur_balance {
-        env.panic_with_error(ContractError::InsufficientRepaymentBalance); // reuse or create new? Let's use InsufficientRepaymentBalance or maybe add a new error. 
-        // Actually, the plan doesn't specify a new error for this, so we'll just use InvalidAmount or InsufficientRepaymentBalance.
+        // We reuse `InsufficientRepaymentBalance` here to avoid expanding the
+        // error enum for this niche case; the semantics ("the caller asked to
+        // move more tokens than they have available") are close enough that
+        // SDK consumers can interpret the code without ambiguity.
+        env.panic_with_error(ContractError::InsufficientRepaymentBalance);
     }
 
     let post_balance = cur_balance - amount;

@@ -3,6 +3,10 @@ name = "creditra-credit"
 version = "0.1.0"
 edition = "2021"
 description = "Creditra credit line Soroban contract"
+license = "MIT"
+keywords = ["soroban", "stellar", "credit", "defi", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "../../README.md"
 
 [lints]
 workspace = true

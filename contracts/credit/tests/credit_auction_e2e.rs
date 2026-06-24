@@ -194,3 +194,46 @@ fn e2e_partial_recovery_keeps_remaining_defaulted_debt() {
     assert_eq!(line.utilized_amount, draw_amount - recovered_amount);
     assert_eq!(line.status, CreditStatus::Defaulted);
 }
+
+#[test]
+fn e2e_atomic_settlement_with_configured_auction() {
+    let env = Env::default();
+    let draw_amount = 1_500;
+    let recovered_amount = 1_500;
+    let deployment = setup_defaulted_credit(&env, draw_amount);
+    let settlement_id = Symbol::new(&env, "auc_atomic");
+
+    // Configure the auction contract in the credit contract
+    let credit = CreditClient::new(&env, &deployment.credit_id);
+    credit.set_auction_contract(&deployment.auction_id);
+
+    // Run the auction but do NOT call settle_default_liquidation manually!
+    let auction = AuctionClient::new(&env, &deployment.auction_id);
+    auction.set_factory_contract(&deployment.credit_id);
+
+    let start_time = env.ledger().timestamp();
+    let end_time = start_time + AUCTION_DURATION;
+
+    auction.init_auction(&settlement_id, &start_time, &end_time, &MIN_BID);
+    auction.place_bid(&settlement_id, &Address::generate(&env), &(recovered_amount / 2));
+    let winner = Address::generate(&env);
+    auction.place_bid(&settlement_id, &winner, &recovered_amount);
+
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = end_time;
+    });
+
+    auction.close_auction(&settlement_id);
+
+    // Call settle_default_liquidation on the credit contract!
+    // It should atomically call settle_default_liquidation on the auction contract,
+    // reconcile the bid amount, and close the defaulted line!
+    credit.settle_default_liquidation(&deployment.borrower, &recovered_amount, &settlement_id, &None);
+
+    let line = credit.get_credit_line(&deployment.borrower).unwrap();
+    assert_eq!(line.utilized_amount, 0);
+    assert_eq!(line.status, CreditStatus::Closed);
+
+    // Also assert that the auction event is still emitted and marker is set
+    assert_event_topic(&env, &deployment.auction_id, "LIQ_SETL", "auction");
+}
