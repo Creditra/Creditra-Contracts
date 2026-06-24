@@ -5,6 +5,21 @@
 //! Provides an admin-only emergency control that blocks **all** `draw_credit`
 //! calls contract-wide while liquidity reserve operations are underway.
 //!
+//! # Comparison with the protocol pause flag
+//!
+//! The credit contract also exposes a broader **pause** flag
+//! ([`crate::storage::is_paused`]) controlled through a separate admin path.
+//! The two switches differ in scope and intent:
+//!
+//! | Switch | Scope | Affects repayments | Intended use |
+//! | ------ | ----- | ------------------ | ------------ |
+//! | `DrawsFrozen` | only `draw_credit` | no | scheduled reserve operations |
+//! | `Paused` | every mutating entrypoint except `repay_credit` | no | emergency stop |
+//!
+//! A protocol pause subsumes a draws freeze; admins should prefer the more
+//! targeted `freeze_draws` flag whenever the situation does not warrant a
+//! full circuit-breaker halt.
+//!
 //! # Design
 //! - Stored as a single `bool` under [`DataKey::DrawsFrozen`] in instance storage.
 //! - Defaults to `false` (draws allowed) when the key is absent.

@@ -2,17 +2,89 @@
 
 //! Credit line lifecycle management: suspend, close, default, reinstate, and liquidation settlement.
 //!
-//! Restricted is handled by the risk-update and draw-policy paths: it is not a
-//! separate lifecycle transition target, but a repayment-capable cure state
-//! created when a limit decrease drops below current utilization.
+//! # What
+//!
+//! The state-transition layer for [`CreditLineData`]. Implements:
+//!
+//! - [`open_credit_line`] — admin-only line creation; idempotent re-open
+//!   of non-Active lines under admin auth.
+//! - [`suspend_credit_line_internal`] / [`suspend_credit_line`] /
+//!   [`self_suspend_credit_line`] — Active → Suspended transition (admin
+//!   path and borrower path).
+//! - [`close_credit_line`] — Active/Suspended/Restricted → Closed.
+//!   Borrower path requires `utilized_amount == 0`; admin path is
+//!   unconditional. Idempotent on already-Closed.
+//! - [`default_credit_line`] — Active/Restricted/Suspended → Defaulted.
+//!   Emits `("credit","liq_req")` for the off-chain orchestrator.
+//! - [`reinstate_credit_line`] — Defaulted → Active or Restricted
+//!   (admin-controlled cure).
+//! - [`forgive_debt`] — admin write-off; reduces `accrued_interest`
+//!   first, then `utilized_amount`.
+//! - [`settle_default_liquidation`] — accounting half of the
+//!   cross-contract handoff with the auction; replay-protected, oracle-
+//!   gated, atomic with status transition to Closed when
+//!   `utilized_amount` hits 0.
+//! - [`set_credit_limit_bounds`] / [`validate_credit_limit_bounds`] —
+//!   global per-line bounds enforced on origination and on
+//!   `update_risk_parameters`.
+//! - [`set_repayment_schedule`] /
+//!   [`advance_repayment_schedule_after_repay`] — installment ledger
+//!   advancement.
+//!
+//! Restricted is **not** a separate transition target — it is a
+//! repayment-capable cure state created by
+//! [`crate::risk::update_risk_parameters`] when a limit decrease drops the
+//! configured limit below current utilization. Repayments auto-cure back
+//! to Active when `utilized_amount <= credit_limit`.
+//!
+//! # How
+//!
+//! Every transition:
+//!
+//! 1. Calls [`crate::auth::require_admin_auth`] (or the borrower path's
+//!    `require_auth`).
+//! 2. Calls [`crate::storage::assert_not_paused`].
+//! 3. Calls [`crate::accrual::apply_accrual`] before reading
+//!    `utilized_amount`, so the transition acts on capitalized debt.
+//! 4. Calls [`crate::storage::assert_ts_monotonic`] on every timestamp
+//!    write (`suspension_ts`, `last_rate_update_ts`).
+//! 5. Persists via [`crate::storage::persist_credit_line`] with the
+//!    captured `previous_utilized` so the global `TotalUtilized`
+//!    accumulator stays consistent.
+//! 6. Emits the transition's `CreditLineEvent` on the appropriate
+//!    `("credit", _)` topic.
 //!
 //! # Storage
-//! - **Borrower credit lines**: Persistent storage (independent TTL per borrower)
-//!   - Key: `borrower: Address`
+//!
+//! - **Borrower credit lines**: Persistent storage (independent TTL per borrower).
+//!   - Key: `borrower: Address` (via `DataKey::CreditLineIdByBorrower`)
 //!   - Value: `CreditLineData`
-//! - **Liquidation settlement markers**: Persistent storage (replay protection)
+//! - **Liquidation settlement markers**: Persistent storage (replay protection).
 //!   - Key: `(Symbol("liq_seen"), borrower, settlement_id)`
-//!   - Value: `bool`
+//!   - Value: `bool` (presence = settled; replay reverts
+//!     `ContractError::AlreadyInitialized = 14`)
+//! - **Credit-limit bounds**: Instance storage (`MinCreditLimit`,
+//!   `MaxCreditLimit`).
+//! - **Repayment schedule**: Persistent storage
+//!   (`DataKey::RepaymentSchedule(Address)`).
+//!
+//! # Why (settlement replay safety)
+//!
+//! The `(borrower, settlement_id)` marker is the credit-side half of a
+//! two-sided replay barrier. The auction contract enforces the same
+//! property on `auction_id` via `AuctionKey::LiquidationSettled(auction_id)`.
+//! Together they ensure a defaulted line cannot be settled twice by the
+//! same admin transaction, by the same admin re-running with a stale
+//! settlement_id, or by the auction contract returning a duplicate value.
+//! The cross-contract return is additionally asserted equal to the
+//! admin-supplied `recovered_amount` in
+//! [`crate::lib::settle_default_liquidation`]; mismatch reverts
+//! `InvalidAmount = 5`.
+//!
+//! See [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+//! authoritative transition table and
+//! [`docs/default-liquidation-auction-hook.md`](../../../docs/default-liquidation-auction-hook.md)
+//! for the handoff protocol.
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
