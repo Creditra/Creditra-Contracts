@@ -55,3 +55,34 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
 
     env.ledger().timestamp() > delinquent_after
 }
+
+/// Return up to `limit` (max 50) borrower addresses starting at `start_index`.
+///
+/// Returns `(addresses, next_cursor)` where `next_cursor` is `Some(idx)` if
+/// there are more items to enumerate, or `None` if the end was reached.
+pub fn enumerate_credit_lines(
+    env: Env,
+    start_index: u32,
+    limit: u32,
+) -> (soroban_sdk::Vec<Address>, Option<u32>) {
+    let count = crate::storage::get_credit_line_count(&env);
+    let capped_limit = limit.min(50);
+
+    if capped_limit == 0 || count == 0 || start_index >= count {
+        return (soroban_sdk::Vec::new(&env), None);
+    }
+
+    let mut addresses = soroban_sdk::Vec::new(&env);
+    let mut idx = start_index;
+
+    while idx < count && (idx - start_index) < capped_limit {
+        if let Some(borrower) = crate::storage::get_borrower_by_credit_line_id(&env, idx) {
+            addresses.push_back(borrower);
+        }
+        idx = idx.saturating_add(1);
+    }
+
+    let next_cursor = if idx < count { Some(idx) } else { None };
+
+    (addresses, next_cursor)
+}
