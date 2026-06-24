@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 
 //! Read-only query helpers for the Credit contract.
+//!
+//! Every function in this module is side-effect free (modulo TTL bumps in
+//! [`crate::storage::get_credit_line`], which write only when the remaining
+//! TTL is below `LEDGER_BUMP_THRESHOLD`).
+//!
+//! These helpers are the primary surface for off-chain indexers: returned
+//! structs are designed for stable serialization order (see
+//! [`crate::types::CreditLineData`] field ordering note).
 
 use crate::storage::grace_period_key;
 use crate::types::{CreditLineData, CreditStatus, GracePeriodConfig, RepaymentSchedule};
@@ -36,6 +44,16 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 }
 
 /// Return `true` when the borrower has missed an installment past the grace window.
+///
+/// Returns `false` for the following short-circuit cases:
+/// - The borrower has no credit line.
+/// - The line is `Closed` or has zero outstanding principal.
+/// - The line has no configured [`RepaymentSchedule`].
+///
+/// The grace window is determined by the global [`GracePeriodConfig`]. When no
+/// config is set, `grace_seconds` defaults to `0`, so any timestamp strictly
+/// greater than `next_due_ts` is treated as delinquent. The comparison uses
+/// `saturating_add` to ensure timestamps near `u64::MAX` do not wrap.
 pub fn is_delinquent(env: Env, borrower: Address) -> bool {
     let Some(line) = get_credit_line(env.clone(), borrower.clone()) else {
         return false;

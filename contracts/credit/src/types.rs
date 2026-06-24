@@ -3,22 +3,81 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Core data types for the Creditra contract.
+//!
+//! # What
+//!
+//! ABI-stable types that cross the contract boundary:
+//!
+//! - [`ContractError`] — 38-variant `#[repr(u32)]` error enum (discriminants
+//!   pinned by `tests/error_discriminants.rs`). See
+//!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
+//!   categorized reference.
+//! - [`CreditStatus`] — 5-variant state-machine label (Active=0,
+//!   Suspended=1, Defaulted=2, Closed=3, Restricted=4). See
+//!   [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+//!   transition graph.
+//! - [`CreditLineData`] — the per-borrower record (limit, utilized, rate,
+//!   score, status, accrual + suspension timestamps, accrued interest).
+//! - [`RepaymentSchedule`] — installment metadata
+//!   (`amount_per_period`, `period_seconds`, `next_due_ts`).
+//! - [`RateChangeConfig`] — magnitude + cadence cap on
+//!   `update_risk_parameters`.
+//! - [`RateFormulaConfig`] — piecewise-linear rate formula parameters
+//!   `(base_rate_bps, slope_bps_per_score, min_rate_bps, max_rate_bps)`.
+//! - [`GracePeriodConfig`] / [`GraceWaiverMode`] — suspension grace policy
+//!   (FullWaiver vs ReducedRate) consumed by [`crate::accrual`].
+//! - [`OracleConfig`] — price-feed circuit-breaker parameters
+//!   `(max_deviation_bps, max_age_seconds)`.
+//! - [`ProtocolConfig`] — host-side projection used by
+//!   `get_protocol_config` (NOT `#[contracttype]`).
+//!
+//! # How
+//!
+//! All types are `#[contracttype]`-tagged unless explicitly marked
+//! otherwise; this makes them cross the Soroban host ABI as structured
+//! values. Discriminants on the two enums are ABI-stable; new variants must
+//! be appended to preserve indexer and SDK compatibility.
+//!
+//! # Why
+//!
+//! These types are the protocol's externalized vocabulary. They are
+//! consumed by off-chain indexers (`docs/indexer-integration.md`), by
+//! SDK clients building transactions, and by integrators reading the
+//! contract state for risk dashboards. Stability of the discriminants and
+//! field layout is enforced by CI tests so a downstream consumer can pin
+//! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
+//! `(1, 0, 0)`).
 
 use soroban_sdk::{contracttype, Address};
 
 /// Status of a borrower's credit line.
+///
+/// # Discriminant stability
+/// The discriminants are part of the contract ABI. They must never be
+/// reordered or renumbered; new variants must be appended.
+///
+/// # Transitions
+/// See [`docs/state-machine.md`](../../../docs/state-machine.md) for the
+/// authoritative state-transition diagram. In short:
+///
+/// - `Active` is the only state that permits new draws.
+/// - `Restricted` allows draws but the numeric limit check will fail until
+///   the borrower repays under the reduced ceiling.
+/// - `Suspended` and `Defaulted` both block draws and allow repayments.
+/// - `Closed` is terminal — no draws, no repayments.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CreditStatus {
-    /// Credit line is active and draws are allowed.
+    /// Credit line is active; draws and repayments allowed.
     Active = 0,
-    /// Credit line is temporarily frozen by admin.
+    /// Credit line is temporarily frozen by admin. Draws blocked, repayments allowed.
     Suspended = 1,
-    /// Credit line is in default; draws are disabled.
+    /// Credit line is in default; draws blocked, repayments allowed for cure.
     Defaulted = 2,
-    /// Credit line is permanently closed.
+    /// Credit line is permanently closed. Draws blocked, repayments blocked.
     Closed = 3,
     /// Credit limit was decreased below utilized amount; excess must be repaid.
+    /// Draws are not flat-blocked but will fail the numeric limit check until cured.
     Restricted = 4,
 }
 
@@ -66,6 +125,10 @@ pub enum CreditStatus {
 /// | 32   | `AdminNotInitialized`         | Admin address has not been initialized |
 /// | 33   | `TimestampRegression`         | Timestamp regression detected |
 /// | 34   | `LimitOutOfBounds`            | Credit limit is outside configured min/max bounds |
+/// | 35   | `CollateralRatioBelowMinimum` | Collateral ratio is below the minimum required ratio |
+/// | 36   | `OraclePriceInvalid`          | Oracle price is invalid (zero, negative, or malformed) |
+/// | 37   | `OraclePriceStale`            | Oracle price is stale (exceeds max_age_seconds) |
+/// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -138,6 +201,14 @@ pub enum ContractError {
     TimestampRegression = 33,
     /// Credit limit is outside the configured minimum/maximum bounds.
     LimitOutOfBounds = 34,
+    /// Collateral ratio is below the minimum required ratio.
+    CollateralRatioBelowMinimum = 35,
+    /// Oracle price is invalid (zero, negative, or malformed).
+    OraclePriceInvalid = 36,
+    /// Oracle price is stale (exceeds max_age_seconds).
+    OraclePriceStale = 37,
+    /// Oracle price deviation exceeds the configured maximum.
+    OraclePriceDeviation = 38,
 }
 
 /// Stored credit line data for a borrower.
@@ -272,6 +343,17 @@ pub struct RateFormulaConfigEvent {
 }
 
 /// Global protocol configuration.
+///
+/// This is **not** a `#[contracttype]` — it never crosses the host boundary.
+/// It is a Rust-side projection of the instance-storage keys
+/// [`crate::storage::DataKey::LiquidityToken`] and
+/// [`crate::storage::DataKey::LiquiditySource`], used by helpers that want to
+/// inspect both values together (e.g. during the draw pre-flight check).
+///
+/// Either field may be `None` if the corresponding key has not been set; in
+/// that case the relevant entrypoints panic with
+/// [`ContractError::MissingLiquidityToken`] or
+/// [`ContractError::MissingLiquiditySource`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
     /// Configured liquidity token.

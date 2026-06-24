@@ -1,6 +1,60 @@
 // SPDX-License-Identifier: MIT
 
 //! Risk parameter management for credit lines.
+//!
+//! # What
+//!
+//! Owns the rate-formula primitives and the `update_risk_parameters`
+//! entrypoint:
+//!
+//! - [`compute_rate_from_score`] — the piecewise-linear formula
+//!   `r(k) = clamp(b + k * s, r_min, min(r_max, 10_000))` documented in
+//!   [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md) §2.1.
+//! - [`update_risk_parameters`] — the admin path that applies a new
+//!   `(credit_limit, interest_rate_bps, risk_score)` triple, with the rate
+//!   either supplied or formula-derived, then bounded by:
+//!     - the per-borrower [`set_borrower_rate_floor`] floor,
+//!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
+//!       `Symbol("rate_cfg")` instance storage,
+//!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
+//! - [`set_rate_change_limits_legacy`] — configure the magnitude+cadence
+//!   cap.
+//! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
+//!   applied to delinquent lines during accrual (see [`crate::accrual`]).
+//! - [`set_borrower_rate_floor`] — per-borrower minimum.
+//!
+//! # How
+//!
+//! All rate arithmetic uses saturating `u32` multiplication; a misconfigured
+//! `b + 100 * s` saturates rather than overflowing, then the clamp brings
+//! it back into the declared `[r_min, r_max]` range. The clamp upper bound
+//! is the minimum of the configured `max_rate_bps` and the protocol-wide
+//! `MAX_INTEREST_RATE_BPS`, so even a misconfigured formula cannot exceed
+//! 10_000 bps.
+//!
+//! `update_risk_parameters` invokes [`crate::accrual::apply_accrual`]
+//! before mutating, so the rate change is applied against capitalized
+//! interest — the borrower is never charged the new rate on debt accrued
+//! under the old rate.
+//!
+//! # Why
+//!
+//! The clamp + saturating combo is the contract's defense against:
+//!
+//! 1. **Admin compromise leading to 1000 % APR.** The 10_000 bps ceiling is
+//!    hard-coded; even admin cannot bypass it.
+//! 2. **Per-step rate shock.** `RateChangeConfig` bounds the size of each
+//!    increment AND the minimum interval between increments. A compromised
+//!    admin can at most raise rates by `max_rate_change_bps` per
+//!    `rate_change_min_interval` window, giving borrowers time to repay.
+//! 3. **Formula misconfiguration.** `min_rate_bps > max_rate_bps` is
+//!    rejected at config-set time; runtime evaluation cannot produce a
+//!    rate outside the `[r_min, r_max]` ∩ `[0, 10_000]` interval.
+//!
+//! See [`docs/risk-based-rate-formula.md`](../../../docs/risk-based-rate-formula.md)
+//! for the normative formula spec and
+//! [`docs/SECURITY.md`](../../../docs/SECURITY.md) §2 (threats T6, T8) for
+//! the threat-model justification.
 
 #![warn(missing_docs)]
 
@@ -101,6 +155,36 @@ pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u3
         assert!(floor <= MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
     }
     crate::storage::set_borrower_rate_floor(&env, &borrower, floor_bps);
+}
+
+/// Set the penalty surcharge in basis points for delinquent lines (admin only).
+///
+/// # Arguments
+/// * `env` - The Soroban environment.
+/// * `bps` - The penalty surcharge in basis points (0..=MAX_INTEREST_RATE_BPS).
+///
+/// # Panics
+/// * If caller is not admin.
+/// * If protocol is paused.
+/// * If bps exceeds MAX_INTEREST_RATE_BPS (10_000 = 100%).
+pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    assert!(bps <= MAX_INTEREST_RATE_BPS, "penalty surcharge exceeds max rate");
+    crate::storage::set_penalty_surcharge_bps(&env, bps);
+}
+
+/// Get the configured penalty surcharge in basis points.
+///
+/// Returns 0 if not configured (no penalty surcharge).
+///
+/// # Arguments
+/// * `env` - The Soroban environment.
+///
+/// # Returns
+/// The penalty surcharge in basis points.
+pub fn get_penalty_surcharge_bps(env: Env) -> u32 {
+    crate::storage::get_penalty_surcharge_bps(&env)
 }
 
 /// Update risk parameters for an existing credit line (admin only).
@@ -206,72 +290,64 @@ pub fn update_risk_parameters(
         interest_rate_bps
     };
 
-    // Apply per-borrower rate floor, if set.
-    if let Some(floor_bps) = crate::storage::get_borrower_rate_floor(&env, &borrower) {
-        effective_rate = effective_rate.max(floor_bps);
-    }
+    // Apply per-borrower rate floor if configured
+    let final_rate = if let Some(floor) = crate::storage::get_borrower_rate_floor(&env, &borrower) {
+        effective_rate.max(floor)
+    } else {
+        effective_rate
+    };
 
-    if effective_rate > MAX_INTEREST_RATE_BPS {
-        env.panic_with_error(ContractError::RateTooHigh);
-    }
-
-    if effective_rate != credit_line.interest_rate_bps {
-        if let Some(cfg) = get_rate_change_limits(env.clone()) {
-            let delta = effective_rate.abs_diff(credit_line.interest_rate_bps);
+    // Rate-change guardrails (if configured)
+    if let Some(cfg) = get_rate_change_limits(env.clone()) {
+        if final_rate != credit_line.interest_rate_bps {
+            let delta = final_rate.abs_diff(credit_line.interest_rate_bps);
             if delta > cfg.max_rate_change_bps {
                 env.panic_with_error(ContractError::RateTooHigh);
             }
 
-            if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts != 0 {
-                let now = env.ledger().timestamp();
-                let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
+            if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts > 0 {
+                let elapsed = env.ledger().timestamp().saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
-                    env.panic_with_error(ContractError::RateTooHigh);
+                    env.panic_with_error(ContractError::TimestampRegression);
                 }
             }
-        }
 
-        let new_ts = env.ledger().timestamp();
-        assert_ts_monotonic(&env, credit_line.last_rate_update_ts, new_ts);
-        credit_line.last_rate_update_ts = new_ts;
+            credit_line.last_rate_update_ts = env.ledger().timestamp();
+        }
     }
 
-    if credit_limit < credit_line.utilized_amount {
+    // Enforce global max rate
+    if final_rate > MAX_INTEREST_RATE_BPS {
+        env.panic_with_error(ContractError::RateTooHigh);
+    }
+
+    credit_line.interest_rate_bps = final_rate;
+    credit_line.risk_score = risk_score;
+
+    // Handle limit decrease: transition to Restricted if utilization exceeds new limit
+    if credit_line.utilized_amount > credit_limit {
         credit_line.status = CreditStatus::Restricted;
-    } else if credit_line.status == CreditStatus::Restricted {
-        credit_line.status = CreditStatus::Active;
     }
 
     credit_line.credit_limit = credit_limit;
-    credit_line.interest_rate_bps = effective_rate;
-    credit_line.risk_score = risk_score;
 
     persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
-    publish_risk_parameters_updated(&env, &borrower, credit_limit, effective_rate, risk_score);
+
+    publish_risk_parameters_updated(
+        &env,
+        &borrower,
+        credit_line.credit_limit,
+        credit_line.interest_rate_bps,
+        credit_line.risk_score,
+    );
 }
 
-/// Return the current rate-change guardrail configuration, if any.
-///
-/// # Parameters
-/// - `env`: The Soroban environment.
-///
-/// # Returns
-/// `Some(RateChangeConfig)` if guardrails have been configured via
-/// [`set_rate_change_limits`], or `None` if no configuration exists (meaning
-/// rate changes are unconstrained).
-#[allow(dead_code)]
+/// Get the configured rate-change limits, if any.
 pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
     env.storage().instance().get(&rate_cfg_key(&env))
 }
 
-/// Retrieve the rate formula configuration from instance storage, if set.
-///
-/// # Storage
-/// - **Type**: Instance storage (shared TTL with all instance keys)
-/// - **Key**: `Symbol("rate_form")`
-/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+/// Get the configured rate formula, if any.
 pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
-    env.storage()
-        .instance()
-        .get::<_, RateFormulaConfig>(&rate_formula_key(&env))
+    env.storage().instance().get(&rate_formula_key(&env))
 }
