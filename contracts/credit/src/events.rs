@@ -275,3 +275,50 @@ pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnE
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
 }
+
+// ── Oracle price-feed events ──────────────────────────────────────────────────
+
+/// Publish an event when the oracle circuit-breaker config is set.
+pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_cfg")),
+        (max_deviation_bps, max_age_seconds),
+    );
+}
+
+/// Publish an event when an oracle price is accepted.
+pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_price")),
+        (price, timestamp),
+    );
+}
+
+// ── Token rescue event ────────────────────────────────────────────────────────
+
+/// Event emitted when an admin rescues an arbitrary token from the contract.
+///
+/// # Fields
+/// - `token`:  Address of the token contract being rescued.
+/// - `to`:     Recipient that received the rescued tokens.
+/// - `amount`: Number of token units transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RescueTokenEvent {
+    /// Address of the token contract that was rescued.
+    pub token: Address,
+    /// Recipient of the rescued tokens.
+    pub to: Address,
+    /// Amount of tokens transferred.
+    pub amount: i128,
+}
+
+/// Publish a token-rescue event.
+///
+/// Topics: `("credit", "rescue_tok")`.
+pub fn publish_rescue_token_event(env: &Env, event: RescueTokenEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rescue_tok")),
+        event,
+    );
+}

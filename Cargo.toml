@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
-members = ["contracts/credit", "gateway-contract/contracts/auction_contract"]
 members = [
     "contracts/credit",
     "gateway-contract/contracts/auction_contract",

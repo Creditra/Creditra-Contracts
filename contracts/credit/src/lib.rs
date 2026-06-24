@@ -33,6 +33,7 @@ use crate::events::{
     publish_interest_accrued_event, publish_repayment_event, CreditLineEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
+    publish_rescue_token_event, RescueTokenEvent,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -1200,6 +1201,62 @@ impl Credit {
 
     pub fn is_draws_frozen(env: Env) -> bool {
         freeze::is_draws_frozen(&env)
+    }
+
+    /// Rescue an arbitrary token that has been accidentally sent to this contract.
+    ///
+    /// Transfers `amount` units of `token` from the contract address to `to`.
+    /// This function is intentionally restricted to admin and blocked while the
+    /// protocol is paused, treating it as a privileged mutating operation.
+    ///
+    /// # Authorization
+    /// Admin only (`require_admin_auth`).
+    ///
+    /// # Errors
+    /// - [`ContractError::Paused`]               — protocol is paused.
+    /// - [`ContractError::InvalidAmount`]         — `amount` is zero or negative.
+    /// - [`ContractError::MissingLiquidityToken`] — the liquidity token is not configured
+    ///   (needed so we can guard against rescuing it).
+    /// - Panics with a descriptive message        — caller tried to rescue the configured
+    ///   liquidity token; use the normal treasury/repayment path instead.
+    ///
+    /// # Events
+    /// Emits [`RescueTokenEvent`] with topics `("credit", "rescue_tok")`.
+    pub fn rescue_token(env: Env, token: Address, to: Address, amount: i128) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        // ── Validate amount ──────────────────────────────────────────────────
+        if amount <= 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        // ── Guard: cannot rescue the configured liquidity token ──────────────
+        // Read the stored liquidity token; revert if it was never set so the
+        // caller cannot accidentally bypass the check on an uninitialized contract.
+        let liquidity_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityToken)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquidityToken));
+
+        if token == liquidity_token {
+            panic!("rescue_token: cannot rescue the configured liquidity token");
+        }
+
+        // ── Transfer ─────────────────────────────────────────────────────────
+        let contract_address = env.current_contract_address();
+        token::Client::new(&env, &token).transfer(&contract_address, &to, &amount);
+
+        // ── Emit event ───────────────────────────────────────────────────────
+        publish_rescue_token_event(
+            &env,
+            RescueTokenEvent {
+                token,
+                to,
+                amount,
+            },
+        );
     }
 
     /// Returns all global protocol configuration in a single call.
@@ -5308,9 +5365,5 @@ mod test_max_repay_amount {
         let (client, _admin, _borrower, _token) = setup_with_token(&env);
 
         client.set_max_repay_amount(&0_i128);
-        }
     }
-
-    }
-}
 }
