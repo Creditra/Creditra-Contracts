@@ -67,20 +67,17 @@ fn test_event_topics_stability() {
         accounting_only: false,
     });
     publish_draws_frozen_event(&env, true);
-    publish_borrower_blocked_event(&env, BorrowerBlockedEvent {
-        borrower: borrower.clone(),
-        blocked: true,
-    });
+    publish_borrower_blocked_event(&env, &borrower, true);
     publish_rate_formula_config_event(&env, true);
 
     let all_events = env.events().all();
     
     // Assert topic pairs
-    let assert_topic = |index: usize, expected_t0: &str, expected_t1: &str| {
+    let assert_topic = |index: usize, _expected_t0: &str, expected_t1: &str| {
         let ev = all_events.get(index as u32).unwrap();
         let topics = ev.1;
-        let t0 = topics.get(0).unwrap();
-        let t1 = topics.get(1).unwrap();
+        let t0 = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+        let t1 = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
         
         assert_eq!(t0, symbol_short!("credit"));
         assert_eq!(t1, Symbol::new(&env, expected_t1));

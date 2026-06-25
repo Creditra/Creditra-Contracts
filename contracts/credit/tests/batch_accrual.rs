@@ -8,7 +8,7 @@ use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger;
-use soroban_sdk::{Address, Env, Symbol, TryFromVal, Vec};
+use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal, Vec};
 
 fn setup_env() -> (Env, Address, CreditClient<'static>) {
     let env = Env::default();

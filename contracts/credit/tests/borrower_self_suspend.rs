@@ -1,35 +1,41 @@
 // SPDX-License-Identifier: MIT
 
 //! Comprehensive Integration Test Suite for `self_suspend_credit_line`
-//!
-//! This test suite validates the borrower self-suspension feature, which allows
-//! a borrower to voluntarily freeze their own line of credit without admin intervention.
-//!
-//! # Test Coverage Matrix
-//!
-//! ## 1. Authorization Matrix (Signer Validation)
-//! - ✓ Borrower can successfully self-suspend their own active line
-//! - ✓ Admin cannot invoke self-suspend (authorization failure)
-//! - ✓ Third-party addresses cannot invoke self-suspend (authorization failure)
-//!
-//! ## 2. State Machine Matrix (Status Validation)
-//! - ✓ Self-suspension succeeds from Active status
-//! - ✓ Self-suspension fails from Suspended status
-//! - ✓ Self-suspension fails from Defaulted status
-//! - ✓ Self-suspension fails from Closed status
-//! - ✓ Self-suspension fails when credit line does not exist
-//!
-//! ## 3. Functional Capabilities Post-Suspension
-//! - ✓ Draw operations are blocked after self-suspension
-//! - ✓ Repayment operations remain allowed after self-suspension
-//! - ✓ Admin can reinstate a self-suspended line to Active
-//! - ✓ Admin can force-close a self-suspended line
-//! - ✓ Utilization amount is preserved during self-suspension
-//!
-//! ## 4. Event Emission & State Integrity
-//! - ✓ Self-suspension emits correct event with proper parameters
-//! - ✓ Credit parameters (limit, rate, score) remain unchanged
-//! - ✓ Idempotency check: calling self-suspend on already suspended line fails
+
+use soroban_sdk::{Address, Env, token};
+use soroban_sdk::testutils::{Address as _, Ledger as _, Events as _};
+use creditra_credit::{Credit, CreditClient};
+use creditra_credit::types::CreditStatus;
+
+const CREDIT_LIMIT: i128 = 10_000;
+const INTEREST_RATE_BPS: u32 = 500; // 5%
+const RISK_SCORE: u32 = 75;
+const RESERVE_AMOUNT: i128 = 50_000;
+
+fn setup() -> (Env, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = token_id.address();
+    client.set_liquidity_token(&token);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_i128);
+
+    (env, admin, borrower, contract_id, token)
+}
+
+fn setup_with_utilized_line() -> (Env, Address, Address, Address, Address, CreditClient<'static>, i128) {
+    let (env, admin, borrower, contract_id, token_address, client) = setup_with_active_line();
+    let draw_amount = 3_000_i128;
+    client.draw_credit(&borrower, &draw_amount);
+    (env, admin, borrower, contract_id, token_address, client, draw_amount)
+}
 
 fn setup_active_line() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
@@ -53,7 +59,7 @@ fn setup_active_line() -> (Env, Address, Address, Address, Address) {
 /// Setup with an active credit line ready for testing.
 ///
 /// Returns: (env, admin, borrower, contract_id, token_address, client)
-fn setup_with_active_line() -> (Env, Address, Address, Address, Address, CreditClient) {
+fn setup_with_active_line() -> (Env, Address, Address, Address, Address, CreditClient<'static>) {
     let (env, admin, borrower, contract_id, token_address) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
@@ -66,25 +72,10 @@ fn setup_with_active_line() -> (Env, Address, Address, Address, Address, CreditC
     (env, admin, borrower, contract_id, token_address, client)
 }
 
-#[test]
-fn self_suspend_blocks_draws_but_allows_repayments() {
-    let (env, _admin, borrower, contract_id, token) = setup_active_line();
-    let client = CreditClient::new(&env, &contract_id);
-
-    let draw_amount = 3_000_i128;
-    client.draw_credit(&borrower, &draw_amount);
-
-    // Verify utilization
-    let credit_line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(credit_line.utilized_amount, draw_amount);
-
-    (env, admin, borrower, contract_id, token_address, client, draw_amount)
-}
-
 /// Setup with a credit line in a specific status.
 ///
 /// Returns: (env, admin, borrower, contract_id, token_address, client)
-fn setup_with_status(status: CreditStatus) -> (Env, Address, Address, Address, Address, CreditClient) {
+fn setup_with_status(status: CreditStatus) -> (Env, Address, Address, Address, Address, CreditClient<'static>) {
     let (env, admin, borrower, contract_id, token_address, client) = setup_with_active_line();
 
     // Transition to the desired status

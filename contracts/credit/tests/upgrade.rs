@@ -13,7 +13,7 @@
 //! - Pause enforcement: upgrades are blocked when circuit breaker is active
 
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{Address, BytesN, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, Symbol, Val, TryFromVal};
 
 use creditra_credit::{Credit, CreditClient};
 
