@@ -3,7 +3,8 @@
 use creditra_credit::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_default_liquidation_settled_event,
-    publish_draw_reversed_event, publish_draws_frozen_event, publish_drawn_event,
+    publish_drawn_event, publish_draw_reversed_event,
+    publish_draws_frozen_event, publish_grace_waiver_applied_event,
     publish_interest_accrued_event, publish_paused_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_risk_parameters_updated, AdminRotationAcceptedEvent,
     AdminRotationProposedEvent, BorrowerBlockedEvent, DefaultLiquidationSettledEvent,
@@ -72,6 +73,12 @@ fn test_event_topics_stability() {
         blocked: true,
     });
     publish_rate_formula_config_event(&env, true);
+    publish_grace_waiver_applied_event(
+        &env,
+        &borrower,
+        10,
+        creditra_credit::types::GraceWaiverMode::FullWaiver,
+    );
 
     let all_events = env.events().all();
     
@@ -97,4 +104,5 @@ fn test_event_topics_stability() {
     assert_topic(8, "credit", "drw_freeze");
     assert_topic(9, "credit", "blk_chg");
     assert_topic(10, "credit", "rate_form");
+    assert_topic(11, "credit", "grace_wv");
 }

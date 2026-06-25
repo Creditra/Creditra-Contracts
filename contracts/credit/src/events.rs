@@ -182,6 +182,14 @@ pub struct PenaltyRateExitedEvent {
     pub new_rate_bps: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraceWaiverAppliedEvent {
+    pub borrower: Address,
+    pub waived_amount: i128,
+    pub mode: crate::types::GraceWaiverMode,
+}
+
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
 }
@@ -394,5 +402,22 @@ pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u6
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "orc_price")),
         (price, timestamp),
+    );
+}
+
+/// Publish a grace waiver applied event when a suspended line's accrual uses the grace period.
+pub fn publish_grace_waiver_applied_event(
+    env: &Env,
+    borrower: &Address,
+    waived_amount: i128,
+    mode: crate::types::GraceWaiverMode,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), symbol_short!("grace_wv")),
+        GraceWaiverAppliedEvent {
+            borrower: borrower.clone(),
+            waived_amount,
+            mode,
+        },
     );
 }

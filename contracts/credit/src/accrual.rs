@@ -54,7 +54,7 @@
 
 #![warn(missing_docs)]
 
-use crate::events::{publish_interest_accrued_event, InterestAccruedEvent, publish_penalty_rate_entered_event, publish_penalty_rate_exited_event};
+use crate::events::{publish_interest_accrued_event, InterestAccruedEvent, publish_penalty_rate_entered_event, publish_penalty_rate_exited_event, publish_grace_waiver_applied_event};
 use crate::storage::persist_credit_line;
 use crate::types::{ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use crate::math_utils::{prorate_interest, Rounding};
@@ -236,6 +236,35 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                             Rounding::Floor,
                         ),
                     };
+
+                    // Calculate waived amount for grace waiver event
+                    let full_rate_interest = prorate_interest(
+                        line.utilized_amount as u128,
+                        effective_rate_bps,
+                        in_window_secs,
+                        Rounding::Floor,
+                    ) as i128;
+
+                    let actual_interest = match cfg.waiver_mode {
+                        GraceWaiverMode::FullWaiver => 0,
+                        GraceWaiverMode::ReducedRate => prorate_interest(
+                            line.utilized_amount as u128,
+                            cfg.reduced_rate_bps,
+                            in_window_secs,
+                            Rounding::Floor,
+                        ) as i128,
+                    };
+
+                    let waived_amount = full_rate_interest.saturating_sub(actual_interest);
+                    if waived_amount > 0 {
+                        publish_grace_waiver_applied_event(
+                            env,
+                            &line.borrower,
+                            waived_amount,
+                            cfg.waiver_mode,
+                        );
+                    }
+
                     let post_window = prorate_interest(
                         line.utilized_amount as u128,
                         effective_rate_bps,
