@@ -59,7 +59,8 @@ mod events;
 mod storage;
 mod types;
 
-use errors::AuctionError;
+pub use errors::AuctionError;
+pub use types::{AuctionMode, AuctionState, AuctionStatus};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
@@ -222,6 +223,9 @@ impl Auction {
         if state.status == AuctionStatus::Claimed {
             env.panic_with_error(AuctionError::AlreadyClaimed);
         }
+        if state.status != AuctionStatus::Open {
+            env.panic_with_error(AuctionError::AuctionNotOpen);
+        }
         state.status = AuctionStatus::Closed;
         env.storage().persistent().set(&auction_id, &state);
         bump_auction_state_ttl(&env, &auction_id);
@@ -254,7 +258,7 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
 
         if state.status != AuctionStatus::Open {
-            panic!("auction not open");
+            env.panic_with_error(AuctionError::AuctionNotOpen);
         }
 
         let now = env.ledger().timestamp();
@@ -369,10 +373,9 @@ impl Auction {
         credit_contract: Address,
         borrower: Address,
     ) -> i128 {
-        let factory = get_factory_contract(&env).unwrap_or_else(|| panic!(AuctionError::NoFactoryContract));
-        if env.invoker() != factory {
-            panic!(AuctionError::Unauthorized);
-        }
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
 
         let state: AuctionState = env
             .storage()
