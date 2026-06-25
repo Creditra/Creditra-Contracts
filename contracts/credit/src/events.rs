@@ -15,8 +15,10 @@
 //! `("credit","accrue")`, `("credit","defaulted")`,
 //! `("credit","liq_req")`, `("credit","liq_setl")`, etc.) plus the
 //! single-element `("blk_chg",)` topic for borrower blocklist changes.
-//! The full catalog is in
-//! [`docs/indexer-integration.md`](../../../docs/indexer-integration.md).
+//!
+//! **Canonical schema and versioning policy:**
+//! See [`docs/events-schema.md`](../../../docs/events-schema.md) for the full
+//! authoritative event catalog, topic versions, and payload field orders.
 //!
 //! # How
 //!
@@ -31,19 +33,12 @@
 //! Event topics and payload field layouts are part of the contract's
 //! public ABI. The CI test `tests/event_topic_stability.rs` pins every
 //! topic string and asserts the payload struct layout has not changed.
-//! Breaking changes to the event surface require a major version bump in
-//! [`crate::CONTRACT_API_VERSION`].
-//!
-//! Additive evolution is safe:
-//!
-//! - New event topics are safe to add (existing topics keep working).
-//! - New fields on an existing payload struct can be added at the end
-//!   *only* via a new event topic with a versioned suffix (e.g.
-//!   `("credit","drawn_v2")`, which already appears here as
-//!   [`DrawnEventV2`] reserved for the next event-schema iteration).
+//! Breaking changes to the event surface require a new event topic
+//! with a version suffix (e.g., `("credit","drawn_v2")`).
 //!
 //! See [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for the
-//! end-to-end event topology and
+//! end-to-end event topology, [`docs/events-schema.md`](../../../docs/events-schema.md)
+//! for the canonical catalog and versioning rules, and
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
 //! per-entrypoint event-emission table.
 
