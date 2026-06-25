@@ -26,3 +26,4 @@ verify_preservation_baseline.pdb
 
 # Compiled WASM artifacts (built into target/, but also possible at workspace root)
 *.wasm
+.aider*
