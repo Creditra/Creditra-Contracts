@@ -27,7 +27,8 @@
 //! Withdrawals additionally enforce the configured
 //! `MinCollateralRatioBps` floor against the borrower's outstanding
 //! utilization, so a withdrawal can never push an active credit line
-//! under-collateralized.
+//! under-collateralized — a breaching withdrawal reverts with
+//! [`ContractError::CollateralRatioBelowMinimum`].
 //!
 //! # Storage
 //!
@@ -53,6 +54,7 @@ use crate::events::{
     publish_collateral_deposited_event, publish_collateral_withdrawn_event,
     CollateralDepositedEvent, CollateralWithdrawnEvent,
 };
+use crate::math_utils::BPS_DENOMINATOR;
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env, token};
 
@@ -71,7 +73,7 @@ pub fn deposit_collateral(env: &Env, borrower: &Address, amount: i128) {
     });
     let token_client = token::Client::new(env, &token_addr);
     let contract_addr = env.current_contract_address();
-    
+
     // In Soroban token standard, transfer takes (from, to, amount).
     // `borrower.require_auth()` ensures this is authorized by the borrower.
     token_client.transfer(borrower, &contract_addr, &amount);
@@ -120,8 +122,8 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
             let required = (credit_line.utilized_amount as i128)
                 .checked_mul(min_ratio_bps as i128)
                 .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
-                / 10_000;
-            
+                / (BPS_DENOMINATOR as i128);
+
             if post_balance < required {
                 env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
             }
