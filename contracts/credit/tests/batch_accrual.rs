@@ -50,7 +50,10 @@ fn accrue_batch_enforces_hard_cap() {
         client.accrue_batch(&borrowers);
     }));
 
-    assert!(result.is_err(), "accrue_batch must reject oversized batches");
+    assert!(
+        result.is_err(),
+        "accrue_batch must reject oversized batches"
+    );
 }
 
 #[test]

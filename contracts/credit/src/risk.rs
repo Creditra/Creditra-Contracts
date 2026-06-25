@@ -59,15 +59,16 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
+use crate::events::publish_risk_parameters_updated;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key,
-    set_borrower_rate_floor,
-};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
-use crate::events::publish_risk_parameters_updated;
-use crate::storage::{
     assert_not_paused, assert_ts_monotonic, persist_credit_line, rate_cfg_key, rate_formula_key,
+};
+use crate::storage::{
+    assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key, set_borrower_rate_floor,
+};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
@@ -137,7 +138,11 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
 }
 
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits_legacy(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+pub fn set_rate_change_limits_legacy(
+    env: Env,
+    max_rate_change_bps: u32,
+    rate_change_min_interval: u64,
+) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -170,7 +175,10 @@ pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u3
 pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    assert!(bps <= MAX_INTEREST_RATE_BPS, "penalty surcharge exceeds max rate");
+    assert!(
+        bps <= MAX_INTEREST_RATE_BPS,
+        "penalty surcharge exceeds max rate"
+    );
     crate::storage::set_penalty_surcharge_bps(&env, bps);
 }
 
@@ -306,7 +314,10 @@ pub fn update_risk_parameters(
             }
 
             if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts > 0 {
-                let elapsed = env.ledger().timestamp().saturating_sub(credit_line.last_rate_update_ts);
+                let elapsed = env
+                    .ledger()
+                    .timestamp()
+                    .saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
                     env.panic_with_error(ContractError::TimestampRegression);
                 }

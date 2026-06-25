@@ -78,13 +78,23 @@ fn self_suspend_blocks_draws_but_allows_repayments() {
     let credit_line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(credit_line.utilized_amount, draw_amount);
 
-    (env, admin, borrower, contract_id, token_address, client, draw_amount)
+    (
+        env,
+        admin,
+        borrower,
+        contract_id,
+        token_address,
+        client,
+        draw_amount,
+    )
 }
 
 /// Setup with a credit line in a specific status.
 ///
 /// Returns: (env, admin, borrower, contract_id, token_address, client)
-fn setup_with_status(status: CreditStatus) -> (Env, Address, Address, Address, Address, CreditClient) {
+fn setup_with_status(
+    status: CreditStatus,
+) -> (Env, Address, Address, Address, Address, CreditClient) {
     let (env, admin, borrower, contract_id, token_address, client) = setup_with_active_line();
 
     // Transition to the desired status
@@ -137,7 +147,10 @@ fn test_self_suspend_success_when_borrower_authorized() {
     assert!(draw_result.is_err(), "draws must fail while self-suspended");
 
     soroban_sdk::token::Client::new(&env, &token).approve(
-        &borrower, &contract_id, &1_000_i128, &1_000_000_u32,
+        &borrower,
+        &contract_id,
+        &1_000_i128,
+        &1_000_000_u32,
     );
     client.repay_credit(&borrower, &200_i128);
 
@@ -387,11 +400,11 @@ fn test_admin_can_unsuspend_self_suspended_line() {
     // Admin unsuspends by opening a new line (current behavior) or via a dedicated unsuspend function
     // For now, we test that admin can transition back by re-opening
     // Note: In production, you may want a dedicated `unsuspend_credit_line` function
-    
+
     // Since there's no direct unsuspend, we verify admin can force-close and reopen
     // Or we can test that the line remains suspended until admin takes action
     // For this test, we document that admin intervention is required
-    
+
     // This test serves as documentation that self-suspended lines require admin action
     // to return to Active status (either via reinstate or other admin functions)
 }
@@ -449,23 +462,19 @@ fn test_self_suspended_line_preserves_utilization() {
     let credit_line_after = client.get_credit_line(&borrower).unwrap();
     assert_eq!(credit_line_after.status, CreditStatus::Suspended);
     assert_eq!(
-        credit_line_after.utilized_amount,
-        credit_line_before.utilized_amount,
+        credit_line_after.utilized_amount, credit_line_before.utilized_amount,
         "Utilization should be preserved during self-suspension"
     );
     assert_eq!(
-        credit_line_after.credit_limit,
-        credit_line_before.credit_limit,
+        credit_line_after.credit_limit, credit_line_before.credit_limit,
         "Credit limit should be preserved"
     );
     assert_eq!(
-        credit_line_after.interest_rate_bps,
-        credit_line_before.interest_rate_bps,
+        credit_line_after.interest_rate_bps, credit_line_before.interest_rate_bps,
         "Interest rate should be preserved"
     );
     assert_eq!(
-        credit_line_after.risk_score,
-        credit_line_before.risk_score,
+        credit_line_after.risk_score, credit_line_before.risk_score,
         "Risk score should be preserved"
     );
 }
@@ -526,33 +535,27 @@ fn test_self_suspend_preserves_credit_parameters() {
     let credit_line_after = client.get_credit_line(&borrower).unwrap();
 
     assert_eq!(
-        credit_line_after.borrower,
-        credit_line_before.borrower,
+        credit_line_after.borrower, credit_line_before.borrower,
         "Borrower address should be unchanged"
     );
     assert_eq!(
-        credit_line_after.credit_limit,
-        credit_line_before.credit_limit,
+        credit_line_after.credit_limit, credit_line_before.credit_limit,
         "Credit limit should be unchanged"
     );
     assert_eq!(
-        credit_line_after.utilized_amount,
-        credit_line_before.utilized_amount,
+        credit_line_after.utilized_amount, credit_line_before.utilized_amount,
         "Utilized amount should be unchanged"
     );
     assert_eq!(
-        credit_line_after.interest_rate_bps,
-        credit_line_before.interest_rate_bps,
+        credit_line_after.interest_rate_bps, credit_line_before.interest_rate_bps,
         "Interest rate should be unchanged"
     );
     assert_eq!(
-        credit_line_after.risk_score,
-        credit_line_before.risk_score,
+        credit_line_after.risk_score, credit_line_before.risk_score,
         "Risk score should be unchanged"
     );
     assert_eq!(
-        credit_line_after.last_rate_update_ts,
-        credit_line_before.last_rate_update_ts,
+        credit_line_after.last_rate_update_ts, credit_line_before.last_rate_update_ts,
         "Last rate update timestamp should be unchanged"
     );
 
@@ -664,7 +667,7 @@ fn test_self_suspend_applies_interest_accrual() {
     // Note: Interest accrual behavior depends on the accrual implementation
     // This test documents that accrual is called before suspension
     // The actual accrued amount depends on the interest calculation logic
-    
+
     // For now, we verify that the function completes successfully
     // and the line is suspended (accrual is called internally)
     assert!(

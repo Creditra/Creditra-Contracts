@@ -4,9 +4,9 @@
 
 #![cfg(test)]
 
-use stellar_soroban_sdk::{Address, Env};
-use soroban_sdk::Symbol;
 use credit::types::{CreditLineData, CreditStatus};
+use soroban_sdk::Symbol;
+use stellar_soroban_sdk::{Address, Env};
 
 #[test]
 fn test_set_and_get_penalty_surcharge_bps() {
@@ -89,8 +89,8 @@ fn test_penalty_surcharge_applied_to_delinquent_line() {
         env.clone(),
         borrower.clone(),
         1_000_000, // credit_limit
-        500,      // interest_rate_bps
-        50,       // risk_score
+        500,       // interest_rate_bps
+        50,        // risk_score
     );
 
     // Set up grace period
@@ -133,8 +133,8 @@ fn test_penalty_surcharge_not_applied_to_non_delinquent_line() {
         env.clone(),
         borrower.clone(),
         1_000_000, // credit_limit
-        500,      // interest_rate_bps
-        50,       // risk_score
+        500,       // interest_rate_bps
+        50,        // risk_score
     );
 
     // Advance time but keep within grace period (not delinquent)
@@ -168,21 +168,10 @@ fn test_penalty_rate_entered_event_emitted() {
     credit::Credit::set_penalty_surcharge_bps(env.clone(), 200);
 
     // Open a credit line
-    credit::Credit::open_credit_line(
-        env.clone(),
-        borrower.clone(),
-        1_000_000,
-        500,
-        50,
-    );
+    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 500, 50);
 
     // Set up grace period
-    credit::Credit::set_grace_period_config(
-        env.clone(),
-        86400 * 30,
-        0,
-        0,
-    );
+    credit::Credit::set_grace_period_config(env.clone(), 86400 * 30, 0, 0);
 
     // Draw some funds
     credit::Credit::draw_credit(
@@ -228,39 +217,19 @@ fn test_penalty_rate_exited_event_emitted() {
     credit::Credit::set_penalty_surcharge_bps(env.clone(), 200);
 
     // Open a credit line
-    credit::Credit::open_credit_line(
-        env.clone(),
-        borrower.clone(),
-        1_000_000,
-        500,
-        50,
-    );
+    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 500, 50);
 
     // Set up grace period
-    credit::Credit::set_grace_period_config(
-        env.clone(),
-        86400 * 30,
-        0,
-        0,
-    );
+    credit::Credit::set_grace_period_config(env.clone(), 86400 * 30, 0, 0);
 
     // Draw funds and become delinquent
-    credit::Credit::draw_credit(
-        env.clone(),
-        borrower.clone(),
-        borrower.clone(),
-        100_000,
-    );
+    credit::Credit::draw_credit(env.clone(), borrower.clone(), borrower.clone(), 100_000);
 
     env.ledger().set_timestamp(86400 * 35);
     credit::Credit::accrue(env.clone(), borrower.clone());
 
     // Repay to become non-delinquent
-    credit::Credit::repay_credit(
-        env.clone(),
-        borrower.clone(),
-        100_000,
-    );
+    credit::Credit::repay_credit(env.clone(), borrower.clone(), 100_000);
 
     // Advance time and accrual - should emit PenaltyRateExitedEvent
     env.ledger().set_timestamp(86400 * 40);
@@ -293,21 +262,10 @@ fn test_penalty_surcharge_with_zero_surcharge_no_effect() {
     credit::Credit::set_penalty_surcharge_bps(env.clone(), 0);
 
     // Open a credit line with 500 bps
-    credit::Credit::open_credit_line(
-        env.clone(),
-        borrower.clone(),
-        1_000_000,
-        500,
-        50,
-    );
+    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 500, 50);
 
     // Set up grace period
-    credit::Credit::set_grace_period_config(
-        env.clone(),
-        86400 * 30,
-        0,
-        0,
-    );
+    credit::Credit::set_grace_period_config(env.clone(), 86400 * 30, 0, 0);
 
     // Advance time to make borrower delinquent
     env.ledger().set_timestamp(86400 * 35);
@@ -316,7 +274,7 @@ fn test_penalty_surcharge_with_zero_surcharge_no_effect() {
     credit::Credit::accrue(env.clone(), borrower.clone());
 
     let credit_line = credit::query::get_credit_line(env.clone(), borrower.clone()).unwrap();
-    
+
     // Interest should be computed at 500 bps (no penalty)
     assert!(credit_line.accrued_interest > 0);
 }
@@ -335,25 +293,14 @@ fn test_penalty_surcharge_clamped_to_max_rate() {
     credit::Credit::set_liquidity_token(env.clone(), token.clone());
 
     // Open a credit line with 9500 bps (95%)
-    credit::Credit::open_credit_line(
-        env.clone(),
-        borrower.clone(),
-        1_000_000,
-        9500,
-        50,
-    );
+    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 9500, 50);
 
     // Set penalty surcharge to 1000 bps (10%)
     // Base rate (9500) + surcharge (1000) = 10500, which exceeds MAX_INTEREST_RATE_BPS (10000)
     credit::Credit::set_penalty_surcharge_bps(env.clone(), 1000);
 
     // Set up grace period
-    credit::Credit::set_grace_period_config(
-        env.clone(),
-        86400 * 30,
-        0,
-        0,
-    );
+    credit::Credit::set_grace_period_config(env.clone(), 86400 * 30, 0, 0);
 
     // Advance time to make borrower delinquent
     env.ledger().set_timestamp(86400 * 35);
@@ -362,7 +309,7 @@ fn test_penalty_surcharge_clamped_to_max_rate() {
     credit::Credit::accrue(env.clone(), borrower.clone());
 
     let credit_line = credit::query::get_credit_line(env.clone(), borrower.clone()).unwrap();
-    
+
     // The accrual should succeed without overflow
     assert!(credit_line.accrued_interest >= 0);
 }

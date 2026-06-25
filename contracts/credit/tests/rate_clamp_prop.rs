@@ -34,7 +34,12 @@ use proptest::prelude::*;
 /// This strategy ensures the config respects the documented invariants
 /// before we even test the formula computation.
 fn valid_rate_formula_config() -> impl Strategy<Value = RateFormulaConfig> {
-    (0u32..=MAX_INTEREST_RATE_BPS, 0u32..=u32::MAX, 0u32..=MAX_INTEREST_RATE_BPS, 0u32..=MAX_INTEREST_RATE_BPS)
+    (
+        0u32..=MAX_INTEREST_RATE_BPS,
+        0u32..=u32::MAX,
+        0u32..=MAX_INTEREST_RATE_BPS,
+        0u32..=MAX_INTEREST_RATE_BPS,
+    )
         .prop_map(|(base, slope, min, max)| {
             // Ensure min <= max by swapping if necessary
             let (min_val, max_val) = if min <= max { (min, max) } else { (max, min) };

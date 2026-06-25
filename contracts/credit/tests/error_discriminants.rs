@@ -163,54 +163,54 @@ fn variant_count_is_known() {
 
 #[cfg(test)]
 mod error_path_tests {
+    use creditra_credit::types::ContractError;
+    use creditra_credit::{Credit, CreditClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         Address, Env,
     };
-    use creditra_credit::{Credit, CreditClient};
-    use creditra_credit::types::ContractError;
 
     fn setup_env() -> (Env, CreditClient<'static>, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
-        
+
         let admin = Address::generate(&env);
         let contract_id = env.register_contract(None, Credit);
         let client = CreditClient::new(&env, &contract_id);
-        
+
         client.init(&admin);
-        
+
         (env, client, contract_id, admin)
     }
 
     fn setup_with_token() -> (Env, CreditClient<'static>, Address, Address, Address) {
         let (env, client, contract_id, admin) = setup_env();
-        
+
         // Deploy a mock token
         let token_id = env.register_stellar_asset_contract(admin.clone());
         client.set_liquidity_token(&token_id);
         client.set_liquidity_source(&contract_id);
-        
+
         (env, client, contract_id, admin, token_id)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Test 1: AdminNotInitialized - require_admin() without init
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_admin_not_initialized_error() {
         let env = Env::default();
         env.mock_all_auths();
-        
+
         let contract_id = env.register_contract(None, Credit);
         let client = CreditClient::new(&env, &contract_id);
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Try to open credit line without initializing admin
         let result = client.try_open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        
+
         assert!(result.is_err(), "Expected error when admin not initialized");
         let err = result.err().unwrap();
         assert_eq!(
@@ -223,16 +223,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 2: CreditLineNotFound - draw_credit on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_draw() {
         let (_env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to draw without opening a credit line
         let result = client.try_draw_credit(&borrower, &100_i128);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -245,16 +245,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 3: CreditLineNotFound - repay_credit on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_repay() {
         let (_env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to repay without opening a credit line
         let result = client.try_repay_credit(&borrower, &100_i128);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -267,16 +267,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 4: CreditLineNotFound - close_credit_line on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_close() {
         let (_env, client, _contract_id, admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to close a non-existent credit line
         let result = client.try_close_credit_line(&borrower, &admin);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -289,16 +289,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 5: CreditLineNotFound - suspend_credit_line on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_suspend() {
         let (_env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to suspend a non-existent credit line
         let result = client.try_suspend_credit_line(&borrower);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -311,16 +311,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 6: CreditLineNotFound - default_credit_line on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_default() {
         let (_env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to default a non-existent credit line
         let result = client.try_default_credit_line(&borrower);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -333,16 +333,16 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 7: CreditLineNotFound - update_risk_parameters on non-existent line
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_credit_line_not_found_on_risk_update() {
         let (_env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&_env);
-        
+
         // Try to update risk parameters on non-existent credit line
         let result = client.try_update_risk_parameters(&borrower, &1000_i128, &500_u32, &50_u32);
-        
+
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
@@ -355,27 +355,27 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 8: Overflow - checked_add in draw_credit
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_overflow_on_draw_utilization_add() {
         let (env, client, contract_id, _admin, token) = setup_with_token();
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Open credit line with max limit
         client.open_credit_line(&borrower, &i128::MAX, &500_u32, &50_u32);
-        
+
         // Mint tokens to reserve
         use soroban_sdk::token::StellarAssetClient;
         let token_admin_client = StellarAssetClient::new(&env, &token);
         token_admin_client.mint(&contract_id, &i128::MAX);
-        
+
         // Draw maximum amount
         client.draw_credit(&borrower, &(i128::MAX - 1000));
-        
+
         // Try to draw more - should overflow
         let result = client.try_draw_credit(&borrower, &2000_i128);
-        
+
         assert!(result.is_err(), "Expected overflow error");
         let err = result.err().unwrap();
         assert_eq!(
@@ -388,45 +388,51 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 9: Overflow - checked_sub in settle_default_liquidation
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_overflow_on_liquidation_settlement() {
         let (env, client, _contract_id, _admin, _token) = setup_with_token();
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Open and default a credit line
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
         client.default_credit_line(&borrower);
-        
+
         // Try to settle with amount greater than utilized (should be caught by validation)
         let result = client.try_settle_default_liquidation(
             &borrower,
             &2000_i128,
             &soroban_sdk::symbol_short!("settle1"),
         );
-        
-        assert!(result.is_err(), "Expected error on invalid settlement amount");
+
+        assert!(
+            result.is_err(),
+            "Expected error on invalid settlement amount"
+        );
         // This will hit the OverLimit check before overflow, but validates the path exists
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Test 10: MissingLiquidityToken - draw without token configured
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_missing_liquidity_token_on_draw() {
         let (env, client, _contract_id, _admin) = setup_env();
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Open credit line without setting liquidity token
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        
+
         // Try to draw - should fail with MissingLiquidityToken
         let result = client.try_draw_credit(&borrower, &100_i128);
-        
-        assert!(result.is_err(), "Expected error when liquidity token not set");
+
+        assert!(
+            result.is_err(),
+            "Expected error when liquidity token not set"
+        );
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
@@ -438,22 +444,25 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 11: MissingLiquiditySource - draw without source configured
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_missing_liquidity_source_on_draw() {
         let (env, client, _contract_id, admin) = setup_env();
-        
+
         let borrower = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract(admin.clone());
-        
+
         // Set token but not source
         client.set_liquidity_token(&token_id);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        
+
         // Try to draw - should fail with MissingLiquiditySource
         let result = client.try_draw_credit(&borrower, &100_i128);
-        
-        assert!(result.is_err(), "Expected error when liquidity source not set");
+
+        assert!(
+            result.is_err(),
+            "Expected error when liquidity source not set"
+        );
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
@@ -465,14 +474,14 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 12: TreasuryNotSet - withdraw_treasury without treasury configured
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_treasury_not_set_on_withdraw() {
         let (_env, client, _contract_id, admin, _token) = setup_with_token();
-        
+
         // Try to withdraw treasury without setting treasury address
         let result = client.try_withdraw_treasury(&admin);
-        
+
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();
         assert_eq!(
@@ -485,28 +494,28 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 13: Overflow - utilization cap calculation
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_overflow_on_utilization_cap_calculation() {
         let (env, client, contract_id, _admin, token) = setup_with_token();
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Open credit line with very large limit
         client.open_credit_line(&borrower, &i128::MAX, &500_u32, &50_u32);
-        
+
         // Set utilization cap
         client.set_utilization_cap(&borrower, &5000_u32); // 50%
-        
+
         // Mint tokens to reserve
         use soroban_sdk::token::StellarAssetClient;
         let token_admin_client = StellarAssetClient::new(&env, &token);
         token_admin_client.mint(&contract_id, &i128::MAX);
-        
+
         // The cap calculation might overflow with i128::MAX
         // This test verifies the overflow is caught gracefully
         let result = client.try_draw_credit(&borrower, &1000_i128);
-        
+
         // Should either succeed or fail with Overflow, not panic
         if result.is_err() {
             let err = result.err().unwrap();
@@ -521,32 +530,32 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 14: ExposureCapExceeded - global exposure limit
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_exposure_cap_exceeded() {
         let (env, client, contract_id, _admin, token) = setup_with_token();
-        
+
         let borrower1 = Address::generate(&env);
         let borrower2 = Address::generate(&env);
-        
+
         // Set global exposure cap
         client.set_max_total_exposure(&1000_i128);
-        
+
         // Mint tokens to reserve
         use soroban_sdk::token::StellarAssetClient;
         let token_admin_client = StellarAssetClient::new(&env, &token);
         token_admin_client.mint(&contract_id, &10000_i128);
-        
+
         // Open two credit lines
         client.open_credit_line(&borrower1, &2000_i128, &500_u32, &50_u32);
         client.open_credit_line(&borrower2, &2000_i128, &500_u32, &50_u32);
-        
+
         // Draw up to cap with first borrower
         client.draw_credit(&borrower1, &800_i128);
-        
+
         // Try to draw more with second borrower - should exceed cap
         let result = client.try_draw_credit(&borrower2, &300_i128);
-        
+
         assert!(result.is_err(), "Expected error when exposure cap exceeded");
         let err = result.err().unwrap();
         assert_eq!(
@@ -559,35 +568,35 @@ mod error_path_tests {
     // ─────────────────────────────────────────────────────────────────────────
     // Test 15: TimestampRegression - assert_ts_monotonic
     // ─────────────────────────────────────────────────────────────────────────
-    
+
     #[test]
     fn test_timestamp_regression_protection() {
         let (env, client, contract_id, _admin, token) = setup_with_token();
-        
+
         let borrower = Address::generate(&env);
-        
+
         // Mint tokens to reserve
         use soroban_sdk::token::StellarAssetClient;
         let token_admin_client = StellarAssetClient::new(&env, &token);
         token_admin_client.mint(&contract_id, &10000_i128);
-        
+
         // Open credit line
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        
+
         // Set ledger timestamp
         env.ledger().with_mut(|li| li.timestamp = 1000);
-        
+
         // Update risk parameters to set last_rate_update_ts
         client.update_risk_parameters(&borrower, &1000_i128, &600_u32, &50_u32);
-        
+
         // Try to move time backwards (this would be caught by Soroban, but we test the guard)
         env.ledger().with_mut(|li| li.timestamp = 500);
-        
+
         // The timestamp regression check should prevent invalid updates
         // Note: In practice, Soroban prevents time from going backwards,
         // but our guard provides defense-in-depth
         let result = client.try_update_risk_parameters(&borrower, &1000_i128, &700_u32, &50_u32);
-        
+
         // This may succeed if ledger timestamp is used directly, or fail if cached
         // The important thing is that it doesn't panic
         if result.is_err() {

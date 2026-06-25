@@ -6,10 +6,10 @@
 //! These entries must have their TTL extended on frequently-invoked read/write
 //! paths so that active credit lines are not silently archived by the network.
 
-use creditra_credit::{Credit, CreditClient};
 use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
-use soroban_sdk::testutils::{Address as _, Ledger};
+use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::storage::Persistent as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env};
 
 fn setup(env: &Env) -> (Address, CreditClient, Address) {
@@ -27,7 +27,11 @@ fn advance_ledgers(env: &Env, delta: u32) {
     });
 }
 
-fn ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, contract_id: &Address, key: &K) -> u32 {
+fn ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    contract_id: &Address,
+    key: &K,
+) -> u32 {
     env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
 }
 
@@ -107,4 +111,3 @@ fn utilization_cap_and_last_draw_keys_bump_persistent_ttl() {
 
     let _ = admin;
 }
-

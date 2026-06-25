@@ -291,7 +291,12 @@ fn settle_zero_recovered_amount_panics() {
     let client = CreditClient::new(&env, &contract_id);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        client.settle_default_liquidation(&borrower, &0_i128, &Symbol::new(&env, "auc_zero"), &None);
+        client.settle_default_liquidation(
+            &borrower,
+            &0_i128,
+            &Symbol::new(&env, "auc_zero"),
+            &None,
+        );
     }));
     assert!(result.is_err());
 
@@ -305,7 +310,12 @@ fn settle_negative_recovered_amount_panics() {
     let client = CreditClient::new(&env, &contract_id);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        client.settle_default_liquidation(&borrower, &(-100_i128), &Symbol::new(&env, "auc_neg"), &None);
+        client.settle_default_liquidation(
+            &borrower,
+            &(-100_i128),
+            &Symbol::new(&env, "auc_neg"),
+            &None,
+        );
     }));
     assert!(result.is_err());
 
@@ -319,7 +329,12 @@ fn settle_over_recovery_panics() {
     let client = CreditClient::new(&env, &contract_id);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        client.settle_default_liquidation(&borrower, &600_i128, &Symbol::new(&env, "auc_over"), &None);
+        client.settle_default_liquidation(
+            &borrower,
+            &600_i128,
+            &Symbol::new(&env, "auc_over"),
+            &None,
+        );
     }));
     assert!(result.is_err());
 
@@ -355,7 +370,12 @@ fn settle_on_active_line_panics() {
     client.draw_credit(&borrower, &1_000_i128);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        client.settle_default_liquidation(&borrower, &500_i128, &Symbol::new(&env, "auc_active"), &None);
+        client.settle_default_liquidation(
+            &borrower,
+            &500_i128,
+            &Symbol::new(&env, "auc_active"),
+            &None,
+        );
     }));
     assert!(result.is_err());
 
@@ -377,7 +397,12 @@ fn settle_on_nonexistent_line_panics() {
     client.init(&admin);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        client.settle_default_liquidation(&borrower, &100_i128, &Symbol::new(&env, "auc_nonex"), &None);
+        client.settle_default_liquidation(
+            &borrower,
+            &100_i128,
+            &Symbol::new(&env, "auc_nonex"),
+            &None,
+        );
     }));
     assert!(result.is_err());
 }

@@ -748,10 +748,7 @@ fn reinstate_invalid_targets_revert() {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.reinstate_credit_line(&borrower, &bad_target);
         }));
-        assert!(
-            result.is_err(),
-            "reinstate to {bad_target:?} must revert"
-        );
+        assert!(result.is_err(), "reinstate to {bad_target:?} must revert");
 
         // Line must remain Defaulted — no partial state change.
         let line = client.get_credit_line(&borrower).unwrap();

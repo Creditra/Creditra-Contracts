@@ -379,8 +379,10 @@ pub struct ContractUpgradedEvent {
 }
 
 pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) {
-    env.events()
-        .publish((symbol_short!("credit"), Symbol::new(env, "upgraded")), event);
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "upgraded")),
+        event,
+    );
 }
 
 pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {

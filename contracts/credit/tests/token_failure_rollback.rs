@@ -130,13 +130,7 @@ mod failing_token {
             Self::write_balance(&env, &to, to_balance.saturating_add(amount));
         }
 
-        pub fn transfer_from(
-            env: Env,
-            spender: Address,
-            from: Address,
-            to: Address,
-            amount: i128,
-        ) {
+        pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
             let fail: bool = env
                 .storage()
                 .instance()
@@ -146,11 +140,7 @@ mod failing_token {
                 env.panic_with_error(ContractError::InvalidAmount);
             }
             let allowance_key = Self::allowance_key(&from, &spender);
-            let allowed: i128 = env
-                .storage()
-                .persistent()
-                .get(&allowance_key)
-                .unwrap_or(0);
+            let allowed: i128 = env.storage().persistent().get(&allowance_key).unwrap_or(0);
             if allowed < amount {
                 env.panic_with_error(ContractError::InvalidAmount);
             }
@@ -183,8 +173,7 @@ mod failing_token {
         }
 
         pub fn set_fail_transfer_from(&self, fail: bool) {
-            FailingTokenContractClient::new(&self.env, &self.address)
-                .set_fail_transfer_from(&fail);
+            FailingTokenContractClient::new(&self.env, &self.address).set_fail_transfer_from(&fail);
         }
 
         pub fn address(&self) -> Address {
@@ -196,9 +185,8 @@ mod failing_token {
         }
 
         pub fn approve(&self, from: &Address, spender: &Address, amount: i128, expiry: u32) {
-            FailingTokenContractClient::new(&self.env, &self.address).approve(
-                from, spender, &amount, &expiry,
-            );
+            FailingTokenContractClient::new(&self.env, &self.address)
+                .approve(from, spender, &amount, &expiry);
         }
 
         pub fn transfer(&self, from: &Address, to: &Address, amount: i128) {
@@ -425,22 +413,30 @@ fn rollback_draw_fail_then_draw_succeeds_guard_cleared() {
     let fail = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.draw_credit(&borrower, &400);
     }));
-    assert!(fail.is_err(), "draw must fail when token transfer is configured to fail");
-
-    assert_guard_cleared(
-        &env,
-        &contract_id,
-        "after mid-transfer draw failure",
+    assert!(
+        fail.is_err(),
+        "draw must fail when token transfer is configured to fail"
     );
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+
+    assert_guard_cleared(&env, &contract_id, "after mid-transfer draw failure");
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        0
+    );
 
     failing_token.set_fail_transfer(false);
     client.draw_credit(&borrower, &400);
     assert_guard_cleared(&env, &contract_id, "after successful draw");
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 400);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        400
+    );
 
     client.draw_credit(&borrower, &100);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 500);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        500
+    );
 }
 
 /// Failed `transfer_from` during repay must roll back and allow a subsequent repay.
@@ -466,18 +462,23 @@ fn rollback_repay_fail_then_repay_succeeds_guard_cleared() {
         "repay must fail when token transfer_from is configured to fail"
     );
 
-    assert_guard_cleared(
-        &env,
-        &contract_id,
-        "after mid-transfer repay failure",
+    assert_guard_cleared(&env, &contract_id, "after mid-transfer repay failure");
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        500
     );
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 500);
 
     failing_token.set_fail_transfer_from(false);
     client.repay_credit(&borrower, &300);
     assert_guard_cleared(&env, &contract_id, "after successful repay");
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 200);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        200
+    );
 
     client.repay_credit(&borrower, &200);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 0);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        0
+    );
 }

@@ -79,7 +79,10 @@ fn protocol_fee_zero_fee_keeps_treasury_balance_at_zero() {
     client.repay_credit(&borrower, &1_100);
 
     assert_eq!(token_client.balance(&contract_id), contract_balance_before);
-    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 1_100);
+    assert_eq!(
+        token_client.balance(&reserve),
+        reserve_balance_before + 1_100
+    );
     assert_eq!(token_client.balance(&treasury), treasury_balance_before);
 }
 
@@ -103,8 +106,14 @@ fn protocol_fee_max_fee_accrues_expected_fee_amount() {
 
     client.repay_credit(&borrower, &1_100);
 
-    assert_eq!(token_client.balance(&contract_id), contract_balance_before + 10);
-    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 1_090);
+    assert_eq!(
+        token_client.balance(&contract_id),
+        contract_balance_before + 10
+    );
+    assert_eq!(
+        token_client.balance(&reserve),
+        reserve_balance_before + 1_090
+    );
     assert_eq!(token_client.balance(&treasury), 0);
 }
 
@@ -129,6 +138,9 @@ fn protocol_fee_rounding_edge_floors_small_fee_to_zero() {
     client.repay_credit(&borrower, &10_001);
 
     assert_eq!(token_client.balance(&contract_id), contract_balance_before);
-    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 10_001);
+    assert_eq!(
+        token_client.balance(&reserve),
+        reserve_balance_before + 10_001
+    );
     assert_eq!(token_client.balance(&treasury), 0);
 }
