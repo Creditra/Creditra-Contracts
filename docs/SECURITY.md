@@ -272,6 +272,7 @@ addressed before mainnet.
 - `WHITEPAPER.md` — protocol-level design
 - `docs/upgrade-policy.md` — upgrade procedure
 - `docs/EXECUTION_QUALITY.md` — test catalog
+- `docs/error-taxonomy.md` — categorized error variants with SDK recovery hints
 - `CIRCUIT_BREAKER_IMPLEMENTATION.md` — pause design
 - `AUCTION_CLOSE_TIME_FIX.md` — close-time off-by-one fix
 - `UNWRAP_AUDIT_REPORT.md` — production-unwrap removal (PR #418)

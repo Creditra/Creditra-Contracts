@@ -57,17 +57,9 @@ be reordered or renumbered; new variants must be appended.
 | 37 | `OraclePriceStale` | Oracle price exceeds `max_age_seconds`. |
 | 38 | `OraclePriceDeviation` | Oracle price deviation exceeds configured maximum. |
 
-## Categorization
+## Taxonomy
 
-Useful when surfacing errors to end users:
-
-- **Auth & lifecycle**: 1, 2, 14, 15, 32.
-- **State guards**: 4, 20, 21, 19, 18.
-- **Numeric guards**: 5, 6, 7, 8, 9, 10, 12, 13, 17, 28, 31, 34.
-- **Treasury / liquidity**: 22, 23, 24, 25, 26, 27, 30.
-- **Cooldown / regression**: 29, 33.
-- **Oracle circuit breaker**: 36, 37, 38.
-- **Collateral**: 35.
-- **Concurrency**: 11.
-- **Risk / blocklist**: 16.
-- **Indexing**: 3.
+See [`docs/error-taxonomy.md`](./error-taxonomy.md) for the authoritative
+grouping of all 38 variants into **named categories** (Auth, Lifecycle,
+Numeric, Limit, Liquidity, Risk, Oracle, Collateral, Block, Reentrancy, Misc)
+with **SDK-side recovery actions** per category.
