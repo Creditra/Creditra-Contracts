@@ -167,6 +167,15 @@ pub struct FeeAccruedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawnEvent {
+    pub treasury: Address,
+    pub amount: i128,
+    pub admin: Address,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PenaltyRateEnteredEvent {
     pub borrower: Address,
     pub base_rate_bps: u32,
@@ -212,6 +221,11 @@ pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
 pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
+}
+
+pub fn publish_treasury_withdrawn_event(env: &Env, event: TreasuryWithdrawnEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("trs_wdraw")), event);
 }
 
 pub fn publish_admin_rotation_proposed(env: &Env, proposed_admin: &Address, accept_after: u64) {

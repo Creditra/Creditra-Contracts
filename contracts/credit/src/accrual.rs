@@ -293,3 +293,21 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     line
 }
+
+/// Apply lazy accrual to a bounded collection of active credit lines.
+pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
+    for borrower in borrowers.iter() {
+        let Some(line) = crate::storage::get_credit_line(env, &borrower) else {
+            continue;
+        };
+        if line.status != CreditStatus::Active {
+            continue;
+        }
+
+        let previous_utilized = line.utilized_amount;
+        let updated = apply_accrual(env, line);
+        if updated.utilized_amount != previous_utilized {
+            persist_credit_line(env, &borrower, &updated, previous_utilized);
+        }
+    }
+}

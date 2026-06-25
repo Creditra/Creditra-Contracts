@@ -211,6 +211,16 @@ pub enum ContractError {
     OraclePriceDeviation = 38,
 }
 
+/// A treasury withdrawal queued for execution after the mandatory delay.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingTreasuryWithdrawal {
+    /// Exact amount approved for withdrawal.
+    pub amount: i128,
+    /// Earliest ledger timestamp at which the withdrawal may be confirmed.
+    pub accept_after: u64,
+}
+
 /// Stored credit line data for a borrower.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,6 +364,7 @@ pub struct RateFormulaConfigEvent {
 /// that case the relevant entrypoints panic with
 /// [`ContractError::MissingLiquidityToken`] or
 /// [`ContractError::MissingLiquiditySource`].
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
     /// Configured liquidity token.

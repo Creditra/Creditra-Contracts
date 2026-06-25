@@ -4,7 +4,7 @@
 //!
 //! # What
 //!
-//! Defines the [`DataKey`] enum (30 variants) and provides typed getters /
+//! Defines the [`DataKey`] enum (32 variants) and provides typed getters /
 //! setters for every persistent and instance storage slot in the credit
 //! contract. Also owns the reentrancy guard, pause flag, monotonic-timestamp
 //! assertion, and the per-borrower id ↔ address mapping used by enumeration.
@@ -58,7 +58,9 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, RepaymentSchedule};
+use crate::types::{
+    ContractError, CreditLineData, PendingTreasuryWithdrawal, RepaymentSchedule,
+};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -139,6 +141,8 @@ pub enum DataKey {
     TreasuryAddress,
     /// Accumulated treasury balance held in contract (fees collected).
     TreasuryBalance,
+    /// Treasury withdrawal waiting for the mandatory confirmation delay.
+    PendingTreasuryWithdrawal,
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
@@ -419,10 +423,13 @@ pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
 }
 
 /// Set a per-borrower max utilization ratio cap in basis points (admin only).
-pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: u32) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::UtilizationCapBps(borrower.clone()), &cap_bps);
+pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    if let Some(cap_bps) = cap_bps {
+        env.storage().persistent().set(&key, &cap_bps);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
 }
 
 /// Get the per-borrower max utilization ratio cap, if set.
@@ -450,6 +457,11 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
             .persistent()
             .remove(&DataKey::BlockedBorrower(borrower.clone()));
     }
+}
+
+/// Remove a borrower from the block list.
+pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
+    set_borrower_blocked(env, borrower, false);
 }
 
 /// Check if a borrower is blocked from drawing.
@@ -676,4 +688,114 @@ pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
 /// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::PenaltySurchargeBps, &bps);
+}
+
+// ── Collateral ───────────────────────────────────────────────────────────────
+
+/// The collateral module currently uses the configured liquidity token.
+pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::LiquidityToken)
+}
+
+/// Return the tracked collateral balance for a borrower.
+pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::CollateralBalance(borrower.clone()))
+        .unwrap_or(0)
+}
+
+/// Persist the tracked collateral balance for a borrower.
+pub fn set_collateral_balance(env: &Env, borrower: &Address, amount: i128) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::CollateralBalance(borrower.clone()), &amount);
+}
+
+/// Return the configured minimum collateral ratio.
+pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinCollateralRatioBps)
+}
+
+/// Persist the minimum collateral ratio.
+pub fn set_min_collateral_ratio_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MinCollateralRatioBps, &bps);
+}
+
+// ── Protocol fee treasury ────────────────────────────────────────────────────
+
+/// Return the configured protocol fee, if explicitly set.
+pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&DataKey::ProtocolFeeBps)
+}
+
+/// Persist the protocol fee in basis points.
+pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
+}
+
+/// Return the configured treasury destination.
+pub fn get_treasury_address(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::TreasuryAddress)
+}
+
+/// Persist the treasury destination.
+pub fn set_treasury_address(env: &Env, treasury: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryAddress, treasury);
+}
+
+/// Return the amount of protocol fees currently available for withdrawal.
+pub fn get_treasury_balance(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::TreasuryBalance)
+        .unwrap_or(0)
+}
+
+/// Add newly collected protocol fees to the treasury accumulator.
+pub fn add_treasury_balance(env: &Env, amount: i128) {
+    let updated = get_treasury_balance(env)
+        .checked_add(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryBalance, &updated);
+}
+
+/// Deduct a confirmed withdrawal from the treasury accumulator.
+pub fn subtract_treasury_balance(env: &Env, amount: i128) {
+    let updated = get_treasury_balance(env)
+        .checked_sub(amount)
+        .filter(|balance| *balance >= 0)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAmount));
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryBalance, &updated);
+}
+
+/// Return the currently queued treasury withdrawal, if any.
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<PendingTreasuryWithdrawal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+/// Create or replace the currently queued treasury withdrawal.
+pub fn set_pending_treasury_withdrawal(env: &Env, pending: &PendingTreasuryWithdrawal) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, pending);
+}
+
+/// Remove the queued treasury withdrawal after successful execution.
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
 }

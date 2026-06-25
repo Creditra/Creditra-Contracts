@@ -64,7 +64,7 @@ use errors::AuctionError;
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
 use crate::storage::{
-    clear_reentrancy_guard, get_factory_contract, set_factory_contract, set_reentrancy_guard,
+    clear_reentrancy_guard, get_factory_contract, set_reentrancy_guard,
 };
 use crate::types::*;
 use events::{
@@ -369,10 +369,9 @@ impl Auction {
         credit_contract: Address,
         borrower: Address,
     ) -> i128 {
-        let factory = get_factory_contract(&env).unwrap_or_else(|| panic!(AuctionError::NoFactoryContract));
-        if env.invoker() != factory {
-            panic!(AuctionError::Unauthorized);
-        }
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
 
         let state: AuctionState = env
             .storage()

@@ -8,6 +8,7 @@ This guide explains how indexers subscribe to Credit contract events and decode:
 - `RiskParametersUpdatedEvent`
 - `DefaultLiquidationRequestedEvent`
 - `DefaultLiquidationSettledEvent`
+- `TreasuryWithdrawnEvent`
 
 Source of truth for schemas: `contracts/credit/src/events.rs`.
 
@@ -26,6 +27,7 @@ The contract publishes Soroban events under a `credit` namespace.
 | `InterestAccruedEvent` | `("credit", "accrue")` | `draw_credit`, `repay_credit` |
 | `DefaultLiquidationRequestedEvent` | `("credit", "liq_req")` | `default_credit_line` |
 | `DefaultLiquidationSettledEvent` | `("credit", "liq_setl")` | `settle_default_liquidation` |
+| `TreasuryWithdrawnEvent` | `("credit", "trs_wdraw")` | `confirm_treasury_withdrawal` |
 
 For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symbol.
 
@@ -88,6 +90,15 @@ For `CreditLineEvent`, `event_type` in the payload mirrors the second topic symb
 | `borrower` | `Address` | Defaulted borrower |
 | `utilized_amount` | `i128` | Debt at request time |
 | `timestamp` | `u64` | Ledger timestamp at emit time |
+
+### `TreasuryWithdrawnEvent`
+
+| Field | Type | Notes |
+|---|---|---|
+| `treasury` | `Address` | Configured withdrawal recipient |
+| `amount` | `i128` | Confirmed proposal amount |
+| `admin` | `Address` | Admin that authorized confirmation |
+| `timestamp` | `u64` | Confirmation ledger timestamp |
 
 ### `DefaultLiquidationSettledEvent`
 

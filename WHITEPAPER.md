@@ -381,8 +381,8 @@ $$
 where $\phi$ is `protocol_fee_bps` (capped at `MAX_PROTOCOL_FEE_BPS = 1_000` =
 10 % of *interest*, never principal — `contracts/credit/src/lib.rs:63`). The
 fee is `transfer_from(borrower, contract, fee)`; the reserve portion is
-`transfer_from(borrower, liquidity_source, a_reserve)`. The fee is then
-withdrawable by the admin via `withdraw_treasury(admin)`.
+`transfer_from(borrower, liquidity_source, a_reserve)`. Treasury fees require
+an admin proposal followed by confirmation after a fixed 24-hour delay.
 
 ---
 

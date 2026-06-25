@@ -327,7 +327,8 @@ All errors are represented as `ContractError` enum variants with stable discrimi
 **Description:** Treasury address is not configured when attempting a treasury withdrawal.
 
 **Trigger Conditions:**
-- Calling `withdraw_treasury()` before `set_treasury()` is called
+- Calling `propose_treasury_withdrawal()` before `set_treasury()` is called
+- Confirming after the configured treasury address has been removed
 
 **Recovery:** Admin must call `set_treasury()` first.
 

@@ -59,15 +59,9 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
-use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key,
-    set_borrower_rate_floor,
-};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use crate::events::publish_risk_parameters_updated;
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, persist_credit_line, rate_cfg_key, rate_formula_key,
+    assert_not_paused, persist_credit_line, rate_cfg_key, rate_formula_key,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
@@ -137,7 +131,11 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
 }
 
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits_legacy(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+pub fn set_rate_change_limits(
+    env: Env,
+    max_rate_change_bps: u32,
+    rate_change_min_interval: u64,
+) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 

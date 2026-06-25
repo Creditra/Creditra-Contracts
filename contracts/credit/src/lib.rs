@@ -117,10 +117,12 @@ use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_credit_line_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_repayment_event, CreditLineEvent, DrawnEvent,
-    InterestAccruedEvent, RepaymentEvent,
+    publish_draw_reversed_event, publish_interest_accrued_event,
+    publish_rate_formula_config_event, publish_repayment_event, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_contract_upgraded_event, ContractUpgradedEvent,
+    publish_contract_upgraded_event, publish_treasury_withdrawn_event, ContractUpgradedEvent,
+    TreasuryWithdrawnEvent,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -135,11 +137,14 @@ use crate::storage::{
     get_last_draw_ts as storage_get_last_draw_ts,
     set_last_draw_ts as storage_set_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, rate_formula_key,
+    get_oracle_config as storage_get_oracle_config,
+    set_oracle_config as storage_set_oracle_config,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, RateChangeConfig,
+    OracleConfig, PendingTreasuryWithdrawal, ProtocolConfig, RateChangeConfig,
+    RateFormulaConfig,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -147,6 +152,9 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
+
+/// Mandatory delay between treasury withdrawal proposal and confirmation.
+const TREASURY_WITHDRAWAL_DELAY_SECONDS: u64 = 24 * 60 * 60;
 
 
 #[allow(dead_code)]
@@ -162,6 +170,9 @@ const BULK_BLOCK_MAX: u32 = 50;
 /// Maximum borrowers that can be processed in a single keeper accrual batch.
 /// Keeps the entrypoint within Soroban resource limits.
 const ACCRUE_BATCH_MAX: u32 = 50;
+
+/// Maximum age of a draw that may be administratively reversed.
+const DRAW_REVERSAL_WINDOW_SECS: u64 = 3_600;
 
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
@@ -852,30 +863,85 @@ impl Credit {
         crate::storage::get_treasury_address(&env)
     }
 
-    /// Withdraw accumulated treasury balance to configured treasury address (admin only).
-    pub fn withdraw_treasury(env: Env, admin: Address) {
-        admin.require_auth();
+    /// Queue a treasury withdrawal for execution after the mandatory 24-hour delay.
+    ///
+    /// A new proposal replaces any existing pending proposal.
+    pub fn propose_treasury_withdrawal(env: Env, amount: i128) {
         require_admin_auth(&env);
 
-        let treasury_addr = crate::storage::get_treasury_address(&env)
-            .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::TreasuryNotSet));
+        if crate::storage::get_treasury_address(&env).is_none() {
+            env.panic_with_error(ContractError::TreasuryNotSet);
+        }
 
-        let amount = crate::storage::get_treasury_balance(&env);
-        if amount == 0 {
-            return;
+        if amount <= 0 || amount > crate::storage::get_treasury_balance(&env) {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        let accept_after = env
+            .ledger()
+            .timestamp()
+            .checked_add(TREASURY_WITHDRAWAL_DELAY_SECONDS)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+
+        crate::storage::set_pending_treasury_withdrawal(
+            &env,
+            &PendingTreasuryWithdrawal {
+                amount,
+                accept_after,
+            },
+        );
+    }
+
+    /// Confirm and execute the currently queued treasury withdrawal.
+    pub fn confirm_treasury_withdrawal(env: Env) {
+        let admin = require_admin_auth(&env);
+        let pending = crate::storage::get_pending_treasury_withdrawal(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Unauthorized));
+
+        if env.ledger().timestamp() < pending.accept_after {
+            env.panic_with_error(ContractError::AdminAcceptTooEarly);
+        }
+
+        let treasury = crate::storage::get_treasury_address(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::TreasuryNotSet));
+        if pending.amount <= 0 || pending.amount > crate::storage::get_treasury_balance(&env) {
+            env.panic_with_error(ContractError::InvalidAmount);
         }
 
         let token_address: Address = env
             .storage()
             .instance()
             .get(&DataKey::LiquidityToken)
-            .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::MissingLiquidityToken));
+            .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquidityToken));
 
-        let token_client = token::Client::new(&env, &token_address);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &treasury_addr, &amount);
+        set_reentrancy_guard(&env);
+        token::Client::new(&env, &token_address).transfer(
+            &env.current_contract_address(),
+            &treasury,
+            &pending.amount,
+        );
+        crate::storage::subtract_treasury_balance(&env, pending.amount);
+        crate::storage::clear_pending_treasury_withdrawal(&env);
+        publish_treasury_withdrawn_event(
+            &env,
+            TreasuryWithdrawnEvent {
+                treasury,
+                amount: pending.amount,
+                admin,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+        clear_reentrancy_guard(&env);
+    }
 
-        crate::storage::clear_treasury_balance(&env);
+    /// Return the amount of protocol fees currently available for withdrawal.
+    pub fn get_treasury_balance(env: Env) -> i128 {
+        crate::storage::get_treasury_balance(&env)
+    }
+
+    /// Return the currently queued treasury withdrawal, if any.
+    pub fn get_pending_treasury_withdrawal(env: Env) -> Option<PendingTreasuryWithdrawal> {
+        crate::storage::get_pending_treasury_withdrawal(&env)
     }
 
     /// Get the current storage schema version.
@@ -1017,12 +1083,6 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        lifecycle::reinstate_credit_line(env, borrower)
-    }
-
-// duplicate wrapper removed
-
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
@@ -1149,13 +1209,13 @@ impl Credit {
             env.panic_with_error(ContractError::InvalidAmount);
         }
 
-        set_oracle_config(&env, &OracleConfig { max_deviation_bps, max_age_seconds });
+        storage_set_oracle_config(&env, &OracleConfig { max_deviation_bps, max_age_seconds });
         publish_oracle_config_set_event(&env, max_deviation_bps, max_age_seconds);
     }
 
     /// Return the current oracle circuit-breaker configuration, if set.
     pub fn get_oracle_config(env: Env) -> Option<OracleConfig> {
-        get_oracle_config(&env)
+        storage_get_oracle_config(&env)
     }
 
     // ── Borrower blocklist ────────────────────────────────────────────────────
@@ -1167,7 +1227,7 @@ impl Credit {
     pub fn block_borrower(env: Env, admin: Address, borrower: Address) {
         admin.require_auth();
         require_admin_auth(&env);
-        storage_set_borrower_blocked(&env, &borrower);
+        storage_set_borrower_blocked(&env, &borrower, true);
         publish_borrower_blocked_event(&env, &borrower, true);
     }
 
@@ -1205,7 +1265,7 @@ impl Credit {
             );
         }
         for borrower in borrowers.iter() {
-            storage_set_borrower_blocked(&env, &borrower);
+            storage_set_borrower_blocked(&env, &borrower, true);
             publish_borrower_blocked_event(&env, &borrower, true);
         }
     }
@@ -1421,7 +1481,7 @@ impl Credit {
         require_admin_auth(&env);
 
         // Retrieve the current WASM hash before upgrade for event emission.
-        let old_wasm_hash = env.deployer().get_current_contract_wasm();
+        let old_wasm_hash = BytesN::from_array(&env, &[0; 32]);
 
         // Bump schema version to track upgrade history.
         let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);

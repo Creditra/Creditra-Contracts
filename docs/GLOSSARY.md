@@ -288,7 +288,8 @@ for almost every event. Stability pinned by
 
 **Treasury**. The address where protocol fees withdrawn from the credit
 contract land. Set by `set_treasury(admin, treasury_addr)`. Drained by
-`withdraw_treasury(admin)`.
+`propose_treasury_withdrawal(amount)` followed by
+`confirm_treasury_withdrawal()` after 24 hours.
 
 ---
 

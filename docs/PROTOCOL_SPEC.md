@@ -289,7 +289,10 @@ emits `("credit","rate_form")` with `true`.
 |---|---|
 | `set_protocol_fee_bps(bps)` (`lib.rs:744`) | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded. |
 | `set_treasury(admin, treasury)` (`lib.rs:758`) | Double-auth (admin arg + `require_admin_auth`). |
-| `withdraw_treasury(admin)` (`lib.rs:770`) | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
+| `propose_treasury_withdrawal(amount)` | Admin; stores `{ amount, accept_after = now + 86_400 }`. A later proposal replaces the pending proposal and restarts the delay. |
+| `confirm_treasury_withdrawal()` | Admin; after `accept_after`, transfers exactly the pending amount to `TreasuryAddress`, subtracts it from `TreasuryBalance`, clears the pending record, and emits `TreasuryWithdrawnEvent`. Early confirmation returns `AdminAcceptTooEarly = 15`. |
+| `get_pending_treasury_withdrawal()` | Read-only pending proposal query. |
+| `get_treasury_balance()` | Read-only accrued fee balance query. |
 
 ### 2.8 Settlement & oracle
 
@@ -430,6 +433,7 @@ table is also reflected in `docs/storage-layout.md`.)
 | `ProtocolFeeBps` | Instance | Fee on interest portion |
 | `TreasuryAddress` | Instance | Withdrawal recipient |
 | `TreasuryBalance` | Instance | Accrued fees |
+| `PendingTreasuryWithdrawal` | Instance | `{ amount, accept_after }` queued for delayed confirmation |
 | `CollateralBalance(Address)` | Persistent | Per-borrower collateral |
 | `MinCollateralRatioBps` | Instance | Collateral floor (default 15000) |
 | `DrawAudit(Address, u64)` | Persistent | `(borrower, ts) → original draw amount` |

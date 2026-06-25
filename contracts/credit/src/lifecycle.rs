@@ -767,6 +767,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 ///
 /// # Events
 /// Emits a `("credit", "selfsus")` [`CreditLineEvent`] with the updated status.
+#[cfg(any())]
 pub fn self_suspend_credit_line(env: Env, borrower: Address) {
     // Require authorization from the borrower (not admin)
     borrower.require_auth();

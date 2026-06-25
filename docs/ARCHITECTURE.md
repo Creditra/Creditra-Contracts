@@ -35,7 +35,7 @@ flowchart LR
     Scorer -- "risk_score (via Admin update_risk_parameters)" --> Admin
     Credit -- "token::Client::transfer<br/>transfer_from" --> Token
     Credit -- "transfer (draw) / transfer_from (repay)" --> Reserve
-    Credit -- "withdraw_treasury" --> Treasury
+    Credit -- "confirm_treasury_withdrawal<br/>(after 24h delay)" --> Treasury
     Credit -- "AuctionClient::settle_default_liquidation<br/>(cross-contract)" --> Auction
     Credit -- "events: credit/opened, drawn, repay, accrue,<br/>liq_req, liq_setl, ..." --> Indexer
     Auction -- "events: AUC_CLOSE, BID_RFDN, LIQ_SETL" --> Indexer
@@ -452,6 +452,7 @@ to these topics and reconstructs the protocol's state machine.
 | `("credit","repay")` | `RepaymentEvent` | Successful repay |
 | `("credit","accrue")` | `InterestAccruedEvent` | Whenever ΔI > 0 |
 | `("credit","fee_accrd")` | `FeeAccruedEvent` | When protocol fee deducted |
+| `("credit","trs_wdraw")` | `TreasuryWithdrawnEvent` | Delayed treasury withdrawal confirmed |
 | `("credit","suspend")` | `CreditLineEvent` | Admin suspend |
 | `("credit","closed")` | `CreditLineEvent` | Borrower or admin close |
 | `("credit","defaulted")` | `CreditLineEvent` | Admin default |

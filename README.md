@@ -188,7 +188,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `set_draw_min_interval`, `set_utilization_cap`, `set_max_total_exposure`,
   `set_credit_limit_bounds`.
 - **Liquidity & treasury:** `set_liquidity_token`, `set_liquidity_source`,
-  `set_protocol_fee_bps`, `set_treasury`, `withdraw_treasury`.
+  `set_protocol_fee_bps`, `set_treasury`, `propose_treasury_withdrawal`,
+  `confirm_treasury_withdrawal`.
 - **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`.
 - **Repayment schedule:** `set_repayment_schedule`, `get_repayment_schedule`,
   `is_delinquent`.

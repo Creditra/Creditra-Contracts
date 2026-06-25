@@ -35,7 +35,8 @@ working set is bounded and frequently touched.
 | `AuctionContract` | Default-liquidation hook target. |
 | `MaxTotalExposure` | Protocol-level exposure cap. |
 | `ProtocolFeeBps` | Fee taken on interest portion of repayments. |
-| `TreasuryAddress` / `TreasuryBalance` | Fee sink. |
+| `TreasuryAddress` / `TreasuryBalance` | Fee destination and accrued balance. |
+| `PendingTreasuryWithdrawal` | Delayed withdrawal proposal (`amount`, `accept_after`). |
 | `MinCollateralRatioBps` | Collateral floor for withdrawals. |
 | `OracleConfig` / `OracleLastPrice` / `OracleLastPriceTs` | Oracle circuit breaker. |
 
