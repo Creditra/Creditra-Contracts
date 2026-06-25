@@ -54,31 +54,8 @@ fn open_line_and_draw(
     assert_eq!(line.utilized_amount, draw);
 }
 
-fn assert_error_code_panic_or_result<F: FnOnce() -> R, R>(f: F, expected: ContractError) {
-    // Some Soroban client wrappers expose `try_*` methods that return Result,
-    // while other implementations may panic on host/contract errors.
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+// ── Test Matrix ───────────────────────────────────────────────────────────────
 
-    match res {
-        Ok(inner) => {
-            // If the closure completed without panicking, we still need to validate
-            // it returned the expected contract error.
-            // For our usage below, we always call `try_update_risk_parameters`,
-            // which returns `Result<Option<T>, ContractError>` or similar.
-            // So we attempt to downcast the error by matching the Debug string
-            // isn't robust; instead, we rely on explicit assertions in call sites.
-            let _ = inner;
-        }
-        Err(_) => {
-            // Panic path should surface the discriminant as `ContractError`.
-            // We re-run the assertion by calling a closure that returns the error
-            // from a `try_*` method (preferred). Call sites ensure that.
-            let _ = expected;
-        }
-    }
-}
-
-// ── Test Matrix ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_limit_increase_matrix_success_in_range() {
