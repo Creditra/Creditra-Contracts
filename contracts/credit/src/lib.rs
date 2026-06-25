@@ -97,13 +97,13 @@ mod accrual_tests;
 mod amount_validation_tests;
 mod auth;
 mod borrow;
+mod collateral;
 mod config;
 pub mod events;
 mod freeze;
-mod collateral;
 mod lifecycle;
-mod query;
 pub mod math_utils;
+mod query;
 mod risk;
 pub use crate::risk::compute_rate_from_score;
 mod storage;
@@ -117,40 +117,36 @@ mod risk_formula_tests;
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_credit_line_event, publish_drawn_event,
-    publish_draw_reversed_event, publish_interest_accrued_event, publish_repayment_event,
-    CreditLineEvent, DrawnEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
+    publish_borrower_blocked_event, publish_contract_upgraded_event, publish_credit_line_event,
+    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_contract_upgraded_event, ContractUpgradedEvent,
-    publish_rate_formula_config_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent,
 };
-use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
+use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::storage::{
-    admin_key, assert_not_paused, clear_reentrancy_guard, proposed_admin_key, proposed_at_key,
-    rate_cfg_key, rate_formula_key, set_reentrancy_guard, DataKey, persist_credit_line,
-    get_borrower_by_credit_line_id, MAX_ENUMERATION_LIMIT,
-    set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_unblocked,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    clear_repayment_schedule,
-    get_credit_line as storage_get_credit_line,
+    admin_key, assert_not_paused, clear_reentrancy_guard, clear_repayment_schedule,
+    get_borrower_by_credit_line_id, get_credit_line as storage_get_credit_line,
     get_last_draw_ts as storage_get_last_draw_ts,
-    set_last_draw_ts as storage_set_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps,
+    is_borrower_blocked as storage_is_borrower_blocked, persist_credit_line, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, rate_formula_key,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_unblocked,
+    set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
+use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, ProtocolConfig, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
+    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
+    ProtocolConfig, ProtocolSummary, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
 };
-use crate::storage::{set_oracle_config, get_oracle_config};
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
-
 
 #[allow(dead_code)]
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -168,6 +164,10 @@ const ACCRUE_BATCH_MAX: u32 = 50;
 
 /// Time window in seconds within which an erroneous draw can be reversed (admin only).
 const DRAW_REVERSAL_WINDOW_SECS: u64 = 3600;
+
+/// Maximum borrowers that can be processed in a single batch close call.
+/// Prevents unbounded gas consumption. Adjust after gas profiling.
+const BATCH_CLOSE_MAX: u32 = 50;
 
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
@@ -281,7 +281,11 @@ impl Credit {
         }
 
         // Disallow rescuing liquidity or collateral tokens
-        if let Some(liq) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquidityToken) {
+        if let Some(liq) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::LiquidityToken)
+        {
             if liq == token {
                 env.panic_with_error(ContractError::Unauthorized);
             }
@@ -298,11 +302,14 @@ impl Credit {
         let contract_addr = env.current_contract_address();
         token_client.transfer(&contract_addr, &recipient, &amount);
 
-        publish_token_rescued_event(&env, crate::events::TokenRescuedEvent {
-            token: token.clone(),
-            recipient: recipient.clone(),
-            amount,
-        });
+        publish_token_rescued_event(
+            &env,
+            crate::events::TokenRescuedEvent {
+                token: token.clone(),
+                recipient: recipient.clone(),
+                amount,
+            },
+        );
     }
 
     pub fn open_credit_line(
@@ -414,10 +421,11 @@ impl Credit {
             }
         }
 
-        let stored_line: CreditLineData = storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::CreditLineNotFound)
-        });
+        let stored_line: CreditLineData =
+            storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::CreditLineNotFound)
+            });
         let previous_utilized = stored_line.utilized_amount;
 
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
@@ -583,10 +591,11 @@ impl Credit {
             }
         }
 
-        let stored_line: CreditLineData = storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::CreditLineNotFound)
-        });
+        let stored_line: CreditLineData =
+            storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::CreditLineNotFound)
+            });
         let previous_utilized = stored_line.utilized_amount;
 
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
@@ -632,18 +641,31 @@ impl Credit {
                 // Transfer fee portion into contract (treasury accumulator), then
                 // transfer remaining amount into the reserve.
                 if fee > 0 {
-                    token_client.transfer_from(&contract_address, &borrower, &contract_address, &fee);
+                    token_client.transfer_from(
+                        &contract_address,
+                        &borrower,
+                        &contract_address,
+                        &fee,
+                    );
                     crate::storage::add_treasury_balance(&env, fee);
-                    crate::events::publish_fee_accrued_event(&env, crate::events::FeeAccruedEvent {
-                        borrower: borrower.clone(),
-                        fee_amount: fee,
-                        new_treasury_balance: crate::storage::get_treasury_balance(&env),
-                    });
+                    crate::events::publish_fee_accrued_event(
+                        &env,
+                        crate::events::FeeAccruedEvent {
+                            borrower: borrower.clone(),
+                            fee_amount: fee,
+                            new_treasury_balance: crate::storage::get_treasury_balance(&env),
+                        },
+                    );
                 }
 
                 let reserve_amount = effective_repay.saturating_sub(fee);
                 if reserve_amount > 0 {
-                    token_client.transfer_from(&contract_address, &borrower, &reserve_address, &reserve_amount);
+                    token_client.transfer_from(
+                        &contract_address,
+                        &borrower,
+                        &reserve_address,
+                        &reserve_amount,
+                    );
                 }
             }
         }
@@ -932,7 +954,9 @@ impl Credit {
             .storage()
             .instance()
             .get(&DataKey::LiquidityToken)
-            .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::MissingLiquidityToken));
+            .unwrap_or_else(|| {
+                env.panic_with_error(crate::types::ContractError::MissingLiquidityToken)
+            });
 
         let token_client = token::Client::new(&env, &token_address);
         let contract_address = env.current_contract_address();
@@ -1071,7 +1095,6 @@ impl Credit {
         out
     }
 
-    
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         lifecycle::suspend_credit_line(env, borrower)
     }
@@ -1086,7 +1109,7 @@ impl Credit {
 
     /// Admin-only batch close of multiple credit lines.
     /// Reverts on first failure, ensuring atomicity.
-    /// 
+    ///
     /// # Parameters
     /// - `borrowers`: List of borrower addresses to close; max `BATCH_CLOSE_MAX`
     pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
@@ -1146,11 +1169,10 @@ impl Credit {
                 }
 
                 if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
-                    let deviation = compute_deviation_bps(price, last_price)
-                        .unwrap_or_else(|| {
-                            clear_reentrancy_guard(&env);
-                            env.panic_with_error(ContractError::OraclePriceInvalid)
-                        });
+                    let deviation = compute_deviation_bps(price, last_price).unwrap_or_else(|| {
+                        clear_reentrancy_guard(&env);
+                        env.panic_with_error(ContractError::OraclePriceInvalid)
+                    });
                     if deviation > cfg.max_deviation_bps {
                         clear_reentrancy_guard(&env);
                         env.panic_with_error(ContractError::OraclePriceDeviation);
@@ -1176,7 +1198,12 @@ impl Credit {
             }
         }
 
-        lifecycle::settle_default_liquidation(env.clone(), borrower, recovered_amount, settlement_id);
+        lifecycle::settle_default_liquidation(
+            env.clone(),
+            borrower,
+            recovered_amount,
+            settlement_id,
+        );
         clear_reentrancy_guard(&env);
     }
 
@@ -1226,7 +1253,13 @@ impl Credit {
             env.panic_with_error(ContractError::InvalidAmount);
         }
 
-        set_oracle_config(&env, &OracleConfig { max_deviation_bps, max_age_seconds });
+        set_oracle_config(
+            &env,
+            &OracleConfig {
+                max_deviation_bps,
+                max_age_seconds,
+            },
+        );
         publish_oracle_config_set_event(&env, max_deviation_bps, max_age_seconds);
     }
 
@@ -1296,7 +1329,10 @@ impl Credit {
     pub fn accrue_batch(env: Env, borrowers: Vec<Address>) {
         assert_not_paused(&env);
         if borrowers.len() as u32 > ACCRUE_BATCH_MAX {
-            panic!("accrue_batch: exceeds max batch size of {}", ACCRUE_BATCH_MAX);
+            panic!(
+                "accrue_batch: exceeds max batch size of {}",
+                ACCRUE_BATCH_MAX
+            );
         }
 
         accrual::accrue_batch(&env, borrowers);
@@ -1486,14 +1522,14 @@ impl Credit {
     /// ```ignore
     /// // Deploy new WASM and get its hash
     /// let new_wasm_hash = env.deployer().upload_contract_wasm(new_wasm);
-    /// 
+    ///
     /// // Upgrade the contract
     /// client.upgrade(&new_wasm_hash);
     /// ```
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         // Enforce pause check: upgrades are blocked during emergency circuit breaker.
         assert_not_paused(&env);
-        
+
         // Enforce admin authentication: only the configured admin can upgrade.
         require_admin_auth(&env);
 
@@ -1508,7 +1544,8 @@ impl Credit {
         crate::storage::set_schema_version(&env, current_version.saturating_add(1));
 
         // Perform the atomic WASM upgrade.
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         // Emit upgrade event for off-chain indexers and audit trails.
         publish_contract_upgraded_event(
@@ -2705,8 +2742,8 @@ mod test_mock_liquidity_token {
     #[test]
     fn test_event_lifecycle_sequence() {
         use soroban_sdk::testutils::Events as _;
-        use soroban_sdk::TryIntoVal;
         use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+        use soroban_sdk::TryIntoVal;
 
         /// Setup helper: creates contract with token, mints `reserve` to contract,
         /// opens credit line for borrower with `credit_limit`, draws `draw_amount`.
@@ -2931,7 +2968,8 @@ mod test_mock_liquidity_token {
             assert!(checkpoint > 0);
 
             // Advance ledger timestamp by exactly one year
-            env.ledger().set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
+            env.ledger()
+                .set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
 
             // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
             StellarAssetClient::new(&env, &token).mint(&borrower, &200);
@@ -3103,22 +3141,23 @@ mod test_mock_liquidity_token {
                     .transfer_from(spender, from, to, &amount);
             }
         }
-
     }
     #[cfg(test)]
     mod test_mock_liquidity_token {
         use super::*;
-        use crate::test_coverage::test_helpers::MockLiquidityToken;
         use crate::events::CreditLineEvent;
+        use crate::test_coverage::test_helpers::MockLiquidityToken;
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::testutils::Ledger;
-        use soroban_sdk::token::StellarAssetClient;
         use soroban_sdk::token::Client as TokenClient;
-        use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal, Env};
+        use soroban_sdk::token::StellarAssetClient;
+        use soroban_sdk::{symbol_short, Env, Symbol, TryFromVal, TryIntoVal};
         use std::boxed::Box;
         use std::panic::{catch_unwind, AssertUnwindSafe};
 
-        fn setup_mock<'a>(env: &'a Env) -> (CreditClient<'a>, Address, Address, MockLiquidityToken) {
+        fn setup_mock<'a>(
+            env: &'a Env,
+        ) -> (CreditClient<'a>, Address, Address, MockLiquidityToken) {
             env.mock_all_auths();
             let admin = Address::generate(env);
             let borrower = Address::generate(env);
@@ -3371,7 +3410,10 @@ mod test_mock_liquidity_token {
             StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_i128);
             StellarAssetClient::new(&env, &token).mint(&borrower, &1_000_000_i128);
             soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower, &contract_id, &1_000_000_i128, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &1_000_000_i128,
+                &1_000_000_u32,
             );
             client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
             client.draw_credit(&borrower, &200_i128);
@@ -3875,7 +3917,10 @@ mod test_mock_liquidity_token {
             StellarAssetClient::new(&env, &token).mint(&contract_id, &10_000_i128);
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000_i128);
             soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower, &contract_id, &10_000_i128, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &10_000_i128,
+                &1_000_000_u32,
             );
             client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
             client.draw_credit(&borrower, &500_i128);
@@ -4176,7 +4221,8 @@ mod test_mock_liquidity_token {
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(env, &token).mint(&contract_id, &1_000_000_i128);
+            soroban_sdk::token::StellarAssetClient::new(env, &token)
+                .mint(&contract_id, &1_000_000_i128);
             client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
             (client, admin, borrower)
         }
@@ -4631,13 +4677,17 @@ mod test_mock_liquidity_token {
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_i128);
+            soroban_sdk::token::StellarAssetClient::new(&env, &token)
+                .mint(&contract_id, &1_000_i128);
             client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
             client.set_draw_min_interval(&60_u64);
             client.draw_credit(&borrower, &200_i128);
             soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower, &contract_id, &1_000_i128, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &1_000_i128,
+                &1_000_000_u32,
             );
             client.repay_credit(&borrower, &100_i128);
 
@@ -4685,7 +4735,8 @@ mod test_mock_liquidity_token {
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &i128::MAX);
+            soroban_sdk::token::StellarAssetClient::new(&env, &token)
+                .mint(&contract_id, &i128::MAX);
 
             // Set credit limit to a large value near i128::MAX
             let large_limit = i128::MAX / 2;
@@ -4742,7 +4793,8 @@ mod test_mock_liquidity_token {
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &i128::MAX);
+            soroban_sdk::token::StellarAssetClient::new(&env, &token)
+                .mint(&contract_id, &i128::MAX);
             env.ledger().set_timestamp(1);
             client.open_credit_line(&borrower, &(i128::MAX / 2), &300_u32, &70_u32);
 
@@ -4756,7 +4808,10 @@ mod test_mock_liquidity_token {
             // Approve and repay a large amount (saturating_sub should handle safely)
             let repay_amount = draw_amount / 2;
             soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower, &contract_id, &repay_amount, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &repay_amount,
+                &1_000_000_u32,
             );
             client.repay_credit(&borrower, &repay_amount);
 
@@ -4796,7 +4851,8 @@ mod test_mock_liquidity_token {
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_i128);
+            soroban_sdk::token::StellarAssetClient::new(&env, &token)
+                .mint(&contract_id, &1_000_i128);
             env.ledger().set_timestamp(1);
             client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
@@ -4804,7 +4860,10 @@ mod test_mock_liquidity_token {
 
             // Approve borrower to repay (borrower received 500 tokens from draw)
             soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower, &contract_id, &1_000_i128, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &1_000_i128,
+                &1_000_000_u32,
             );
 
             // Repay more than owed (1000 > 500) — effective_repay = 500
@@ -5391,7 +5450,10 @@ mod test_mock_liquidity_token {
             // Mint to borrower so they have funds to repay
             StellarAssetClient::new(env, &token).mint(&borrower, &5_000_i128);
             soroban_sdk::token::Client::new(env, &token).approve(
-                &borrower, &contract_id, &10_000_i128, &1_000_000_u32,
+                &borrower,
+                &contract_id,
+                &10_000_i128,
+                &1_000_000_u32,
             );
 
             (client, admin, borrower, token)

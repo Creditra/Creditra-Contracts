@@ -367,9 +367,8 @@ pub struct ProtocolConfig {
 
 /// Global protocol aggregate balances.
 ///
-/// This is **not** a `#[contracttype]`; it is a Rust-side projection used by
-/// `get_protocol_summary` to return dashboard totals from existing aggregate
-/// storage without bumping persistent-entry TTL.
+/// Returned by `get_protocol_summary` as a Soroban ABI value.
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolSummary {
     /// Number of indexed credit lines.
