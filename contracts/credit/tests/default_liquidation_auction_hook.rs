@@ -1,4 +1,12 @@
+// SPDX-License-Identifier: MIT
+
+use creditra_credit::types::CreditStatus;
+use creditra_credit::{Credit, CreditClient};
 use gateway_auction::{Auction, AuctionClient};
+use simple_price_oracle::{SimplePriceOracle, SimplePriceOracleClient};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 fn setup_auction(
     env: &Env,
@@ -104,6 +112,32 @@ fn settle_full_default_liquidation_closes_credit_line() {
     let client = CreditClient::new(&env, &contract_id);
 
     client.settle_default_liquidation(&borrower, &450_i128, &Symbol::new(&env, "auc_fin"), &None);
+    assert!(has_event_topic(&env, "closed"));
+    assert!(has_event_topic(&env, "liq_setl"));
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Closed);
+    assert_eq!(line.utilized_amount, 0);
+}
+
+#[test]
+fn settle_full_default_liquidation_with_mock_oracle_price() {
+    let (env, contract_id, borrower) = setup_defaulted_line(450);
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    client.set_oracle_config(&500_u32, &3600_u64);
+    let oracle_id = env.register(SimplePriceOracle, ());
+    let oracle = SimplePriceOracleClient::new(&env, &oracle_id);
+    oracle.init(&admin);
+    oracle.set_price(&1_000_i128);
+
+    client.settle_default_liquidation(
+        &borrower,
+        &450_i128,
+        &Symbol::new(&env, "auc_orc"),
+        &Some(oracle.get_price()),
+    );
     assert!(has_event_topic(&env, "closed"));
     assert!(has_event_topic(&env, "liq_setl"));
 

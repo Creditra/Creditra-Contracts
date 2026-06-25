@@ -56,3 +56,18 @@ cargo test -p creditra-credit --test token_failure_rollback rollback
 
 `MockLiquidityToken` is test-only (`#[cfg(test)]`) and must not be imported
 into contract runtime logic.
+
+## SimplePriceOracle mock (`tests/mocks/simple_price_oracle/`)
+
+Cross-contract default-liquidation tests deploy this minimal `#[contract]`
+oracle to mirror the off-chain flow of reading a price before calling
+`settle_default_liquidation`:
+
+```bash
+cargo test -p simple-price-oracle
+cargo test -p creditra-credit oracle::with_mock
+```
+
+- Deploy with `env.register(SimplePriceOracle, ())`, then `init` + `set_price`.
+- Read `get_price()` and pass the value as `Some(price)` into settlement.
+- `set_price` is admin-guarded; see `contracts/credit/tests/oracle/with_mock.rs`.

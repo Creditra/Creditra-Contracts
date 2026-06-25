@@ -9,6 +9,8 @@ members = [
     # The auction contract is consumed as a dev-dependency by credit tests
     # to exercise the default-liquidation hook.
     "gateway-contract/contracts/auction_contract",
+    # Minimal price oracle mock for cross-contract default-liquidation tests.
+    "contracts/credit/tests/mocks/simple_price_oracle",
 ]
 
 [workspace.lints.rust]

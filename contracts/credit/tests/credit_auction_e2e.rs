@@ -11,6 +11,7 @@
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use gateway_auction::{Auction, AuctionClient};
+use simple_price_oracle::{SimplePriceOracle, SimplePriceOracleClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, TryIntoVal};
@@ -126,6 +127,32 @@ fn settle_credit_from_auction(
     assert_event_topic(env, &deployment.credit_id, "credit", "liq_setl");
 }
 
+fn settle_credit_from_auction_with_oracle(
+    env: &Env,
+    deployment: &Deployment,
+    admin: &Address,
+    settlement_id: &Symbol,
+    recovered_amount: i128,
+    oracle_price: i128,
+) {
+    let credit = CreditClient::new(env, &deployment.credit_id);
+    credit.set_oracle_config(&500_u32, &3600_u64);
+
+    let oracle_id = env.register(SimplePriceOracle, ());
+    let oracle = SimplePriceOracleClient::new(env, &oracle_id);
+    oracle.init(admin);
+    oracle.set_price(&oracle_price);
+
+    let price = oracle.get_price();
+    credit.settle_default_liquidation(
+        &deployment.borrower,
+        &recovered_amount,
+        settlement_id,
+        &Some(price),
+    );
+    assert_event_topic(env, &deployment.credit_id, "credit", "liq_setl");
+}
+
 fn assert_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &str) {
     let expected0 = Symbol::new(env, topic0);
     let expected1 = Symbol::new(env, topic1);
@@ -236,4 +263,30 @@ fn e2e_atomic_settlement_with_configured_auction() {
 
     // Also assert that the auction event is still emitted and marker is set
     assert_event_topic(&env, &deployment.auction_id, "LIQ_SETL", "auction");
+}
+
+#[test]
+fn e2e_settlement_with_mock_oracle_price() {
+    let env = Env::default();
+    let draw_amount = 900;
+    let recovered_amount = 900;
+    let deployment = setup_defaulted_credit(&env, draw_amount);
+    let settlement_id = Symbol::new(&env, "auc_oracle");
+
+    let admin = Address::generate(&env);
+    let auction_recovery =
+        run_auction_to_settlement(&env, &deployment, &settlement_id, recovered_amount);
+    settle_credit_from_auction_with_oracle(
+        &env,
+        &deployment,
+        &admin,
+        &settlement_id,
+        auction_recovery,
+        1_000_i128,
+    );
+
+    let credit = CreditClient::new(&env, &deployment.credit_id);
+    let line = credit.get_credit_line(&deployment.borrower).unwrap();
+    assert_eq!(line.utilized_amount, 0);
+    assert_eq!(line.status, CreditStatus::Closed);
 }

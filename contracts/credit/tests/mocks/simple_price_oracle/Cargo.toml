@@ -1,0 +1,17 @@
+[package]
+name = "simple-price-oracle"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal deployable price oracle mock for credit integration tests"
+license = "MIT"
+keywords = ["soroban", "stellar", "oracle", "mock", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "no-std"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

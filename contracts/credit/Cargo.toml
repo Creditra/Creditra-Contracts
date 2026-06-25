@@ -19,5 +19,6 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 gateway-auction = { path = "../../gateway-contract/contracts/auction_contract" }
+simple-price-oracle = { path = "tests/mocks/simple_price_oracle" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 proptest = "1.4"

@@ -15,6 +15,7 @@
 
 use creditra_credit::types::{ContractError, CreditStatus, OracleConfig};
 use creditra_credit::{Credit, CreditClient};
+use simple_price_oracle::{SimplePriceOracle, SimplePriceOracleClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, Env, Symbol};
 
@@ -50,6 +51,16 @@ fn open_and_default(client: &CreditClient, env: &Env, contract_id: &Address, uti
 
 fn sid(env: &Env, s: &str) -> Symbol {
     Symbol::new(env, s)
+}
+
+fn deploy_oracle(env: &Env, admin: &Address, price: i128) -> SimplePriceOracleClient<'_> {
+    let oracle_id = env.register(SimplePriceOracle, ());
+    let client = SimplePriceOracleClient::new(env, &oracle_id);
+    client.init(admin);
+    if price != 0 {
+        client.set_price(&price);
+    }
+    client
 }
 
 // ── set_oracle_config ─────────────────────────────────────────────────────────
@@ -116,12 +127,14 @@ fn settle_without_oracle_config_accepts_none_price() {
 #[test]
 fn settle_with_oracle_config_first_price_accepted() {
     let env = Env::default();
-    let (client, contract_id, _) = setup(&env);
+    let (client, contract_id, admin) = setup(&env);
     client.set_oracle_config(&500_u32, &3600_u64);
+    let oracle = deploy_oracle(&env, &admin, 1_000_i128);
     let borrower = open_and_default(&client, &env, &contract_id, 500);
 
-    // First call — no prior price stored, any positive price is accepted.
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    // First call — price sourced from deployed mock oracle.
+    let price = oracle.get_price();
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &Some(price));
 
     assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
 }
@@ -131,16 +144,28 @@ fn settle_with_oracle_config_first_price_accepted() {
 #[test]
 fn settle_within_deviation_bound_accepted() {
     let env = Env::default();
-    let (client, contract_id, _) = setup(&env);
+    let (client, contract_id, admin) = setup(&env);
     client.set_oracle_config(&500_u32, &3600_u64); // 5% max deviation
+    let oracle = deploy_oracle(&env, &admin, 1_000_i128);
 
     // First settlement — seeds the last accepted price at 1_000.
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &Some(oracle.get_price()),
+    );
 
-    // Second settlement — price 1_040 is 4% deviation from 1_000 (within 5%).
+    // Second settlement — admin updates mock feed to 1_040 (4% deviation).
+    oracle.set_price(&1_040_i128);
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_040_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &Some(oracle.get_price()),
+    );
 
     assert_eq!(client.get_credit_line(&b2).unwrap().status, CreditStatus::Closed);
 }
