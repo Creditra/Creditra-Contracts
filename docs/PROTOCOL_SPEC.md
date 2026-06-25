@@ -680,6 +680,6 @@ unpaused (`assert_not_paused`). A safe upgrade procedure is therefore:
 | Oracle (price) | `WHITEPAPER.md` §7.1 |
 | Oracle (default signal, staged) | `docs/default-oracle.md` |
 | Upgrade policy | `docs/upgrade-policy.md` |
-| Event catalog | `docs/indexer-integration.md` |
+| Event catalog | `docs/events-schema.md` |
 | Deployment | `docs/deploy.md` |
 | Test catalog | `docs/EXECUTION_QUALITY.md` |
