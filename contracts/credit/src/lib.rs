@@ -138,8 +138,8 @@ use crate::storage::{
     set_utilization_cap_bps as storage_set_utilization_cap_bps,
 };
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, RateChangeConfig,
+    ContractError, CreditLineData, CreditStatus, DeveloperBalance, GracePeriodConfig,
+    GraceWaiverMode, OracleConfig, RateChangeConfig,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -900,6 +900,25 @@ impl Credit {
         crate::collateral::get_collateral(&env, &borrower)
     }
 
+    /// Set the minimum collateral ratio required for draws (admin only).
+    ///
+    /// Expressed in basis points: 15 000 = 150 %, the default.
+    /// Pass `0` to disable the ratio check entirely (fully unsecured mode).
+    ///
+    /// # Authorization
+    /// Admin only.
+    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
+        require_admin_auth(&env);
+        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
+    }
+
+    /// Get the configured minimum collateral ratio in basis points.
+    ///
+    /// Defaults to 15 000 (150 %) when not explicitly set.
+    pub fn get_min_collateral_ratio_bps(env: Env) -> Option<u32> {
+        crate::storage::get_min_collateral_ratio_bps(&env)
+    }
+
     /// Set the maximum total utilization allowed across all credit lines (admin only).
     ///
     /// Once set, `draw_credit` reverts with [`ContractError::ExposureCapExceeded`] if
@@ -1000,7 +1019,42 @@ impl Credit {
         out
     }
 
-    
+    /// Return a cursor-paginated page of developer (borrower) balances.
+    ///
+    /// This is the efficient, bounded replacement for a hypothetical
+    /// `get_all_developer_balances` full-scan. Each call returns at most
+    /// `limit` entries (capped at 100) anchored to the stable numeric id
+    /// assigned at origination so pages remain consistent across
+    /// interleaved draws, repayments, and new credit-line openings.
+    ///
+    /// # Parameters
+    /// - `cursor`: Exclusive lower bound on the stable id. Pass `None` for
+    ///   the first page; pass the returned `next_cursor` to advance.
+    /// - `limit`: Maximum entries per page. Clamped to 100 internally.
+    ///
+    /// # Returns
+    /// `(page, next_cursor)` where:
+    /// - `page` — `Vec<DeveloperBalance>` in ascending id order.
+    /// - `next_cursor` — `Some(id)` when more pages exist; `None` at end.
+    ///
+    /// # Auth
+    /// None required — pure read, safe for public RPCs and indexers.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let (page1, cursor) = client.get_developer_balances_page(&None, &20);
+    /// if let Some(c) = cursor {
+    ///     let (page2, _) = client.get_developer_balances_page(&Some(c), &20);
+    /// }
+    /// ```
+    pub fn get_developer_balances_page(
+        env: Env,
+        cursor: Option<u32>,
+        limit: u32,
+    ) -> (Vec<DeveloperBalance>, Option<u32>) {
+        query::get_developer_balances_page(env, cursor, limit)
+    }
+
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         lifecycle::suspend_credit_line(env, borrower)
     }

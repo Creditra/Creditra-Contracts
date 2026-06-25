@@ -677,3 +677,51 @@ pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
 pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::PenaltySurchargeBps, &bps);
 }
+
+// ── Collateral ────────────────────────────────────────────────────────────────
+
+/// Get the collateral balance for a borrower (0 if not set).
+pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::CollateralBalance(borrower.clone()))
+        .unwrap_or(0)
+}
+
+/// Set the collateral balance for a borrower.
+pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::CollateralBalance(borrower.clone()), &balance);
+}
+
+/// Get the configured minimum collateral ratio in basis points.
+///
+/// Defaults to 15 000 bps (150 %) when not explicitly set.
+pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinCollateralRatioBps)
+}
+
+/// Set the minimum collateral ratio in basis points (admin only, enforced by caller).
+///
+/// Pass `0` to disable the ratio check entirely (fully unsecured mode).
+pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+
+/// Get the collateral token address.
+///
+/// Collateral uses the same liquidity token as draws/repayments.
+/// Returns `None` if the liquidity token has not been configured yet.
+pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::LiquidityToken)
+}
+
+/// Unblock a borrower (alias for `set_borrower_blocked(env, borrower, false)`).
+pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
+    set_borrower_blocked(env, borrower, false);
+}

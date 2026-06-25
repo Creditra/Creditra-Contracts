@@ -361,3 +361,35 @@ pub struct ProtocolConfig {
     /// Configured liquidity source.
     pub liquidity_source: Option<Address>,
 }
+
+/// A single entry in a developer-balances page.
+///
+/// Returned by [`crate::Credit::get_developer_balances_page`] as part of a
+/// cursor-paginated scan over all borrower credit lines. The struct carries
+/// the fields an off-chain indexer needs for balance accounting; callers
+/// that need the full [`CreditLineData`] can follow up with
+/// [`crate::Credit::get_credit_line`].
+///
+/// # Pagination cursor
+/// `id` is the stable numeric id assigned at origination
+/// (`CreditLineBorrowerById` index). Pass the last returned `id` as the
+/// `cursor` argument on the next call to advance the page window.
+///
+/// # ABI stability
+/// This type is `#[contracttype]`-tagged and part of the on-chain ABI.
+/// Fields must never be removed or reordered; new fields must be appended.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeveloperBalance {
+    /// Stable numeric id assigned at credit-line origination.
+    /// Monotonically increasing; used as the pagination cursor.
+    pub id: u32,
+    /// Address of the borrower / developer.
+    pub borrower: Address,
+    /// Current outstanding principal (post-accrual as of last mutation).
+    /// Lazy accrual applies — pending interest since the last checkpoint
+    /// is not capitalized by this query.
+    pub utilized_amount: i128,
+    /// Configured credit ceiling for this line.
+    pub credit_limit: i128,
+}
