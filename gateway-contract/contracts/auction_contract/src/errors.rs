@@ -34,4 +34,6 @@ pub enum AuctionError {
     NoWinner = 11,
     /// Auction with the requested id was not found.
     NotFound = 12,
+    /// `settle_default_liquidation` was called a second time for the same auction.
+    AlreadySettled = 13,
 }

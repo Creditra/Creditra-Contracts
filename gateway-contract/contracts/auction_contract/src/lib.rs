@@ -369,10 +369,9 @@ impl Auction {
         credit_contract: Address,
         borrower: Address,
     ) -> i128 {
-        let factory = get_factory_contract(&env).unwrap_or_else(|| panic!(AuctionError::NoFactoryContract));
-        if env.invoker() != factory {
-            panic!(AuctionError::Unauthorized);
-        }
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
 
         let state: AuctionState = env
             .storage()
@@ -393,7 +392,7 @@ impl Auction {
             .get::<AuctionKey, bool>(&settlement_key)
             .unwrap_or(false);
         if already_settled {
-            panic!("liquidation already settled");
+            env.panic_with_error(AuctionError::AlreadySettled);
         }
 
         env.storage().persistent().set(&settlement_key, &true);
