@@ -123,7 +123,7 @@ fn upgrade_event_contains_correct_hashes() {
     let (env, _admin, contract_id, client) = setup();
 
     // Get the current WASM hash before upgrade
-    let old_wasm_hash = env.deployer().get_current_contract_wasm();
+    let old_wasm_hash = client.get_current_wasm_hash();
 
     // Perform upgrade with a new hash
     let new_wasm_hash = mock_wasm_hash(&env, 99);

@@ -61,13 +61,7 @@
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key,
-    set_borrower_rate_floor,
-};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
-use crate::events::publish_risk_parameters_updated;
-use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, persist_credit_line, rate_cfg_key, rate_formula_key,
+    assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key, persist_credit_line,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
@@ -340,6 +334,17 @@ pub fn update_risk_parameters(
         credit_line.interest_rate_bps,
         credit_line.risk_score,
     );
+}
+
+/// Set optional global rate-change caps (admin only).
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    let cfg = RateChangeConfig {
+        max_rate_change_bps,
+        rate_change_min_interval,
+    };
+    env.storage().instance().set(&rate_cfg_key(&env), &cfg);
 }
 
 /// Get the configured rate-change limits, if any.

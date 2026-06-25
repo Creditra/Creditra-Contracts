@@ -253,6 +253,8 @@ pub struct RepaymentSchedule {
     pub period_seconds: u64,
     /// Timestamp at which the next installment is due.
     pub next_due_ts: u64,
+    /// Current installment number.
+    pub installment_index: u32,
 }
 
 /// Admin-configurable limits on interest-rate changes.
@@ -354,6 +356,7 @@ pub struct RateFormulaConfigEvent {
 /// that case the relevant entrypoints panic with
 /// [`ContractError::MissingLiquidityToken`] or
 /// [`ContractError::MissingLiquiditySource`].
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolConfig {
     /// Configured liquidity token.

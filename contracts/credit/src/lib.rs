@@ -121,6 +121,7 @@ use crate::events::{
     InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
     publish_contract_upgraded_event, ContractUpgradedEvent,
+    publish_rate_formula_config_event, publish_draw_reversed_event, DrawReversedEvent,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -136,10 +137,11 @@ use crate::storage::{
     set_last_draw_ts as storage_set_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
     set_utilization_cap_bps as storage_set_utilization_cap_bps,
+    set_oracle_config, get_oracle_config, rate_formula_key,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, RateChangeConfig,
+    OracleConfig, RateChangeConfig, RateFormulaConfig, ProtocolConfig,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -148,6 +150,8 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 
+/// Limit for draw reversal window in seconds.
+const DRAW_REVERSAL_WINDOW_SECS: u64 = 3_600;
 
 #[allow(dead_code)]
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -1017,12 +1021,6 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        lifecycle::reinstate_credit_line(env, borrower)
-    }
-
-// duplicate wrapper removed
-
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
@@ -1413,6 +1411,47 @@ impl Credit {
     /// // Upgrade the contract
     /// client.upgrade(&new_wasm_hash);
     /// ```
+    pub fn get_current_wasm_hash(env: Env) -> BytesN<32> {
+        crate::storage::get_current_wasm_hash(&env)
+    }
+
+    /// Upgrade the contract WASM to a new version (admin only).
+    ///
+    /// This entrypoint allows the protocol to ship bug fixes and feature additions
+    /// without migrating borrower state. The upgrade is atomic and preserves all
+    /// existing storage.
+    ///
+    /// # Security Gates
+    /// - **Admin authentication**: Only the configured admin can authorize upgrades.
+    /// - **Pause check**: Upgrades are blocked when the protocol circuit breaker is active.
+    ///
+    /// # State Updates
+    /// - Bumps `SCHEMA_VERSION` in instance storage to track upgrade history.
+    /// - Calls `env.deployer().update_current_contract_wasm(new_wasm_hash)` to perform
+    ///   the atomic WASM replacement.
+    ///
+    /// # Events
+    /// Emits `ContractUpgradedEvent` with both the old and new WASM hashes for
+    /// off-chain indexers and audit trails.
+    ///
+    /// # Parameters
+    /// - `new_wasm_hash`: The 32-byte hash of the new WASM binary to deploy.
+    ///
+    /// # Authorization
+    /// Requires admin authorization via `require_admin_auth()`.
+    ///
+    /// # Errors
+    /// - `ContractError::Paused` — Protocol is paused by the emergency circuit breaker.
+    /// - Auth error — Caller is not the configured admin.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Deploy new WASM and get its hash
+    /// let new_wasm_hash = env.deployer().upload_contract_wasm(new_wasm);
+    ///
+    /// // Upgrade the contract
+    /// client.upgrade(&new_wasm_hash);
+    /// ```
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         // Enforce pause check: upgrades are blocked during emergency circuit breaker.
         assert_not_paused(&env);
@@ -1421,7 +1460,7 @@ impl Credit {
         require_admin_auth(&env);
 
         // Retrieve the current WASM hash before upgrade for event emission.
-        let old_wasm_hash = env.deployer().get_current_contract_wasm();
+        let old_wasm_hash = crate::storage::get_current_wasm_hash(&env);
 
         // Bump schema version to track upgrade history.
         let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);
@@ -1429,6 +1468,9 @@ impl Credit {
 
         // Perform the atomic WASM upgrade.
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Update the stored WASM hash.
+        crate::storage::set_current_wasm_hash(&env, &new_wasm_hash);
 
         // Emit upgrade event for off-chain indexers and audit trails.
         publish_contract_upgraded_event(
@@ -2005,6 +2047,8 @@ pub mod test_coverage {
 mod test_smoke_coverage {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events;
+    use soroban_sdk::testutils::Ledger;
     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 
     fn base(env: &Env) -> (CreditClient, Address, Address) {
@@ -2023,7 +2067,7 @@ mod test_smoke_coverage {
         credit_limit: i128,
         reserve: i128,
         draw_amount: i128,
-    ) -> (CreditClient, Address, Address, Address) {
+    ) -> (CreditClient<'_>, Address, Address, Address) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
@@ -2251,13 +2295,6 @@ mod test_smoke_coverage {
         assert_eq!(line_after_second.accrued_interest, 0);
         assert_eq!(line_after_second.utilized_amount, 727);
     }
-}
-
-#[cfg(test)]
-mod test_smoke_coverage {
-    use super::*;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 
     #[test]
     #[should_panic(expected = "Only active credit lines can be suspended")]
@@ -2306,10 +2343,12 @@ mod test_smoke_coverage {
 #[cfg(test)]
 pub mod test_helpers {
     use soroban_sdk::{
+        contract, contractimpl, symbol_short,
         testutils::Address as _,
         token::{Client as TokenClient, StellarAssetClient},
         Address, Env,
     };
+    use crate::types::ContractError;
     pub struct MockLiquidityToken {
         pub address: Address,
         env: Env,
@@ -2404,7 +2443,7 @@ pub mod test_helpers {
     }
 
     /// A simple token contract that can be configured to fail on transfers.
-    #[contractimpl]
+    #[contract]
     pub struct FailingTokenContract {
         fail_transfer: bool,
         fail_transfer_from: bool,
@@ -3028,7 +3067,7 @@ mod test_mock_liquidity_token {
     #[cfg(test)]
     mod test_mock_liquidity_token {
         use super::*;
-        use crate::test_coverage::test_helpers::MockLiquidityToken;
+        use crate::test_helpers::MockLiquidityToken;
         use crate::events::CreditLineEvent;
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::testutils::Ledger;
@@ -5137,7 +5176,7 @@ mod test_mock_liquidity_token {
     #[cfg(test)]
     mod test_utilization_cap {
         use super::*;
-        use crate::test_coverage::test_helpers::MockLiquidityToken;
+        use crate::test_helpers::MockLiquidityToken;
         use soroban_sdk::Env;
 
         fn setup_with_cap_env(
@@ -5368,168 +5407,5 @@ mod test_mock_liquidity_token {
             client.set_max_repay_amount(&0_i128);
         }
     }
-
-    #[test]
-    fn test_get_utilization_cap_returns_set_value() {
-        let env = Env::default();
-        let (client, borrower, _) = setup_with_cap_env(&env, 1_000);
-        assert!(client.get_utilization_cap(&borrower).is_none());
-        client.set_utilization_cap(&borrower, &7_500_u32);
-        assert_eq!(client.get_utilization_cap(&borrower), Some(7_500_u32));
-    }
-
-    #[test]
-    fn test_cap_at_100_percent_allows_full_limit() {
-        let env = Env::default();
-        let (client, borrower, _) = setup_with_cap_env(&env, 1_000);
-        client.set_utilization_cap(&borrower, &10_000_u32);
-        client.draw_credit(&borrower, &1_000_i128);
-        assert_eq!(
-            client.get_credit_line(&borrower).unwrap().utilized_amount,
-            1_000_i128
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "cap_bps must be <= 10000")]
-    fn test_set_cap_above_10000_reverts() {
-        let env = Env::default();
-        let (client, borrower, _) = setup_with_cap_env(&env, 1_000);
-        client.set_utilization_cap(&borrower, &10_001_u32);
-    }
-
-    #[test]
-    fn test_cap_is_per_borrower_independent() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower_a = Address::generate(&env);
-        let borrower_b = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin);
-        let liquidity = MockLiquidityToken::deploy(&env);
-        liquidity.mint(&contract_id, 2_000);
-        client.set_liquidity_token(&liquidity.address());
-        client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &50_u32);
-        client.open_credit_line(&borrower_b, &1_000_i128, &300_u32, &50_u32);
-        client.set_utilization_cap(&borrower_a, &5_000_u32);
-        client.draw_credit(&borrower_b, &1_000_i128);
-        assert_eq!(
-            client.get_credit_line(&borrower_b).unwrap().utilized_amount,
-            1_000_i128
-        );
-        client.draw_credit(&borrower_a, &500_i128);
-        assert_eq!(
-            client.get_credit_line(&borrower_a).unwrap().utilized_amount,
-            500_i128
-        );
-    }
-
-    #[test]
-    fn test_cap_boundary_exact_draw_succeeds() {
-        let env = Env::default();
-        let (client, borrower, _) = setup_with_cap_env(&env, 500);
-        client.set_utilization_cap(&borrower, &6_000_u32);
-        client.draw_credit(&borrower, &300_i128);
-        assert_eq!(
-            client.get_credit_line(&borrower).unwrap().utilized_amount,
-            300_i128
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "exceeds utilization cap")]
-    fn test_cap_boundary_one_over_reverts() {
-        let env = Env::default();
-        let (client, borrower, _) = setup_with_cap_env(&env, 500);
-        client.set_utilization_cap(&borrower, &6_000_u32);
-        client.draw_credit(&borrower, &301_i128);
-    }
 }
 
-#[cfg(test)]
-mod test_max_repay_amount {
-    use super::*;
-    use crate::types::ContractError;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::Env;
-
-    fn setup_with_token(env: &Env) -> (CreditClient, Address, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let borrower = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-        let token = token_id.address();
-        client.set_liquidity_token(&token);
-
-        // Mint to contract to allow draw
-        StellarAssetClient::new(env, &token).mint(&contract_id, &5_000_i128);
-
-        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-        // Draw some credit to repay later
-        client.draw_credit(&borrower, &500_i128);
-
-        // Mint to borrower so they have funds to repay
-        StellarAssetClient::new(env, &token).mint(&borrower, &5_000_i128);
-
-        (client, admin, borrower, token)
-    }
-
-    #[test]
-    fn test_unset_max_repay_amount_allows_any() {
-        let env = Env::default();
-        let (client, _admin, borrower, _token) = setup_with_token(&env);
-
-        assert_eq!(client.get_max_repay_amount(), None);
-
-        client.repay_credit(&borrower, &400_i128);
-        let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.utilized_amount, 100);
-    }
-
-    #[test]
-    fn test_set_and_get_max_repay_amount() {
-        let env = Env::default();
-        let (client, _admin, _borrower, _token) = setup_with_token(&env);
-
-        client.set_max_repay_amount(&300_i128);
-        assert_eq!(client.get_max_repay_amount(), Some(300_i128));
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #28)")]
-    fn test_repay_exceeds_max_cap_reverts() {
-        let env = Env::default();
-        let (client, _admin, borrower, _token) = setup_with_token(&env);
-
-        client.set_max_repay_amount(&300_i128);
-        client.repay_credit(&borrower, &400_i128);
-    }
-
-    #[test]
-    fn test_repay_within_max_cap_succeeds() {
-        let env = Env::default();
-        let (client, _admin, borrower, _token) = setup_with_token(&env);
-
-        client.set_max_repay_amount(&300_i128);
-        client.repay_credit(&borrower, &300_i128);
-        let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.utilized_amount, 200);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #5)")]
-    fn test_set_max_repay_amount_zero_or_negative() {
-        let env = Env::default();
-        let (client, _admin, _borrower, _token) = setup_with_token(&env);
-
-        client.set_max_repay_amount(&0_i128);
-    }
-}

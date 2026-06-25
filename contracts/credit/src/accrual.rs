@@ -293,3 +293,27 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     line
 }
+
+/// Materialize interest accrual for a caller-supplied batch of borrowers.
+///
+/// Only `Active` credit lines are processed. Missing lines and non-active lines
+/// are skipped without reverting the batch. Non-zero accruals are persisted and
+/// emit the standard `InterestAccruedEvent` through [`apply_accrual`].
+pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
+    for borrower in borrowers.iter() {
+        let Some(stored_line) = env.storage().persistent().get::<Address, CreditLineData>(&borrower) else {
+            continue;
+        };
+
+        if stored_line.status != CreditStatus::Active {
+            continue;
+        }
+
+        let previous_utilized = stored_line.utilized_amount;
+        let updated_line = apply_accrual(env, stored_line.clone());
+
+        if updated_line != stored_line {
+            persist_credit_line(env, &borrower, &updated_line, previous_utilized);
+        }
+    }
+}
