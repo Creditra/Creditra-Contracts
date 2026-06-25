@@ -27,7 +27,7 @@
 //!
 //! ## How
 //!
-//! - 12 `AuctionError` discriminants pinned by ABI;
+//! - 13 `AuctionError` discriminants pinned by ABI;
 //!   `AuctionError::Reentrancy = 10` reverts on re-entered refund or claim.
 //! - Three event topics under stable symbols (`BID_RFDN`, `AUC_CLOSE`,
 //!   `LIQ_SETL`) — see [`events`].
@@ -444,13 +444,30 @@ impl Auction {
         env.storage().persistent().set(&auction_id, &updated_state);
         bump_auction_state_ttl(&env, &auction_id);
 
+        // Resolve the escrow token before touching the reentrancy guard. The
+        // effects above (status -> Claimed, persisted) already precede this
+        // interaction, preserving checks-effects-interactions order. On any
+        // panic below, Soroban rolls back all storage writes, so the status
+        // flip is reverted atomically and the auction stays claimable.
+        let bid_token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "bid_token"))
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::BidTokenNotSet));
+
         // Reentrancy guard wraps the transfer site (defense-in-depth).
         // The status is already updated to Claimed above (checks-effects-interactions),
         // so a reentrant claim_auction call will hit AuctionNotClosed before reaching here.
         // The guard provides an additional layer: any reentrant call during the token
         // transfer will revert with AuctionError::Reentrancy.
         set_reentrancy_guard(&env);
-        // token_client.transfer(...) — proceeds to winner (transfer to be wired up)
+        // Transfer the winning bid (held in escrow since place_bid) out to the winner.
+        let token_client = token::Client::new(&env, &bid_token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &winner,
+            &updated_state.highest_bid,
+        );
         clear_reentrancy_guard(&env);
     }
 }

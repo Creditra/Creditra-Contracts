@@ -34,4 +34,7 @@ pub enum AuctionError {
     NoWinner = 11,
     /// Auction with the requested id was not found.
     NotFound = 12,
+    /// The `bid_token` instance key has not been configured, so proceeds
+    /// cannot be transferred to the winner on claim.
+    BidTokenNotSet = 13,
 }

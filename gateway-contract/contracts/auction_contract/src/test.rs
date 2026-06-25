@@ -1932,3 +1932,116 @@ mod reentrancy_preservation {
         assert!(settlement_found, "LIQ_SETL event must be emitted");
     }
 }
+
+/// Tests for issue #467 — `claim_auction` transferring the escrowed
+/// `highest_bid` of `bid_token` out to the winner.
+#[cfg(test)]
+mod claim_transfer_tests {
+    extern crate std;
+    use super::super::*;
+    use crate::errors::AuctionError;
+
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env, Symbol};
+
+    /// Happy path: a closed auction's winner receives `highest_bid` of the
+    /// configured `bid_token`, and the contract escrow is drained to zero.
+    #[test]
+    fn claim_auction_transfers_highest_bid_to_winner() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        // Configure the escrow token in instance storage.
+        let token_admin = Address::generate(&env);
+        let bid_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .set(&Symbol::new(&env, "bid_token"), &bid_token);
+        });
+        let sac = StellarAssetClient::new(&env, &bid_token);
+        let token_client = TokenClient::new(&env, &bid_token);
+
+        let winner = Address::generate(&env);
+        let bid: i128 = 100;
+
+        // Fund the contract escrow with the winning bid. (`place_bid` records
+        // the bid but does not itself pull funds in this WIP contract, so the
+        // escrow is provisioned directly — exactly the held-proceeds scenario
+        // `claim_auction` is meant to settle.)
+        sac.mint(&contract_id, &bid);
+
+        let auction_id = Symbol::new(&env, "claim_xfer");
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &u64::MAX,
+            &1_i128,
+            &0_u32,
+            &None,
+            &None,
+        );
+        client.place_bid(&auction_id, &winner, &bid);
+        client.close_auction(&auction_id);
+
+        // Pre-claim: escrow holds the bid, winner holds nothing.
+        assert_eq!(token_client.balance(&contract_id), bid);
+        assert_eq!(token_client.balance(&winner), 0);
+
+        client.claim_auction(&auction_id);
+
+        // Post-claim: proceeds moved to the winner, escrow drained.
+        assert_eq!(
+            token_client.balance(&winner),
+            bid,
+            "winner balance must increase by highest_bid"
+        );
+        assert_eq!(
+            token_client.balance(&contract_id),
+            0,
+            "escrow must be fully paid out"
+        );
+    }
+
+    /// Claiming when `bid_token` was never configured reverts with
+    /// `BidTokenNotSet` rather than silently succeeding without a payout.
+    #[test]
+    fn claim_auction_without_bid_token_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let winner = Address::generate(&env);
+        let auction_id = Symbol::new(&env, "claim_nobt");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &u64::MAX,
+            &1_i128,
+            &0_u32,
+            &None,
+            &None,
+        );
+        client.place_bid(&auction_id, &winner, &100_i128);
+        client.close_auction(&auction_id);
+
+        // bid_token instance key was never set -> claim must revert.
+        let err = client.try_claim_auction(&auction_id);
+        assert!(err.is_err());
+        assert_eq!(
+            err.unwrap_err().unwrap(),
+            AuctionError::BidTokenNotSet.into()
+        );
+    }
+}
