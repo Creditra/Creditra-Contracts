@@ -103,7 +103,7 @@ mod freeze;
 mod collateral;
 mod lifecycle;
 mod query;
-mod math_utils;
+pub mod math_utils;
 mod risk;
 mod storage;
 pub mod types;
