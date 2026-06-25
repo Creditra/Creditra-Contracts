@@ -163,6 +163,10 @@ const BULK_BLOCK_MAX: u32 = 50;
 /// Keeps the entrypoint within Soroban resource limits.
 const ACCRUE_BATCH_MAX: u32 = 50;
 
+/// Maximum borrowers that can be closed in a single `close_credit_lines_batch` call.
+/// Prevents unbounded gas consumption and stays within ledger limits.
+const BATCH_CLOSE_MAX: u32 = 32;
+
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
     fn settle_default_liquidation(
@@ -1011,6 +1015,18 @@ impl Credit {
 
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         lifecycle::close_credit_line(env, borrower, closer)
+    }
+
+    /// Admin-only batch close of multiple credit lines.
+    /// Reverts on first failure, ensuring atomicity.
+    /// 
+    /// # Parameters
+    /// - `borrowers`: List of borrower addresses to close; max `BATCH_CLOSE_MAX`
+    pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
+        if borrowers.len() > BATCH_CLOSE_MAX {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        lifecycle::close_credit_lines_batch(env, borrowers)
     }
 
     pub fn default_credit_line(env: Env, borrower: Address) {

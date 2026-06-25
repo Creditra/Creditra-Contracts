@@ -510,6 +510,33 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     );
 }
 
+/// Admin-only batch close of multiple credit lines.
+/// Reverts on first failure, ensuring atomicity.
+/// 
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `borrowers`: List of borrower addresses to close.
+/// 
+/// # Authorization
+/// Requires admin authorization.
+/// 
+/// # Errors
+/// - Reverts if any close fails (e.g., credit line not found, already closed).
+/// - Reverts if borrowers.len() > BATCH_CLOSE_MAX.
+pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+
+    // Resolve admin just once, to save storage access
+    let admin: Address = require_admin(&env);
+
+    // Process each borrower in order; failure of any reverts the whole batch
+    for borrower in borrowers {
+        // Reuse the single close function, passing admin as the closer
+        close_credit_line(env.clone(), borrower, admin.clone());
+    }
+}
+
 // ── default_credit_line ───────────────────────────────────────────────────────
 
 /// Mark a credit line as defaulted (admin only).
