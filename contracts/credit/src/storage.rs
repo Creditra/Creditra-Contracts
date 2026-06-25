@@ -118,6 +118,9 @@ pub enum DataKey {
     /// Per-borrower interest rate floor in basis points.
     /// When set, the effective interest rate must be >= floor.
     RateFloorBps(Address),
+    /// Per-borrower interest rate ceiling in basis points.
+    /// When set, the effective interest rate must be <= ceiling.
+    RateCeilingBps(Address),
     /// Per-borrower installment schedule for delinquency tracking.
     RepaymentSchedule(Address),
     /// Minimum allowed credit limit for new credit lines (admin-configurable).
@@ -416,6 +419,29 @@ pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
     env.storage()
         .persistent()
         .get(&DataKey::RateFloorBps(borrower.clone()))
+}
+
+/// Set a per-borrower interest rate ceiling (admin only, enforced by caller).
+pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Option<u32>) {
+    if let Some(ceiling) = ceiling_bps {
+        assert!(ceiling <= crate::risk::MAX_INTEREST_RATE_BPS, "ceiling exceeds max rate");
+    }
+    if let Some(ceiling) = ceiling_bps {
+        env.storage()
+            .persistent()
+            .set(&DataKey::RateCeilingBps(borrower.clone()), &ceiling);
+    } else {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RateCeilingBps(borrower.clone()));
+    }
+}
+
+/// Get the per-borrower interest rate ceiling, if set.
+pub fn get_borrower_rate_ceiling(env: &Env, borrower: &Address) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::RateCeilingBps(borrower.clone()))
 }
 
 /// Set a per-borrower max utilization ratio cap in basis points (admin only).

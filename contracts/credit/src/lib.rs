@@ -670,6 +670,28 @@ impl Credit {
         storage::get_borrower_rate_floor(&env, &borrower)
     }
 
+    /// Set a per-borrower interest rate ceiling (admin only).
+    ///
+    /// When set, the effective interest rate for this borrower will not exceed
+    /// this value. Pass `None` to remove the ceiling.
+    ///
+    /// # Parameters
+    /// - `borrower`: The borrower whose ceiling to configure.
+    /// - `ceiling_bps`: Ceiling in basis points, or `None` to remove.
+    ///
+    /// # Errors
+    /// - Reverts if caller is not the contract admin.
+    /// - Reverts if `ceiling_bps` exceeds `MAX_INTEREST_RATE_BPS` (10_000).
+    /// - Reverts if `ceiling_bps` is less than the configured floor for this borrower.
+    pub fn set_borrower_rate_ceiling(env: Env, borrower: Address, ceiling_bps: Option<u32>) {
+        risk::set_borrower_rate_ceiling(env, borrower, ceiling_bps)
+    }
+
+    /// Get the interest rate ceiling for a borrower, if set.
+    pub fn get_borrower_rate_ceiling(env: Env, borrower: Address) -> Option<u32> {
+        storage::get_borrower_rate_ceiling(&env, &borrower)
+    }
+
     pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
         risk::set_penalty_surcharge_bps(env, bps)
     }

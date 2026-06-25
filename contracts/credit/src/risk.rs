@@ -62,7 +62,7 @@ use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::storage::{
     assert_not_paused, assert_ts_monotonic, rate_cfg_key, rate_formula_key,
-    set_borrower_rate_floor,
+    set_borrower_rate_floor, set_borrower_rate_ceiling, get_borrower_rate_ceiling,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use crate::events::publish_risk_parameters_updated;
@@ -155,6 +155,26 @@ pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u3
         assert!(floor <= MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
     }
     crate::storage::set_borrower_rate_floor(&env, &borrower, floor_bps);
+}
+
+/// Set a per-borrower interest rate ceiling (admin only).
+///
+/// # Panics
+/// - If caller is not admin.
+/// - If `ceiling_bps` exceeds `MAX_INTEREST_RATE_BPS` (10_000).
+/// - If `ceiling_bps` is less than the configured floor for this borrower.
+pub fn set_borrower_rate_ceiling(env: Env, borrower: Address, ceiling_bps: Option<u32>) {
+    require_admin_auth(&env);
+    if let Some(ceiling) = ceiling_bps {
+        assert!(ceiling <= MAX_INTEREST_RATE_BPS, "ceiling exceeds max rate");
+        // Reject ceiling < floor at config-set time
+        if let Some(floor) = crate::storage::get_borrower_rate_floor(&env, &borrower) {
+            if ceiling < floor {
+                env.panic_with_error(ContractError::RateTooHigh);
+            }
+        }
+    }
+    crate::storage::set_borrower_rate_ceiling(&env, &borrower, ceiling_bps);
 }
 
 /// Set the penalty surcharge in basis points for delinquent lines (admin only).
@@ -291,11 +311,16 @@ pub fn update_risk_parameters(
     };
 
     // Apply per-borrower rate floor if configured
-    let final_rate = if let Some(floor) = crate::storage::get_borrower_rate_floor(&env, &borrower) {
+    let mut final_rate = if let Some(floor) = crate::storage::get_borrower_rate_floor(&env, &borrower) {
         effective_rate.max(floor)
     } else {
         effective_rate
     };
+
+    // Apply per-borrower rate ceiling if configured
+    if let Some(ceiling) = crate::storage::get_borrower_rate_ceiling(&env, &borrower) {
+        final_rate = final_rate.min(ceiling);
+    }
 
     // Rate-change guardrails (if configured)
     if let Some(cfg) = get_rate_change_limits(env.clone()) {
