@@ -121,6 +121,7 @@ use crate::events::{
     InterestAccruedEvent, RepaymentEvent,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
     publish_contract_upgraded_event, ContractUpgradedEvent,
+    publish_token_rescued_event,
 };
 use crate::math_utils::{mul_div, Rounding, compute_deviation_bps};
 use crate::storage::{
@@ -262,6 +263,41 @@ impl Credit {
             .instance()
             .get(&DataKey::LiquiditySource)
             .unwrap_or_else(|| env.current_contract_address())
+    }
+
+    /// Admin-only: rescue tokens accidentally sent to this contract.
+    /// Cannot rescue the configured liquidity or collateral tokens.
+    pub fn rescue_token(env: Env, token: Address, recipient: Address, amount: i128) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        if amount <= 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        // Disallow rescuing liquidity or collateral tokens
+        if let Some(liq) = env.storage().instance().get::<DataKey, Address>(&DataKey::LiquidityToken) {
+            if liq == token {
+                env.panic_with_error(ContractError::Unauthorized);
+            }
+        }
+
+        if let Some(col_token) = crate::storage::get_collateral_token(&env) {
+            if col_token == token {
+                env.panic_with_error(ContractError::Unauthorized);
+            }
+        }
+
+        // Transfer token from contract to recipient
+        let token_client = token::Client::new(&env, &token);
+        let contract_addr = env.current_contract_address();
+        token_client.transfer(&contract_addr, &recipient, &amount);
+
+        publish_token_rescued_event(&env, crate::events::TokenRescuedEvent {
+            token: token.clone(),
+            recipient: recipient.clone(),
+            amount,
+        });
     }
 
     pub fn open_credit_line(

@@ -491,6 +491,15 @@ pub fn get_auction_contract(env: &Env) -> Option<Address> {
     env.storage().instance().get(&DataKey::AuctionContract)
 }
 
+/// Return the configured collateral token, if any.
+///
+/// Historically the contract uses the single configured `LiquidityToken`
+/// for both liquidity and collateral operations; this helper abstracts the
+/// lookup so callers (e.g. `collateral.rs`) can use a dedicated name.
+pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::LiquidityToken)
+}
+
 /// Persist the auction contract address (admin only, enforced by caller).
 pub fn set_auction_contract(env: &Env, addr: &Address) {
     env.storage().instance().set(&DataKey::AuctionContract, addr);

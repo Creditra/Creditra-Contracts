@@ -373,6 +373,20 @@ pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnE
 }
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenRescuedEvent {
+    pub token: Address,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+pub fn publish_token_rescued_event(env: &Env, event: TokenRescuedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tok_resc")),
+        event,
+    );
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractUpgradedEvent {
     pub old_wasm_hash: soroban_sdk::BytesN<32>,
     pub new_wasm_hash: soroban_sdk::BytesN<32>,
