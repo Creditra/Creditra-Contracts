@@ -139,7 +139,7 @@ use crate::storage::{
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, RateChangeConfig,
+    OracleConfig, ProtocolConfig, ProtocolSummary, RateChangeConfig, RateFormulaConfig,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -886,6 +886,14 @@ impl Credit {
     /// Get the global total utilized accumulator.
     pub fn get_total_utilized(env: Env) -> i128 {
         crate::storage::get_total_utilized(&env)
+    }
+
+    /// Get protocol-level dashboard totals in one read-only call.
+    ///
+    /// Reads aggregate counters only: no borrower records are loaded and no TTL
+    /// entries are extended.
+    pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
+        query::get_protocol_summary(env)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {

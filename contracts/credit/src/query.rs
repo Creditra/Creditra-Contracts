@@ -11,7 +11,9 @@
 //! [`crate::types::CreditLineData`] field ordering note).
 
 use crate::storage::grace_period_key;
-use crate::types::{CreditLineData, CreditStatus, GracePeriodConfig, RepaymentSchedule};
+use crate::types::{
+    CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
+};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -34,6 +36,19 @@ use soroban_sdk::{Address, Env};
 #[allow(dead_code)]
 pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
     crate::storage::get_credit_line(&env, &borrower)
+}
+
+/// Return protocol-level dashboard aggregates in one read-only call.
+///
+/// This reads only aggregate storage slots and does not touch per-borrower
+/// records, so it does not bump persistent-entry TTL.
+pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
+    ProtocolSummary {
+        count: crate::storage::get_credit_line_count(&env),
+        total_utilized: crate::storage::get_total_utilized(&env),
+        total_collateral: crate::storage::get_total_collateral(&env),
+        treasury_balance: crate::storage::get_treasury_balance(&env),
+    }
 }
 
 /// Return the configured installment repayment schedule for `borrower`, if any.
