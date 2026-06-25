@@ -1,0 +1,93 @@
+name: API Version Guard
+
+# Fails a PR that edits the indexer-facing event surface
+# (`contracts/credit/src/events.rs`) without bumping `CONTRACT_API_VERSION`.
+#
+# `CONTRACT_API_VERSION` is the API contract consumed by off-chain indexers
+# (defined in `contracts/credit/src/lib.rs` — there is no `version.rs`). Any
+# change to the event layout that is not purely a doc-comment edit must be
+# accompanied by a version change, or this gate blocks the merge.
+#
+# Scope: only the credit crate is guarded — it is the sole crate that defines
+# `CONTRACT_API_VERSION`. The auction crate's events have no version constant.
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: api-version-guard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Require API version bump on events.rs change
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the PR base..head range is diffable.
+          fetch-depth: 0
+
+      - name: Enforce CONTRACT_API_VERSION bump
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          EVENTS_FILE="contracts/credit/src/events.rs"
+          VERSION_FILE="contracts/credit/src/lib.rs"
+          VERSION_SYMBOL="CONTRACT_API_VERSION"
+          # Merge-base diff: exactly what this PR introduces over its base.
+          RANGE="${BASE_SHA}...${HEAD_SHA}"
+
+          summary() { echo "$1" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
+
+          changed="$(git diff --name-only "$RANGE")"
+
+          if ! grep -qxF "$EVENTS_FILE" <<< "$changed"; then
+            echo "::notice::${EVENTS_FILE} unchanged — version guard not applicable."
+            summary "✅ API version guard: \`${EVENTS_FILE}\` unchanged."
+            exit 0
+          fi
+
+          # Decide whether the events.rs change touches anything other than
+          # doc/comment or blank lines. Added AND removed content lines count.
+          code_changed=0
+          while IFS= read -r line; do
+            case "$line" in
+              '+++'*|'---'*) continue ;;   # diff file headers, not content
+              '+'*|'-'*) ;;                 # an added/removed content line
+              *) continue ;;               # hunk headers / context
+            esac
+            content="${line:1}"
+            # Strip leading whitespace (pure bash, no external tools).
+            stripped="${content#"${content%%[![:space:]]*}"}"
+            case "$stripped" in
+              ''|'//'*|'/*'*|'*'*) ;;       # blank, line comment, block comment
+              *) code_changed=1; break ;;
+            esac
+          done <<< "$(git diff --unified=0 "$RANGE" -- "$EVENTS_FILE")"
+
+          if [ "$code_changed" -eq 0 ]; then
+            echo "::notice::${EVENTS_FILE} changed only in comments/blank lines — skipping."
+            summary "✅ API version guard: \`${EVENTS_FILE}\` doc-only change, version bump not required."
+            exit 0
+          fi
+
+          # Code-level event change present — a CONTRACT_API_VERSION change is required.
+          if git diff "$RANGE" -- "$VERSION_FILE" | grep -qE "^[+-].*${VERSION_SYMBOL}"; then
+            echo "::notice::${EVENTS_FILE} changed and ${VERSION_SYMBOL} was bumped — OK."
+            summary "✅ API version guard: \`${EVENTS_FILE}\` changed and \`${VERSION_SYMBOL}\` updated."
+            exit 0
+          fi
+
+          echo "::error file=${VERSION_FILE}::${EVENTS_FILE} changed without bumping ${VERSION_SYMBOL} in ${VERSION_FILE}. Indexers rely on this version — bump it (e.g. major bump for a breaking event change)."
+          summary "❌ API version guard: \`${EVENTS_FILE}\` changed but \`${VERSION_SYMBOL}\` was not bumped in \`${VERSION_FILE}\`."
+          exit 1
