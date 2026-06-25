@@ -1,0 +1,65 @@
+error[E0428]: the name `self_suspend_credit_line` is defined multiple times
+error[E0255]: the name `set_borrower_rate_floor` is defined multiple times
+error[E0252]: the name `publish_risk_parameters_updated` is defined multiple times
+error[E0252]: the name `assert_not_paused` is defined multiple times
+error[E0252]: the name `assert_ts_monotonic` is defined multiple times
+error[E0252]: the name `rate_cfg_key` is defined multiple times
+error[E0252]: the name `rate_formula_key` is defined multiple times
+error[E0428]: the name `__reinstate_credit_line` is defined multiple times
+error[E0428]: the name `__SPEC_XDR_FN_REINSTATE_CREDIT_LINE` is defined multiple times
+error[E0252]: the name `ContractError` is defined multiple times
+error[E0252]: the name `CreditLineData` is defined multiple times
+error[E0252]: the name `CreditStatus` is defined multiple times
+error[E0252]: the name `RateChangeConfig` is defined multiple times
+error[E0252]: the name `RateFormulaConfig` is defined multiple times
+error[E0432]: unresolved imports `crate::storage::get_collateral_balance`, `crate::storage::set_collateral_balance`, `crate::storage::get_min_collateral_ratio_bps`, `crate::storage::get_collateral_token`
+error[E0432]: unresolved import `crate::storage::set_borrower_unblocked`
+error[E0425]: cannot find function `set_min_collateral_ratio_bps` in module `crate::storage`
+error[E0425]: cannot find type `TestCreditClient` in this scope
+error[E0425]: cannot find value `TestCredit` in this scope
+error[E0425]: cannot find type `TestCreditClient` in this scope
+error[E0425]: cannot find function `get_min_collateral_ratio_bps` in module `crate::storage`
+error[E0425]: cannot find function `get_collateral_balance` in module `crate::storage`
+error[E0425]: cannot find function `get_protocol_fee_bps` in module `crate::storage`
+error[E0425]: cannot find function `add_treasury_balance` in module `crate::storage`
+error[E0425]: cannot find function `get_treasury_balance` in module `crate::storage`
+error[E0425]: cannot find function `set_rate_change_limits` in module `risk`
+error[E0425]: cannot find function `set_protocol_fee_bps` in module `crate::storage`
+error[E0425]: cannot find function `get_protocol_fee_bps` in module `crate::storage`
+error[E0425]: cannot find function `set_treasury_address` in module `crate::storage`
+error[E0425]: cannot find function `get_treasury_address` in module `crate::storage`
+error[E0425]: cannot find function `get_treasury_address` in module `crate::storage`
+error[E0425]: cannot find function `get_treasury_balance` in module `crate::storage`
+error[E0425]: cannot find function `clear_treasury_balance` in module `crate::storage`
+error[E0425]: cannot find function `set_oracle_config` in this scope
+error[E0425]: cannot find function `get_oracle_config` in this scope
+error[E0425]: cannot find function `accrue_batch` in module `accrual`
+error[E0425]: cannot find type `RateFormulaConfig` in this scope
+error[E0422]: cannot find struct, variant or union type `RateFormulaConfig` in this scope
+error[E0425]: cannot find function `rate_formula_key` in this scope
+error[E0425]: cannot find function `publish_rate_formula_config_event` in this scope
+error[E0425]: cannot find function `rate_formula_key` in this scope
+error[E0425]: cannot find function `publish_rate_formula_config_event` in this scope
+error[E0425]: cannot find value `DRAW_REVERSAL_WINDOW_SECS` in this scope
+error[E0425]: cannot find function `publish_draw_reversed_event` in this scope
+error[E0422]: cannot find struct, variant or union type `DrawReversedEvent` in this scope
+error[E0425]: cannot find type `ProtocolConfig` in this scope
+error[E0422]: cannot find struct, variant or union type `ProtocolConfig` in this scope
+error[E0592]: duplicate definitions with name `reinstate_credit_line`
+error[E0592]: duplicate definitions with name `spec_xdr_reinstate_credit_line`
+error[E0592]: duplicate definitions with name `reinstate_credit_line`
+error[E0592]: duplicate definitions with name `reinstate_credit_line`
+error[E0592]: duplicate definitions with name `try_reinstate_credit_line`
+error[E0599]: no method named `mock_all_auths` found for reference `&Env` in the current scope
+error[E0599]: no function or associated item named `generate` found for struct `soroban_sdk::Address` in the current scope
+error[E0599]: no method named `register` found for reference `&Env` in the current scope
+error[E0433]: cannot find type `TestCreditClient` in this scope
+error[E0308]: mismatched types
+error[E0308]: mismatched types
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+error[E0599]: no method named `get_current_contract_wasm` found for struct `Deployer` in the current scope
+error[E0034]: multiple applicable items in scope
+error[E0061]: this function takes 2 arguments but 3 arguments were supplied
+error: could not compile `creditra-credit` (lib) due to 65 previous errors; 7 warnings emitted

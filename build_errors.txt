@@ -1,0 +1,2 @@
+   Compiling stellar-xdr v22.1.0
+error: could not compile `stellar-xdr` (lib)

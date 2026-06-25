@@ -1,0 +1,11 @@
+   Compiling stellar-xdr v22.1.0
+   Compiling getrandom v0.3.4
+   Compiling getrandom v0.4.3
+   Compiling soroban-sdk-macros v22.0.11
+   Compiling darling v0.20.11
+   Compiling rand_core v0.9.5
+error: error calling dlltool 'dlltool.exe': program not found
+
+error: could not compile `getrandom` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error
