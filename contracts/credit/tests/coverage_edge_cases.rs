@@ -359,7 +359,10 @@ fn update_risk_limit_below_utilization_restricts_line() {
     client.draw_credit(&borrower, &5_000);
     client.update_risk_parameters(&borrower, &4_000, &500, &50);
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, creditra_credit::types::CreditStatus::Restricted);
+    assert_eq!(
+        line.status,
+        creditra_credit::types::CreditStatus::Restricted
+    );
     assert_eq!(line.credit_limit, 4_000);
 }
 

@@ -54,14 +54,15 @@ fn upgrade_happy_path_succeeds() {
     let mut found_upgrade_event = false;
 
     for i in 0..events.len() {
-        let (_contract, topics, data): (Address, soroban_sdk::Vec<Val>, Val) = events.get(i).unwrap();
-        
+        let (_contract, topics, data): (Address, soroban_sdk::Vec<Val>, Val) =
+            events.get(i).unwrap();
+
         // Check if this is an upgrade event
         if topics.len() >= 2 {
             if let Ok(topic1) = Symbol::try_from_val(&env, &topics.get(1).unwrap()) {
                 if topic1 == Symbol::new(&env, "upgraded") {
                     found_upgrade_event = true;
-                    
+
                     // Verify the event data contains the new WASM hash
                     // The event structure is ContractUpgradedEvent { old_wasm_hash, new_wasm_hash }
                     // We can't easily deserialize it in tests, but we verified it was emitted
@@ -98,7 +99,7 @@ fn upgrade_preserves_existing_state() {
     let borrower = Address::generate(&env);
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let token = token_id.address();
-    
+
     client.set_liquidity_token(&token);
     client.open_credit_line(&borrower, &10_000_i128, &500_u32, &75_u32);
 
@@ -134,8 +135,9 @@ fn upgrade_event_contains_correct_hashes() {
     let mut found_event = false;
 
     for i in 0..events.len() {
-        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) = events.get(i).unwrap();
-        
+        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) =
+            events.get(i).unwrap();
+
         if topics.len() >= 2 {
             if let Ok(topic1) = Symbol::try_from_val(&env, &topics.get(1).unwrap()) {
                 if topic1 == Symbol::new(&env, "upgraded") {
@@ -188,23 +190,24 @@ fn upgrade_requires_admin_not_arbitrary_address() {
 
     // Create a non-admin address
     let non_admin = Address::generate(&env);
-    
+
     // Mock auth for non-admin
     env.mock_all_auths_allowing_non_root_auth();
-    
+
     // Create client and attempt upgrade
     let client = CreditClient::new(&env, &contract_id);
     let new_wasm_hash = mock_wasm_hash(&env, 42);
-    
+
     // This should succeed because we're mocking all auths
     // In production, this would fail without proper admin auth
     client.upgrade(&new_wasm_hash);
-    
+
     // Verify the upgrade succeeded (event was emitted)
     let events = env.events().all();
     let mut found = false;
     for i in 0..events.len() {
-        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) = events.get(i).unwrap();
+        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) =
+            events.get(i).unwrap();
         if topics.len() >= 2 {
             if let Ok(topic) = Symbol::try_from_val(&env, &topics.get(1).unwrap()) {
                 if topic == Symbol::new(&env, "upgraded") {
@@ -267,14 +270,14 @@ fn upgrade_does_not_affect_credit_line_operations() {
     let borrower = Address::generate(&env);
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let token = token_id.address();
-    
+
     client.set_liquidity_token(&token);
-    
+
     // Mint liquidity for draws
     use soroban_sdk::token::StellarAssetClient;
     let sac = StellarAssetClient::new(&env, &token);
     sac.mint(&contract_id, &100_000_i128);
-    
+
     client.open_credit_line(&borrower, &10_000_i128, &500_u32, &75_u32);
 
     // Perform upgrade
@@ -283,7 +286,7 @@ fn upgrade_does_not_affect_credit_line_operations() {
 
     // Verify credit line operations still work after upgrade
     client.draw_credit(&borrower, &1_000_i128);
-    
+
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 1_000);
 }
@@ -320,8 +323,9 @@ fn upgrade_event_topic_is_stable() {
     let mut found_correct_topic = false;
 
     for i in 0..events.len() {
-        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) = events.get(i).unwrap();
-        
+        let (_contract, topics, _data): (Address, soroban_sdk::Vec<Val>, Val) =
+            events.get(i).unwrap();
+
         if topics.len() >= 2 {
             if let Ok(topic1) = Symbol::try_from_val(&env, &topics.get(1).unwrap()) {
                 if topic1 == Symbol::new(&env, "upgraded") {
@@ -332,7 +336,10 @@ fn upgrade_event_topic_is_stable() {
         }
     }
 
-    assert!(found_correct_topic, "Upgrade event topic must be 'upgraded'");
+    assert!(
+        found_correct_topic,
+        "Upgrade event topic must be 'upgraded'"
+    );
 }
 
 #[test]
@@ -346,12 +353,12 @@ fn upgrade_admin_rotation_still_works_after_upgrade() {
     // Verify admin rotation still works after upgrade
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin, &0_u64);
-    
+
     // Fast forward time
     env.ledger().with_mut(|li| li.timestamp = 1000);
-    
+
     client.accept_admin();
-    
+
     // Verify new admin can perform admin operations
     let another_wasm_hash = mock_wasm_hash(&env, 99);
     client.upgrade(&another_wasm_hash);

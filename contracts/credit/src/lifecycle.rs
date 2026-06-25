@@ -93,11 +93,10 @@ use crate::events::{
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, clear_repayment_schedule, persist_credit_line,
-    get_repayment_schedule as storage_get_repayment_schedule,
+    assert_not_paused, assert_ts_monotonic, clear_repayment_schedule, get_max_credit_limit,
+    get_min_credit_limit, get_repayment_schedule as storage_get_repayment_schedule,
+    persist_credit_line, set_max_credit_limit, set_min_credit_limit,
     set_repayment_schedule as storage_set_repayment_schedule,
-    get_min_credit_limit, set_min_credit_limit,
-    get_max_credit_limit, set_max_credit_limit,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};

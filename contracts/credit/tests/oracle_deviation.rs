@@ -30,7 +30,12 @@ fn setup(env: &Env) -> (CreditClient, Address, Address) {
 }
 
 /// Open a credit line, draw `utilized`, then default it. Returns borrower.
-fn open_and_default(client: &CreditClient, env: &Env, contract_id: &Address, utilized: i128) -> Address {
+fn open_and_default(
+    client: &CreditClient,
+    env: &Env,
+    contract_id: &Address,
+    utilized: i128,
+) -> Address {
     let borrower = Address::generate(env);
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
@@ -38,7 +43,12 @@ fn open_and_default(client: &CreditClient, env: &Env, contract_id: &Address, uti
     client.set_liquidity_token(&token_addr);
     token::StellarAssetClient::new(env, &token_addr).mint(contract_id, &1_000_000_i128);
     token::StellarAssetClient::new(env, &token_addr).mint(&borrower, &1_000_000_i128);
-    token::Client::new(env, &token_addr).approve(&borrower, contract_id, &1_000_000_i128, &1_000_000_u32);
+    token::Client::new(env, &token_addr).approve(
+        &borrower,
+        contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
 
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
     if utilized > 0 {
@@ -108,7 +118,10 @@ fn settle_without_oracle_config_accepts_none_price() {
     // No oracle config set — None price must be accepted.
     client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &None);
 
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
 }
 
 // ── first price acceptance ────────────────────────────────────────────────────
@@ -123,7 +136,10 @@ fn settle_with_oracle_config_first_price_accepted() {
     // First call — no prior price stored, any positive price is accepted.
     client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &Some(1_000_i128));
 
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
 }
 
 // ── within-bound deviation accepted ──────────────────────────────────────────
@@ -142,7 +158,10 @@ fn settle_within_deviation_bound_accepted() {
     let b2 = open_and_default(&client, &env, &contract_id, 200);
     client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_040_i128));
 
-    assert_eq!(client.get_credit_line(&b2).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&b2).unwrap().status,
+        CreditStatus::Closed
+    );
 }
 
 // ── over-deviation rejected ───────────────────────────────────────────────────
@@ -215,7 +234,10 @@ fn settle_price_at_exact_max_age_accepted() {
     let b2 = open_and_default(&client, &env, &contract_id, 200);
     client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_010_i128));
 
-    assert_eq!(client.get_credit_line(&b2).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&b2).unwrap().status,
+        CreditStatus::Closed
+    );
 }
 
 // ── invalid price ─────────────────────────────────────────────────────────────

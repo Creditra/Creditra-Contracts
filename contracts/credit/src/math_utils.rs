@@ -146,7 +146,9 @@ pub fn mul_div(a: u128, numerator: u128, denominator: u128, rounding: Rounding) 
 ///
 /// Panics if the result would overflow `u128`.
 pub fn scale_up(amount: u128) -> u128 {
-    amount.checked_mul(SCALE).expect("math_utils: scale_up overflow")
+    amount
+        .checked_mul(SCALE)
+        .expect("math_utils: scale_up overflow")
 }
 
 /// Scale `amount` down by [`SCALE`] (divide by 10^18), applying `rounding`.
@@ -159,7 +161,9 @@ pub fn scale_down(amount: u128, rounding: Rounding) -> u128 {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
             if amount % SCALE != 0 {
-                quotient.checked_add(1).expect("math_utils: scale_down ceil overflow")
+                quotient
+                    .checked_add(1)
+                    .expect("math_utils: scale_down ceil overflow")
             } else {
                 quotient
             }
@@ -282,7 +286,9 @@ pub fn prorate_interest(
         Rounding::Floor => quotient,
         Rounding::Ceil => {
             if step2 % BPS_YEAR_DENOM != 0 {
-                quotient.checked_add(1).expect("math_utils: prorate ceil overflow")
+                quotient
+                    .checked_add(1)
+                    .expect("math_utils: prorate ceil overflow")
             } else {
                 quotient
             }
@@ -618,8 +624,7 @@ mod tests {
     #[test]
     fn prorate_interest_max_rate_one_year() {
         // 10 000 tokens at 10 000 bps (100 %) for one year → 10 000 tokens
-        let interest =
-            prorate_interest(10_000, 10_000, SECONDS_PER_YEAR as u64, Rounding::Floor);
+        let interest = prorate_interest(10_000, 10_000, SECONDS_PER_YEAR as u64, Rounding::Floor);
         assert_eq!(interest, 10_000);
     }
 
@@ -724,7 +729,7 @@ mod tests {
         let p = u32::MAX as u128; // ~4.3 × 10^9
         let r = 10_000_u32;
         let t = u32::MAX as u64; // ~4.3 × 10^9 seconds ≈ 136 years
-        // p × r × t = 4.3e9 × 10_000 × 4.3e9 ≈ 1.85 × 10^23 — fits in u128
+                                 // p × r × t = 4.3e9 × 10_000 × 4.3e9 ≈ 1.85 × 10^23 — fits in u128
         let _ = prorate_interest(p, r, t, Rounding::Floor);
         let _ = prorate_interest(p, r, t, Rounding::Ceil);
     }

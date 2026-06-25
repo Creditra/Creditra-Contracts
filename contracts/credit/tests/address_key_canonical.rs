@@ -112,10 +112,7 @@ fn test_g_address_strkey_prefix() {
     let user = Address::generate(&env);
     let s = user.to_string();
     let bytes = s.as_ref().as_bytes();
-    assert!(
-        !bytes.is_empty(),
-        "G-address strkey must not be empty"
-    );
+    assert!(!bytes.is_empty(), "G-address strkey must not be empty");
     let first = bytes[0] as char;
     assert!(
         first == 'G' || first == 'C',
@@ -132,10 +129,7 @@ fn test_c_address_strkey_prefix() {
     let bytes = s.as_ref().as_bytes();
     assert!(!bytes.is_empty());
     let first = bytes[0] as char;
-    assert_eq!(
-        first, 'C',
-        "Contract address strkey must start with 'C'"
-    );
+    assert_eq!(first, 'C', "Contract address strkey must start with 'C'");
 }
 
 #[test]
@@ -152,7 +146,10 @@ fn test_g_and_c_strkey_prefixes_are_distinct() {
     let user_first = user_str.as_ref().as_bytes()[0] as char;
     let contract_first = contract_str.as_ref().as_bytes()[0] as char;
     assert_eq!(user_first, 'G', "User address strkey should start with 'G'");
-    assert_eq!(contract_first, 'C', "Contract address strkey should start with 'C'");
+    assert_eq!(
+        contract_first, 'C',
+        "Contract address strkey should start with 'C'"
+    );
 }
 
 // ── Collision resistance ────────────────────────────────────────────────────
@@ -167,7 +164,10 @@ fn test_different_addresses_produce_different_strkeys() {
     let s1 = addr1.to_string();
     let s2 = addr2.to_string();
 
-    assert_ne!(s1, s2, "Different G-addresses must produce different strkey strings");
+    assert_ne!(
+        s1, s2,
+        "Different G-addresses must produce different strkey strings"
+    );
 }
 
 #[test]

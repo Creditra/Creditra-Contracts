@@ -72,9 +72,9 @@ fn serialize_key<T: soroban_sdk::IntoVal<soroban_sdk::Env, soroban_sdk::Val>>(
     key: T,
 ) -> Vec<u8> {
     use soroban_sdk::Val;
-    
+
     let val: Val = key.into_val(env);
-    
+
     // Convert Val to bytes using Soroban's serialization
     // This mimics what happens internally when storing to the ledger
     format!("{:?}", val).into_bytes()
@@ -96,11 +96,11 @@ fn serialize_key<T: soroban_sdk::IntoVal<soroban_sdk::Env, soroban_sdk::Val>>(
 /// A vector of unique `Address` instances
 fn generate_test_addresses(env: &Env, count: usize) -> Vec<Address> {
     let mut addresses = Vec::with_capacity(count);
-    
+
     for _ in 0..count {
         addresses.push(Address::generate(env));
     }
-    
+
     addresses
 }
 
@@ -119,14 +119,14 @@ fn generate_test_addresses(env: &Env, count: usize) -> Vec<Address> {
 /// A vector of adversarial `Address` instances
 fn generate_adversarial_addresses(env: &Env, count: usize) -> Vec<Address> {
     let mut addresses = Vec::with_capacity(count);
-    
+
     // Generate addresses that might have similar characteristics
     // In a real scenario, these would be crafted to have similar prefixes
     // For now, we use the standard generator which provides good randomness
     for _ in 0..count {
         addresses.push(Address::generate(env));
     }
-    
+
     addresses
 }
 
@@ -148,19 +148,19 @@ fn generate_adversarial_addresses(env: &Env, count: usize) -> Vec<Address> {
 #[test]
 fn test_key_stability_same_address_produces_identical_keys() {
     let env = Env::default();
-    
+
     // Generate a single test address
     let borrower = Address::generate(&env);
-    
+
     // Serialize the address as a storage key multiple times
     let iterations = 100;
     let mut keys = Vec::with_capacity(iterations);
-    
+
     for _ in 0..iterations {
         let key = serialize_key(&env, borrower.clone());
         keys.push(key);
     }
-    
+
     // Assert all keys are identical
     let first_key = &keys[0];
     for (i, key) in keys.iter().enumerate() {
@@ -170,7 +170,7 @@ fn test_key_stability_same_address_produces_identical_keys() {
             i
         );
     }
-    
+
     // Additional check: use a HashSet to verify uniqueness count
     let unique_keys: HashSet<Vec<u8>> = keys.into_iter().collect();
     assert_eq!(
@@ -189,18 +189,18 @@ fn test_key_stability_same_address_produces_identical_keys() {
 #[test]
 fn test_key_stability_credit_line_data_address() {
     let env = Env::default();
-    
+
     let borrower = Address::generate(&env);
-    
+
     // Serialize the address multiple times
     let iterations = 50;
     let mut keys = Vec::with_capacity(iterations);
-    
+
     for _ in 0..iterations {
         let key = serialize_key(&env, borrower.clone());
         keys.push(key);
     }
-    
+
     // Verify all keys are identical
     let first_key = &keys[0];
     for key in &keys {
@@ -227,21 +227,21 @@ fn test_key_stability_credit_line_data_address() {
 #[test]
 fn test_key_uniqueness_different_addresses_produce_unique_keys() {
     let env = Env::default();
-    
+
     // Generate a large pool of distinct addresses
     let address_count = 100;
     let addresses = generate_test_addresses(&env, address_count);
-    
+
     // Serialize each address to a storage key
     let mut keys = Vec::with_capacity(address_count);
     for addr in &addresses {
         let key = serialize_key(&env, addr.clone());
         keys.push(key);
     }
-    
+
     // Use HashSet to detect collisions
     let unique_keys: HashSet<Vec<u8>> = keys.iter().cloned().collect();
-    
+
     // Assert: number of unique keys must equal number of addresses
     assert_eq!(
         unique_keys.len(),
@@ -251,7 +251,7 @@ fn test_key_uniqueness_different_addresses_produce_unique_keys() {
         address_count,
         unique_keys.len()
     );
-    
+
     // Additional verification: ensure no two addresses share a key
     for i in 0..keys.len() {
         for j in (i + 1)..keys.len() {
@@ -278,21 +278,21 @@ fn test_key_uniqueness_different_addresses_produce_unique_keys() {
 #[test]
 fn test_key_uniqueness_adversarial_addresses() {
     let env = Env::default();
-    
+
     // Generate adversarial addresses
     let address_count = 50;
     let addresses = generate_adversarial_addresses(&env, address_count);
-    
+
     // Serialize each address
     let mut keys = Vec::with_capacity(address_count);
     for addr in &addresses {
         let key = serialize_key(&env, addr.clone());
         keys.push(key);
     }
-    
+
     // Check for collisions using HashSet
     let unique_keys: HashSet<Vec<u8>> = keys.iter().cloned().collect();
-    
+
     assert_eq!(
         unique_keys.len(),
         address_count,
@@ -311,20 +311,20 @@ fn test_key_uniqueness_adversarial_addresses() {
 #[test]
 fn test_key_uniqueness_large_address_pool() {
     let env = Env::default();
-    
+
     // Generate a large pool of addresses (200+)
     let address_count = 200;
     let addresses = generate_test_addresses(&env, address_count);
-    
+
     // Serialize all addresses
     let keys: Vec<Vec<u8>> = addresses
         .iter()
         .map(|addr| serialize_key(&env, addr.clone()))
         .collect();
-    
+
     // Check for collisions
     let unique_keys: HashSet<Vec<u8>> = keys.iter().cloned().collect();
-    
+
     assert_eq!(
         unique_keys.len(),
         address_count,
@@ -356,37 +356,37 @@ fn test_key_uniqueness_large_address_pool() {
 #[test]
 fn test_variant_isolation_same_address_different_variants() {
     let env = Env::default();
-    
+
     // Generate a single test address
     let borrower = Address::generate(&env);
-    
+
     // We need to test the actual DataKey variants
     // Since we can't directly instantiate DataKey in tests without the contract,
     // we'll use a different approach: test via contract storage operations
-    
+
     // For now, we'll document the expected behavior and test what we can
     // In a real scenario, you would:
     // 1. Create DataKey::LastDrawTs(borrower.clone())
     // 2. Create DataKey::BlockedBorrower(borrower.clone())
     // 3. Create DataKey::UtilizationCapBps(borrower.clone())
     // 4. Serialize each and verify uniqueness
-    
+
     // Since we're testing from outside the contract, we'll verify the concept
     // by ensuring that the same address used in different contexts produces
     // different storage patterns
-    
+
     // This test serves as documentation of the expected behavior
     // The actual variant isolation is guaranteed by Soroban's enum serialization
     // which includes the variant discriminant in the key
-    
+
     // We can verify this by checking that direct address storage doesn't
     // conflict with enum-wrapped storage
     let direct_key = serialize_key(&env, borrower.clone());
-    
+
     // In practice, DataKey::BlockedBorrower(borrower) would serialize to:
     // [variant_discriminant, address_bytes]
     // which is different from just [address_bytes]
-    
+
     // This test documents the isolation guarantee
     assert!(
         !direct_key.is_empty(),
@@ -408,30 +408,30 @@ fn test_variant_isolation_same_address_different_variants() {
 #[test]
 fn test_variant_isolation_multiple_addresses() {
     let env = Env::default();
-    
+
     // Generate multiple test addresses
     let address_count = 10;
     let addresses = generate_test_addresses(&env, address_count);
-    
+
     // For each address, we would create keys for all variants
     // Since we're testing from outside, we verify the address uniqueness
     // which is the foundation of variant isolation
-    
+
     let mut all_keys = Vec::new();
-    
+
     for addr in &addresses {
         // In a real test with access to DataKey, we would do:
         // all_keys.push(serialize_key(&env, DataKey::LastDrawTs(addr.clone())));
         // all_keys.push(serialize_key(&env, DataKey::BlockedBorrower(addr.clone())));
         // all_keys.push(serialize_key(&env, DataKey::UtilizationCapBps(addr.clone())));
-        
+
         // For now, we verify the base address uniqueness
         all_keys.push(serialize_key(&env, addr.clone()));
     }
-    
+
     // Verify all keys are unique
     let unique_keys: HashSet<Vec<u8>> = all_keys.iter().cloned().collect();
-    
+
     assert_eq!(
         unique_keys.len(),
         all_keys.len(),
@@ -458,43 +458,43 @@ fn test_variant_isolation_multiple_addresses() {
 fn test_storage_isolation_real_contract_operations() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     // Register the contract
     let contract_id = env.register(Credit, ());
     let client = creditra_credit::CreditClient::new(&env, &contract_id);
-    
+
     // Initialize the contract
     let admin = Address::generate(&env);
     client.init(&admin);
-    
+
     // Generate multiple borrowers
     let borrower1 = Address::generate(&env);
     let borrower2 = Address::generate(&env);
     let borrower3 = Address::generate(&env);
-    
+
     // Open credit lines for each borrower with different parameters
     client.open_credit_line(&borrower1, &10_000, &300, &70);
     client.open_credit_line(&borrower2, &20_000, &400, &80);
     client.open_credit_line(&borrower3, &30_000, &500, &90);
-    
+
     // Retrieve and verify each borrower's data is isolated
     let line1 = client.get_credit_line(&borrower1).unwrap();
     let line2 = client.get_credit_line(&borrower2).unwrap();
     let line3 = client.get_credit_line(&borrower3).unwrap();
-    
+
     // Verify each borrower has their own distinct data
     assert_eq!(line1.credit_limit, 10_000, "Borrower 1 data corrupted");
     assert_eq!(line2.credit_limit, 20_000, "Borrower 2 data corrupted");
     assert_eq!(line3.credit_limit, 30_000, "Borrower 3 data corrupted");
-    
+
     assert_eq!(line1.interest_rate_bps, 300, "Borrower 1 rate corrupted");
     assert_eq!(line2.interest_rate_bps, 400, "Borrower 2 rate corrupted");
     assert_eq!(line3.interest_rate_bps, 500, "Borrower 3 rate corrupted");
-    
+
     assert_eq!(line1.risk_score, 70, "Borrower 1 score corrupted");
     assert_eq!(line2.risk_score, 80, "Borrower 2 score corrupted");
     assert_eq!(line3.risk_score, 90, "Borrower 3 score corrupted");
-    
+
     // Verify borrower addresses are correct
     assert_eq!(line1.borrower, borrower1, "Borrower 1 address mismatch");
     assert_eq!(line2.borrower, borrower2, "Borrower 2 address mismatch");
@@ -511,47 +511,49 @@ fn test_storage_isolation_real_contract_operations() {
 fn test_storage_isolation_large_scale() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(Credit, ());
     let client = creditra_credit::CreditClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.init(&admin);
-    
+
     // Generate many borrowers
     let borrower_count = 50;
     let mut borrowers = Vec::with_capacity(borrower_count);
-    
+
     for i in 0..borrower_count {
         let borrower = Address::generate(&env);
         let credit_limit = (i as i128 + 1) * 1_000;
         let interest_rate = 300 + (i as u32 * 10);
         let risk_score = 50 + (i as u32);
-        
+
         client.open_credit_line(&borrower, &credit_limit, &interest_rate, &risk_score);
         borrowers.push((borrower, credit_limit, interest_rate, risk_score));
     }
-    
+
     // Verify all borrowers have isolated, correct data
-    for (i, (borrower, expected_limit, expected_rate, expected_score)) in borrowers.iter().enumerate() {
+    for (i, (borrower, expected_limit, expected_rate, expected_score)) in
+        borrowers.iter().enumerate()
+    {
         let line = client.get_credit_line(borrower).unwrap();
-        
+
         assert_eq!(
             line.credit_limit, *expected_limit,
-            "Borrower {} credit limit mismatch", i
+            "Borrower {} credit limit mismatch",
+            i
         );
         assert_eq!(
             line.interest_rate_bps, *expected_rate,
-            "Borrower {} interest rate mismatch", i
+            "Borrower {} interest rate mismatch",
+            i
         );
         assert_eq!(
             line.risk_score, *expected_score,
-            "Borrower {} risk score mismatch", i
+            "Borrower {} risk score mismatch",
+            i
         );
-        assert_eq!(
-            line.borrower, *borrower,
-            "Borrower {} address mismatch", i
-        );
+        assert_eq!(line.borrower, *borrower, "Borrower {} address mismatch", i);
     }
 }
 
@@ -569,31 +571,31 @@ fn test_storage_isolation_large_scale() {
 fn test_edge_case_same_address_multiple_operations() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register(Credit, ());
     let client = creditra_credit::CreditClient::new(&env, &contract_id);
-    
+
     let admin = Address::generate(&env);
     client.init(&admin);
-    
+
     let borrower = Address::generate(&env);
-    
+
     // Open credit line
     client.open_credit_line(&borrower, &10_000, &300, &70);
-    
+
     // Verify initial state
     let line1 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line1.credit_limit, 10_000);
-    
+
     // Update risk parameters (overwrites storage)
     client.update_risk_parameters(&borrower, &15_000, &400, &75);
-    
+
     // Verify updated state
     let line2 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line2.credit_limit, 15_000);
     assert_eq!(line2.interest_rate_bps, 400);
     assert_eq!(line2.risk_score, 75);
-    
+
     // Verify borrower address is still correct
     assert_eq!(line2.borrower, borrower);
 }
@@ -607,17 +609,17 @@ fn test_edge_case_same_address_multiple_operations() {
 #[test]
 fn test_edge_case_address_serialization_consistency() {
     let env = Env::default();
-    
+
     let borrower = Address::generate(&env);
-    
+
     // Serialize the same address in different "contexts" (iterations)
     let key1 = serialize_key(&env, borrower.clone());
-    
+
     // Simulate some operations (to change environment state)
     let _other_addr = Address::generate(&env);
-    
+
     let key2 = serialize_key(&env, borrower.clone());
-    
+
     // Keys should be identical regardless of environment state
     assert_eq!(
         key1, key2,
@@ -634,22 +636,22 @@ fn test_edge_case_address_serialization_consistency() {
 #[test]
 fn test_edge_case_sequential_address_generation() {
     let env = Env::default();
-    
+
     // Generate addresses sequentially
     let mut addresses = Vec::new();
     for _ in 0..30 {
         addresses.push(Address::generate(&env));
     }
-    
+
     // Serialize all addresses
     let keys: Vec<Vec<u8>> = addresses
         .iter()
         .map(|addr| serialize_key(&env, addr.clone()))
         .collect();
-    
+
     // Verify all keys are unique
     let unique_keys: HashSet<Vec<u8>> = keys.iter().cloned().collect();
-    
+
     assert_eq!(
         unique_keys.len(),
         addresses.len(),
@@ -668,20 +670,20 @@ fn test_edge_case_sequential_address_generation() {
 #[test]
 fn test_documentation_storage_key_structure() {
     let env = Env::default();
-    
+
     let borrower = Address::generate(&env);
-    
+
     // Serialize the address
     let key = serialize_key(&env, borrower.clone());
-    
+
     // Document expectations:
     // 1. Key should be non-empty
     assert!(!key.is_empty(), "Storage key should not be empty");
-    
+
     // 2. Key should be deterministic (tested elsewhere)
     // 3. Key should be unique per address (tested elsewhere)
     // 4. Key should be stable across invocations (tested elsewhere)
-    
+
     // This test documents that these properties are guaranteed
 }
 
@@ -692,20 +694,20 @@ fn test_documentation_storage_key_structure() {
 #[test]
 fn test_documentation_collision_resistance_guarantee() {
     // This test documents the theoretical collision resistance
-    
+
     // Address space: 2^256 possible addresses
     // Probability of collision with n addresses: ~n^2 / 2^257
-    
+
     // For 1 million addresses:
     // P(collision) ≈ (10^6)^2 / 2^257 ≈ 10^12 / 10^77 ≈ 10^-65
-    
+
     // This is astronomically unlikely and can be considered impossible
     // in practical terms.
-    
+
     // The test suite validates this by testing with 200+ addresses
     // and finding zero collisions, which is consistent with the
     // theoretical guarantee.
-    
+
     // This test serves as documentation of the collision resistance guarantee
     assert!(true, "Collision resistance is mathematically guaranteed");
 }
@@ -721,20 +723,20 @@ fn test_documentation_collision_resistance_guarantee() {
 #[test]
 fn test_summary_comprehensive_key_encoding_validation() {
     let env = Env::default();
-    
+
     // 1. Key Stability
     let borrower = Address::generate(&env);
     let key1 = serialize_key(&env, borrower.clone());
     let key2 = serialize_key(&env, borrower.clone());
     assert_eq!(key1, key2, "Key stability validation failed");
-    
+
     // 2. Key Uniqueness
     let addr1 = Address::generate(&env);
     let addr2 = Address::generate(&env);
     let key_a = serialize_key(&env, addr1);
     let key_b = serialize_key(&env, addr2);
     assert_ne!(key_a, key_b, "Key uniqueness validation failed");
-    
+
     // 3. Large-scale uniqueness
     let addresses = generate_test_addresses(&env, 100);
     let keys: Vec<Vec<u8>> = addresses
@@ -747,6 +749,6 @@ fn test_summary_comprehensive_key_encoding_validation() {
         addresses.len(),
         "Large-scale uniqueness validation failed"
     );
-    
+
     // All validations passed
 }

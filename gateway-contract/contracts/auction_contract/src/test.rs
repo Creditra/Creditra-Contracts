@@ -1782,7 +1782,10 @@ mod reentrancy_preservation {
         client.close_auction(&auction_id);
 
         let recovered = client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
-        assert_eq!(recovered, 420_i128, "recovered amount must equal highest_bid");
+        assert_eq!(
+            recovered, 420_i128,
+            "recovered amount must equal highest_bid"
+        );
 
         // Verify LIQ_SETL event was emitted
         let mut settlement_found = false;

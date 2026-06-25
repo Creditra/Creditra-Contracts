@@ -63,7 +63,9 @@ use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent}
 use crate::storage::{
     assert_not_paused, assert_ts_monotonic, persist_credit_line, rate_cfg_key, rate_formula_key,
 };
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
+};
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -162,7 +164,10 @@ pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u3
 pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    assert!(bps <= MAX_INTEREST_RATE_BPS, "penalty surcharge exceeds max rate");
+    assert!(
+        bps <= MAX_INTEREST_RATE_BPS,
+        "penalty surcharge exceeds max rate"
+    );
     crate::storage::set_penalty_surcharge_bps(&env, bps);
 }
 
@@ -298,7 +303,10 @@ pub fn update_risk_parameters(
             }
 
             if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts > 0 {
-                let elapsed = env.ledger().timestamp().saturating_sub(credit_line.last_rate_update_ts);
+                let elapsed = env
+                    .ledger()
+                    .timestamp()
+                    .saturating_sub(credit_line.last_rate_update_ts);
                 if elapsed < cfg.rate_change_min_interval {
                     env.panic_with_error(ContractError::TimestampRegression);
                 }
