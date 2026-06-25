@@ -85,6 +85,16 @@
 //! authoritative transition table and
 //! [`docs/default-liquidation-auction-hook.md`](../../../docs/default-liquidation-auction-hook.md)
 //! for the handoff protocol.
+use crate::events::{
+    publish_late_fee_charged_event,
+    LateFeeChargedEvent,
+};
+
+use crate::storage::{
+    get_late_fee_flat,
+    get_treasury_balance,
+    set_treasury_balance,
+};
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
@@ -282,6 +292,7 @@ pub fn set_repayment_schedule(
             amount_per_period,
             period_seconds,
             next_due_ts: first_due_ts,
+            installment_index: 0,
         },
     );
 }
@@ -300,14 +311,57 @@ pub fn advance_repayment_schedule_after_repay(env: &Env, borrower: &Address, amo
         return;
     }
 
-    let installments_paid = (amount / schedule.amount_per_period) as u64;
-    if installments_paid == 0 {
-        return;
+    let now = env.ledger().timestamp();
+    let mut schedule_changed = false;
+
+    if now > schedule.next_due_ts {
+        let late_fee = get_late_fee_flat(env);
+
+        if late_fee > 0 {
+            let mut check_due_ts = schedule.next_due_ts;
+            while now > check_due_ts {
+                schedule.installment_index = schedule.installment_index.saturating_add(1);
+                let current_balance = get_treasury_balance(env);
+
+                set_treasury_balance(
+                    env,
+                    current_balance.saturating_add(late_fee),
+                );
+
+                publish_late_fee_charged_event(
+                    env,
+                    LateFeeChargedEvent {
+                        borrower: borrower.clone(),
+                        amount: late_fee,
+                        installment_index: schedule.installment_index,
+                    },
+                );
+
+                check_due_ts = check_due_ts.saturating_add(schedule.period_seconds);
+                schedule_changed = true;
+            }
+        }
     }
 
-    let advance_seconds = schedule.period_seconds.saturating_mul(installments_paid);
-    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
-    storage_set_repayment_schedule(env, borrower, &schedule);
+    let installments_paid =
+        (amount / schedule.amount_per_period) as u64;
+
+    if installments_paid > 0 {
+        let advance_seconds =
+            schedule.period_seconds.saturating_mul(installments_paid);
+
+        schedule.next_due_ts =
+            schedule.next_due_ts.saturating_add(advance_seconds);
+        schedule_changed = true;
+    }
+
+    if schedule_changed {
+        storage_set_repayment_schedule(
+            env,
+            borrower,
+            &schedule,
+        );
+    }
 }
 
 /// Open a new credit line.
@@ -406,16 +460,6 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
     suspend_credit_line_internal(&env, borrower);
 }
 
-/// Suspend the caller's own active credit line.
-///
-/// This is a borrower safety control that blocks future draws while leaving
-/// repayments available. Reactivation still requires a separate admin-controlled
-/// workflow.
-pub fn self_suspend_credit_line(env: Env, borrower: Address) {
-    assert_not_paused(&env);
-    borrower.require_auth();
-    suspend_credit_line_internal(&env, borrower);
-}
 
 /// Close a credit line permanently.
 ///
@@ -768,24 +812,113 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 /// # Events
 /// Emits a `("credit", "selfsus")` [`CreditLineEvent`] with the updated status.
 pub fn self_suspend_credit_line(env: Env, borrower: Address) {
+    assert_not_paused(&env);
     // Require authorization from the borrower (not admin)
     borrower.require_auth();
 
-    let mut credit_line: CreditLineData = env
+    let stored_line: CreditLineData = env
         .storage()
         .persistent()
         .get(&borrower)
-        .expect("Credit line not found");
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+    let previous_utilized = stored_line.utilized_amount;
 
     // Apply interest accrual before any mutation
-    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+    let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 
     // Only allow self-suspension from Active status
     if credit_line.status != CreditStatus::Active {
         panic!("Only active credit lines can be self-suspended");
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    credit_line.status = CreditStatus::Suspended;
+    let new_ts = env.ledger().timestamp();
+    assert_ts_monotonic(&env, credit_line.suspension_ts, new_ts);
+    credit_line.suspension_ts = new_ts;
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("selfsus")),
+        CreditLineEvent {
+            borrower,
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::storage::DataKey;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
+    use soroban_sdk::{Address, Env, contract, contractimpl};
+    use crate::storage::{
+        set_late_fee_flat,
+        get_late_fee_flat,
+        get_treasury_balance,
+        set_treasury_balance,
+    };
+
+    #[contract]
+    struct TestCredit;
+
+    #[contractimpl]
+    impl TestCredit {
+        pub fn init(env: Env, admin: Address) {
+            let key = crate::storage::admin_key(&env);
+            env.storage().instance().set(&key, &admin);
+            env.storage()
+                .instance()
+                .set(&DataKey::LiquiditySource, &env.current_contract_address());
+        }
+
+        pub fn open(
+            env: Env,
+            borrower: Address,
+            credit_limit: i128,
+            interest_rate_bps: u32,
+            risk_score: u32,
+        ) {
+            open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score);
+        }
+
+        pub fn draw(env: Env, borrower: Address, amount: i128) {
+            borrower.require_auth();
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get(&borrower)
+                .expect("not found");
+            line.utilized_amount += amount;
+            env.storage().persistent().set(&borrower, &line);
+        }
+
+        pub fn close(env: Env, borrower: Address, closer: Address) {
+            close_credit_line(env, borrower, closer);
+        }
+
+        pub fn suspend(env: Env, borrower: Address) {
+            suspend_credit_line(env, borrower);
+        }
+
+        pub fn default_line(env: Env, borrower: Address) {
+            default_credit_line(env, borrower);
+        }
+
+        pub fn reinstate(env: Env, borrower: Address) {
+            reinstate_credit_line(env, borrower, CreditStatus::Active);
+        }
+
+        pub fn get(env: Env, borrower: Address) -> Option<CreditLineData> {
+            env.storage().persistent().get(&borrower)
+        }
+    }
 
     fn setup(env: &Env) -> (TestCreditClient<'_>, Address, Address) {
         env.mock_all_auths();
@@ -1109,4 +1242,101 @@ pub fn self_suspend_credit_line(env: Env, borrower: Address) {
             "close_credit_line must require closer authorization"
         );
     }
+
+
+     #[test]
+    fn late_fee_is_added_to_treasury_when_payment_is_late() {
+        let env = Env::default();
+
+        let borrower = Address::generate(&env);
+
+        set_late_fee_flat(&env, 100);
+
+        set_repayment_schedule(
+            &env,
+            borrower.clone(),
+            100,
+            30,
+            50, // due at 50
+        );
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 100; // overdue
+        });
+
+        advance_repayment_schedule_after_repay(
+            &env,
+            &borrower,
+            100,
+        );
+
+        assert_eq!(
+            get_treasury_balance(&env),
+            100
+        );
+    }
+
+    #[test]
+fn zero_late_fee_does_not_change_treasury_balance() {
+    let env = Env::default();
+
+    let borrower = Address::generate(&env);
+
+    set_late_fee_flat(&env, 0);
+
+    set_repayment_schedule(
+        &env,
+        borrower.clone(),
+        100,
+        30,
+        50,
+    );
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+
+    advance_repayment_schedule_after_repay(
+        &env,
+        &borrower,
+        100,
+    );
+
+    assert_eq!(
+        get_treasury_balance(&env),
+        0
+    );
+}
+
+#[test]
+fn late_fee_event_is_emitted() {
+    let env = Env::default();
+
+    let borrower = Address::generate(&env);
+
+    set_late_fee_flat(&env, 100);
+
+    set_repayment_schedule(
+        &env,
+        borrower.clone(),
+        100,
+        30,
+        50,
+    );
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 100;
+    });
+
+    advance_repayment_schedule_after_repay(
+        &env,
+        &borrower,
+        100,
+    );
+
+    let events = env.events().all();
+
+    assert!(!events.is_empty());
+}
+
 }

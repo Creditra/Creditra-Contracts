@@ -59,7 +59,7 @@
 //! full per-variant tier table.
 
 use crate::types::{ContractError, CreditLineData, RepaymentSchedule};
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 ///
@@ -127,6 +127,8 @@ pub enum DataKey {
     /// Penalty surcharge in basis points applied to delinquent credit lines.
     /// Admin-configurable via `set_penalty_surcharge_bps`. Default is 0.
     PenaltySurchargeBps,
+    /// Flat fee charged once per missed installment period.
+    LateFeeFlat,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
@@ -153,6 +155,8 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// The currently active contract WASM hash.
+    CurrentWasmHash,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -418,11 +422,19 @@ pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
         .get(&DataKey::RateFloorBps(borrower.clone()))
 }
 
-/// Set a per-borrower max utilization ratio cap in basis points (admin only).
-pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: u32) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::UtilizationCapBps(borrower.clone()), &cap_bps);
+/// Set or clear the per-borrower max utilization ratio cap in basis points.
+pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    match cap_bps {
+        Some(v) => {
+            env.storage().persistent().set(&key, &v);
+        }
+        None => {
+            if env.storage().persistent().has(&key) {
+                env.storage().persistent().remove(&key);
+            }
+        }
+    }
 }
 
 /// Get the per-borrower max utilization ratio cap, if set.
@@ -439,16 +451,18 @@ pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
         .remove(&DataKey::RepaymentSchedule(borrower.clone()));
 }
 
-/// Block a borrower from drawing (admin only, enforced by caller).
-pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
-    if blocked {
-        env.storage()
-            .persistent()
-            .set(&DataKey::BlockedBorrower(borrower.clone()), &true);
-    } else {
-        env.storage()
-            .persistent()
-            .remove(&DataKey::BlockedBorrower(borrower.clone()));
+/// Store `borrower` as blocked.
+pub fn set_borrower_blocked(env: &Env, borrower: &Address) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::BlockedBorrower(borrower.clone()), &true);
+}
+
+/// Remove the blocked entry for `borrower`.
+pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
+    let key = DataKey::BlockedBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().remove(&key);
     }
 }
 
@@ -676,4 +690,101 @@ pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
 /// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::PenaltySurchargeBps, &bps);
+}
+/// Returns configured flat late fee.
+/// Defaults to 0 to preserve existing behaviour.
+pub fn get_late_fee_flat(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LateFeeFlat)
+        .unwrap_or(0)
+}
+
+/// Stores flat late fee amount.
+pub fn set_late_fee_flat(env: &Env, fee: i128) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LateFeeFlat, &fee);
+}
+
+pub fn get_treasury_balance(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::TreasuryBalance)
+        .unwrap_or(0)
+}
+
+/// Stores treasury balance.
+pub fn set_treasury_balance(env: &Env, amount: i128) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryBalance, &amount);
+}
+
+pub fn get_current_wasm_hash(env: &Env) -> BytesN<32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::CurrentWasmHash)
+        .unwrap_or_else(|| BytesN::from_array(env, &[0; 32]))
+}
+
+pub fn set_current_wasm_hash(env: &Env, hash: &BytesN<32>) {
+    env.storage().instance().set(&DataKey::CurrentWasmHash, hash);
+}
+
+pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::LiquidityToken)
+}
+
+pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
+    let key = DataKey::CollateralBalance(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    } else {
+        0
+    }
+}
+
+pub fn set_collateral_balance(env: &Env, borrower: &Address, amount: i128) {
+    let key = DataKey::CollateralBalance(borrower.clone());
+    env.storage().persistent().set(&key, &amount);
+    bump_persistent_ttl(env, &key);
+}
+
+pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&DataKey::MinCollateralRatioBps)
+}
+
+pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
+    assert!(ratio_bps <= 10_000, "ratio_bps must be <= 10000");
+    env.storage().instance().set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+
+pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&DataKey::ProtocolFeeBps)
+}
+
+pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
+}
+
+pub fn get_treasury_address(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::TreasuryAddress)
+}
+
+pub fn set_treasury_address(env: &Env, addr: &Address) {
+    env.storage().instance().set(&DataKey::TreasuryAddress, addr);
+}
+
+pub fn add_treasury_balance(env: &Env, amount: i128) {
+    let cur = get_treasury_balance(env);
+    let updated = cur
+        .checked_add(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    env.storage().instance().set(&DataKey::TreasuryBalance, &updated);
+}
+
+pub fn clear_treasury_balance(env: &Env) {
+    env.storage().instance().set(&DataKey::TreasuryBalance, &0_i128);
 }

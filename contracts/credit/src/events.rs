@@ -167,6 +167,15 @@ pub struct FeeAccruedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LateFeeChargedEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub installment_index: u32,
+}   
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PenaltyRateEnteredEvent {
     pub borrower: Address,
     pub base_rate_bps: u32,
@@ -267,6 +276,13 @@ pub fn publish_rate_formula_config_event(env: &Env, enabled: bool) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "rate_form")),
         enabled,
+    );
+}
+
+pub fn publish_late_fee_charged_event(env: &Env,event: LateFeeChargedEvent) {
+    env.events().publish(
+        ("late_fee",),
+        event,
     );
 }
 
