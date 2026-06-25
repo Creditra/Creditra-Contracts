@@ -11,13 +11,12 @@
 //! Uses `proptest` to generate 1024 random test cases covering:
 //! - Random `base_rate_bps`, `slope_bps_per_score`, `min_rate_bps`, `max_rate_bps`
 //! - Random `risk_score` (0–100)
-//! - Random additional `floor` and `ceiling` clamping values
 //!
 //! # Invariants Tested
 //!
 //! For all valid configs (where `min_rate_bps <= max_rate_bps <= 10_000`):
 //! ```text
-//! output ∈ [max(floor, min_rate_bps), min(ceiling, max_rate_bps, 10_000)]
+//! output ∈ [min_rate_bps, min(max_rate_bps, 10_000)]
 //! ```
 //!
 //! # Shrinking
@@ -57,16 +56,6 @@ fn risk_score() -> impl Strategy<Value = u32> {
     0u32..=MAX_RISK_SCORE
 }
 
-/// Generate an optional floor value (0..=10_000).
-fn optional_floor() -> impl Strategy<Value = Option<u32>> {
-    proptest::option::of(0u32..=MAX_INTEREST_RATE_BPS)
-}
-
-/// Generate an optional ceiling value (0..=10_000).
-fn optional_ceiling() -> impl Strategy<Value = Option<u32>> {
-    proptest::option::of(0u32..=MAX_INTEREST_RATE_BPS)
-}
-
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 1024, // Run 1024 test cases as specified
@@ -77,48 +66,38 @@ proptest! {
     /// Property: rate formula output respects all clamping bounds.
     ///
     /// Given a valid config and risk score, the computed rate must lie within:
-    /// - Lower bound: `max(floor, min_rate_bps)` (if floor is provided)
-    /// - Upper bound: `min(ceiling, max_rate_bps, 10_000)` (if ceiling is provided)
+    /// - Lower bound: `min_rate_bps`
+    /// - Upper bound: `min(max_rate_bps, 10_000)`
     ///
     /// This test covers:
     /// - Normal configurations
     /// - Edge cases (min == max, extreme slopes)
     /// - Saturating multiplication boundaries (when slope * score overflows)
-    /// - Additional floor/ceiling clamping
     #[test]
     fn rate_formula_clamp_invariant(
         cfg in valid_rate_formula_config(),
-        score in risk_score(),
-        floor in optional_floor(),
-        ceiling in optional_ceiling()
+        score in risk_score()
     ) {
         // Compute the raw formula output
         let raw_output = compute_rate_from_score(&cfg, score);
 
-        // Apply additional floor clamping if provided
-        let effective_floor = floor.unwrap_or(0).max(cfg.min_rate_bps);
-
-        // Apply additional ceiling clamping if provided
-        let formula_upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
-        let effective_ceiling = ceiling.map_or(formula_upper, |c| c.min(formula_upper));
-
-        // The final expected bounds
-        let lower_bound = effective_floor;
-        let upper_bound = effective_ceiling;
+        // The expected bounds from the config
+        let lower_bound = cfg.min_rate_bps;
+        let upper_bound = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
 
         // Assert the output is within bounds
         prop_assert!(
             raw_output >= lower_bound,
-            "Rate {} below lower bound {} (config: base={}, slope={}, min={}, max={}, score={}, floor={:?}, ceiling={:?})",
+            "Rate {} below lower bound {} (config: base={}, slope={}, min={}, max={}, score={})",
             raw_output, lower_bound, cfg.base_rate_bps, cfg.slope_bps_per_score,
-            cfg.min_rate_bps, cfg.max_rate_bps, score, floor, ceiling
+            cfg.min_rate_bps, cfg.max_rate_bps, score
         );
 
         prop_assert!(
             raw_output <= upper_bound,
-            "Rate {} exceeds upper bound {} (config: base={}, slope={}, min={}, max={}, score={}, floor={:?}, ceiling={:?})",
+            "Rate {} exceeds upper bound {} (config: base={}, slope={}, min={}, max={}, score={})",
             raw_output, upper_bound, cfg.base_rate_bps, cfg.slope_bps_per_score,
-            cfg.min_rate_bps, cfg.max_rate_bps, score, floor, ceiling
+            cfg.min_rate_bps, cfg.max_rate_bps, score
         );
     }
 
