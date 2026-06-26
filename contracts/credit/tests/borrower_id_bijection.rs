@@ -1,42 +1,30 @@
 // SPDX-License-Identifier: MIT
 
-//! Property-based tests verifying the bijection invariant of the borrower-id
-//! mapping maintained by `storage.rs`.
+//! Property-based tests for the bijection invariant of the borrower-id mapping.
 //!
 //! # What
 //!
 //! `storage.rs` maintains two complementary persistent storage slots:
 //!
-//! - `CreditLineIdByBorrower(Address)  → u32`    — stable numeric id per borrower
-//! - `CreditLineBorrowerById(u32)      → Address` — reverse lookup from id to address
+//! - `CreditLineIdByBorrower(Address)  -> u32`    -- stable numeric id per borrower
+//! - `CreditLineBorrowerById(u32)      -> Address` -- reverse lookup from id to address
 //!
-//! These form a **bijective** (one-to-one, onto) mapping for every id in
-//! `0..CreditLineCount`.  [`ensure_credit_line_id`] writes both directions
-//! atomically on first open and is **idempotent** on subsequent opens of the
+//! These form a bijective (one-to-one, onto) mapping for every id in
+//! `0..CreditLineCount`. `ensure_credit_line_id` writes both directions
+//! atomically on first open and is idempotent on subsequent opens of the
 //! same address.
 //!
-//! # Why a proptest?
+//! # Invariants verified
 //!
-//! A single linear test can verify happy-path correctness but cannot efficiently
-//! cover the space of interleaved open/close/default/reinstate sequences.
-//! Proptest generates hundreds of randomised operation sequences, shrinks any
-//! failing case to a minimal reproducer, and enforces all three invariants:
-//!
-//! 1. **Round-trip** — enumerating id `N` yields a borrower whose forward
-//!    mapping `CreditLineIdByBorrower` also returns `N` (bijection).
-//! 2. **Stable-id** — closing then reopening the same borrower keeps the same id.
-//! 3. **Monotonic count** — `CreditLineCount` never decreases.
-//!
-//! # Acceptance criteria
-//!
-//! - Round-trip holds for ≥256 proptest cases (configured via `PROPTEST_CASES`).
-//! - `Close` + reopen of the same borrower yields the same id.
-//! - `CreditLineCount` is monotonically non-decreasing.
+//! 1. **Round-trip** -- enumerating id `N` yields a borrower whose forward
+//!    mapping also returns `N` (bijection).
+//! 2. **Stable-id** -- closing then reopening the same borrower keeps the same id.
+//! 3. **Monotonic count** -- `CreditLineCount` never decreases.
 //!
 //! # How
 //!
 //! A proptest generates a sequence of [`Op`] variants over a fixed pool of
-//! `N_BORROWERS` (= 12) borrower addresses.  After every operation the full
+//! `N_BORROWERS` (= 12) borrower addresses. After every operation the full
 //! `0..CreditLineCount` range is walked via `enumerate_credit_lines` and each
 //! entry is cross-checked against the locally-tracked `id_to_borrower` list.
 
@@ -50,7 +38,7 @@ use creditra_credit::{types::CreditStatus, Credit, CreditClient};
 // Configuration
 // ---------------------------------------------------------------------------
 
-/// Number of distinct borrower addresses in the pool.  Must be >= 10 per the
+/// Number of distinct borrower addresses in the pool. Must be >= 10 per the
 /// issue acceptance criteria.
 const N_BORROWERS: usize = 12;
 
@@ -81,7 +69,7 @@ fn setup_env() -> (Env, Address, Address, Vec<Address>) {
     (env, contract_id, admin, borrowers)
 }
 
-/// Open (or re-open) a credit line.  Returns `true` on success.
+/// Open (or re-open) a credit line. Returns `true` on success.
 ///
 /// Uses a fixed credit-limit/rate/score that is well within bounds.
 fn try_open(client: &CreditClient, borrower: &Address) -> bool {
@@ -90,17 +78,17 @@ fn try_open(client: &CreditClient, borrower: &Address) -> bool {
         .is_ok()
 }
 
-/// Admin-close a credit line.  Returns `true` on success.
+/// Admin-close a credit line. Returns `true` on success.
 fn try_close(client: &CreditClient, borrower: &Address, admin: &Address) -> bool {
     client.try_close_credit_line(borrower, admin).is_ok()
 }
 
-/// Admin-default a credit line.  Returns `true` on success.
+/// Admin-default a credit line. Returns `true` on success.
 fn try_default(client: &CreditClient, borrower: &Address) -> bool {
     client.try_default_credit_line(borrower).is_ok()
 }
 
-/// Reinstate a Defaulted credit line back to Active.  Returns `true` on success.
+/// Reinstate a Defaulted credit line back to Active. Returns `true` on success.
 fn try_reinstate(client: &CreditClient, borrower: &Address) -> bool {
     client
         .try_reinstate_credit_line(borrower, &CreditStatus::Active)
@@ -116,9 +104,9 @@ fn try_reinstate(client: &CreditClient, borrower: &Address) -> bool {
 enum Op {
     /// Open (or re-open after Close/Default) a credit line.
     Open { idx: usize },
-    /// Force-close a credit line (admin path — works from any non-Closed status).
+    /// Force-close a credit line (admin path -- works from any non-Closed status).
     Close { idx: usize },
-    /// Admin-default a credit line (Active/Suspended/Restricted → Defaulted).
+    /// Admin-default a credit line (Active/Suspended/Restricted -> Defaulted).
     Default { idx: usize },
     /// Reinstate a Defaulted credit line to Active.
     Reinstate { idx: usize },
@@ -127,8 +115,8 @@ enum Op {
 /// Proptest strategy that generates a random [`Op`] referencing a valid
 /// borrower pool index.
 ///
-/// `Open` is weighted 4× relative to `Close`/`Default`/`Reinstate` so that
-/// the pool fills up quickly and the bijection sweep exercises many ids.
+/// `Open` is weighted 4x relative to `Close`/`Default`/`Reinstate` so the pool
+/// fills up quickly and the bijection sweep exercises many ids.
 fn arb_op() -> impl Strategy<Value = Op> {
     prop_oneof![
         4 => (0..N_BORROWERS).prop_map(|idx| Op::Open { idx }),
@@ -139,12 +127,12 @@ fn arb_op() -> impl Strategy<Value = Op> {
 }
 
 // ---------------------------------------------------------------------------
-// Bijection sweep
+// Bijection sweep helper
 // ---------------------------------------------------------------------------
 
-/// Walk every id in `0..count` via `enumerate_credit_lines` and verify:
+/// Walk every id in `0..count` via `enumerate_credit_lines` and assert:
 ///
-/// 1. The enumeration returns contiguous ids `0, 1, 2, …, count-1`.
+/// 1. The enumeration returns contiguous ids `0, 1, 2, ..., count-1`.
 /// 2. For each id the embedded `borrower` address matches `id_to_borrower[id]`.
 ///
 /// Returns a `TestCaseError` via `prop_assert*!` on any violation.
@@ -166,26 +154,32 @@ fn sweep_bijection(
         for i in 0..page.len() {
             let (id, line) = page.get(i).expect("index within page bounds");
 
-            // ── Contiguity ────────────────────────────────────────────────
+            // Contiguity: ids must be sequential with no gaps.
             prop_assert_eq!(
                 id,
                 walked,
-                "[{label}] enumerate yielded non-contiguous id={id}, expected {walked}"
+                "[{}] enumerate yielded non-contiguous id={}, expected {}",
+                label,
+                id,
+                walked
             );
 
-            // ── Known-address cross-check ─────────────────────────────────
-            // If the ID is within the range of our recorded first-opens, the
-            // borrower address must match.
+            // Address cross-check: the address stored at this id must match
+            // the address we recorded when the borrower was first opened.
             if (id as usize) < id_to_borrower.len() {
                 let expected_addr = &id_to_borrower[id as usize];
                 prop_assert_eq!(
                     &line.borrower,
                     expected_addr,
-                    "[{label}] id={id}: enumerated borrower ≠ recorded borrower"
+                    "[{}] id={}: enumerated borrower != recorded borrower",
+                    label,
+                    id
                 );
             } else {
                 return Err(TestCaseError::fail(format!(
-                    "[{label}] id={id} is outside recorded first-opens length {}",
+                    "[{}] id={} is outside recorded first-opens length {}",
+                    label,
+                    id,
                     id_to_borrower.len()
                 )));
             }
@@ -203,22 +197,27 @@ fn sweep_bijection(
     prop_assert_eq!(
         walked,
         count,
-        "[{label}] enumeration covered {walked} ids but CreditLineCount={count}"
+        "[{}] enumeration covered {} ids but CreditLineCount={}",
+        label,
+        walked,
+        count
     );
 
-    // Locally tracked first-opens must match the contract's count.
+    // Local first-opens length must match the contract's count.
     prop_assert_eq!(
         id_to_borrower.len(),
         count as usize,
-        "[{label}] local first-opens length {} ≠ CreditLineCount={count}",
-        id_to_borrower.len()
+        "[{}] local first-opens length {} != CreditLineCount={}",
+        label,
+        id_to_borrower.len(),
+        count
     );
 
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic unit tests (fast baseline)
+// Deterministic unit tests (fast baselines)
 // ---------------------------------------------------------------------------
 
 /// Open all N_BORROWERS lines and verify the bijection once.
@@ -283,7 +282,7 @@ fn stable_id_after_close_reopen() {
     // Reopen (admin re-opens a Closed line).
     assert!(try_open(&client, borrower), "re-open must succeed");
 
-    // Count must not have grown (same borrower → same slot).
+    // Count must not have grown (same borrower -> same slot).
     let count_after = client.get_credit_line_count();
     assert_eq!(
         count_after, count_first,
@@ -313,14 +312,21 @@ fn count_monotonically_increases() {
 
         try_open(&client, borrower);
         let c = client.get_credit_line_count();
-        assert!(c >= max_count, "count regressed after open: {c} < {max_count}");
+        assert!(
+            c >= max_count,
+            "count regressed after open: {} < {}",
+            c,
+            max_count
+        );
         max_count = c;
 
         try_close(&client, borrower, &admin);
         let c2 = client.get_credit_line_count();
         assert!(
             c2 >= max_count,
-            "count regressed after close: {c2} < {max_count}"
+            "count regressed after close: {} < {}",
+            c2,
+            max_count
         );
         max_count = c2;
     }
@@ -334,20 +340,19 @@ fn count_monotonically_increases() {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    // Run 256 cases to satisfy the acceptance criterion.
     #![proptest_config(ProptestConfig::with_cases(256))]
 
-    /// For ≥256 randomly-generated operation sequences spanning ≥12 distinct
+    /// For >=256 randomly-generated operation sequences spanning >=12 distinct
     /// borrowers, assert after every operation:
     ///
-    /// 1. **Round-trip / bijection** — enumerating the full range
+    /// 1. **Round-trip / bijection** -- enumerating the full range
     ///    `0..CreditLineCount` via `enumerate_credit_lines` returns contiguous
     ///    ids and each entry's embedded borrower address matches the address
-    ///    that was recorded when it was first opened.
+    ///    recorded at first open.
     ///
-    /// 2. **Monotonic count** — `CreditLineCount` never decreases across any op.
+    /// 2. **Monotonic count** -- `CreditLineCount` never decreases across any op.
     ///
-    /// 3. **Stable id** — when a borrower is reopened after a close, the id
+    /// 3. **Stable id** -- when a borrower is reopened after a close, the id
     ///    recovered from enumeration equals the id recorded at first open.
     #[test]
     fn prop_bijection_survives_open_close_churn(
@@ -356,21 +361,19 @@ proptest! {
         let (env, contract_id, admin, borrowers) = setup_env();
         let client = CreditClient::new(&env, &contract_id);
 
-        // The list of borrower addresses in the order they were first opened.
-        // The index in this vector is the contract-assigned ID.
+        // id_to_borrower[id] = the address of the borrower assigned that stable id.
+        // Built up as borrowers are opened for the first time.
         let mut id_to_borrower: Vec<Address> = Vec::new();
 
-        // Track the ID of each borrower in the pool (indexed by borrower pool index `idx`).
-        // `borrower_to_id[idx]` is `Some(id)` if the borrower was opened, `None` otherwise.
+        // borrower_to_id[idx] = the stable id assigned to borrowers[idx], or None.
         let mut borrower_to_id: Vec<Option<u32>> = vec![None; N_BORROWERS];
 
         // Track the previous count for monotonicity verification.
         let mut prev_count = 0_u32;
 
         for op in &ops {
-            // Advance ledger time by a small positive delta before every op so
-            // that the monotonic-timestamp guard in `assert_ts_monotonic` never
-            // fires for the operations that write timestamps.
+            // Advance ledger time before every op so the monotonic-timestamp
+            // guard in the contract never fires.
             env.ledger().with_mut(|li| li.timestamp += 10);
 
             match op {
@@ -381,15 +384,16 @@ proptest! {
                     if ok {
                         let count = client.get_credit_line_count();
 
-                        // Monotonicity check.
+                        // Monotonicity.
                         prop_assert!(
                             count >= prev_count,
-                            "CreditLineCount regressed after Open: {count} < {prev_count}"
+                            "CreditLineCount regressed after Open: {} < {}",
+                            count,
+                            prev_count
                         );
                         prev_count = count;
 
-                        // Find the current id of this borrower via enumeration.
-                        // We scan at most `count` entries (capped at 100 per page).
+                        // Find the current id of this borrower by scanning enumeration.
                         let mut found_id: Option<u32> = None;
                         let mut cursor2: Option<u32> = None;
                         'outer: loop {
@@ -413,29 +417,32 @@ proptest! {
                         let id = match found_id {
                             Some(i) => i,
                             None => {
-                                // The borrower must appear after a successful open.
-                                return Err(TestCaseError::fail(
-                                    format!("borrower[{idx}] not found in enumerate after open")
-                                ));
+                                return Err(TestCaseError::fail(format!(
+                                    "borrower[{}] not found in enumerate after open",
+                                    idx
+                                )));
                             }
                         };
 
-                        // Stable-id check: if we have a recorded first-open id,
-                        // it must equal the current id.
+                        // Stable-id check.
                         if let Some(prev_id) = borrower_to_id[*idx] {
                             prop_assert_eq!(
                                 id,
                                 prev_id,
-                                "stable-id violated for borrowers[{idx}]: \
-                                 id after reopen={id}, expected {prev_id}"
+                                "stable-id violated for borrowers[{}]: \
+                                 id after reopen={}, expected {}",
+                                idx,
+                                id,
+                                prev_id
                             );
                         } else {
                             borrower_to_id[*idx] = Some(id);
-                            // The ID assigned must be the next index in id_to_borrower.
+                            // First-open id must be the next sequential slot.
                             prop_assert_eq!(
                                 id as usize,
                                 id_to_borrower.len(),
-                                "first-open ID={id} does not match expected sequential ID={}",
+                                "first-open ID={} does not match expected sequential ID={}",
+                                id,
                                 id_to_borrower.len()
                             );
                             id_to_borrower.push(borrower.clone());
@@ -449,7 +456,9 @@ proptest! {
                     let count = client.get_credit_line_count();
                     prop_assert!(
                         count >= prev_count,
-                        "CreditLineCount regressed after Close: {count} < {prev_count}"
+                        "CreditLineCount regressed after Close: {} < {}",
+                        count,
+                        prev_count
                     );
                     prev_count = count;
                 }
@@ -459,7 +468,9 @@ proptest! {
                     let count = client.get_credit_line_count();
                     prop_assert!(
                         count >= prev_count,
-                        "CreditLineCount regressed after Default: {count} < {prev_count}"
+                        "CreditLineCount regressed after Default: {} < {}",
+                        count,
+                        prev_count
                     );
                     prev_count = count;
                 }
@@ -469,13 +480,15 @@ proptest! {
                     let count = client.get_credit_line_count();
                     prop_assert!(
                         count >= prev_count,
-                        "CreditLineCount regressed after Reinstate: {count} < {prev_count}"
+                        "CreditLineCount regressed after Reinstate: {} < {}",
+                        count,
+                        prev_count
                     );
                     prev_count = count;
                 }
             }
 
-            // ── Bijection sweep after every operation ─────────────────────
+            // Bijection sweep after every operation.
             let count = client.get_credit_line_count();
             sweep_bijection(&client, &id_to_borrower, count, "post-op sweep")?;
         }
