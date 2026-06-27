@@ -324,7 +324,6 @@ pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bo
         },
     );
 }
-}
 
 /// Publish a borrower temporary freeze event.
 ///
