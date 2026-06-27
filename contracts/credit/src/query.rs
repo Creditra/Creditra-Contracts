@@ -126,9 +126,9 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15_000);
 
     // Convert to u128 for overflow-safe multiplication.
-    let collateral_u128 = u128::from(collateral.max(0));
-    let utilized_u128 = u128::from(utilized.max(0));
-    let min_ratio_u128 = u128::from(min_ratio_bps);
+    let collateral_u128 = collateral.max(0) as u128;
+    let utilized_u128 = utilized.max(0) as u128;
+    let min_ratio_u128 = min_ratio_bps as u128;
 
     // health_bps = collateral * 100_000_000 / (utilized * min_ratio)
     //

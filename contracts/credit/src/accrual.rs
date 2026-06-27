@@ -341,12 +341,13 @@ pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
             if stored_line.status == CreditStatus::Active && stored_line.utilized_amount > 0 {
                 let previous_utilized = stored_line.utilized_amount;
                 let previous_ts = stored_line.last_accrual_ts;
+                let previous_status = stored_line.status;
                 let updated = apply_accrual(env, stored_line);
                 // Only persist if accrual actually changed the line
                 if updated.utilized_amount != previous_utilized
                     || updated.last_accrual_ts != previous_ts
                 {
-                    persist_credit_line(env, &borrower, &updated, previous_utilized);
+                    persist_credit_line(env, &borrower, &updated, previous_utilized, Some(previous_status));
                 }
             }
         }
