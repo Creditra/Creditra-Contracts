@@ -98,10 +98,32 @@ fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
 
 /// Computes the current Dutch auction price based on elapsed time.
 ///
-/// The price decays linearly from start_price to floor_price over the auction duration.
-/// Formula: current_price = start_price - ((start_price - floor_price) * elapsed_time) / duration
+/// ### Mathematical Formula
+/// The price decays linearly from `start_price` to `floor_price` over the auction `duration`:
+/// `current_price = start_price - ((start_price - floor_price) * elapsed_time) / duration`
 ///
-/// This function is overflow-safe and ensures monotone decreasing prices.
+/// ### Parameters
+/// * `start_price` - The starting price of the auction (when `elapsed_time` is `0`).
+/// * `floor_price` - The minimum/floor price of the auction (reached when `elapsed_time >= duration`).
+/// * `elapsed_time` - The duration of time (in seconds) elapsed since the auction start.
+/// * `duration` - The total duration of the auction (in seconds).
+///
+/// ### Return Value
+/// Returns the calculated `i128` current price for the auction at the given `elapsed_time`.
+/// The price is guaranteed to be at least `floor_price`.
+///
+/// ### Assumptions
+/// * `start_price >= floor_price`. If this invariant is violated, the function will panic.
+///
+/// ### Edge Cases
+/// * **`duration == 0`**: Returns `floor_price` immediately to avoid division by zero.
+/// * **`elapsed_time >= duration`**: Returns `floor_price` immediately, clamping the price decay once the auction has expired.
+///
+/// ### Overflow / Panic Behavior
+/// This function uses checked arithmetic to prevent overflow:
+/// * Panics with `"start_price must be >= floor_price"` if `start_price < floor_price`.
+/// * Panics with `"overflow in Dutch price calculation"` if `(start_price - floor_price) * elapsed_time` overflows `i128`.
+/// * Panics with `"current price should not underflow"` if the subtraction from `start_price` underflows.
 fn compute_dutch_price(
     start_price: i128,
     floor_price: i128,
@@ -375,6 +397,7 @@ impl Auction {
     ) -> i128 {
         let factory = get_factory_contract(&env)
             .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
         if credit_contract != factory {
             env.panic_with_error(AuctionError::Unauthorized);
         }

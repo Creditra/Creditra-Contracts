@@ -58,7 +58,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, RepaymentSchedule};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -78,7 +78,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `OracleLastPriceTs`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
-///   `BlockedBorrower`, `UtilizationCapBps`, `RateFloorBps`,
+///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
 ///   `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
 ///   `DrawReversedAmount`).
 ///
@@ -99,6 +99,8 @@ pub enum DataKey {
     SchemaVersion,
     /// Monotonic count of unique borrowers that have had a credit line recorded.
     CreditLineCount,
+    /// Count of currently Active credit lines.
+    ActiveLineCount,
     /// Borrower → stable numeric id used for deterministic enumeration.
     CreditLineIdByBorrower(Address),
     /// Stable numeric id → borrower address.
@@ -113,6 +115,10 @@ pub enum DataKey {
     LastDrawTs(Address),
     /// Per-borrower block flag; when `true`, draw_credit is rejected.
     BlockedBorrower(Address),
+    /// Per-borrower temporary freeze expiry timestamp; draws blocked while now < expiry_ts.
+    /// When key is absent or expiry_ts <= now, the borrower is not frozen.
+    FrozenBorrower(Address),
+
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
@@ -264,6 +270,30 @@ pub fn get_credit_line_count(env: &Env) -> u32 {
         .unwrap_or(0)
 }
 
+/// Return the count of currently Active credit lines.
+pub fn get_active_line_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::ActiveLineCount)
+        .unwrap_or(0)
+}
+
+/// Increment the count of currently Active credit lines.
+pub fn increment_active_line_count(env: &Env) {
+    let count = get_active_line_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::ActiveLineCount, &count.saturating_add(1));
+}
+
+/// Decrement the count of currently Active credit lines.
+pub fn decrement_active_line_count(env: &Env) {
+    let count = get_active_line_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::ActiveLineCount, &count.saturating_sub(1));
+}
+
 /// Return the configured global exposure cap, if set.
 pub fn get_max_total_exposure(env: &Env) -> Option<i128> {
     env.storage().instance().get(&DataKey::MaxTotalExposure)
@@ -354,11 +384,21 @@ pub fn persist_credit_line(
     borrower: &Address,
     line: &CreditLineData,
     previous_utilized: i128,
+    previous_status: Option<CreditStatus>,
 ) {
     ensure_credit_line_id(env, borrower);
     env.storage().persistent().set(borrower, line);
     bump_credit_line_ttl(env, borrower);
     adjust_total_utilized(env, previous_utilized, line.utilized_amount);
+
+    let is_now_active = line.status == CreditStatus::Active;
+    let was_active = previous_status == Some(CreditStatus::Active);
+
+    if is_now_active && !was_active {
+        increment_active_line_count(env);
+    } else if !is_now_active && was_active {
+        decrement_active_line_count(env);
+    }
 }
 
 /// Return a borrower's collateral balance without bumping unrelated TTL.
@@ -900,4 +940,70 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// Unblock a borrower (convenience wrapper).
 pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
     set_borrower_blocked(env, borrower, false);
+}
+
+// ── Borrower temporary freeze helpers ────────────────────────────────────────
+
+/// Freeze a borrower's draws until the specified expiry timestamp (admin only,
+/// enforced by caller).
+///
+/// Stores the expiry `u64` timestamp under [`DataKey::FrozenBorrower(Address)`]
+/// in persistent storage. Draws are blocked when `env.ledger().timestamp() < expiry_ts`.
+/// Once the expiry is reached or passed, draws automatically resume — no admin
+/// unfreeze call is required.
+///
+/// # Auto-expiry
+/// The freeze is time-bounded: [`is_borrower_frozen`] compares the current
+/// ledger timestamp against the stored expiry. When `now >= expiry_ts`, it
+/// returns `false` without any admin intervention.
+///
+/// # Storage
+/// - **Type**: Persistent storage (per-borrower, shares TTL with other persistent keys)
+/// - **Key**: [`DataKey::FrozenBorrower`]
+pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::FrozenBorrower(borrower.clone()), &expiry_ts);
+}
+
+/// Check if a borrower is temporarily frozen from drawing.
+///
+/// Returns `true` when the current ledger timestamp is strictly less than the
+/// stored expiry timestamp. Returns `false` when:
+/// - No freeze has been set (key is absent),
+/// - The freeze has expired (`now >= expiry_ts`).
+///
+/// # Time semantics
+/// Uses `env.ledger().timestamp()` so the check is deterministic per ledger.
+///
+/// # Storage
+/// - **Type**: Persistent storage read
+/// - **Key**: [`DataKey::FrozenBorrower`]
+pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
+    let now = env.ledger().timestamp();
+    env.storage()
+        .persistent()
+        .get(&DataKey::FrozenBorrower(borrower.clone()))
+        .map_or(false, |expiry: u64| now < expiry)
+}
+
+/// Get the freeze expiry timestamp for a borrower, if one is set.
+///
+/// Returns `Some(expiry_ts)` when a temporary freeze is in effect (even if
+/// expired — callers should compare against `now` themselves). Returns `None`
+/// when no freeze has ever been set.
+pub fn get_borrower_frozen_until(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FrozenBorrower(borrower.clone()))
+}
+
+/// Remove the temporary freeze for a borrower (admin only, enforced by caller).
+///
+/// This is a convenience for an admin who wants to lift a freeze before its
+/// natural expiry. If no freeze was set, this is a no-op.
+pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FrozenBorrower(borrower.clone()));
 }

@@ -85,6 +85,7 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     env.storage()
         .persistent()
         .set(&key, &commitment);
+    env.storage().persistent().set(&key, &commitment);
     bump_credit_line_ttl(&env, &borrower);
 }
 
@@ -241,6 +242,17 @@ mod tests {
         let hash_zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
         let hash_max: BytesN<32> = BytesN::from_array(&env, &[255u8; 32]);
         let hash_mixed: BytesN<32> = BytesN::from_array(&env, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
+
+        // Test with various hash patterns
+        let hash_zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+        let hash_max: BytesN<32> = BytesN::from_array(&env, &[255u8; 32]);
+        let hash_mixed: BytesN<32> = BytesN::from_array(
+            &env,
+            &[
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                24, 25, 26, 27, 28, 29, 30, 31, 32,
+            ],
+        );
 
         let score_zero = derive_score_from_hash(&hash_zero);
         let score_max = derive_score_from_hash(&hash_max);

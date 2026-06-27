@@ -1,19 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
-//! One-shot baseline regenerator.
-//!
-//! Run with:
-//! ```
-//! cargo run --example budget_baseline
-//! ```
-//!
-//! This calls every instrumented entrypoint with the same setups used in
-//! `tests/budget_regression.rs`, records the observed budget, and overwrites
-//! `contracts/credit/test_snapshots/budget.json`.
-//!
-//! **Review the diff before committing** — the whole point of the snapshot is
-//! to make regressions visible.
-
-use soroban_sdk::{testutils::Budget, token, Address, Env};
+use soroban_sdk::{
+    testutils::{budget::Budget, Address as _, Ledger},
+    token, Address, Env,
+};
 use std::{io::Write, path::Path};
 
 #[derive(Debug, serde::Serialize)]
@@ -26,25 +14,25 @@ struct Baseline {
     _comment: Option<&'static str>,
 }
 
-/// Tiny helper: reset budget, run closure, return (cpu, mem).
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    env.budget().reset_unlimited();
+    env.cost_estimate().budget().reset_unlimited();
     f();
     (
-        env.budget().cpu_instruction_count(),
-        env.budget().memory_bytes_count(),
+        env.cost_estimate().budget().cpu_instruction_cost(),
+        env.cost_estimate().budget().memory_bytes_cost(),
     )
 }
 
 fn setup() -> (
     Env,
-    credit::CreditClient<'static>,
+    creditra_credit::CreditClient<'static>,
     token::StellarAssetClient<'static>,
     Address,
     Address,
 ) {
     let env = Env::default();
-    env.budget().reset_unlimited();
+    env.cost_estimate().budget().reset_unlimited();
+    env.mock_all_auths_allowing_non_root_auth();
 
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
@@ -56,10 +44,12 @@ fn setup() -> (
     token.mint(&admin, &1_000_000_000_i128);
     token.mint(&borrower, &500_000_000_i128);
 
-    let credit_id = env.register(credit::Credit, ());
-    let credit = credit::CreditClient::new(&env, &credit_id);
+    let credit_id = env.register(creditra_credit::Credit, ());
+    let credit = creditra_credit::CreditClient::new(&env, &credit_id);
+    let token_client = token::Client::new(&env, &token_id);
+    token_client.approve(&borrower, &credit_id, &500_000_000_i128, &2000_u32);
+    token_client.approve(&admin, &credit_id, &1_000_000_000_i128, &2000_u32);
 
-    env.mock_all_auths();
     credit.init(&admin);
     credit.set_liquidity_token(&token_id);
     credit.set_liquidity_source(&admin);
@@ -73,11 +63,11 @@ fn main() {
     // ── init ─────────────────────────────────────────────────────────────────
     {
         let env = Env::default();
-        env.budget().reset_unlimited();
+        env.cost_estimate().budget().reset_unlimited();
+        env.mock_all_auths_allowing_non_root_auth();
         let admin = Address::generate(&env);
-        let credit_id = env.register(credit::Credit, ());
-        let credit = credit::CreditClient::new(&env, &credit_id);
-        env.mock_all_auths();
+        let credit_id = env.register(creditra_credit::Credit, ());
+        let credit = creditra_credit::CreditClient::new(&env, &credit_id);
         let (cpu, mem) = measure(&env, || credit.init(&admin));
         results.push(Baseline {
             entrypoint: "init",
@@ -93,7 +83,7 @@ fn main() {
     {
         let (env, credit, _tok, _adm, borrower) = setup();
         let (cpu, mem) = measure(&env, || {
-            credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
+            credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
         });
         results.push(Baseline {
             entrypoint: "open_credit_line",
@@ -108,8 +98,8 @@ fn main() {
     // ── draw_credit ──────────────────────────────────────────────────────────
     {
         let (env, credit, token, admin, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-        token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&borrower, &200_000_i128);
         let (cpu, mem) = measure(&env, || {
             credit.draw_credit(&borrower, &100_000_i128);
         });
@@ -126,10 +116,9 @@ fn main() {
     // ── repay_credit ─────────────────────────────────────────────────────────
     {
         let (env, credit, token, admin, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-        token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&borrower, &200_000_i128);
         credit.draw_credit(&borrower, &100_000_i128);
-        token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
         let (cpu, mem) = measure(&env, || {
             credit.repay_credit(&borrower, &50_000_i128);
         });
@@ -146,9 +135,9 @@ fn main() {
     // ── update_risk_parameters ───────────────────────────────────────────────
     {
         let (env, credit, _tok, _adm, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
         let (cpu, mem) = measure(&env, || {
-            credit.update_risk_parameters(&borrower, &400_u32, &900_000_i128);
+            credit.update_risk_parameters(&borrower, &900_000_i128, &400_u32, &50_u32);
         });
         results.push(Baseline {
             entrypoint: "update_risk_parameters",
@@ -195,8 +184,9 @@ fn main() {
     // ── set_utilization_cap ──────────────────────────────────────────────────
     {
         let (env, credit, ..) = setup();
+        let addr = soroban_sdk::Address::generate(&env);
         let (cpu, mem) = measure(&env, || {
-            credit.set_utilization_cap(&8_000_u32);
+            credit.set_utilization_cap(&addr, &8_000_u32);
         });
         results.push(Baseline {
             entrypoint: "set_utilization_cap",
@@ -211,8 +201,7 @@ fn main() {
     // ── deposit_collateral ───────────────────────────────────────────────────
     {
         let (env, credit, token, _adm, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-        token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
         let (cpu, mem) = measure(&env, || {
             credit.deposit_collateral(&borrower, &100_000_i128);
         });
@@ -229,8 +218,7 @@ fn main() {
     // ── withdraw_collateral ──────────────────────────────────────────────────
     {
         let (env, credit, token, _adm, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-        token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
         credit.deposit_collateral(&borrower, &100_000_i128);
         let (cpu, mem) = measure(&env, || {
             credit.withdraw_collateral(&borrower, &50_000_i128);
@@ -245,64 +233,71 @@ fn main() {
         eprintln!("withdraw_collateral  cpu={cpu}  mem={mem}");
     }
 
-    // ── accrue_batch (empty list — zero-cost floor) ───────────────────────────
+    // ── accrue_batch (5-borrower batch) ───────────────────────────────────────
     {
-        let (env, credit, ..) = setup();
-        let empty = soroban_sdk::Vec::new(&env);
+        let (env, credit, token, admin, _admin_addr) = setup();
+        let mut accrue_vec = soroban_sdk::Vec::new(&env);
+        for _ in 0..5 {
+            let b = Address::generate(&env);
+            token.mint(&b, &200_000_i128);
+            credit.open_credit_line(&b, &500_000_i128, &500_u32, &100_u32);
+            credit.deposit_collateral(&b, &150_000_i128);
+            credit.draw_credit(&b, &50_000_i128);
+            accrue_vec.push_back(b);
+        }
+        env.ledger().with_mut(|l| l.timestamp += 86_400 * 30);
         let (cpu, mem) = measure(&env, || {
-            credit.accrue_batch(&empty);
+            credit.accrue_batch(&accrue_vec);
         });
         results.push(Baseline {
             entrypoint: "accrue_batch",
             cpu_instructions: cpu,
             memory_bytes: mem,
             tolerance_pct: 10.0,
-            _comment: Some(
-                "Batch size varies; wider tolerance applied. Regenerate with a fixed 5-borrower batch.",
-            ),
+            _comment: None,
         });
         eprintln!("accrue_batch  cpu={cpu}  mem={mem}");
     }
 
-    // ── pause_protocol ────────────────────────────────────────────────────────
+    // ── freeze_draws ──────────────────────────────────────────────────────
     {
         let (env, credit, ..) = setup();
         let (cpu, mem) = measure(&env, || {
-            credit.pause_protocol();
+            credit.freeze_draws();
         });
         results.push(Baseline {
-            entrypoint: "pause_protocol",
+            entrypoint: "freeze_draws",
             cpu_instructions: cpu,
             memory_bytes: mem,
             tolerance_pct: 5.0,
             _comment: None,
         });
-        eprintln!("pause_protocol  cpu={cpu}  mem={mem}");
+        eprintln!("freeze_draws  cpu={cpu}  mem={mem}");
     }
 
-    // ── unpause_protocol ──────────────────────────────────────────────────────
+    // ── unfreeze_draws ────────────────────────────────────────────────────
     {
         let (env, credit, ..) = setup();
-        credit.pause_protocol();
+        credit.freeze_draws();
         let (cpu, mem) = measure(&env, || {
-            credit.unpause_protocol();
+            credit.unfreeze_draws();
         });
         results.push(Baseline {
-            entrypoint: "unpause_protocol",
+            entrypoint: "unfreeze_draws",
             cpu_instructions: cpu,
             memory_bytes: mem,
             tolerance_pct: 5.0,
             _comment: None,
         });
-        eprintln!("unpause_protocol  cpu={cpu}  mem={mem}");
+        eprintln!("unfreeze_draws  cpu={cpu}  mem={mem}");
     }
 
     // ── default_credit_line ───────────────────────────────────────────────────
     {
         let (env, credit, token, admin, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-        token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
-        credit.draw_credit(&borrower, &500_000_i128);
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&borrower, &500_000_i128);
+        credit.draw_credit(&borrower, &300_000_i128);
         env.ledger().with_mut(|l| l.timestamp += 86_400 * 120);
         let (cpu, mem) = measure(&env, || {
             credit.default_credit_line(&borrower);
@@ -319,10 +314,10 @@ fn main() {
 
     // ── close_credit_line ─────────────────────────────────────────────────────
     {
-        let (env, credit, _tok, _adm, borrower) = setup();
-        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
+        let (env, credit, _tok, admin, borrower) = setup();
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
         let (cpu, mem) = measure(&env, || {
-            credit.close_credit_line(&borrower);
+            credit.close_credit_line(&borrower, &admin);
         });
         results.push(Baseline {
             entrypoint: "close_credit_line",

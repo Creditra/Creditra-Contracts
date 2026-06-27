@@ -24,7 +24,7 @@ fn setup_defaulted_line(env: &Env, utilized_amount: i128) -> (Address, Address, 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_address = token_id.address();
     client.set_liquidity_token(&token_address);
-    
+
     // Mint liquidity tokens to fund credit lines and draws
     token::StellarAssetClient::new(env, &token_address).mint(&contract_id, &1_000_000_i128);
     token::StellarAssetClient::new(env, &token_address).mint(&borrower, &1_000_000_i128);
@@ -71,10 +71,15 @@ fn test_event_liq_req_payload_tuple_pin() {
         }
     }
 
-    let (topics, data) = found_event.expect("Expected a ('credit', 'liq_req') event to be published");
+    let (topics, data) =
+        found_event.expect("Expected a ('credit', 'liq_req') event to be published");
 
     // 1. Assert topic symbols
-    assert_eq!(topics.len(), 2, "Topic list must contain exactly 2 elements");
+    assert_eq!(
+        topics.len(),
+        2,
+        "Topic list must contain exactly 2 elements"
+    );
     assert_eq!(
         Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
         symbol_short!("credit"),

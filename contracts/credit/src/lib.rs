@@ -109,38 +109,43 @@ pub use crate::risk::compute_rate_from_score;
 mod scoring;
 mod storage;
 pub mod types;
+mod views;
 
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
 mod risk_formula_tests;
+#[cfg(test)]
+mod views_tests;
 
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_contract_upgraded_event, publish_credit_line_event,
-    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent,
+    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
+    publish_repayment_event, publish_token_rescued_event, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::storage::{
-    admin_key, assert_not_paused, clear_reentrancy_guard, clear_repayment_schedule,
-    get_borrower_by_credit_line_id, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
+    clear_repayment_schedule, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked, persist_credit_line, proposed_admin_key,
+    is_borrower_blocked as storage_is_borrower_blocked,
+    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
     proposed_at_key, rate_cfg_key, rate_formula_key,
-    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
+    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
+    RateFormulaConfigEvent,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -360,7 +365,7 @@ impl Credit {
             suspension_ts: 0,
         };
 
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
         clear_repayment_schedule(&env, &borrower);
 
         publish_credit_line_event(
@@ -408,6 +413,12 @@ impl Credit {
         if freeze::is_draws_frozen(&env) {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::DrawsFrozen);
+        }
+
+        // Per-borrower temporary draw freeze with auto-expiry.
+        if storage_is_borrower_frozen(&env, &borrower) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::BorrowerFrozen);
         }
 
         // Enforce per-transaction draw cap when configured.
@@ -544,8 +555,15 @@ impl Credit {
         }
         token_client.transfer(&reserve_address, &borrower, &amount);
 
+        let previous_status = credit_line.status;
         credit_line.utilized_amount = updated_utilized;
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(
+            &env,
+            &borrower,
+            &credit_line,
+            previous_utilized,
+            Some(previous_status),
+        );
 
         let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
@@ -680,9 +698,16 @@ impl Credit {
             .utilized_amount
             .saturating_sub(effective_repay)
             .max(0);
+        let previous_status = credit_line.status;
         credit_line.utilized_amount = new_utilized;
 
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(
+            &env,
+            &borrower,
+            &credit_line,
+            previous_utilized,
+            Some(previous_status),
+        );
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
 
         let _timestamp = env.ledger().timestamp();
@@ -1057,6 +1082,11 @@ impl Credit {
     /// entries are extended.
     pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
         query::get_protocol_summary(env)
+    }
+
+    /// Get protocol-level dashboard totals requested for GrantFox campaign.
+    pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
+        views::get_protocol_summary_view(env)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
@@ -1548,6 +1578,71 @@ impl Credit {
 
     pub fn is_draws_frozen(env: Env) -> bool {
         freeze::is_draws_frozen(&env)
+    }
+
+    /// Temporarily freeze a borrower's draws until the given expiry timestamp (admin only).
+    ///
+    /// # Parameters
+    /// - `admin`: Must be the current contract admin (checked via `require_admin_auth` + explicit `require_auth`).
+    /// - `borrower`: The address whose draw capability should be frozen.
+    /// - `expiry_ts`: Ledger timestamp (seconds) at which the freeze auto-expires.
+    ///   Must be strictly greater than the current ledger timestamp.
+    ///
+    /// # Behaviour
+    /// - Stores the expiry timestamp in persistent storage under [`DataKey::FrozenBorrower`].
+    /// - Once `env.ledger().timestamp() >= expiry_ts`, the freeze auto-lifts — no
+    ///   admin call needed.
+    /// - Calling again for the same borrower updates the expiry to the new value.
+    /// - Repayments are **never** blocked by a temporary freeze.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::InvalidAmount`] if `expiry_ts <= now`.
+    /// - Reverts with auth error if caller is not the configured admin.
+    ///
+    /// # Events
+    /// Emits `BorrowerFrozenEvent` on topic `("br_freeze",)`.
+    pub fn freeze_borrower_until(env: Env, admin: Address, borrower: Address, expiry_ts: u64) {
+        admin.require_auth();
+        require_admin_auth(&env);
+
+        let now = env.ledger().timestamp();
+        if expiry_ts <= now {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        set_borrower_frozen_until(&env, &borrower, expiry_ts);
+        publish_borrower_frozen_event(&env, &borrower, expiry_ts);
+    }
+
+    /// Check whether a borrower's draws are currently frozen.
+    ///
+    /// Returns `true` when a temporary freeze is in effect (`now < expiry_ts`).
+    /// Returns `false` when no freeze has been set, or when the freeze has expired.
+    /// No auth required.
+    pub fn is_borrower_frozen(env: Env, borrower: Address) -> bool {
+        storage_is_borrower_frozen(&env, &borrower)
+    }
+
+    /// Get the freeze expiry timestamp for a borrower, if one is set.
+    ///
+    /// Returns `Some(expiry_ts)` when a temporary freeze record exists (even if
+    /// expired). Returns `None` when no freeze has ever been set for this borrower.
+    /// No auth required.
+    pub fn get_borrower_frozen_until(env: Env, borrower: Address) -> Option<u64> {
+        get_borrower_frozen_until(&env, &borrower)
+    }
+
+    /// Remove a temporary freeze before its natural expiry (admin only).
+    ///
+    /// If no freeze is currently set, this is a no-op. Repayments have never
+    /// been affected by this flag, so unfreezing early just restores draw access.
+    ///
+    /// # Errors
+    /// - Reverts with auth error if caller is not the configured admin.
+    pub fn unfreeze_borrower(env: Env, admin: Address, borrower: Address) {
+        admin.require_auth();
+        require_admin_auth(&env);
+        clear_borrower_frozen(&env, &borrower);
     }
 
     /// Returns all global protocol configuration in a single call.
@@ -4521,6 +4616,146 @@ mod test_mock_liquidity_token {
     }
 
     #[cfg(test)]
+    mod test_borrower_freeze {
+        use super::*;
+        use crate::events::BorrowerFrozenEvent;
+        use soroban_sdk::testutils::Events as _;
+        use soroban_sdk::testutils::Ledger;
+        use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
+
+        /// freeze_borrower_until sets the freeze and stores the expiry.
+        #[test]
+        fn freeze_borrower_until_sets_freeze() {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _admin, borrower) = setup(&env);
+
+            let now = 1_700_000_000u64;
+
+            client.freeze_borrower_until(&_admin, &borrower, &(now + 3600));
+
+            assert!(client.is_borrower_frozen(&borrower));
+            assert_eq!(
+                client.get_borrower_frozen_until(&borrower),
+                Some(now + 3600)
+            );
+        }
+
+        /// freeze_borrower_until with past or present timestamp reverts.
+        #[test]
+        #[should_panic(expected = "Error(Contract, #5)")]
+        fn freeze_borrower_until_past_ts_reverts() {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _admin, borrower) = setup(&env);
+
+            let now = 1_700_000_000u64;
+            // expiry_ts <= now should revert with InvalidAmount
+            client.freeze_borrower_until(&_admin, &borrower, &now);
+        }
+
+        /// Freeze expires automatically when ledger timestamp passes expiry_ts.
+        #[test]
+
+        /// freeze_borrower_until requires admin auth.
+        #[test]
+        #[should_panic]
+        fn freeze_borrower_until_requires_auth() {
+            let env = Env::default();
+            let (client, _admin, borrower) = setup(&env);
+            let non_admin = Address::generate(&env);
+
+            let now = 1_700_000_000u64;
+            client.freeze_borrower_until(&non_admin, &borrower, &(now + 3600));
+        }
+
+        /// unfreeze_borrower lifts the freeze before expiry.
+        #[test]
+        fn unfreeze_borrower_lifts_freeze() {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _admin, borrower) = setup(&env);
+
+            let now = 1_700_000_000u64;
+
+            client.freeze_borrower_until(&_admin, &borrower, &(now + 7200));
+            assert!(client.is_borrower_frozen(&borrower));
+
+            client.unfreeze_borrower(&_admin, &borrower);
+            assert!(!client.is_borrower_frozen(&borrower));
+            assert_eq!(client.get_borrower_frozen_until(&borrower), None);
+        }
+
+        /// Unfrozen borrower returns false by default.
+        #[test]
+        fn is_borrower_frozen_defaults_false() {
+            let env = Env::default();
+            let (client, _admin, borrower) = setup(&env);
+
+            assert!(!client.is_borrower_frozen(&borrower));
+            assert_eq!(client.get_borrower_frozen_until(&borrower), None);
+        }
+
+        /// Event is emitted on freeze with correct topic and payload.
+        #[test]
+        fn freeze_emits_borrower_frozen_event() {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _admin, borrower) = setup(&env);
+
+            let now = 1_700_000_000u64;
+            let expiry = now + 3600;
+
+            client.freeze_borrower_until(&_admin, &borrower, &expiry);
+
+            let events = env.events().all();
+            let (_contract, topics, data) = events.last().unwrap();
+            let topic_sym = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+            assert_eq!(topic_sym, Symbol::new(&env, "br_freeze"));
+            let event: BorrowerFrozenEvent = data.try_into_val(&env).unwrap();
+            assert_eq!(event.borrower, borrower);
+            assert_eq!(event.frozen_until, expiry);
+        }
+
+        /// draw_credit reverts with BorrowerFrozen when a freeze is active.
+        #[test]
+        #[should_panic(expected = "Error(Contract, #40)")]
+        fn draw_credit_reverts_when_borrower_frozen() {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _admin, borrower) = setup(&env);
+
+            let now = 1_700_000_000u64;
+
+            client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+
+            // Freeze the borrower
+            client.freeze_borrower_until(&_admin, &borrower, &(now + 3600));
+
+            // Draw should revert with BorrowerFrozen (#40)
+            client.draw_credit(&borrower, &100_i128);
+        }
+    }
+
+    fn freeze_auto_expires_after_ts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
+
+        let start = 1_700_000_000u64;
+
+        // Freeze for 1 hour
+        client.freeze_borrower_until(&_admin, &borrower, &(start + 3600));
+        assert!(client.is_borrower_frozen(&borrower));
+
+        // Advance past expiry
+        env.ledger().set_timestamp(start + 3600);
+
+        // Should now be unfrozen
+        assert!(!client.is_borrower_frozen(&borrower));
+    }
+
+    #[cfg(test)]
     mod test_max_draw_amount {
         use super::*;
         use soroban_sdk::testutils::Ledger;
@@ -5592,7 +5827,7 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             let (client, _admin, _borrower, _token) = setup_with_token(&env);
 
-        client.set_max_repay_amount(&0_i128);
+            client.set_max_repay_amount(&0_i128);
         }
     }
 
@@ -5600,9 +5835,9 @@ mod test_mock_liquidity_token {
     #[cfg(test)]
     mod test_health_factor {
         use super::*;
+        use crate::collateral;
         use soroban_sdk::testutils::Address as _;
         use soroban_sdk::token::StellarAssetClient;
-        use crate::collateral;
 
         /// Setup: contract + admin + borrower + token (used for both liquidity
         /// and collateral — the contract shares one token).  `reserve` tokens
@@ -5734,10 +5969,7 @@ mod test_mock_liquidity_token {
 
             assert_eq!(hf_again, hf_before);
             assert_eq!(line_before.utilized_amount, line_after.utilized_amount);
-            assert_eq!(
-                line_before.accrued_interest,
-                line_after.accrued_interest
-            );
+            assert_eq!(line_before.accrued_interest, line_after.accrued_interest);
             assert_eq!(collateral_before, collateral_after);
         }
 

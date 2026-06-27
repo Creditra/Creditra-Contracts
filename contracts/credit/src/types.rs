@@ -132,6 +132,7 @@ pub enum CreditStatus {
 /// | 37   | `OraclePriceStale`            | Oracle price is stale (exceeds max_age_seconds) |
 /// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 /// | 39   | `InsufficientCollateralBalance` | Borrower collateral balance cannot cover withdrawal |
+/// | 40   | `BorrowerFrozen`               | Borrower's draws are temporarily frozen until expiry |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -214,6 +215,8 @@ pub enum ContractError {
     OraclePriceDeviation = 38,
     /// Borrower's collateral balance is below the requested withdrawal amount.
     InsufficientCollateralBalance = 39,
+    /// Borrower's draws are temporarily frozen until the specified expiry timestamp.
+    BorrowerFrozen = 40,
 }
 
 /// Stored credit line data for a borrower.
@@ -382,4 +385,16 @@ pub struct ProtocolSummary {
     pub total_collateral: i128,
     /// Accumulated protocol fees awaiting treasury withdrawal.
     pub treasury_balance: i128,
+}
+
+/// Protocol summary returned by the specific query view for GrantFox campaign.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtocolSummaryView {
+    /// Global utilized principal accumulator.
+    pub total_utilized: i128,
+    /// Global collateral balance accumulator.
+    pub total_collateral: i128,
+    /// Count of currently Active credit lines.
+    pub active_line_count: u32,
 }
