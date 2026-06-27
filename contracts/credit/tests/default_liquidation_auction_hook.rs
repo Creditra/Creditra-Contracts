@@ -106,7 +106,13 @@ fn settle_full_default_liquidation_closes_credit_line() {
     let (env, contract_id, borrower) = setup_defaulted_line(450);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.settle_default_liquidation(&borrower, &450_i128, &Symbol::new(&env, "auc_fin"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &450_i128,
+        &Symbol::new(&env, "auc_fin"),
+        &10_000_u32,
+        &None,
+    );
     assert!(has_event_topic(&env, "closed"));
     assert!(has_event_topic(&env, "liq_setl"));
 
