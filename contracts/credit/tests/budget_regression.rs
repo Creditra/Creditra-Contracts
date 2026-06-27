@@ -331,7 +331,7 @@ fn budget_freeze_draws() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
     budget(&env).reset_unlimited();
-    credit.freeze_draws();
+    credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
     let cpu = budget(&env).cpu_instruction_cost();
     let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("freeze_draws") {
@@ -347,7 +347,7 @@ fn budget_freeze_draws() {
 fn budget_unfreeze_draws() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-    credit.freeze_draws();
+    credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
     budget(&env).reset_unlimited();
     credit.unfreeze_draws();
     let cpu = budget(&env).cpu_instruction_cost();

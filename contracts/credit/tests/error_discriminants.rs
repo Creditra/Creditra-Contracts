@@ -55,6 +55,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::OraclePriceDeviation as u32, 38);
     assert_eq!(ContractError::InsufficientCollateralBalance as u32, 39);
     assert_eq!(ContractError::BorrowerFrozen as u32, 40);
+    assert_eq!(ContractError::CreditLineFrozen as u32, 41);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -105,6 +106,7 @@ fn no_duplicate_discriminants() {
         ContractError::OraclePriceDeviation as u32,
         ContractError::InsufficientCollateralBalance as u32,
         ContractError::BorrowerFrozen as u32,
+        ContractError::CreditLineFrozen as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -119,8 +121,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 40 variants as of this writing. Update when adding new ones.
-    const EXPECTED_VARIANT_COUNT: usize = 40;
+    // 41 variants as of this writing. Update when adding new ones.
+    const EXPECTED_VARIANT_COUNT: usize = 41;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -163,6 +165,7 @@ fn variant_count_is_known() {
         ContractError::OraclePriceDeviation as u32,
         ContractError::InsufficientCollateralBalance as u32,
         ContractError::BorrowerFrozen as u32,
+        ContractError::CreditLineFrozen as u32,
     ];
 
     assert_eq!(

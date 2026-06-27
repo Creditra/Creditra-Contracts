@@ -8,7 +8,7 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 38-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 41-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). See
 //!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
 //!   flat code table and
@@ -133,6 +133,7 @@ pub enum CreditStatus {
 /// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 /// | 39   | `InsufficientCollateralBalance` | Borrower collateral balance cannot cover withdrawal |
 /// | 40   | `BorrowerFrozen`               | Borrower's draws are temporarily frozen until expiry |
+/// | 41   | `CreditLineFrozen`             | Credit line draws are frozen with a structured reason |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -217,6 +218,44 @@ pub enum ContractError {
     InsufficientCollateralBalance = 39,
     /// Borrower's draws are temporarily frozen until the specified expiry timestamp.
     BorrowerFrozen = 40,
+    /// Credit line draws are frozen by admin with a structured [`FreezeReason`].
+    CreditLineFrozen = 41,
+}
+
+/// Structured taxonomy for credit-line and global draw freezes.
+///
+/// # Discriminant stability
+/// Discriminants are part of the contract ABI. New variants must be appended;
+/// existing values must never be reordered or renumbered.
+///
+/// # Usage
+/// - [`crate::freeze::freeze_draws`] records a global reason alongside the
+///   contract-wide draw kill-switch.
+/// - [`crate::freeze::freeze_credit_line`] records a per-borrower reason without
+///   mutating [`CreditStatus`], preserving lifecycle history for indexers.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Scheduled reserve or treasury operations affecting draw liquidity.
+    LiquidityReserve = 0,
+    /// Regulatory or compliance-mandated draw pause.
+    Compliance = 1,
+    /// Active risk investigation or off-chain risk signal.
+    RiskInvestigation = 2,
+    /// Planned operational maintenance window.
+    OperationalMaintenance = 3,
+    /// Borrower-initiated voluntary draw pause.
+    BorrowerRequest = 4,
+}
+
+/// Global draw-freeze state stored under [`crate::storage::DataKey::DrawsFrozen`].
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen contract-wide.
+    pub frozen: bool,
+    /// Structured reason recorded when the freeze was last activated.
+    pub reason: FreezeReason,
 }
 
 /// Stored credit line data for a borrower.

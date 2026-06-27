@@ -58,7 +58,10 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason,
+    RepaymentSchedule,
+};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -118,6 +121,9 @@ pub enum DataKey {
     /// Per-borrower temporary freeze expiry timestamp; draws blocked while now < expiry_ts.
     /// When key is absent or expiry_ts <= now, the borrower is not frozen.
     FrozenBorrower(Address),
+    /// Per-borrower credit-line draw freeze with structured reason taxonomy.
+    /// When absent, the line is not admin-frozen (distinct from [`CreditStatus::Suspended`]).
+    CreditLineFreeze(Address),
 
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
@@ -767,16 +773,19 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
 }
 
 /// Set/unset the global draws frozen flag (admin only, enforced by caller).
-pub fn set_draws_frozen(env: &Env, frozen: bool) {
-    env.storage().instance().set(&DataKey::DrawsFrozen, &frozen);
+pub fn set_draws_frozen(env: &Env, frozen: bool, reason: FreezeReason) {
+    env.storage().instance().set(
+        &DataKey::DrawsFrozen,
+        &DrawsFreezeState { frozen, reason },
+    );
 }
 
 /// Check if draws are globally frozen.
 pub fn is_draws_frozen(env: &Env) -> bool {
     env.storage()
         .instance()
-        .get(&DataKey::DrawsFrozen)
-        .unwrap_or(false)
+        .get::<DataKey, DrawsFreezeState>(&DataKey::DrawsFrozen)
+        .map_or(false, |state| state.frozen)
 }
 
 /// Check if the protocol is paused.

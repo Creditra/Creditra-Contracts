@@ -6,14 +6,13 @@ use creditra_credit::events::{
     publish_draw_reversed_event, publish_drawn_event, publish_draws_frozen_event,
     publish_grace_waiver_applied_event, publish_interest_accrued_event, publish_paused_event,
     publish_rate_formula_config_event, publish_repayment_event, publish_risk_parameters_updated,
-    AdminRotationAcceptedEvent, AdminRotationProposedEvent, BorrowerBlockedEvent,
-    DefaultLiquidationSettledEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, TryFromVal};
 
 fn setup(env: &Env) -> (CreditClient, Address) {
     env.mock_all_auths();
@@ -82,14 +81,8 @@ fn test_event_topics_stability() {
             accounting_only: false,
         },
     );
-    publish_draws_frozen_event(&env, true);
-    publish_borrower_blocked_event(
-        &env,
-        BorrowerBlockedEvent {
-            borrower: borrower.clone(),
-            blocked: true,
-        },
-    );
+    publish_draws_frozen_event(&env, true, creditra_credit::FreezeReason::LiquidityReserve);
+    publish_borrower_blocked_event(&env, &borrower, true);
     publish_rate_formula_config_event(&env, true);
     publish_grace_waiver_applied_event(
         &env,
@@ -120,7 +113,13 @@ fn test_event_topics_stability() {
     assert_topic(6, "credit", "risk_upd");
     assert_topic(7, "credit", "draw_rev");
     assert_topic(8, "credit", "drw_freeze");
-    assert_topic(9, "credit", "blk_chg");
+    let blk_event = all_events.get(9).unwrap();
+    let blk_topics = blk_event.1;
+    assert_eq!(blk_topics.len(), 1);
+    assert_eq!(
+        Symbol::try_from_val(&env, &blk_topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&env, "blk_chg")
+    );
     assert_topic(10, "credit", "rate_form");
     assert_topic(11, "credit", "grace_wv");
 }

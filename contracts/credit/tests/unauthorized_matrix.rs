@@ -44,7 +44,7 @@
 //! | `get_*` / `is_*` / `enumerate_*` | none (read-only) |
 
 use creditra_credit::types::CreditStatus;
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
 use soroban_sdk::{Address, Env, IntoVal, Symbol};
 
@@ -127,7 +127,7 @@ fn set_draw_min_interval_unauthorized() {
 fn freeze_draws_unauthorized() {
     let env = Env::default();
     let (client, _, _, _) = setup(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn freeze_draws_non_admin_mock_auth() {
                 sub_invokes: &[],
             },
         }])
-        .freeze_draws();
+        .freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn set_max_draw_amount_unauthorized() {
 fn freeze_draws_unauthorized() {
     let env = Env::default();
     let (client, _, _, _) = setup(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]
@@ -868,7 +868,7 @@ fn freeze_draws_non_admin_mock_auth() {
                 sub_invokes: &[],
             },
         }])
-        .freeze_draws();
+        .freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]

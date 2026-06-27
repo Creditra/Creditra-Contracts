@@ -50,7 +50,8 @@ Topics use `symbol_short!` (≤ 9 chars) to use cheap `SCV_SYMBOL` on-chain enco
 | ("credit","admin_acc") | AdminRotationAcceptedEvent | 1. new_admin: Address | 1.0.0 | -
 | ("credit","risk_upd") | RiskParametersUpdatedEvent | 1. borrower: Address, 2. credit_limit: i128, 3. interest_rate_bps: u32, 4. risk_score: u32 | 1.0.0 | -
 | ("credit","draw_rev") | DrawReversedEvent | 1. borrower: Address, 2. amount: i128, 3. original_ts: u64, 4. reason_code: u32, 5. new_utilized_amount: i128, 6. timestamp: u64, 7. admin: Address, 8. accounting_only: bool | 1.0.0 | -
-| ("credit","drw_freeze") | DrawsFrozenEvent | 1. frozen: bool | 1.0.0 | -
+| ("credit","drw_freeze") | DrawsFrozenEvent | 1. frozen: bool, 2. reason: FreezeReason | 1.0.0 | -
+| ("credit","line_frz") | CreditLineFreezeEvent | 1. borrower: Address, 2. reason: FreezeReason, 3. frozen: bool, 4. ledger: u32 | 1.0.0 | -
 | ("credit","rate_form") | bool | (single value, no struct | 1.0.0 | -
 | ("credit","liq_req") | (Address, i128) | 1. borrower: Address, 2. utilized_amount: i128 | 1.0.0 | -
 | ("credit","liq_setl") | DefaultLiquidationSettledEvent | 1. borrower: Address, 2. settlement_id: Symbol, 3. recovered_amount: i128, 4. remaining_utilized_amount: i128, 5. status: CreditStatus, 6. close_factor_bps: u32 | 1.0.0 | -

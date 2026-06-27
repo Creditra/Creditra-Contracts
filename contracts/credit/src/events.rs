@@ -130,6 +130,19 @@ pub struct DrawReversedEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawsFrozenEvent {
     pub frozen: bool,
+    pub reason: crate::types::FreezeReason,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineFreezeEvent {
+    pub borrower: soroban_sdk::Address,
+    /// Structured reason for the freeze action.
+    pub reason: crate::types::FreezeReason,
+    /// `true` when frozen; `false` when unfrozen.
+    pub frozen: bool,
+    /// Ledger sequence at time of change (for off-chain indexers).
+    pub ledger: u32,
 }
 
 #[contracttype]
@@ -270,10 +283,28 @@ pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
 }
 
-pub fn publish_draws_frozen_event(env: &Env, frozen: bool) {
+pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types::FreezeReason) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "drw_freeze")),
-        DrawsFrozenEvent { frozen },
+        DrawsFrozenEvent { frozen, reason },
+    );
+}
+
+/// Publish a per-credit-line freeze/unfreeze event.
+pub fn publish_credit_line_freeze_event(
+    env: &Env,
+    borrower: &soroban_sdk::Address,
+    reason: crate::types::FreezeReason,
+    frozen: bool,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "line_frz")),
+        CreditLineFreezeEvent {
+            borrower: borrower.clone(),
+            reason,
+            frozen,
+            ledger: env.ledger().sequence(),
+        },
     );
 }
 

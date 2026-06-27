@@ -263,7 +263,7 @@ fn main() {
     {
         let (env, credit, ..) = setup();
         let (cpu, mem) = measure(&env, || {
-            credit.freeze_draws();
+            credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
         });
         results.push(Baseline {
             entrypoint: "freeze_draws",
@@ -278,7 +278,7 @@ fn main() {
     // ── unfreeze_draws ────────────────────────────────────────────────────
     {
         let (env, credit, ..) = setup();
-        credit.freeze_draws();
+        credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
         let (cpu, mem) = measure(&env, || {
             credit.unfreeze_draws();
         });
