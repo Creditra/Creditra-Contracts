@@ -346,6 +346,15 @@ fn set_protocol_paused_unauthorized() {
     client.set_protocol_paused(&true);
 }
 
+#[test]
+#[should_panic]
+fn set_protocol_paused_with_reason_unauthorized() {
+    let env = Env::default();
+    let (client, _, _, _) = setup(&env);
+    let reason = soroban_sdk::Symbol::new(&env, "test");
+    client.set_protocol_paused_with_reason(&true, &reason);
+}
+
 // ── Borrower role-gated functions: wrong signer ─────────────────────────────
 
 #[test]
@@ -721,6 +730,15 @@ fn set_protocol_paused_unauthorized() {
     let env = Env::default();
     let (client, _, _, _) = setup(&env);
     client.set_protocol_paused(&true);
+}
+
+#[test]
+#[should_panic]
+fn set_protocol_paused_with_reason_unauthorized() {
+    let env = Env::default();
+    let (client, _, _, _) = setup(&env);
+    let reason = soroban_sdk::Symbol::new(&env, "test");
+    client.set_protocol_paused_with_reason(&true, &reason);
 }
 
 // ── Borrower role-gated functions: wrong signer ─────────────────────────────

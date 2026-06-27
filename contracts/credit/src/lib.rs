@@ -126,10 +126,10 @@ mod views_tests;
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
+    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_paused_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event, ContractUpgradedEvent, CreditLineEvent,
     DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
@@ -1506,8 +1506,80 @@ impl Credit {
         );
     }
 
-    pub fn freeze_draws(env: Env, reason: FreezeReason) {
-        freeze::freeze_draws(env, reason)
+    /// Emergency pause the protocol (admin only).
+    ///
+    /// When paused, all mutating entrypoints except `repay_credit` are blocked
+    /// with [`ContractError::Paused`] (code 18). Repayments are always allowed
+    /// so borrowers can deleverage even during an emergency.
+    ///
+    /// # Parameters
+    /// - `paused`: `true` to pause, `false` to unpause.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits `("credit", "paused")` with `true` or `("credit", "unpaused")` with `false`.
+    pub fn set_protocol_paused(env: Env, paused: bool) {
+        require_admin_auth(&env);
+        crate::storage::set_paused(&env, paused);
+        publish_paused_event(&env, paused);
+    }
+
+    /// Query whether the protocol is currently paused.
+    ///
+    /// No auth required — pure read.
+    pub fn is_protocol_paused(env: Env) -> bool {
+        crate::storage::is_paused(&env)
+    }
+
+    /// Get the structured pause reason, if one was recorded during the last pause.
+    ///
+    /// Returns `None` before any pause or when the admin used the reason-less
+    /// `set_protocol_paused(bool)`. The reason is cleared on unpause.
+    ///
+    /// No auth required — pure read.
+    pub fn get_protocol_pause_reason(env: Env) -> Option<crate::types::PauseReason> {
+        crate::storage::get_pause_reason(&env)
+    }
+
+    /// Emergency pause the protocol with a structured reason (admin only).
+    ///
+    /// Same as `set_protocol_paused` but records a human-readable reason for
+    /// governance transparency and off-chain monitoring. The reason is stored
+    /// alongside the pause flag and cleared on unpause.
+    ///
+    /// # Parameters
+    /// - `paused`: `true` to pause, `false` to unpause.
+    /// - `reason`: A human-readable reason symbol (e.g., "oracle-outage").
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits `("credit", "paused")` or `("credit", "unpaused")`.
+    pub fn set_protocol_paused_with_reason(
+        env: Env,
+        paused: bool,
+        reason: soroban_sdk::Symbol,
+    ) {
+        let admin = require_admin_auth(&env);
+
+        if paused {
+            let pause_reason = crate::types::PauseReason {
+                reason,
+                timestamp: env.ledger().timestamp(),
+                actor: admin,
+            };
+            crate::storage::set_pause_reason(&env, &pause_reason);
+        }
+
+        crate::storage::set_paused(&env, paused);
+        publish_paused_event(&env, paused);
+    }
+
+    pub fn freeze_draws(env: Env) {
+        freeze::freeze_draws(env)
     }
 
     pub fn unfreeze_draws(env: Env) {

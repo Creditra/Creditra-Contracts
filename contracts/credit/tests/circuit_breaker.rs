@@ -479,3 +479,93 @@ fn operations_resume_after_unpause() {
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.credit_limit, 1_000);
 }
+
+// ── pause with reason (escape-hatch audit trail) ─────────────────────────
+
+#[test]
+fn pause_with_reason_stores_reason() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    assert!(!client.is_protocol_paused());
+
+    let reason = soroban_sdk::Symbol::new(&env, "oracle-outage");
+    client.set_protocol_paused_with_reason(&true, &reason);
+
+    assert!(client.is_protocol_paused());
+
+    let stored = client.get_protocol_pause_reason();
+    assert!(stored.is_some(), "pause reason must be stored");
+    let pause_reason = stored.unwrap();
+    assert_eq!(pause_reason.reason, reason);
+}
+
+#[test]
+fn pause_with_reason_unpause_clears_reason() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    let reason = soroban_sdk::Symbol::new(&env, "token-migration");
+    client.set_protocol_paused_with_reason(&true, &reason);
+    assert!(client.get_protocol_pause_reason().is_some());
+
+    // Unpause — reason should be cleared
+    client.set_protocol_paused_with_reason(&false, &reason);
+    assert!(!client.is_protocol_paused());
+    assert!(client.get_protocol_pause_reason().is_none(), "reason must be cleared on unpause");
+}
+
+#[test]
+fn pause_without_reason_has_no_stored_reason() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // Use the reason-less pause
+    client.set_protocol_paused(&true);
+    assert!(client.is_protocol_paused());
+
+    // No reason should be stored
+    let stored = client.get_protocol_pause_reason();
+    assert!(stored.is_none(), "reason-less pause must not store a reason");
+}
+
+#[test]
+fn pause_with_reason_records_timestamp_and_actor() {
+    let (env, admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    let reason = soroban_sdk::Symbol::new(&env, "maintenance");
+    client.set_protocol_paused_with_reason(&true, &reason);
+
+    let stored = client.get_protocol_pause_reason().unwrap();
+    assert!(stored.timestamp > 0, "timestamp must be recorded");
+    assert_eq!(stored.actor, admin, "actor must be the admin");
+}
+
+#[test]
+fn get_protocol_pause_reason_works_when_paused() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // No reason before pause
+    assert!(client.get_protocol_pause_reason().is_none());
+
+    let reason = soroban_sdk::Symbol::new(&env, "emergency");
+    client.set_protocol_paused_with_reason(&true, &reason);
+
+    // Reason available after pause-with-reason
+    assert!(client.get_protocol_pause_reason().is_some());
+}
+
+#[test]
+#[should_panic]
+fn pause_with_reason_requires_admin() {
+    let (env, _admin, contract_id) = setup();
+    env.mock_all_auths_allowing_non_root_auth();
+    let non_admin = Address::generate(&env);
+    let client = CreditClient::new(&env, &contract_id);
+
+    non_admin.require_auth();
+    let reason = soroban_sdk::Symbol::new(&env, "bad-actor");
+    client.set_protocol_paused_with_reason(&true, &reason);
+}

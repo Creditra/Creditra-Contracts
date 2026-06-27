@@ -408,3 +408,20 @@ pub struct ProtocolSummaryView {
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
 }
+
+/// Reason for protocol pause (escape-hatch audit trail).
+///
+/// Stored alongside the pause flag in instance storage when the admin invokes
+/// `set_protocol_paused`. Intended for governance transparency and off-chain
+/// monitoring — the reason is a human-readable symbol that indexers and
+/// dashboards can display to explain why the protocol is paused.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable reason for pausing (e.g., "oracle-outage", "token-migration").
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp when the pause was activated.
+    pub timestamp: u64,
+    /// Admin address that invoked the pause.
+    pub actor: soroban_sdk::Address,
+}
