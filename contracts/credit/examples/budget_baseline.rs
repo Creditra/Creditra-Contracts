@@ -1,6 +1,6 @@
 use creditra_credit::instrument::{
-    self, entrypoint, setup_credit_harness, BudgetBaseline, BudgetSample,
-    BATCH_TOLERANCE_PCT, DEFAULT_TOLERANCE_PCT,
+    self, entrypoint, setup_credit_harness, BudgetBaseline, BudgetSample, BATCH_TOLERANCE_PCT,
+    DEFAULT_TOLERANCE_PCT,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -35,7 +35,12 @@ fn main() {
         let credit_id = env.register(creditra_credit::Credit, ());
         let credit = creditra_credit::CreditClient::new(&env, &credit_id);
         let sample = BudgetSample::measure(&env, || credit.init(&admin));
-        push(&mut results, entrypoint::INIT, sample, DEFAULT_TOLERANCE_PCT);
+        push(
+            &mut results,
+            entrypoint::INIT,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
     }
 
     // ── open_credit_line ─────────────────────────────────────────────────────

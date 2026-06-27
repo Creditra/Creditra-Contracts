@@ -293,11 +293,11 @@ mod tests {
         let loaded = load_baselines_from_manifest_dir(&dir);
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[entrypoint::INIT].cpu_instructions, 42);
-        assert!((loaded[entrypoint::ACCRUE_BATCH]
-            .effective_tolerance_pct()
-            - BATCH_TOLERANCE_PCT)
-            .abs()
-            < f64::EPSILON);
+        assert!(
+            (loaded[entrypoint::ACCRUE_BATCH].effective_tolerance_pct() - BATCH_TOLERANCE_PCT)
+                .abs()
+                < f64::EPSILON
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
