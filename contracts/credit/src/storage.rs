@@ -78,7 +78,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `OracleLastPriceTs`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
-///   `BlockedBorrower`, `UtilizationCapBps`, `RateFloorBps`,
+///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
 ///   `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
 ///   `DrawReversedAmount`).
 ///
@@ -113,6 +113,10 @@ pub enum DataKey {
     LastDrawTs(Address),
     /// Per-borrower block flag; when `true`, draw_credit is rejected.
     BlockedBorrower(Address),
+    /// Per-borrower temporary freeze expiry timestamp; draws blocked while now < expiry_ts.
+    /// When key is absent or expiry_ts <= now, the borrower is not frozen.
+    FrozenBorrower(Address),
+
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
@@ -898,3 +902,70 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
     set_borrower_blocked(env, borrower, false);
 }
+
+// ── Borrower temporary freeze helpers ────────────────────────────────────────
+
+/// Freeze a borrower's draws until the specified expiry timestamp (admin only,
+/// enforced by caller).
+///
+/// Stores the expiry `u64` timestamp under [`DataKey::FrozenBorrower(Address)`]
+/// in persistent storage. Draws are blocked when `env.ledger().timestamp() < expiry_ts`.
+/// Once the expiry is reached or passed, draws automatically resume — no admin
+/// unfreeze call is required.
+///
+/// # Auto-expiry
+/// The freeze is time-bounded: [`is_borrower_frozen`] compares the current
+/// ledger timestamp against the stored expiry. When `now >= expiry_ts`, it
+/// returns `false` without any admin intervention.
+///
+/// # Storage
+/// - **Type**: Persistent storage (per-borrower, shares TTL with other persistent keys)
+/// - **Key**: [`DataKey::FrozenBorrower`]
+pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::FrozenBorrower(borrower.clone()), &expiry_ts);
+}
+
+/// Check if a borrower is temporarily frozen from drawing.
+///
+/// Returns `true` when the current ledger timestamp is strictly less than the
+/// stored expiry timestamp. Returns `false` when:
+/// - No freeze has been set (key is absent),
+/// - The freeze has expired (`now >= expiry_ts`).
+///
+/// # Time semantics
+/// Uses `env.ledger().timestamp()` so the check is deterministic per ledger.
+///
+/// # Storage
+/// - **Type**: Persistent storage read
+/// - **Key**: [`DataKey::FrozenBorrower`]
+pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
+    let now = env.ledger().timestamp();
+    env.storage()
+        .persistent()
+        .get(&DataKey::FrozenBorrower(borrower.clone()))
+        .map_or(false, |expiry: u64| now < expiry)
+}
+
+/// Get the freeze expiry timestamp for a borrower, if one is set.
+///
+/// Returns `Some(expiry_ts)` when a temporary freeze is in effect (even if
+/// expired — callers should compare against `now` themselves). Returns `None`
+/// when no freeze has ever been set.
+pub fn get_borrower_frozen_until(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FrozenBorrower(borrower.clone()))
+}
+
+/// Remove the temporary freeze for a borrower (admin only, enforced by caller).
+///
+/// This is a convenience for an admin who wants to lift a freeze before its
+/// natural expiry. If no freeze was set, this is a no-op.
+pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FrozenBorrower(borrower.clone()));
+}
+

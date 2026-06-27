@@ -144,6 +144,17 @@ pub struct BorrowerBlockedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerFrozenEvent {
+    pub borrower: Address,
+    /// Timestamp (ledger seconds) until which draws are frozen.
+    pub frozen_until: u64,
+    /// Ledger sequence at time of change (for off-chain indexers)
+    pub ledger: u32,
+}
+
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawnEventV2 {
     pub borrower: Address,
     pub recipient: Address,
@@ -313,6 +324,28 @@ pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bo
         },
     );
 }
+}
+
+/// Publish a borrower temporary freeze event.
+///
+/// Emitted when an admin sets a time-bounded freeze on a borrower's draws.
+/// The `frozen_until` field records the ledger timestamp at which the freeze
+/// will auto-expire.
+///
+/// # Topic
+/// `("credit", "brw_frz")`
+pub fn publish_borrower_frozen_event(env: &Env, borrower: &Address, frozen_until: u64) {
+    env.events().publish(
+        (Symbol::new(env, "br_freeze"),),
+        BorrowerFrozenEvent {
+            borrower: borrower.clone(),
+            frozen_until,
+            ledger: env.ledger().sequence(),
+        },
+    );
+}
+
+/// Publish a penalty rate entered event when a line becomes delinquent.
 
 /// Publish a penalty rate entered event when a line becomes delinquent.
 pub fn publish_penalty_rate_entered_event(
