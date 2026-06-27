@@ -160,6 +160,7 @@ CI workflows in `.github/workflows/`:
 | `coverage.yml` | push (`main`/`master`) and PR | `cargo llvm-cov --workspace --all-targets --fail-under-lines 95` |
 | `pr-coverage.yml` | PR | Comment-with-coverage-delta on PRs |
 | `build-wasm.yml` | push / PR | Release-WASM artifact build for `creditra-credit` and `gateway-auction`, uploads to artifact storage |
+| `wasm-size.yml` | push / PR | Build all workspace WASM via `scripts/check-wasm-size.sh`; fail if **any** artifact exceeds **100 KiB** (`THRESHOLD_BYTES=102400`) |
 | `gas.yml` | push / PR | Per-entrypoint CPU/memory budget regression against `contracts/.gas-baseline.json` (via `instrument` feature) |
 
 The size-budget enforcement is the load-bearing one: it guarantees the WASM
