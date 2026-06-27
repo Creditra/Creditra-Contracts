@@ -387,3 +387,15 @@ pub struct ProtocolSummary {
     /// Accumulated protocol fees awaiting treasury withdrawal.
     pub treasury_balance: i128,
 }
+
+/// Protocol summary returned by the specific query view for GrantFox campaign.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtocolSummaryView {
+    /// Global utilized principal accumulator.
+    pub total_utilized: i128,
+    /// Global collateral balance accumulator.
+    pub total_collateral: i128,
+    /// Count of currently Active credit lines.
+    pub active_line_count: u32,
+}

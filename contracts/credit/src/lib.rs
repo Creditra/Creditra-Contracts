@@ -109,11 +109,14 @@ pub use crate::risk::compute_rate_from_score;
 mod scoring;
 mod storage;
 pub mod types;
+mod views;
 
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
 mod risk_formula_tests;
+#[cfg(test)]
+mod views_tests;
 
 use crate::auth::require_admin_auth;
 use crate::events::{
@@ -145,7 +148,7 @@ use crate::storage::{
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
+    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -365,7 +368,7 @@ impl Credit {
             suspension_ts: 0,
         };
 
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
         clear_repayment_schedule(&env, &borrower);
 
         publish_credit_line_event(
@@ -556,8 +559,9 @@ impl Credit {
         }
         token_client.transfer(&reserve_address, &borrower, &amount);
 
+        let previous_status = credit_line.status;
         credit_line.utilized_amount = updated_utilized;
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 
         let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
@@ -692,9 +696,10 @@ impl Credit {
             .utilized_amount
             .saturating_sub(effective_repay)
             .max(0);
+        let previous_status = credit_line.status;
         credit_line.utilized_amount = new_utilized;
 
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
 
         let _timestamp = env.ledger().timestamp();
@@ -1069,6 +1074,11 @@ impl Credit {
     /// entries are extended.
     pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
         query::get_protocol_summary(env)
+    }
+
+    /// Get protocol-level dashboard totals requested for GrantFox campaign.
+    pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
+        views::get_protocol_summary_view(env)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {

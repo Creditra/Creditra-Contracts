@@ -225,6 +225,8 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
 
+    let previous_status = stored_line.status;
+
     // Apply interest accrual before any mutation.
     let mut credit_line = crate::accrual::apply_accrual(env, stored_line);
 
@@ -236,7 +238,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     let new_ts = env.ledger().timestamp();
     assert_ts_monotonic(env, credit_line.suspension_ts, new_ts);
     credit_line.suspension_ts = new_ts;
-    persist_credit_line(env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 
     publish_credit_line_event(
         env,
@@ -421,7 +423,7 @@ pub fn open_credit_line(
         last_accrual_ts: env.ledger().timestamp(),
         suspension_ts: 0,
     };
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
     clear_repayment_schedule(&env, &borrower);
 
     publish_credit_line_event(
@@ -544,8 +546,9 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         panic!("unauthorized");
     }
 
+    let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
     clear_repayment_schedule(&env, &borrower);
 
     publish_credit_line_event(
@@ -623,8 +626,9 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
+    let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 
     publish_credit_line_event(
         &env,
@@ -678,7 +682,8 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
         .checked_sub(effective_forgive)
         .unwrap_or(0);
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    let previous_status = credit_line.status;
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 }
 
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
@@ -738,11 +743,12 @@ pub fn settle_default_liquidation(
         .checked_sub(recovered_amount)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
+    let previous_status = credit_line.status;
     if credit_line.utilized_amount == 0 {
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -812,9 +818,10 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
+    let previous_status = credit_line.status;
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 
     publish_credit_line_event(
         &env,

@@ -58,7 +58,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, RepaymentSchedule};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -99,6 +99,8 @@ pub enum DataKey {
     SchemaVersion,
     /// Monotonic count of unique borrowers that have had a credit line recorded.
     CreditLineCount,
+    /// Count of currently Active credit lines.
+    ActiveLineCount,
     /// Borrower → stable numeric id used for deterministic enumeration.
     CreditLineIdByBorrower(Address),
     /// Stable numeric id → borrower address.
@@ -268,6 +270,30 @@ pub fn get_credit_line_count(env: &Env) -> u32 {
         .unwrap_or(0)
 }
 
+/// Return the count of currently Active credit lines.
+pub fn get_active_line_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::ActiveLineCount)
+        .unwrap_or(0)
+}
+
+/// Increment the count of currently Active credit lines.
+pub fn increment_active_line_count(env: &Env) {
+    let count = get_active_line_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::ActiveLineCount, &count.saturating_add(1));
+}
+
+/// Decrement the count of currently Active credit lines.
+pub fn decrement_active_line_count(env: &Env) {
+    let count = get_active_line_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::ActiveLineCount, &count.saturating_sub(1));
+}
+
 /// Return the configured global exposure cap, if set.
 pub fn get_max_total_exposure(env: &Env) -> Option<i128> {
     env.storage().instance().get(&DataKey::MaxTotalExposure)
@@ -358,11 +384,21 @@ pub fn persist_credit_line(
     borrower: &Address,
     line: &CreditLineData,
     previous_utilized: i128,
+    previous_status: Option<CreditStatus>,
 ) {
     ensure_credit_line_id(env, borrower);
     env.storage().persistent().set(borrower, line);
     bump_credit_line_ttl(env, borrower);
     adjust_total_utilized(env, previous_utilized, line.utilized_amount);
+    
+    let is_now_active = line.status == CreditStatus::Active;
+    let was_active = previous_status == Some(CreditStatus::Active);
+    
+    if is_now_active && !was_active {
+        increment_active_line_count(env);
+    } else if !is_now_active && was_active {
+        decrement_active_line_count(env);
+    }
 }
 
 /// Return a borrower's collateral balance without bumping unrelated TTL.
