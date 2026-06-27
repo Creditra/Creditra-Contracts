@@ -302,6 +302,18 @@ pub fn update_risk_parameters(
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
+    // Verify VRF commitment if score is changing
+    if risk_score != credit_line.risk_score {
+        if let Some(_commitment) = crate::scoring::get_vrf_commitment(&env, &borrower) {
+            // VRF commitment exists - verify the score matches
+            if !crate::scoring::verify_vrf_commitment(&env, &borrower, risk_score) {
+                env.panic_with_error(ContractError::Unauthorized);
+            }
+        }
+        // If no commitment exists, allow the update for backward compatibility
+        // (existing credit lines without VRF commitments)
+    }
+
     // Validate credit limit is within configured bounds
     crate::lifecycle::validate_credit_limit_bounds(&env, credit_limit);
 

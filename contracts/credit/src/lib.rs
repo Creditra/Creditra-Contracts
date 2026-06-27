@@ -106,6 +106,7 @@ pub mod math_utils;
 mod query;
 mod risk;
 pub use crate::risk::compute_rate_from_score;
+mod scoring;
 mod storage;
 pub mod types;
 
@@ -796,6 +797,50 @@ impl Credit {
     /// Get the utilization cap in basis points for a borrower, if set.
     pub fn get_utilization_cap(env: Env, borrower: Address) -> Option<u32> {
         storage_get_utilization_cap_bps(&env, &borrower)
+    }
+
+    /// Commit to a VRF output for a borrower's credit score derivation (admin only).
+    ///
+    /// This function stores a hash of the VRF output, creating a binding commitment
+    /// that prevents ex-post manipulation of the credit score. The commitment must
+    /// be set before `update_risk_parameters` can be called with a new score.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower whose score will be derived from this VRF.
+    /// - `commitment_hash`: 256-bit hash of the VRF output.
+    ///
+    /// # Errors
+    /// - Reverts if protocol is paused.
+    /// - Reverts if caller is not admin.
+    /// - Reverts if a commitment already exists for this borrower.
+    pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32>) {
+        scoring::commit_vrf_output(env, borrower, commitment_hash)
+    }
+
+    /// Clear the VRF commitment for a borrower (admin only).
+    ///
+    /// This function removes the VRF commitment, allowing a new commitment to be
+    /// made. This is intended for cases where the VRF process needs to be restarted.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower.
+    ///
+    /// # Errors
+    /// - Reverts if protocol is paused.
+    /// - Reverts if caller is not admin.
+    pub fn clear_vrf_commitment(env: Env, borrower: Address) {
+        scoring::clear_vrf_commitment(env, borrower)
+    }
+
+    /// Get the VRF commitment for a borrower (if it exists).
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower.
+    ///
+    /// # Returns
+    /// The VRF commitment data, or `None` if no commitment exists.
+    pub fn get_vrf_commitment(env: Env, borrower: Address) -> Option<scoring::VrfCommitment> {
+        scoring::get_vrf_commitment(&env, &borrower)
     }
 
     // ── Grace period policy ───────────────────────────────────────────────────

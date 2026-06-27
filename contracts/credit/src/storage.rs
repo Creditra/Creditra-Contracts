@@ -124,6 +124,9 @@ pub enum DataKey {
     RateCeilingBps(Address),
     /// Per-borrower installment schedule for delinquency tracking.
     RepaymentSchedule(Address),
+    /// Per-borrower VRF commitment for credit score derivation.
+    /// Stores the hash of the VRF output that the risk score must be derived from.
+    VrfCommitment(Address),
     /// Minimum allowed credit limit for new credit lines (admin-configurable).
     MinCreditLimit,
     /// Maximum allowed credit limit for new credit lines (admin-configurable).
