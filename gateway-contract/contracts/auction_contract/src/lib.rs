@@ -375,6 +375,7 @@ impl Auction {
     ) -> i128 {
         let factory = get_factory_contract(&env)
             .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
         if credit_contract != factory {
             env.panic_with_error(AuctionError::Unauthorized);
         }
