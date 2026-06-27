@@ -185,11 +185,8 @@ pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatu
     );
 }
 
-pub fn auction_get_seller(env: &Env, id: u32) -> Address {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::Seller(id))
-        .unwrap()
+pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
+    env.storage().persistent().get(&AuctionKey::Seller(id))
 }
 
 pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
@@ -202,11 +199,8 @@ pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
     );
 }
 
-pub fn auction_get_asset(env: &Env, id: u32) -> Address {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::Asset(id))
-        .unwrap()
+pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
+    env.storage().persistent().get(&AuctionKey::Asset(id))
 }
 
 pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {

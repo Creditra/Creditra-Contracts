@@ -5547,7 +5547,7 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             let (client, _admin, _borrower, _token) = setup_with_token(&env);
 
-        client.set_max_repay_amount(&0_i128);
+            client.set_max_repay_amount(&0_i128);
         }
     }
 
@@ -5555,9 +5555,9 @@ mod test_mock_liquidity_token {
     #[cfg(test)]
     mod test_health_factor {
         use super::*;
+        use crate::collateral;
         use soroban_sdk::testutils::Address as _;
         use soroban_sdk::token::StellarAssetClient;
-        use crate::collateral;
 
         /// Setup: contract + admin + borrower + token (used for both liquidity
         /// and collateral — the contract shares one token).  `reserve` tokens
@@ -5689,10 +5689,7 @@ mod test_mock_liquidity_token {
 
             assert_eq!(hf_again, hf_before);
             assert_eq!(line_before.utilized_amount, line_after.utilized_amount);
-            assert_eq!(
-                line_before.accrued_interest,
-                line_after.accrued_interest
-            );
+            assert_eq!(line_before.accrued_interest, line_after.accrued_interest);
             assert_eq!(collateral_before, collateral_after);
         }
 
