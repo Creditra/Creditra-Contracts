@@ -1281,6 +1281,53 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_dutch_price_happy_paths() {
+        // start_price = 1000, floor_price = 500, duration = 100
+        // elapsed = 0 -> should be 1000
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 0, 100), 1000);
+
+        // elapsed = 50 -> mid point -> should be 750
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 50, 100), 750);
+
+        // elapsed = 25 -> quarter point -> 1000 - (500 * 25) / 100 = 875
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 25, 100), 875);
+
+        // elapsed = 75 -> three-quarters point -> 1000 - (500 * 75) / 100 = 625
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 75, 100), 625);
+
+        // start_price == floor_price -> should always return start_price
+        assert_eq!(super::super::compute_dutch_price(1000, 1000, 50, 100), 1000);
+    }
+
+    #[test]
+    fn test_compute_dutch_price_edge_cases() {
+        // duration = 0 -> returns floor_price immediately
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 50, 0), 500);
+
+        // elapsed_time >= duration -> returns floor_price
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 100, 100), 500);
+        assert_eq!(super::super::compute_dutch_price(1000, 500, 150, 100), 500);
+    }
+
+    #[test]
+    fn test_compute_dutch_price_invalid_inputs_panic() {
+        // start_price < floor_price -> panic
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            super::super::compute_dutch_price(500, 1000, 50, 100);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compute_dutch_price_overflow_panics() {
+        // (i128::MAX * 2) overflows, which should panic
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            super::super::compute_dutch_price(i128::MAX, 0, 2, 100);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn english_mode_unchanged_with_new_signature() {
         let env = Env::default();
         env.mock_all_auths();
