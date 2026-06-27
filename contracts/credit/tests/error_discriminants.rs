@@ -11,7 +11,7 @@
 //! - New variants must be appended at the end of the enum with the next integer.
 //! - Add a corresponding assertion here when adding a new variant.
 
-use creditra_credit::types::ContractError;
+use creditra_credit::types::{ContractError, ContractErrorCategory};
 
 #[test]
 fn error_discriminants_are_stable() {
@@ -173,6 +173,189 @@ fn variant_count_is_known() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ContractErrorCategory Stability Tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Verify every `ContractErrorCategory` discriminant is pinned.
+#[test]
+fn category_discriminants_are_stable() {
+    assert_eq!(ContractErrorCategory::Auth as u32, 1);
+    assert_eq!(ContractErrorCategory::Lifecycle as u32, 2);
+    assert_eq!(ContractErrorCategory::Numeric as u32, 3);
+    assert_eq!(ContractErrorCategory::Limit as u32, 4);
+    assert_eq!(ContractErrorCategory::Liquidity as u32, 5);
+    assert_eq!(ContractErrorCategory::Risk as u32, 6);
+    assert_eq!(ContractErrorCategory::Oracle as u32, 7);
+    assert_eq!(ContractErrorCategory::Collateral as u32, 8);
+    assert_eq!(ContractErrorCategory::Block as u32, 9);
+    assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
+    assert_eq!(ContractErrorCategory::Misc as u32, 11);
+}
+
+/// Verify no two `ContractErrorCategory` variants share a discriminant.
+#[test]
+fn no_duplicate_category_discriminants() {
+    use std::collections::HashSet;
+
+    let codes: Vec<u32> = vec![
+        ContractErrorCategory::Auth as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
+        ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
+    ];
+
+    let unique: HashSet<u32> = codes.iter().cloned().collect();
+    assert_eq!(
+        codes.len(),
+        unique.len(),
+        "Duplicate discriminants detected in ContractErrorCategory"
+    );
+}
+
+/// Verify the total variant count for `ContractErrorCategory`.
+#[test]
+fn category_variant_count_is_known() {
+    const EXPECTED_VARIANT_COUNT: usize = 11;
+
+    let codes = [
+        ContractErrorCategory::Auth as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
+        ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
+    ];
+
+    assert_eq!(
+        codes.len(),
+        EXPECTED_VARIANT_COUNT,
+        "Category variant count changed — update EXPECTED_VARIANT_COUNT"
+    );
+}
+
+/// Verify every `ContractError` variant maps to the expected `ContractErrorCategory`.
+#[test]
+fn category_mappings_are_stable() {
+    // Auth
+    assert_eq!(ContractError::Unauthorized.category(), ContractErrorCategory::Auth);
+    assert_eq!(ContractError::NotAdmin.category(), ContractErrorCategory::Auth);
+    assert_eq!(ContractError::AdminNotInitialized.category(), ContractErrorCategory::Auth);
+    // Lifecycle
+    assert_eq!(ContractError::CreditLineClosed.category(), ContractErrorCategory::Lifecycle);
+    assert_eq!(ContractError::AlreadyInitialized.category(), ContractErrorCategory::Lifecycle);
+    assert_eq!(ContractError::CreditLineSuspended.category(), ContractErrorCategory::Lifecycle);
+    assert_eq!(ContractError::CreditLineDefaulted.category(), ContractErrorCategory::Lifecycle);
+    // Numeric
+    assert_eq!(ContractError::InvalidAmount.category(), ContractErrorCategory::Numeric);
+    assert_eq!(ContractError::NegativeLimit.category(), ContractErrorCategory::Numeric);
+    assert_eq!(ContractError::Overflow.category(), ContractErrorCategory::Numeric);
+    assert_eq!(ContractError::TimestampRegression.category(), ContractErrorCategory::Numeric);
+    assert_eq!(ContractError::LimitOutOfBounds.category(), ContractErrorCategory::Numeric);
+    // Limit
+    assert_eq!(ContractError::OverLimit.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::UtilizationNotZero.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::DrawExceedsMaxAmount.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::RepayExceedsMaxAmount.category(), ContractErrorCategory::Limit);
+    // Liquidity
+    assert_eq!(ContractError::MissingLiquidityToken.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::MissingLiquiditySource.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::InsufficientLiquidityReserve.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::LiquidityTokenCallFailed.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::InsufficientRepaymentAllowance.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::InsufficientRepaymentBalance.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::TreasuryNotSet.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(ContractError::ExposureCapExceeded.category(), ContractErrorCategory::Liquidity);
+    // Risk
+    assert_eq!(ContractError::RateTooHigh.category(), ContractErrorCategory::Risk);
+    assert_eq!(ContractError::ScoreTooHigh.category(), ContractErrorCategory::Risk);
+    assert_eq!(ContractError::Paused.category(), ContractErrorCategory::Risk);
+    assert_eq!(ContractError::DrawCooldownActive.category(), ContractErrorCategory::Risk);
+    // Oracle
+    assert_eq!(ContractError::OraclePriceInvalid.category(), ContractErrorCategory::Oracle);
+    assert_eq!(ContractError::OraclePriceStale.category(), ContractErrorCategory::Oracle);
+    assert_eq!(ContractError::OraclePriceDeviation.category(), ContractErrorCategory::Oracle);
+    // Collateral
+    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), ContractErrorCategory::Collateral);
+    assert_eq!(ContractError::InsufficientCollateralBalance.category(), ContractErrorCategory::Collateral);
+    // Block
+    assert_eq!(ContractError::BorrowerBlocked.category(), ContractErrorCategory::Block);
+    assert_eq!(ContractError::DrawsFrozen.category(), ContractErrorCategory::Block);
+    assert_eq!(ContractError::BorrowerFrozen.category(), ContractErrorCategory::Block);
+    // Reentrancy
+    assert_eq!(ContractError::Reentrancy.category(), ContractErrorCategory::Reentrancy);
+    // Misc
+    assert_eq!(ContractError::CreditLineNotFound.category(), ContractErrorCategory::Misc);
+    assert_eq!(ContractError::AdminAcceptTooEarly.category(), ContractErrorCategory::Misc);
+}
+
+/// Verify every ContractError variant's category matches its discriminant table.
+/// This catches accidental miscategorization when new variants are added.
+#[test]
+fn every_variant_has_known_category() {
+    use std::collections::HashSet;
+
+    let all_variants: Vec<ContractErrorCategory> = vec![
+        ContractError::Unauthorized.category(),
+        ContractError::NotAdmin.category(),
+        ContractError::CreditLineNotFound.category(),
+        ContractError::CreditLineClosed.category(),
+        ContractError::InvalidAmount.category(),
+        ContractError::OverLimit.category(),
+        ContractError::NegativeLimit.category(),
+        ContractError::RateTooHigh.category(),
+        ContractError::ScoreTooHigh.category(),
+        ContractError::UtilizationNotZero.category(),
+        ContractError::Reentrancy.category(),
+        ContractError::Overflow.category(),
+        ContractError::LimitDecreaseRequiresRepayment.category(),
+        ContractError::AlreadyInitialized.category(),
+        ContractError::AdminAcceptTooEarly.category(),
+        ContractError::BorrowerBlocked.category(),
+        ContractError::DrawExceedsMaxAmount.category(),
+        ContractError::Paused.category(),
+        ContractError::DrawsFrozen.category(),
+        ContractError::CreditLineSuspended.category(),
+        ContractError::CreditLineDefaulted.category(),
+        ContractError::MissingLiquidityToken.category(),
+        ContractError::MissingLiquiditySource.category(),
+        ContractError::InsufficientLiquidityReserve.category(),
+        ContractError::LiquidityTokenCallFailed.category(),
+        ContractError::InsufficientRepaymentAllowance.category(),
+        ContractError::InsufficientRepaymentBalance.category(),
+        ContractError::RepayExceedsMaxAmount.category(),
+        ContractError::DrawCooldownActive.category(),
+        ContractError::TreasuryNotSet.category(),
+        ContractError::ExposureCapExceeded.category(),
+        ContractError::AdminNotInitialized.category(),
+        ContractError::TimestampRegression.category(),
+        ContractError::LimitOutOfBounds.category(),
+        ContractError::CollateralRatioBelowMinimum.category(),
+        ContractError::OraclePriceInvalid.category(),
+        ContractError::OraclePriceStale.category(),
+        ContractError::OraclePriceDeviation.category(),
+        ContractError::InsufficientCollateralBalance.category(),
+        ContractError::BorrowerFrozen.category(),
+    ];
+
+    let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
+    assert_eq!(unique.len(), 11, "Not all 11 categories are covered by variant mappings");
+    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Integration Tests: Verify Refactored Error Paths
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -181,7 +364,7 @@ fn variant_count_is_known() {
 
 #[cfg(test)]
 mod error_path_tests {
-    use creditra_credit::types::ContractError;
+use creditra_credit::types::ContractError;
     use creditra_credit::{Credit, CreditClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
