@@ -4,7 +4,12 @@ Grouped reference for SDK clients, indexers, and front-end integrators.
 Each category names its variants, explains when the contract raises them, and
 prescribes an **SDK-side recovery action** the caller can take.
 
-Source of truth: `contracts/credit/src/types.rs` (lines 135–212).
+Categories are also available as a stable `#[repr(u32)]` enum —
+[`ContractErrorCategory`](../contracts/credit/src/types.rs) — with
+[`ContractError::category()`](../contracts/credit/src/types.rs) to map
+any error to its category at runtime.
+
+Source of truth: `contracts/credit/src/types.rs`.
 Cross-reference: [`docs/contract-errors.md`](./contract-errors.md) (flat code
 table).
 
@@ -181,18 +186,22 @@ ensure the requested amount does not exceed it.
 
 ---
 
-## Block (codes 16, 19)
+## Block (codes 16, 19, 40)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 16   | `BorrowerBlocked` | Borrower is on the admin-managed block list. |
 | 19   | `DrawsFrozen` | Global draw freeze is active (admin action for liquidity reserve ops). |
+| 40   | `BorrowerFrozen` | Borrower's draws are temporarily frozen until the specified expiry timestamp. |
 
 **Recovery action:**
 - `BorrowerBlocked`: The borrower is permanently blocked. No recovery from the
   SDK side; the borrower must contact the protocol admin.
 - `DrawsFrozen`: Inform the user that draws are temporarily frozen. Repayments
   remain open. Retry when the admin unfreezes.
+- `BorrowerFrozen`: Wait for the freeze to expire (or contact the admin to
+  unfreeze early). The freeze is time-bounded and auto-expires; check
+  `get_borrower_frozen_until()` for the remaining duration.
 
 ---
 
@@ -238,7 +247,7 @@ ensure it does not re-enter the credit contract during `transfer` /
 | Risk | 8, 9, 18, 29 | 4 | Clamp inputs / wait for cooldown or unpause |
 | Oracle | 36, 37, 38 | 3 | Await valid price feed |
 | Collateral | 35, 39 | 2 | Reduce withdrawal amount |
-| Block | 16, 19 | 2 | Contact admin or wait for unfreeze |
+| Block | 16, 19, 40 | 3 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
 | Misc | 3, 15 | 2 | Create line first / wait for delay |
-| **Total** | 1–39 | **39** | — |
+| **Total** | 1–40 | **40** | — |
