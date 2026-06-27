@@ -151,6 +151,9 @@ Creditra-Contracts/
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
 ├── gateway-contract/contracts/auction_contract/
+│   ├── tests/
+│   │   ├── transition_matrix.rs  # AuctionStatus transition matrix (Issue #614)
+│   │   └── auth_settle.rs       # settle_default_liquidation auth coverage
 │   └── src/
 │       ├── lib.rs             # Auction contract (English + Dutch modes)
 │       ├── types.rs           # AuctionMode, AuctionStatus, AuctionState

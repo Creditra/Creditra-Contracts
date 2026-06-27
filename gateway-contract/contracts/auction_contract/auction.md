@@ -15,6 +15,12 @@ Run all workspace tests:
 cargo test --workspace
 ```
 
+Run the exhaustive `AuctionStatus` transition matrix (Issue #614):
+
+```bash
+cargo test -p gateway-auction --test transition_matrix
+```
+
 Run only auction invariant/fuzz tests:
 
 ```bash
@@ -23,6 +29,25 @@ cargo test --manifest-path gateway-contract/contracts/auction_contract/Cargo.tom
 ```
 
 The fuzz tests use fixed seeds and bounded iteration counts to keep CI runtime deterministic.
+
+## AuctionStatus state machine
+
+`AuctionStatus` follows a strict three-state lifecycle defined in `src/types.rs`:
+
+```text
+Open ──close_auction / Dutch place_bid──► Closed ──claim_auction──► Claimed
+  │                                          │
+  └── place_bid (English) stays Open       └── terminal after claim
+```
+
+| From    | `place_bid`              | `close_auction` | `claim_auction` |
+|---------|--------------------------|-----------------|-----------------|
+| Open    | ✓ (English: stays Open; Dutch: → Closed) | ✓ → Closed | ✗ `AuctionNotClosed` (9) |
+| Closed  | ✗ `AuctionNotOpen` (8)   | ✗ `AuctionNotOpen` (8) | ✓ → Claimed |
+| Claimed | ✗ `AuctionNotOpen` (8)   | ✗ `AlreadyClaimed` (2) | ✗ `AuctionNotClosed` (9) |
+
+Each mode has three legal and six illegal status × entrypoint pairs. Integration coverage lives in
+`tests/transition_matrix.rs` (`cargo test -p gateway-auction --test transition_matrix`).
 
 ## Public Entry Points
 
