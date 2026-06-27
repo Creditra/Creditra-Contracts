@@ -1,49 +1,21 @@
-// SPDX-License-Identifier: Apache-2.0
-//! Budget-regression tests for the Creditra credit contract.
-//!
-//! Each test drives a public entrypoint, records the Soroban budget consumed
-//! (`cpu_instructions` + `memory_bytes`), and asserts the observed values stay
-//! within ±5 % (or a per-entrypoint override) of the baselines pinned in
-//! `contracts/credit/test_snapshots/budget.json`.
-//!
-//! # Regenerating baselines
-//! ```
-//! cargo run --example budget_baseline
-//! ```
-//! That writes fresh numbers to `test_snapshots/budget.json`; review the diff
-//! and commit it when the change is intentional.
-//!
-//! # Tolerance
-//! `BUDGET_TOLERANCE_PCT` is the global default (5 %).  Individual entries in
-//! `budget.json` may carry an optional `"tolerance_pct"` field to override it.
-
 use soroban_sdk::{
-    testutils::{Address as _, Budget},
+    testutils::{budget::Budget, Address as _, Ledger},
     token, Address, Env,
 };
 use std::{collections::HashMap, path::Path};
 
-// ── baseline file path (relative to the crate root) ──────────────────────────
 const SNAPSHOT_PATH: &str = "test_snapshots/budget.json";
-
-/// Global ±% tolerance when no per-entrypoint override is present.
 const BUDGET_TOLERANCE_PCT: f64 = 5.0;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-/// A single pinned baseline triple.
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct Baseline {
     entrypoint: String,
     cpu_instructions: u64,
     memory_bytes: u64,
-    /// Optional per-entrypoint tolerance override (percentage, e.g. `10.0`).
     #[serde(default)]
     tolerance_pct: Option<f64>,
 }
 
-/// Load the JSON snapshot from disk.  Returns an empty map when the file does
-/// not exist yet (first run / CI bootstrap).
 fn load_baselines() -> HashMap<String, Baseline> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SNAPSHOT_PATH);
     if !path.exists() {
@@ -58,8 +30,6 @@ fn load_baselines() -> HashMap<String, Baseline> {
         .collect()
 }
 
-/// Assert that `observed` is within `±tolerance_pct` of `baseline`.
-/// Panics with a human-readable triple on failure.
 fn assert_within_tolerance(
     entrypoint: &str,
     observed_cpu: u64,
@@ -67,7 +37,6 @@ fn assert_within_tolerance(
     baseline: &Baseline,
 ) {
     let tol = baseline.tolerance_pct.unwrap_or(BUDGET_TOLERANCE_PCT) / 100.0;
-
     let check = |label: &str, observed: u64, pinned: u64| {
         let delta_pct = (observed as f64 - pinned as f64).abs() / (pinned as f64) * 100.0;
         assert!(
@@ -76,75 +45,63 @@ fn assert_within_tolerance(
             tol * 100.0
         );
     };
-
     check("cpu_instructions", observed_cpu, baseline.cpu_instructions);
     check("memory_bytes", observed_mem, baseline.memory_bytes);
 }
 
-// ── shared test-environment factory ──────────────────────────────────────────
-
-/// Returns `(env, credit_client, token_client, admin, borrower)`.
-/// The environment has the budget **enabled** and the contract already
-/// `init`-ialized so individual test cases start from a clean, consistent
-/// state without counting setup overhead.
 fn setup() -> (
     Env,
-    credit::CreditClient<'static>,
+    creditra_credit::CreditClient<'static>,
     token::StellarAssetClient<'static>,
     Address,
     Address,
 ) {
     let env = Env::default();
-    // Enable budget tracking.
-    env.budget().reset_unlimited();
+    env.cost_estimate().budget().reset_unlimited();
+    env.mock_all_auths_allowing_non_root_auth();
 
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    // Deploy a SAC token so liquidity transfers work.
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
     let token = token::StellarAssetClient::new(&env, &token_id);
+    let token_client = token::Client::new(&env, &token_id);
+
     token.mint(&admin, &1_000_000_000_i128);
+    token.mint(&borrower, &500_000_000_i128);
 
-    // Deploy and initialise the credit contract.
-    let credit_id = env.register(credit::Credit, ());
-    let credit = credit::CreditClient::new(&env, &credit_id);
+    let credit_id = env.register(creditra_credit::Credit, ());
+    let credit = creditra_credit::CreditClient::new(&env, &credit_id);
 
-    env.mock_all_auths();
+    token_client.approve(&borrower, &credit_id, &500_000_000_i128, &2000_u32);
+    token_client.approve(&admin, &credit_id, &1_000_000_000_i128, &2000_u32);
+
     credit.init(&admin);
     credit.set_liquidity_token(&token_id);
     credit.set_liquidity_source(&admin);
 
-    // Give borrower some tokens for collateral / repayment.
-    token.mint(&borrower, &500_000_000_i128);
-
     (env, credit, token, admin, borrower)
 }
 
-// ── macro: measure one entrypoint invocation ─────────────────────────────────
+fn budget(env: &Env) -> Budget {
+    env.cost_estimate().budget()
+}
 
-/// Measure CPU and memory after calling `$call`, then assert against baselines.
 macro_rules! budget_test {
     ($name:ident, $ep:expr, $setup:expr, $call:expr) => {
         #[test]
         fn $name() {
             let baselines = load_baselines();
             let (env, credit, _token, admin, borrower) = $setup;
-
-            // Reset counters immediately before the call under test.
-            env.budget().reset_unlimited();
+            budget(&env).reset_unlimited();
             $call;
-
-            let cpu = env.budget().cpu_instruction_count();
-            let mem = env.budget().memory_bytes_count();
-
+            let cpu = budget(&env).cpu_instruction_cost();
+            let mem = budget(&env).memory_bytes_cost();
             if let Some(baseline) = baselines.get($ep) {
                 assert_within_tolerance($ep, cpu, mem, baseline);
             } else {
-                // No baseline yet — print observed values so the developer can
-                // bootstrap `budget.json` with `cargo run --example budget_baseline`.
                 println!(
                     "[budget_regression] no baseline for '{ep}'; observed cpu={cpu} mem={mem}",
                     ep = $ep
@@ -154,24 +111,20 @@ macro_rules! budget_test {
     };
 }
 
-// ── 1. init ───────────────────────────────────────────────────────────────────
+// ── 1. init ──────────────────────────────────────────────────────────────────
 #[test]
 fn budget_init() {
     let baselines = load_baselines();
     let env = Env::default();
-    env.budget().reset_unlimited();
-
+    budget(&env).reset_unlimited();
+    env.mock_all_auths_allowing_non_root_auth();
     let admin = Address::generate(&env);
-    let credit_id = env.register(credit::Credit, ());
-    let credit = credit::CreditClient::new(&env, &credit_id);
-    env.mock_all_auths();
-
-    env.budget().reset_unlimited();
+    let credit_id = env.register(creditra_credit::Credit, ());
+    let credit = creditra_credit::CreditClient::new(&env, &credit_id);
+    budget(&env).reset_unlimited();
     credit.init(&admin);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("init") {
         assert_within_tolerance("init", cpu, mem, b);
     } else {
@@ -179,18 +132,15 @@ fn budget_init() {
     }
 }
 
-// ── 2. open_credit_line ───────────────────────────────────────────────────────
+// ── 2. open_credit_line ──────────────────────────────────────────────────────
 #[test]
 fn budget_open_credit_line() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, borrower) = setup();
-
-    env.budget().reset_unlimited();
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    budget(&env).reset_unlimited();
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("open_credit_line") {
         assert_within_tolerance("open_credit_line", cpu, mem, b);
     } else {
@@ -200,23 +150,17 @@ fn budget_open_credit_line() {
     }
 }
 
-// ── 3. draw_credit ────────────────────────────────────────────────────────────
+// ── 3. draw_credit ───────────────────────────────────────────────────────────
 #[test]
 fn budget_draw_credit() {
     let baselines = load_baselines();
     let (env, credit, token, admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-
-    // Fund the liquidity source so the transfer succeeds.
-    token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
-
-    env.budget().reset_unlimited();
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    credit.deposit_collateral(&borrower, &200_000_i128);
+    budget(&env).reset_unlimited();
     credit.draw_credit(&borrower, &100_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("draw_credit") {
         assert_within_tolerance("draw_credit", cpu, mem, b);
     } else {
@@ -224,25 +168,18 @@ fn budget_draw_credit() {
     }
 }
 
-// ── 4. repay_credit ───────────────────────────────────────────────────────────
+// ── 4. repay_credit ──────────────────────────────────────────────────────────
 #[test]
 fn budget_repay_credit() {
     let baselines = load_baselines();
     let (env, credit, token, admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-    token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    credit.deposit_collateral(&borrower, &200_000_i128);
     credit.draw_credit(&borrower, &100_000_i128);
-
-    // Borrower approves repayment.
-    token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
-
-    env.budget().reset_unlimited();
+    budget(&env).reset_unlimited();
     credit.repay_credit(&borrower, &50_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("repay_credit") {
         assert_within_tolerance("repay_credit", cpu, mem, b);
     } else {
@@ -252,21 +189,16 @@ fn budget_repay_credit() {
     }
 }
 
-// ── 5. update_risk_parameters ─────────────────────────────────────────────────
+// ── 5. update_risk_parameters ────────────────────────────────────────────────
 #[test]
 fn budget_update_risk_parameters() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-
-    env.budget().reset_unlimited();
-    // New risk score: 400 (lower risk → tighter rate).
-    credit.update_risk_parameters(&borrower, &400_u32, &900_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    budget(&env).reset_unlimited();
+    credit.update_risk_parameters(&borrower, &900_000_i128, &400_u32, &50_u32);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("update_risk_parameters") {
         assert_within_tolerance("update_risk_parameters", cpu, mem, b);
     } else {
@@ -274,23 +206,15 @@ fn budget_update_risk_parameters() {
     }
 }
 
-// ── 6. set_rate_formula_config ────────────────────────────────────────────────
+// ── 6. set_rate_formula_config ──────────────────────────────────────────────
 #[test]
 fn budget_set_rate_formula_config() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-
-    env.budget().reset_unlimited();
-    credit.set_rate_formula_config(
-        &200_u32,   // base_rate_bps
-        &10_u32,    // slope
-        &100_u32,   // r_min_bps
-        &2_000_u32, // r_max_bps
-    );
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    budget(&env).reset_unlimited();
+    credit.set_rate_formula_config(&200_u32, &10_u32, &100_u32, &2_000_u32);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("set_rate_formula_config") {
         assert_within_tolerance("set_rate_formula_config", cpu, mem, b);
     } else {
@@ -298,18 +222,15 @@ fn budget_set_rate_formula_config() {
     }
 }
 
-// ── 7. set_credit_limit_bounds ────────────────────────────────────────────────
+// ── 7. set_credit_limit_bounds ──────────────────────────────────────────────
 #[test]
 fn budget_set_credit_limit_bounds() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-
-    env.budget().reset_unlimited();
+    budget(&env).reset_unlimited();
     credit.set_credit_limit_bounds(&10_000_i128, &50_000_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("set_credit_limit_bounds") {
         assert_within_tolerance("set_credit_limit_bounds", cpu, mem, b);
     } else {
@@ -317,18 +238,16 @@ fn budget_set_credit_limit_bounds() {
     }
 }
 
-// ── 8. set_utilization_cap ────────────────────────────────────────────────────
+// ── 8. set_utilization_cap ──────────────────────────────────────────────────
 #[test]
 fn budget_set_utilization_cap() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-
-    env.budget().reset_unlimited();
-    credit.set_utilization_cap(&8_000_u32); // 80 %
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let addr = Address::generate(&env);
+    budget(&env).reset_unlimited();
+    credit.set_utilization_cap(&addr, &8_000_u32);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("set_utilization_cap") {
         assert_within_tolerance("set_utilization_cap", cpu, mem, b);
     } else {
@@ -336,21 +255,16 @@ fn budget_set_utilization_cap() {
     }
 }
 
-// ── 9. deposit_collateral ─────────────────────────────────────────────────────
+// ── 9. deposit_collateral ──────────────────────────────────────────────────
 #[test]
 fn budget_deposit_collateral() {
     let baselines = load_baselines();
     let (env, credit, token, _admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-    token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
-
-    env.budget().reset_unlimited();
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    budget(&env).reset_unlimited();
     credit.deposit_collateral(&borrower, &100_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("deposit_collateral") {
         assert_within_tolerance("deposit_collateral", cpu, mem, b);
     } else {
@@ -358,22 +272,17 @@ fn budget_deposit_collateral() {
     }
 }
 
-// ── 10. withdraw_collateral ───────────────────────────────────────────────────
+// ── 10. withdraw_collateral ────────────────────────────────────────────────
 #[test]
 fn budget_withdraw_collateral() {
     let baselines = load_baselines();
     let (env, credit, token, _admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-    token.approve(&borrower, &credit.address, &200_000_i128, &1000_u32);
-    credit.deposit_collateral(&borrower, &100_000_i128);
-
-    env.budget().reset_unlimited();
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    credit.deposit_collateral(&borrower, &200_000_i128);
+    budget(&env).reset_unlimited();
     credit.withdraw_collateral(&borrower, &50_000_i128);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("withdraw_collateral") {
         assert_within_tolerance("withdraw_collateral", cpu, mem, b);
     } else {
@@ -381,35 +290,32 @@ fn budget_withdraw_collateral() {
     }
 }
 
-// ── 11. accrue_batch ──────────────────────────────────────────────────────────
+// ── 11. accrue_batch ───────────────────────────────────────────────────────
 #[test]
 fn budget_accrue_batch() {
     let baselines = load_baselines();
     let (env, credit, token, admin, _admin_addr) = setup();
+    let token_client = token::Client::new(
+        &env,
+        &env.register_stellar_asset_contract_v2(admin.clone())
+            .address(),
+    );
 
-    // Open 5 lines so the batch has meaningful work.
+    let mut vec = soroban_sdk::Vec::new(&env);
     for _ in 0..5 {
         let b = Address::generate(&env);
         token.mint(&b, &200_000_i128);
-        credit.open_credit_line(&b, &500_000_i128, &500_u32);
-        token.approve(&admin, &credit.address, &500_000_i128, &1000_u32);
+        credit.open_credit_line(&b, &500_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&b, &150_000_i128);
         credit.draw_credit(&b, &50_000_i128);
+        vec.push_back(b);
     }
 
-    // Advance ledger time to make accrual non-trivial.
     env.ledger().with_mut(|l| l.timestamp += 86_400 * 30);
-
-    let borrowers: soroban_sdk::Vec<Address> = {
-        // Re-enumerate; simpler to collect from a fresh Vec for the test.
-        soroban_sdk::Vec::new(&env)
-    };
-
-    env.budget().reset_unlimited();
-    credit.accrue_batch(&borrowers);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    budget(&env).reset_unlimited();
+    credit.accrue_batch(&vec);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("accrue_batch") {
         assert_within_tolerance("accrue_batch", cpu, mem, b);
     } else {
@@ -419,71 +325,55 @@ fn budget_accrue_batch() {
     }
 }
 
-// ── 12. pause_protocol / unpause_protocol ─────────────────────────────────────
+// ── 12. freeze_draws / unfreeze_draws ──────────────────────────────────────
 #[test]
-fn budget_pause_protocol() {
+fn budget_freeze_draws() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-
-    env.budget().reset_unlimited();
-    credit.pause_protocol();
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
-    if let Some(b) = baselines.get("pause_protocol") {
-        assert_within_tolerance("pause_protocol", cpu, mem, b);
+    budget(&env).reset_unlimited();
+    credit.freeze_draws();
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
+    if let Some(b) = baselines.get("freeze_draws") {
+        assert_within_tolerance("freeze_draws", cpu, mem, b);
     } else {
         println!(
-            "[budget_regression] no baseline for 'pause_protocol'; observed cpu={cpu} mem={mem}"
+            "[budget_regression] no baseline for 'freeze_draws'; observed cpu={cpu} mem={mem}"
         );
     }
 }
 
 #[test]
-fn budget_unpause_protocol() {
+fn budget_unfreeze_draws() {
     let baselines = load_baselines();
     let (env, credit, _token, _admin, _borrower) = setup();
-
-    credit.pause_protocol();
-
-    env.budget().reset_unlimited();
-    credit.unpause_protocol();
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
-    if let Some(b) = baselines.get("unpause_protocol") {
-        assert_within_tolerance("unpause_protocol", cpu, mem, b);
+    credit.freeze_draws();
+    budget(&env).reset_unlimited();
+    credit.unfreeze_draws();
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
+    if let Some(b) = baselines.get("unfreeze_draws") {
+        assert_within_tolerance("unfreeze_draws", cpu, mem, b);
     } else {
         println!(
-            "[budget_regression] no baseline for 'unpause_protocol'; observed cpu={cpu} mem={mem}"
+            "[budget_regression] no baseline for 'unfreeze_draws'; observed cpu={cpu} mem={mem}"
         );
     }
 }
 
-// ── 13. default_credit_line ───────────────────────────────────────────────────
-/// Drives the full path: open → draw → age past grace → default.
-/// `settle_default_liquidation` is exercised in the auction integration suite;
-/// here we pin just the state-transition cost.
+// ── 13. default_credit_line ───────────────────────────────────────────────
 #[test]
 fn budget_default_credit_line() {
     let baselines = load_baselines();
     let (env, credit, token, admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-    token.approve(&admin, &credit.address, &1_000_000_i128, &1000_u32);
-    credit.draw_credit(&borrower, &500_000_i128);
-
-    // Skip past any grace period.
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    credit.deposit_collateral(&borrower, &500_000_i128);
+    credit.draw_credit(&borrower, &300_000_i128);
     env.ledger().with_mut(|l| l.timestamp += 86_400 * 120);
-
-    env.budget().reset_unlimited();
+    budget(&env).reset_unlimited();
     credit.default_credit_line(&borrower);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("default_credit_line") {
         assert_within_tolerance("default_credit_line", cpu, mem, b);
     } else {
@@ -491,20 +381,16 @@ fn budget_default_credit_line() {
     }
 }
 
-// ── 14. close_credit_line ─────────────────────────────────────────────────────
+// ── 14. close_credit_line ─────────────────────────────────────────────────
 #[test]
 fn budget_close_credit_line() {
     let baselines = load_baselines();
-    let (env, credit, _token, _admin, borrower) = setup();
-
-    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32);
-
-    env.budget().reset_unlimited();
-    credit.close_credit_line(&borrower);
-
-    let cpu = env.budget().cpu_instruction_count();
-    let mem = env.budget().memory_bytes_count();
-
+    let (env, credit, _token, admin, borrower) = setup();
+    credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+    budget(&env).reset_unlimited();
+    credit.close_credit_line(&borrower, &admin);
+    let cpu = budget(&env).cpu_instruction_cost();
+    let mem = budget(&env).memory_bytes_cost();
     if let Some(b) = baselines.get("close_credit_line") {
         assert_within_tolerance("close_credit_line", cpu, mem, b);
     } else {

@@ -347,7 +347,13 @@ pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
                 if updated.utilized_amount != previous_utilized
                     || updated.last_accrual_ts != previous_ts
                 {
-                    persist_credit_line(env, &borrower, &updated, previous_utilized, Some(previous_status));
+                    persist_credit_line(
+                        env,
+                        &borrower,
+                        &updated,
+                        previous_utilized,
+                        Some(previous_status),
+                    );
                 }
             }
         }

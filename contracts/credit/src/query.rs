@@ -142,7 +142,9 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         .checked_mul(100_000_000)
         .unwrap_or(u128::MAX);
 
-    let denominator = utilized_u128.checked_mul(min_ratio_u128).unwrap_or(u128::MAX);
+    let denominator = utilized_u128
+        .checked_mul(min_ratio_u128)
+        .unwrap_or(u128::MAX);
 
     // If the denominator overflowed to u128::MAX, the result will be small.
     // We guard against division-by-zero: `utilized > 0` and `min_ratio_bps`

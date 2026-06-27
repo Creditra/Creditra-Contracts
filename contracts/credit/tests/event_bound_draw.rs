@@ -74,8 +74,7 @@ fn setup_active_borrower(start_ts: u64) -> (Env, Address, Address, Address) {
     let token_address = token_id.address();
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&contract_id);
-    token::StellarAssetClient::new(&env, &token_address)
-        .mint(&contract_id, &RESERVE_BALANCE);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &RESERVE_BALANCE);
 
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &300_u32, &70_u32);
 
@@ -184,9 +183,9 @@ fn make_delinquent(env: &Env, client: &CreditClient, borrower: &Address) {
     let due_in_past = START_TS - 10_000;
     client.set_repayment_schedule(
         borrower,
-        &500_i128,       // amount_per_period
-        &86_400_u64,     // period_seconds (1 day)
-        &due_in_past,    // first_due_ts in the past -> immediately delinquent
+        &500_i128,    // amount_per_period
+        &86_400_u64,  // period_seconds (1 day)
+        &due_in_past, // first_due_ts in the past -> immediately delinquent
     );
 
     // Enable penalty surcharge so delinquent accrual adds the surcharge.

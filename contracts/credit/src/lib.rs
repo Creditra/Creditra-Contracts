@@ -121,34 +121,31 @@ mod views_tests;
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_contract_upgraded_event, publish_credit_line_event,
-    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent,
+    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
+    publish_repayment_event, publish_token_rescued_event, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::storage::{
-    admin_key, assert_not_paused, clear_reentrancy_guard, clear_repayment_schedule,
-    get_borrower_by_credit_line_id, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
+    clear_repayment_schedule, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen,
-    persist_credit_line, proposed_admin_key,
+    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
     proposed_at_key, rate_cfg_key, rate_formula_key,
-    set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, clear_borrower_frozen,
-    get_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, RateFormulaConfigEvent,
+    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
+    RateFormulaConfigEvent,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -424,7 +421,6 @@ impl Credit {
             env.panic_with_error(ContractError::BorrowerFrozen);
         }
 
-
         // Enforce per-transaction draw cap when configured.
         if let Some(max_draw) = env
             .storage()
@@ -561,7 +557,13 @@ impl Credit {
 
         let previous_status = credit_line.status;
         credit_line.utilized_amount = updated_utilized;
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
+        persist_credit_line(
+            &env,
+            &borrower,
+            &credit_line,
+            previous_utilized,
+            Some(previous_status),
+        );
 
         let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
@@ -699,7 +701,13 @@ impl Credit {
         let previous_status = credit_line.status;
         credit_line.utilized_amount = new_utilized;
 
-        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
+        persist_credit_line(
+            &env,
+            &borrower,
+            &credit_line,
+            previous_utilized,
+            Some(previous_status),
+        );
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
 
         let _timestamp = env.ledger().timestamp();
@@ -1636,8 +1644,6 @@ impl Credit {
         require_admin_auth(&env);
         clear_borrower_frozen(&env, &borrower);
     }
-
-
 
     /// Returns all global protocol configuration in a single call.
     ///
@@ -4731,25 +4737,23 @@ mod test_mock_liquidity_token {
         }
     }
 
+    fn freeze_auto_expires_after_ts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
 
-        fn freeze_auto_expires_after_ts() {
-            let env = Env::default();
-            env.mock_all_auths();
-            let (client, _admin, borrower) = setup(&env);
+        let start = 1_700_000_000u64;
 
-            let start = 1_700_000_000u64;
+        // Freeze for 1 hour
+        client.freeze_borrower_until(&_admin, &borrower, &(start + 3600));
+        assert!(client.is_borrower_frozen(&borrower));
 
-            // Freeze for 1 hour
-            client.freeze_borrower_until(&_admin, &borrower, &(start + 3600));
-            assert!(client.is_borrower_frozen(&borrower));
+        // Advance past expiry
+        env.ledger().set_timestamp(start + 3600);
 
-            // Advance past expiry
-            env.ledger().set_timestamp(start + 3600);
-
-            // Should now be unfrozen
-            assert!(!client.is_borrower_frozen(&borrower));
-        }
-
+        // Should now be unfrozen
+        assert!(!client.is_borrower_frozen(&borrower));
+    }
 
     #[cfg(test)]
     mod test_max_draw_amount {
@@ -5823,7 +5827,7 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             let (client, _admin, _borrower, _token) = setup_with_token(&env);
 
-        client.set_max_repay_amount(&0_i128);
+            client.set_max_repay_amount(&0_i128);
         }
     }
 
@@ -5831,9 +5835,9 @@ mod test_mock_liquidity_token {
     #[cfg(test)]
     mod test_health_factor {
         use super::*;
+        use crate::collateral;
         use soroban_sdk::testutils::Address as _;
         use soroban_sdk::token::StellarAssetClient;
-        use crate::collateral;
 
         /// Setup: contract + admin + borrower + token (used for both liquidity
         /// and collateral — the contract shares one token).  `reserve` tokens
@@ -5965,10 +5969,7 @@ mod test_mock_liquidity_token {
 
             assert_eq!(hf_again, hf_before);
             assert_eq!(line_before.utilized_amount, line_after.utilized_amount);
-            assert_eq!(
-                line_before.accrued_interest,
-                line_after.accrued_interest
-            );
+            assert_eq!(line_before.accrued_interest, line_after.accrued_interest);
             assert_eq!(collateral_before, collateral_after);
         }
 

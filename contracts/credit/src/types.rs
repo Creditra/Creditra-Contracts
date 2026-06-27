@@ -217,7 +217,6 @@ pub enum ContractError {
     InsufficientCollateralBalance = 39,
     /// Borrower's draws are temporarily frozen until the specified expiry timestamp.
     BorrowerFrozen = 40,
-
 }
 
 /// Stored credit line data for a borrower.

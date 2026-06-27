@@ -390,10 +390,10 @@ pub fn persist_credit_line(
     env.storage().persistent().set(borrower, line);
     bump_credit_line_ttl(env, borrower);
     adjust_total_utilized(env, previous_utilized, line.utilized_amount);
-    
+
     let is_now_active = line.status == CreditStatus::Active;
     let was_active = previous_status == Some(CreditStatus::Active);
-    
+
     if is_now_active && !was_active {
         increment_active_line_count(env);
     } else if !is_now_active && was_active {
@@ -1007,4 +1007,3 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
         .persistent()
         .remove(&DataKey::FrozenBorrower(borrower.clone()));
 }
-

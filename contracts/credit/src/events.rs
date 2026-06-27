@@ -152,7 +152,6 @@ pub struct BorrowerFrozenEvent {
     pub ledger: u32,
 }
 
-
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawnEventV2 {
@@ -323,7 +322,6 @@ pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bo
             ledger: env.ledger().sequence(),
         },
     );
-}
 }
 
 /// Publish a borrower temporary freeze event.

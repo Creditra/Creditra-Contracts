@@ -61,7 +61,8 @@
 use crate::auth::require_admin_auth;
 use crate::events::publish_risk_parameters_updated;
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, get_credit_line, persist_credit_line, rate_cfg_key, rate_formula_key,
+    assert_not_paused, assert_ts_monotonic, get_credit_line, persist_credit_line, rate_cfg_key,
+    rate_formula_key,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
@@ -374,7 +375,13 @@ pub fn update_risk_parameters(
 
     credit_line.credit_limit = credit_limit;
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(previous_status),
+    );
 
     publish_risk_parameters_updated(
         &env,
