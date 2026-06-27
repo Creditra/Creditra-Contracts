@@ -59,8 +59,7 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason,
-    RepaymentSchedule,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
 };
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
@@ -774,10 +773,9 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
 
 /// Set/unset the global draws frozen flag (admin only, enforced by caller).
 pub fn set_draws_frozen(env: &Env, frozen: bool, reason: FreezeReason) {
-    env.storage().instance().set(
-        &DataKey::DrawsFrozen,
-        &DrawsFreezeState { frozen, reason },
-    );
+    env.storage()
+        .instance()
+        .set(&DataKey::DrawsFrozen, &DrawsFreezeState { frozen, reason });
 }
 
 /// Check if draws are globally frozen.

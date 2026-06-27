@@ -73,7 +73,7 @@
   },
   {
     "entrypoint": "unfreeze_draws",
-    "cpu_instructions": 97541,
+    "cpu_instructions": 109835,
     "memory_bytes": 17481,
     "tolerance_pct": 5.0
   },

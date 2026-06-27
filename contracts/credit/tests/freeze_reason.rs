@@ -2,8 +2,8 @@
 
 //! Focused tests for credit-line freeze with structured reason taxonomy (#629).
 
-use creditra_credit::{Credit, CreditClient, FreezeReason};
 use creditra_credit::events::{CreditLineFreezeEvent, DrawsFrozenEvent};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal, TryIntoVal};
 
@@ -66,7 +66,10 @@ fn freeze_credit_line_blocks_draws_with_reason() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.draw_credit(&borrower, &100);
     }));
-    assert!(result.is_err(), "draw must fail while credit line is frozen");
+    assert!(
+        result.is_err(),
+        "draw must fail while credit line is frozen"
+    );
 }
 
 #[test]

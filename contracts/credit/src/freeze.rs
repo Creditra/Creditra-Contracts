@@ -122,7 +122,11 @@ pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
 pub fn unfreeze_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
     let key = DataKey::CreditLineFreeze(borrower.clone());
-    let Some(reason) = env.storage().persistent().get::<DataKey, FreezeReason>(&key) else {
+    let Some(reason) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, FreezeReason>(&key)
+    else {
         return;
     };
     env.storage().persistent().remove(&key);

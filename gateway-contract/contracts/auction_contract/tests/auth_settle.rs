@@ -74,12 +74,7 @@ fn non_factory_invoker_reverts() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
@@ -104,12 +99,7 @@ fn factory_invoker_succeeds() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
@@ -134,12 +124,7 @@ fn replay_settle_reverts() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
@@ -153,12 +138,7 @@ fn replay_settle_reverts() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])

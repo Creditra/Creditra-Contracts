@@ -6,8 +6,8 @@ use creditra_credit::events::{
     publish_draw_reversed_event, publish_drawn_event, publish_draws_frozen_event,
     publish_grace_waiver_applied_event, publish_interest_accrued_event, publish_paused_event,
     publish_rate_formula_config_event, publish_repayment_event, publish_risk_parameters_updated,
-    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent,
+    DrawReversedEvent, InterestAccruedEvent, RepaymentEvent, RiskParametersUpdatedEvent,
 };
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};

@@ -144,9 +144,9 @@ use crate::storage::{
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, RateFormulaConfigEvent,
+    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
+    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
+    RateFormulaConfigEvent,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -4478,7 +4478,7 @@ mod test_mock_liquidity_token {
         #[should_panic(expected = "Error(Contract, #19)")]
         fn draw_credit_reverts_when_frozen() {
             let env = Env::default();
-            let (client, _admin, borrower, _contract_id) = setup(&env);
+            let (client, _admin, borrower) = setup(&env);
             client.freeze_draws(&FreezeReason::LiquidityReserve);
             client.draw_credit(&borrower, &100_i128);
         }
@@ -4535,7 +4535,7 @@ mod test_mock_liquidity_token {
         #[test]
         fn draw_credit_succeeds_after_unfreeze() {
             let env = Env::default();
-            let (client, _admin, borrower, _contract_id) = setup(&env);
+            let (client, _admin, borrower) = setup(&env);
             client.freeze_draws(&FreezeReason::LiquidityReserve);
             client.unfreeze_draws();
             client.draw_credit(&borrower, &100_i128);
@@ -4687,7 +4687,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
 
             client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
 
@@ -4706,7 +4706,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
             client.freeze_borrower_until(&admin, &borrower, &now);
         }
 
@@ -4717,12 +4717,12 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let start = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = start);
+            env.ledger().set_timestamp(start);
 
             client.freeze_borrower_until(&admin, &borrower, &(start + 3600));
             assert!(client.is_borrower_frozen(&borrower));
 
-            env.ledger().with_mut(|li| li.timestamp = start + 3600);
+            env.ledger().set_timestamp(start + 3600);
             assert!(!client.is_borrower_frozen(&borrower));
         }
 
@@ -4735,7 +4735,7 @@ mod test_mock_liquidity_token {
             let non_admin = Address::generate(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
             client.freeze_borrower_until(&non_admin, &borrower, &(now + 3600));
         }
 
@@ -4746,7 +4746,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
 
             client.freeze_borrower_until(&admin, &borrower, &(now + 7200));
             assert!(client.is_borrower_frozen(&borrower));
@@ -4774,7 +4774,7 @@ mod test_mock_liquidity_token {
 
             let now = 1_700_000_000u64;
             let expiry = now + 3600;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
 
             client.freeze_borrower_until(&admin, &borrower, &expiry);
 
@@ -4796,12 +4796,13 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().with_mut(|li| li.timestamp = now);
+            env.ledger().set_timestamp(now);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
             client.set_liquidity_token(&token);
-            soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_i128);
+            soroban_sdk::token::StellarAssetClient::new(&env, &token)
+                .mint(&contract_id, &1_000_i128);
 
             client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
             client.draw_credit(&borrower, &100_i128);
