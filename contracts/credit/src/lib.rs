@@ -1253,7 +1253,30 @@ impl Credit {
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
+    
+    /// Set the risk weight for a collateral asset, in basis points (admin only).
+    ///
+    /// Risk weight scales how much a unit of this asset counts toward the
+    /// collateral ratio check. 10_000 bps (100%) means full value; lower
+    /// values discount the asset.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::InvalidRiskWeight`] if `weight_bps > 10_000`.
+    /// - Reverts if caller is not the configured admin.
+    pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
+        require_admin_auth(&env);
+        if weight_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidRiskWeight);
+        }
+        crate::storage::set_collateral_risk_weight_bps(&env, &asset, weight_bps);
+    }
 
+    /// Get the configured risk weight for a collateral asset, in basis points.
+    /// Returns 10_000 (100%, unweighted) if never explicitly set.
+    pub fn get_collateral_risk_weight(env: Env, asset: Address) -> u32 {
+        crate::collateral::get_collateral_risk_weight(&env, &asset)
+    }
+    
     /// Set the maximum total utilization allowed across all credit lines (admin only).
     ///
     /// Once set, `draw_credit` reverts with [`ContractError::ExposureCapExceeded`] if
