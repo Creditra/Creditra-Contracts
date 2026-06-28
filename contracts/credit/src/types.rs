@@ -447,3 +447,19 @@ pub struct TreasuryWithdrawalProposal {
     /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
     pub execute_after: u64,
 }
+
+/// Paginated response for credit lines enumeration.
+///
+/// Uses cursor-based pagination where the cursor is the stable numeric ID
+/// assigned to each borrower. This allows efficient, stateless navigation
+/// through large sets of credit lines without offset-based limitations.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// The credit lines in this page.
+    pub credit_lines: Vec<CreditLineData>,
+    /// The cursor for the next page, if more results exist.
+    /// Pass this value as `cursor` in the next call to continue enumeration.
+    /// When `None`, this is the last page.
+    pub next_cursor: Option<u32>,
+}

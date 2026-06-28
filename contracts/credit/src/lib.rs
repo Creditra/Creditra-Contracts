@@ -163,9 +163,9 @@ use crate::storage::{
     set_pending_treasury_withdrawal,
 };
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode,
+    OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
+    RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -1240,6 +1240,42 @@ impl Credit {
     /// and indexer integration.
     pub fn get_proof_of_reserve(env: Env) -> ProofOfReserve {
         views::get_proof_of_reserve(env)
+    }
+
+    /// Return a paginated view of credit lines for off-chain reporting.
+    ///
+    /// Uses cursor-based pagination where the cursor is the stable numeric ID
+    /// assigned to each borrower. This allows efficient, stateless navigation
+    /// through large sets of credit lines without offset-based limitations.
+    ///
+    /// # Parameters
+    ///
+    /// - `cursor`: Optional starting cursor (numeric ID). Pass `None` for the first page.
+    /// - `limit`: Maximum number of credit lines to return. Must be <= 100.
+    ///
+    /// # Returns
+    ///
+    /// A [`CreditLinesPage`] containing:
+    /// - `credit_lines`: Vector of credit line data for this page.
+    /// - `next_cursor`: Cursor for the next page, or `None` if this is the last page.
+    ///
+    /// # Authentication
+    ///
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// // First page
+    /// let page1 = client.get_credit_lines_paginated(None, 10);
+    ///
+    /// // Second page
+    /// if let Some(cursor) = page1.next_cursor {
+    ///     let page2 = client.get_credit_lines_paginated(Some(cursor), 10);
+    /// }
+    /// ```
+    pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> CreditLinesPage {
+        views::get_credit_lines_paginated(env, cursor, limit)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
