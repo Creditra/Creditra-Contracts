@@ -509,7 +509,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 ///
 /// # Parameters
 /// - `borrower`: Borrower whose credit line schedule is being configured.
-/// - `amount_per_period`: Required repayment amount per installment; must be positive.
+/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
 /// - `period_seconds`: Duration of each installment period in seconds; must be positive.
 /// - `first_due_ts`: Timestamp at which the first installment is due.
 ///
@@ -547,27 +547,32 @@ pub fn set_repayment_schedule(
     storage_set_repayment_schedule(env, &borrower, &schedule);
 }
 
-/// Advance a borrower's installment schedule after an effective repayment.
+/// Advance a borrower's installment schedule after a repayment.
 ///
-/// The public `repay_credit` entrypoint caps the requested repayment to the
-/// outstanding debt before calling this helper.  This function therefore uses
-/// `effective_repay` directly and advances `next_due_ts` by the whole number of
-/// installments covered:
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
 ///
 /// ```text
-/// floor(effective_repay / amount_per_period) * period_seconds
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
 /// ```
 ///
-/// Partial installments do not move the due date.  Arithmetic uses saturating
-/// `u64` operations so extreme schedule values cannot wrap timestamps.
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
 pub fn advance_repayment_schedule_after_repay(
     env: &Env,
     borrower: &Address,
     effective_repay: i128,
+    interest_repaid: i128,
 ) {
-    if effective_repay <= 0 {
-        return;
-    }
+    let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
+        Some(principal) if principal > 0 => principal,
+        _ => return,
+    };
 
     let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
         return;
@@ -577,7 +582,7 @@ pub fn advance_repayment_schedule_after_repay(
         return;
     }
 
-    let installments_paid = (effective_repay / schedule.amount_per_period) as u64;
+    let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
     if installments_paid == 0 {
         return;
     }

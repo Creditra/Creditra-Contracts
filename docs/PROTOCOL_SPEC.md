@@ -269,7 +269,7 @@ emits `("credit","rate_form")` with `true`.
 | `set_utilization_cap(borrower, cap_bps)` | `lib.rs:607` | `DataKey::UtilizationCapBps(borrower)` (Persistent) | `cap_bps ∈ 1..=10000`; `0` clears. |
 | `set_max_total_exposure(amount)` | `lib.rs:827` | `DataKey::MaxTotalExposure` | `0` removes the cap. |
 | `set_credit_limit_bounds(min, max)` | `lib.rs:862` | `MinCreditLimit`, `MaxCreditLimit` | `min >= 0`, `max >= min`. |
-| `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | All > 0. |
+| `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | `amount_per_period` is principal-only; interest repayments do not advance `next_due_ts`. All > 0. |
 | `set_grace_period_config(grace_period_seconds, waiver_mode, reduced_rate_bps)` | `lib.rs:646` | `Symbol("grace_cfg")` (Instance) | `reduced_rate <= 10000`. |
 
 ### 2.6 Collateral

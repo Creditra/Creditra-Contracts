@@ -32,7 +32,7 @@ Optional per-borrower installment schedule stored in persistent storage under th
 
 | Field | Type | Description |
 |---|---|---|
-| `amount_per_period` | `i128` | Required amount for each installment |
+| `amount_per_period` | `i128` | Required principal amount for each installment; interest-only repayment does not advance the schedule |
 | `period_seconds` | `u64` | Installment interval in seconds |
 | `next_due_ts` | `u64` | Timestamp for the next installment due date |
 

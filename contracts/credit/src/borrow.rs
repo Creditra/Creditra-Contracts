@@ -3,6 +3,7 @@ use crate::events::{
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
+use crate::lifecycle;
 use crate::math_utils::{mul_div, Rounding};
 use crate::storage::{
     clear_reentrancy_guard, get_collateral_balance, persist_credit_line, set_reentrancy_guard,
@@ -120,6 +121,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 /// - `credit_line.accrued_interest -= interest_repaid`
 /// - `credit_line.utilized_amount -= effective_repay`
 /// - Persists the credit line via [`persist_credit_line`]
+/// - Advances the installment schedule by principal installments only
 /// - Emits [`InterestAccruedEvent`] and [`RepaymentEvent`]
 pub(crate) fn repay_credit_internal(
     env: &Env,
@@ -142,6 +144,12 @@ pub(crate) fn repay_credit_internal(
     credit_line.utilized_amount = new_utilized;
 
     persist_credit_line(env, borrower, credit_line, previous_utilized, Some(previous_status));
+    lifecycle::advance_repayment_schedule_after_repay(
+        env,
+        borrower,
+        effective_repay,
+        interest_repaid,
+    );
 
     publish_interest_accrued_event(
         env,
