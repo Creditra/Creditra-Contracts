@@ -28,7 +28,9 @@
 //!
 //! ## How
 //!
-//! - 12 `AuctionError` discriminants pinned by ABI;
+//! - 13 `AuctionError` discriminants pinned by ABI; contract failures use
+//!   `env.panic_with_error(AuctionError::…)` so clients receive stable codes
+//!   (never `panic!(AuctionError::…)` or string panics on error paths).
 //!   `AuctionError::Reentrancy = 10` reverts on re-entered refund or claim.
 //! - Three event topics under stable symbols (`BID_RFDN`, `AUC_CLOSE`,
 //!   `LIQ_SETL`) — see [`events`].
@@ -286,7 +288,7 @@ impl Auction {
             .storage()
             .persistent()
             .get(&auction_id)
-            .unwrap_or_else(|| panic!("auction not found"));
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
         bump_auction_state_ttl(&env, &auction_id);
         if state.status == AuctionStatus::Claimed {
             env.panic_with_error(AuctionError::AlreadyClaimed);
@@ -316,14 +318,14 @@ impl Auction {
         bidder.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            env.panic_with_error(AuctionError::BidTooLow);
         }
 
         let mut state: AuctionState = env
             .storage()
             .persistent()
             .get(&auction_id)
-            .unwrap_or_else(|| panic!("auction not initialized"));
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
         bump_auction_state_ttl(&env, &auction_id);
 
         if state.status != AuctionStatus::Open {
@@ -333,7 +335,7 @@ impl Auction {
         let now = env.ledger().timestamp();
 
         if now >= state.config.end_time {
-            panic!("auction closed");
+            env.panic_with_error(AuctionError::AuctionNotOpen);
         }
 
         match state.config.mode {
