@@ -47,8 +47,8 @@ use crate::events::{
     CollateralDepositedEvent, CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
-    set_collateral_balance,
+    get_collateral_balance, get_collateral_risk_weight_bps, get_collateral_token,
+    get_credit_line, get_min_collateral_ratio_bps, set_collateral_balance,
 };
 use crate::types::ContractError;
 use soroban_sdk::{token, Address, Env};
@@ -149,6 +149,12 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 /// Read‑only getter for a borrower's collateral balance.
 pub fn get_collateral(env: &Env, borrower: &Address) -> i128 {
     get_collateral_balance(env, borrower)
+}
+
+/// Read-only getter for a collateral asset's risk weight, in basis points.
+/// Defaults to 10_000 (100%, unweighted) if never explicitly configured.
+pub fn get_collateral_risk_weight(env: &Env, asset: &Address) -> u32 {
+    get_collateral_risk_weight_bps(env, asset).unwrap_or(10_000)
 }
 
 /// Release collateral tokens to the borrower without requiring auth.
