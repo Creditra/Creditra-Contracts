@@ -51,7 +51,7 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Symbol};
 
 /// Status of a borrower's credit line.
 ///
@@ -236,6 +236,14 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// Credit line is frozen by admin for compliance or investigation.
+    CreditLineFrozen = 45,
+    /// Original draw timestamp not found in the audit trail.
+    OriginalDrawNotFound = 46,
+    /// Draw reversal window has expired.
+    DrawReversalWindowExpired = 47,
+    /// Attestation batch not found for this borrower.
+    AttestationBatchNotFound = 48,
 }
 
 /// Stored credit line data for a borrower.
@@ -446,4 +454,44 @@ pub struct TreasuryWithdrawalProposal {
     pub proposed_at: u64,
     /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
     pub execute_after: u64,
+}
+
+/// Proof-of-reserve balances for the protocol treasury.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated treasury balance held in contract (fees collected).
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool balance held in contract (fee share).
+    pub bounty_balance: i128,
+}
+
+/// Structured pause reason recorded alongside the pause flag.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable reason symbol (e.g. "oracle-outage").
+    pub reason: Symbol,
+    /// Ledger timestamp when the pause was initiated.
+    pub timestamp: u64,
+    /// Address of the actor that initiated the pause.
+    pub actor: Address,
+}
+
+/// Draw freeze reason taxonomy for indexer and governance tooling.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Draws frozen for liquidity reserve operations.
+    LiquidityReserve = 0,
+}
+
+/// Global draw freeze state with structured reason.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// `true` when draws are globally frozen.
+    pub frozen: bool,
+    /// Structured reason for the freeze action.
+    pub reason: FreezeReason,
 }
