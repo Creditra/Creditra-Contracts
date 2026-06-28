@@ -101,6 +101,7 @@ mod accrual_tests;
 mod amount_validation_tests;
 mod auth;
 mod borrow;
+mod collateral;
 mod config;
 pub mod events;
 mod fees;
@@ -108,6 +109,7 @@ mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod math_utils;
 mod query;
 mod risk;
 pub use crate::risk::compute_rate_from_score;
@@ -621,6 +623,15 @@ impl Credit {
         );
 
         clear_reentrancy_guard(&env);
+    }
+
+    /// Atomic repay that also releases proportional collateral.
+    ///
+    /// Repays `amount` of outstanding debt and simultaneously returns a
+    /// proportional share of deposited collateral. See
+    /// [`borrow::repay_and_release_collateral`] for the full specification.
+    pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
+        borrow::repay_and_release_collateral(env, borrower, amount);
     }
 
     pub fn update_risk_parameters(

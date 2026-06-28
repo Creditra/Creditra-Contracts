@@ -150,3 +150,45 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 pub fn get_collateral(env: &Env, borrower: &Address) -> i128 {
     get_collateral_balance(env, borrower)
 }
+
+/// Release collateral tokens to the borrower without requiring auth.
+///
+/// Called internally by atomic repay+release flows. The caller is
+/// responsible for computing the correct release amount and ensuring
+/// the collateral ratio remains valid.
+///
+/// Panics with [`ContractError::InsufficientCollateralBalance`] if
+/// `amount` exceeds the borrower's stored collateral balance.
+pub fn release_collateral(env: &Env, borrower: &Address, amount: i128) {
+    if amount < 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    if amount == 0 {
+        return;
+    }
+
+    let cur_balance = get_collateral_balance(env, borrower);
+    if amount > cur_balance {
+        env.panic_with_error(ContractError::InsufficientCollateralBalance);
+    }
+
+    let post_balance = cur_balance - amount;
+
+    let token_addr = get_collateral_token(env).unwrap_or_else(|| {
+        env.panic_with_error(ContractError::MissingLiquidityToken);
+    });
+    let token_client = token::Client::new(env, &token_addr);
+    let contract_addr = env.current_contract_address();
+    token_client.transfer(&contract_addr, borrower, &amount);
+
+    set_collateral_balance(env, borrower, post_balance);
+
+    publish_collateral_withdrawn_event(
+        env,
+        CollateralWithdrawnEvent {
+            borrower: borrower.clone(),
+            amount,
+            new_balance: post_balance,
+        },
+    );
+}
