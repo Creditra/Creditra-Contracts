@@ -2,9 +2,9 @@
 
 //! Protocol fee skim split between treasury and bounty pools.
 //!
-//! When a borrower repays interest, the protocol fee (`ProtocolFeeBps`) is
-//! skimmed into the contract and allocated between two accumulators by
-//! [`TreasuryFeeShareBps`]:
+//! When a borrower repays, the protocol fee (`ProtocolFeeBps`) is
+//! skimmed from the total repayment amount into the contract and allocated
+//! between two accumulators by [`TreasuryFeeShareBps`]:
 //!
 //! - **Treasury** — withdrawable via `propose_treasury_withdrawal` / `execute_treasury_withdrawal` to `TreasuryAddress`.
 //! - **Bounty pool** — withdrawable via `withdraw_bounty` to `BountyAddress`.
