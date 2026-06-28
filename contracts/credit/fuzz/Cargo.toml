@@ -10,6 +10,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dependencies.creditra-credit]
 path = "../.."
@@ -20,4 +22,9 @@ path = "../.."
 [[bin]]
 name = "oracle_deviation"
 path = "fuzz_targets/oracle_deviation.rs"
+doc = false
+
+[[bin]]
+name = "prorate_interest_snapshot"
+path = "fuzz_targets/prorate_interest_snapshot.rs"
 doc = false
