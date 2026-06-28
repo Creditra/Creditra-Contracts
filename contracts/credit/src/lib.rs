@@ -120,7 +120,8 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
-pub mod views;
+pub mod cross_chain;
+
 
 #[cfg(test)]
 mod boundary_tests;
