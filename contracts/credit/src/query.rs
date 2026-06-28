@@ -1,5 +1,7 @@
-use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
-use crate::types::CreditLineData;
+use crate::storage::grace_period_key;
+use crate::types::{
+    CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
+};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -36,7 +38,6 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
         treasury_balance: crate::storage::get_treasury_balance(&env),
         bounty_balance: crate::storage::get_bounty_balance(&env),
     }
-    result
 }
 
 /// Return the configured installment repayment schedule for `borrower`, if any.
@@ -130,7 +131,9 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         .checked_mul(100_000_000)
         .unwrap_or(u128::MAX);
 
-    let denominator = utilized_u128.checked_mul(min_ratio_u128).unwrap_or(u128::MAX);
+    let denominator = utilized_u128
+        .checked_mul(min_ratio_u128)
+        .unwrap_or(u128::MAX);
 
     // If the denominator overflowed to u128::MAX, the result will be small.
     // We guard against division-by-zero: `utilized > 0` and `min_ratio_bps`

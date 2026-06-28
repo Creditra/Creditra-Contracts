@@ -45,7 +45,6 @@ use crate::auth::require_admin_auth;
 use crate::storage::{admin_key, set_schema_version, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env};
-use crate::types::ContractError;
 
 /// Initialize the contract exactly once.
 pub fn init(env: Env, admin: Address) {

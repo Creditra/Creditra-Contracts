@@ -17,7 +17,7 @@
 //!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
 //!       `Symbol("rate_cfg")` instance storage,
 //!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
-//! - [`set_rate_change_limits_legacy`] — configure the magnitude+cadence
+//! - [`set_rate_change_limits`] — configure the magnitude+cadence
 //!   cap.
 //! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
 //!   applied to delinquent lines during accrual (see [`crate::accrual`]).
@@ -59,9 +59,11 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
-use crate::storage::{rate_cfg_key, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
-use crate::types::{CreditLineData, RateChangeConfig};
+use crate::events::publish_risk_parameters_updated;
+use crate::storage::{assert_not_paused, persist_credit_line, rate_cfg_key, rate_formula_key};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
+};
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -70,85 +72,27 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score on the normalized 0-100 scale.
 pub const MAX_RISK_SCORE: u32 = 100;
 
-pub fn update_risk_parameters(
-    env: Env,
-    borrower: Address,
-    credit_limit: i128,
-    interest_rate_bps: u32,
-    risk_score: u32,
-) {
-    require_admin_auth(&env);
-
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .expect("Credit line not found");
-
-    if credit_limit < 0 {
-        panic!("credit_limit must be non-negative");
-    }
-    if credit_limit < credit_line.utilized_amount {
-        panic!("credit_limit cannot be less than utilized amount");
-    }
-    if interest_rate_bps > MAX_INTEREST_RATE_BPS {
-        panic!("interest_rate_bps exceeds maximum");
-    }
-    if risk_score > MAX_RISK_SCORE {
-        panic!("risk_score exceeds maximum");
-    }
-
-    if interest_rate_bps != credit_line.interest_rate_bps {
-        if let Some(cfg) = env
-            .storage()
-            .instance()
-            .get::<_, RateChangeConfig>(&rate_cfg_key(&env))
-        {
-            let old_rate = credit_line.interest_rate_bps;
-            let delta = interest_rate_bps.abs_diff(old_rate);
-
-            if delta > cfg.max_rate_change_bps {
-                panic!("rate change exceeds maximum allowed delta");
-            }
-
-            if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts != 0 {
-                let now = env.ledger().timestamp();
-                let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
-                if elapsed < cfg.rate_change_min_interval {
-                    panic!("rate change too soon: minimum interval not elapsed");
-                }
-            }
-        }
-
-        credit_line.last_rate_update_ts = env.ledger().timestamp();
-    }
-
-    credit_line.credit_limit = credit_limit;
-    credit_line.interest_rate_bps = interest_rate_bps;
-    credit_line.risk_score = risk_score;
-    env.storage().persistent().set(&borrower, &credit_line);
-    // Bump TTL: every risk-parameter update is an interaction with the line.
-    env.storage()
-        .persistent()
-        .extend_ttl(&borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
-
-    publish_risk_parameters_updated(
-        &env,
-        RiskParametersUpdatedEvent {
-            borrower: borrower.clone(),
-            credit_limit,
-            interest_rate_bps,
-            risk_score,
-        },
-    );
+/// Compute interest rate from risk score using the piecewise-linear formula.
+///
+/// # Formula
+/// ```text
+/// raw_rate = base_rate_bps + (risk_score * slope_bps_per_score)
+/// effective_rate = clamp(raw_rate, min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS))
+/// ```
+///
+/// Uses saturating arithmetic to prevent overflow — if the multiplication
+/// overflows u32, it saturates to `u32::MAX` and is then clamped by the
+/// upper bound.
+pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 {
+    let raw = cfg
+        .base_rate_bps
+        .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
+    let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
+    raw.clamp(cfg.min_rate_bps, upper)
 }
 
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits_legacy(
-    env: Env,
-    max_rate_change_bps: u32,
-    rate_change_min_interval: u64,
-) {
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 

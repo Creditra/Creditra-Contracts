@@ -58,9 +58,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
-};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -143,6 +141,8 @@ pub enum DataKey {
     MinCreditLimit,
     /// Maximum allowed credit limit for new credit lines (admin-configurable).
     MaxCreditLimit,
+    /// Protocol-level max close factor in basis points for partial liquidation.
+    CloseFactorBps,
     /// Penalty surcharge in basis points applied to delinquent credit lines.
     /// Admin-configurable via `set_penalty_surcharge_bps`. Default is 0.
     PenaltySurchargeBps,
@@ -508,9 +508,7 @@ pub fn clear_treasury_balance(env: &Env) {
 
 /// Return configured treasury fee share in basis points, if set.
 pub fn get_treasury_fee_share_bps(env: &Env) -> Option<u32> {
-    env.storage()
-        .instance()
-        .get(&DataKey::TreasuryFeeShareBps)
+    env.storage().instance().get(&DataKey::TreasuryFeeShareBps)
 }
 
 /// Persist treasury fee share in basis points.
@@ -785,9 +783,7 @@ pub fn get_close_factor_bps(env: &Env) -> u32 {
 /// Supply `10_000` for full-liquidation-only (no partial), or any value
 /// `1..=10_000` to cap partial settlements.
 pub fn set_close_factor_bps(env: &Env, bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CloseFactorBps, &bps);
+    env.storage().instance().set(&DataKey::CloseFactorBps, &bps);
 }
 
 /// Return the installment schedule for a borrower, if configured.
@@ -818,30 +814,6 @@ pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
         .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
 }
 
-/// Get the configured max draw amount, if set.
-pub fn get_max_draw_amount(env: &Env) -> Option<i128> {
-    env.storage().instance().get(&DataKey::MaxDrawAmount)
-}
-
-/// Set the max draw amount (admin only, enforced by caller).
-pub fn set_max_draw_amount(env: &Env, amount: i128) {
-    env.storage()
-        .instance()
-        .set(&DataKey::MaxDrawAmount, &amount);
-}
-
-/// Get the configured max repay amount, if set.
-pub fn get_max_repay_amount(env: &Env) -> Option<i128> {
-    env.storage().instance().get(&DataKey::MaxRepayAmount)
-}
-
-/// Set the max repay amount (admin only, enforced by caller).
-pub fn set_max_repay_amount(env: &Env, amount: i128) {
-    env.storage()
-        .instance()
-        .set(&DataKey::MaxRepayAmount, &amount);
-}
-
 /// Get the configured draw min interval, if set.
 pub fn get_draw_min_interval(env: &Env) -> Option<u64> {
     env.storage()
@@ -854,21 +826,6 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
     env.storage()
         .instance()
         .set(&DataKey::DrawMinIntervalSeconds, &seconds);
-}
-
-/// Set/unset the global draws frozen flag (admin only, enforced by caller).
-pub fn set_draws_frozen(env: &Env, frozen: bool, reason: FreezeReason) {
-    env.storage()
-        .instance()
-        .set(&DataKey::DrawsFrozen, &DrawsFreezeState { frozen, reason });
-}
-
-/// Check if draws are globally frozen.
-pub fn is_draws_frozen(env: &Env) -> bool {
-    env.storage()
-        .instance()
-        .get::<DataKey, DrawsFreezeState>(&DataKey::DrawsFrozen)
-        .map_or(false, |state| state.frozen)
 }
 
 /// Check if the protocol is paused.
@@ -906,9 +863,7 @@ pub fn get_pause_reason(env: &Env) -> Option<crate::types::PauseReason> {
 /// Should be called by the entrypoint that sets the pause flag, so the reason
 /// and the flag are written atomically within the same host transaction.
 pub fn set_pause_reason(env: &Env, reason: &crate::types::PauseReason) {
-    env.storage()
-        .instance()
-        .set(&DataKey::PauseReason, reason);
+    env.storage().instance().set(&DataKey::PauseReason, reason);
 }
 
 /// Assert the protocol is not paused. Reverts with ContractError::Paused if paused.
@@ -1098,7 +1053,7 @@ pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
     env.storage()
         .persistent()
         .get(&DataKey::FrozenBorrower(borrower.clone()))
-        .map_or(false, |expiry: u64| now < expiry)
+        .is_some_and(|expiry: u64| now < expiry)
 }
 
 /// Get the freeze expiry timestamp for a borrower, if one is set.

@@ -230,6 +230,104 @@ pub enum ContractError {
     DrawReversalWindowExpired = 41,
     /// Original draw audit record not found for the specified (borrower, timestamp) pair.
     OriginalDrawNotFound = 42,
+    /// The borrower's credit line has an admin freeze with a structured reason; draws are blocked.
+    CreditLineFrozen = 43,
+    /// Bounty address has not been configured when attempting a bounty withdrawal.
+    BountyNotSet = 44,
+}
+
+/// Stable category grouping for [`ContractError`] variants.
+///
+/// Each category groups semantically related errors that share a common
+/// SDK-side recovery action. See [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md)
+/// for the full categorized reference.
+///
+/// # Stability guarantee
+/// Discriminants are **permanent**. Never reorder or renumber existing
+/// variants — doing so would break deployed SDK clients. New categories
+/// must be appended at the end with the next available integer.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authorization failures (wrong caller, missing admin).
+    Auth = 1,
+    /// Credit-line lifecycle state violations.
+    Lifecycle = 2,
+    /// Numeric validation or arithmetic errors.
+    Numeric = 3,
+    /// Credit limit and per-transaction cap violations.
+    Limit = 4,
+    /// Liquidity, reserve, and treasury availability failures.
+    Liquidity = 5,
+    /// Risk-score, rate, pause, and cooldown violations.
+    Risk = 6,
+    /// Oracle price-feed circuit-breaker failures.
+    Oracle = 7,
+    /// Collateral ratio or balance violations.
+    Collateral = 8,
+    /// Borrower-blocked or draw-freeze state.
+    Block = 9,
+    /// Reentrancy guard triggered.
+    Reentrancy = 10,
+    /// Miscellaneous errors that do not fit a specific category.
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Return the stable category for this error variant.
+    ///
+    /// Clients can use this to group errors for UI display, analytics,
+    /// or recovery heuristics without hard-coding variant-to-category
+    /// mappings.
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            Self::Unauthorized | Self::NotAdmin | Self::AdminNotInitialized => {
+                ContractErrorCategory::Auth
+            }
+            Self::CreditLineClosed
+            | Self::AlreadyInitialized
+            | Self::CreditLineSuspended
+            | Self::CreditLineDefaulted => ContractErrorCategory::Lifecycle,
+            Self::InvalidAmount
+            | Self::NegativeLimit
+            | Self::Overflow
+            | Self::TimestampRegression
+            | Self::LimitOutOfBounds => ContractErrorCategory::Numeric,
+            Self::OverLimit
+            | Self::UtilizationNotZero
+            | Self::LimitDecreaseRequiresRepayment
+            | Self::DrawExceedsMaxAmount
+            | Self::RepayExceedsMaxAmount => ContractErrorCategory::Limit,
+            Self::MissingLiquidityToken
+            | Self::MissingLiquiditySource
+            | Self::InsufficientLiquidityReserve
+            | Self::LiquidityTokenCallFailed
+            | Self::InsufficientRepaymentAllowance
+            | Self::InsufficientRepaymentBalance
+            | Self::TreasuryNotSet
+            | Self::ExposureCapExceeded
+            | Self::BountyNotSet => ContractErrorCategory::Liquidity,
+            Self::RateTooHigh | Self::ScoreTooHigh | Self::Paused | Self::DrawCooldownActive => {
+                ContractErrorCategory::Risk
+            }
+            Self::OraclePriceInvalid | Self::OraclePriceStale | Self::OraclePriceDeviation => {
+                ContractErrorCategory::Oracle
+            }
+            Self::CollateralRatioBelowMinimum | Self::InsufficientCollateralBalance => {
+                ContractErrorCategory::Collateral
+            }
+            Self::BorrowerBlocked
+            | Self::DrawsFrozen
+            | Self::BorrowerFrozen
+            | Self::CreditLineFrozen => ContractErrorCategory::Block,
+            Self::Reentrancy => ContractErrorCategory::Reentrancy,
+            Self::CreditLineNotFound
+            | Self::AdminAcceptTooEarly
+            | Self::DrawReversalWindowExpired
+            | Self::OriginalDrawNotFound => ContractErrorCategory::Misc,
+        }
+    }
 }
 
 /// Stored credit line data for a borrower.
@@ -412,6 +510,42 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Structured taxonomy for credit-line and global draw freezes.
+///
+/// # Discriminant stability
+/// Discriminants are part of the contract ABI. New variants must be appended;
+/// existing values must never be reordered or renumbered.
+///
+/// # Usage
+/// - [`crate::freeze::freeze_draws`] records a global reason alongside the
+///   contract-wide draw kill-switch.
+/// - [`crate::freeze::freeze_credit_line`] records a per-borrower reason without
+///   mutating [`CreditStatus`], preserving lifecycle history for indexers.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Scheduled reserve or treasury operations affecting draw liquidity.
+    LiquidityReserve = 0,
+    /// Regulatory or compliance-mandated draw pause.
+    Compliance = 1,
+    /// Active risk investigation or off-chain risk signal.
+    RiskInvestigation = 2,
+    /// Planned operational maintenance window.
+    OperationalMaintenance = 3,
+    /// Borrower-initiated voluntary draw pause.
+    BorrowerRequest = 4,
+}
+
+/// Global draw-freeze state stored under [`crate::storage::DataKey::DrawsFrozen`].
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen contract-wide.
+    pub frozen: bool,
+    /// Structured reason recorded when the freeze was last activated.
+    pub reason: FreezeReason,
 }
 
 /// Reason for protocol pause (escape-hatch audit trail).
