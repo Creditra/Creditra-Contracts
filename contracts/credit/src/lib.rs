@@ -109,6 +109,7 @@ mod freeze;
 pub mod instrument;
 mod lifecycle;
 mod query;
+mod views;
 mod risk;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
@@ -149,7 +150,8 @@ use crate::storage::{
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
+    ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
+    RateFormulaConfig,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -991,6 +993,14 @@ impl Credit {
     /// Get protocol-level dashboard totals requested for GrantFox campaign.
     pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
         views::get_protocol_summary_view(env)
+    }
+
+    /// Return proof-of-reserve balances for the protocol treasury.
+    ///
+    /// Read-only view exposing accumulated reserves for transparency
+    /// and indexer integration.
+    pub fn get_proof_of_reserve(env: Env) -> ProofOfReserve {
+        views::get_proof_of_reserve(env)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {

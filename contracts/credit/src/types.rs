@@ -414,6 +414,20 @@ pub struct ProtocolSummaryView {
     pub active_line_count: u32,
 }
 
+/// Proof-of-reserve view for the protocol treasury.
+///
+/// Exposes the accumulated reserves held by the protocol in a single
+/// read-only call. Indexers and dashboards can use this to verify that
+/// the protocol's accounting balances are consistent.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees held in the contract (treasury share).
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees held in the contract.
+    pub bounty_balance: i128,
+}
+
 /// Reason for protocol pause (escape-hatch audit trail).
 ///
 /// Stored alongside the pause flag in instance storage when the admin invokes

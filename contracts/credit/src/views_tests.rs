@@ -55,3 +55,55 @@ fn test_protocol_summary_view_active_lines() {
     client.close_credit_line(&b3, &admin);
     assert_eq!(client.get_protocol_summary_view().active_line_count, 0);
 }
+
+#[test]
+fn test_proof_of_reserve_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let token = Address::generate(&env);
+    let source = Address::generate(&env);
+    client.init(&admin);
+    client.set_liquidity_token(&token);
+    client.set_liquidity_source(&source);
+
+    let por = client.get_proof_of_reserve();
+    assert_eq!(por.treasury_balance, 0);
+    assert_eq!(por.bounty_balance, 0);
+}
+
+#[test]
+fn test_proof_of_reserve_reads_existing_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let token = Address::generate(&env);
+    let source = Address::generate(&env);
+    client.init(&admin);
+    client.set_liquidity_token(&token);
+    client.set_liquidity_source(&source);
+
+    // Set balances directly via storage
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&crate::storage::DataKey::TreasuryBalance, &42_i128);
+        env.storage()
+            .instance()
+            .set(&crate::storage::DataKey::BountyBalance, &7_i128);
+    });
+
+    let por = client.get_proof_of_reserve();
+    assert_eq!(por.treasury_balance, 42);
+    assert_eq!(por.bounty_balance, 7);
+}
