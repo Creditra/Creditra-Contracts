@@ -2,7 +2,7 @@
 
 ## Description
 
-This PR addresses issue #603 for the GrantFox campaign by emitting a structured receipt event when a grace-period waiver is applied. This improves audit transparency. 
+This PR addresses issue #603 for the GrantFox campaign by emitting a structured receipt event when a grace-period waiver is applied. This improves audit transparency.
 
 Specifically, this refactors the existing `GraceWaiverAppliedEvent` to explicitly be a `GraceWaiverReceiptEvent`. The payload remains identical to ensure it accurately acts as a receipt for the `waived_amount`.
 
