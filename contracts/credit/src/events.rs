@@ -130,6 +130,19 @@ pub struct DrawReversedEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawsFrozenEvent {
     pub frozen: bool,
+    pub reason: crate::types::FreezeReason,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineFreezeEvent {
+    pub borrower: soroban_sdk::Address,
+    /// Structured reason for the freeze action.
+    pub reason: crate::types::FreezeReason,
+    /// `true` when frozen; `false` when unfrozen.
+    pub frozen: bool,
+    /// Ledger sequence at time of change (for off-chain indexers).
+    pub ledger: u32,
 }
 
 #[contracttype]
@@ -167,8 +180,14 @@ pub struct DrawnEventV2 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeeAccruedEvent {
     pub borrower: Address,
+    /// Total protocol fee skimmed from the repayment.
     pub fee_amount: i128,
+    /// Treasury portion of `fee_amount` credited to `TreasuryBalance`.
+    pub treasury_amount: i128,
+    /// Bounty pool portion of `fee_amount` credited to `BountyBalance`.
+    pub bounty_amount: i128,
     pub new_treasury_balance: i128,
+    pub new_bounty_balance: i128,
 }
 
 #[contracttype]
@@ -228,6 +247,20 @@ pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
 }
 
+pub fn publish_protocol_fee_bps_set_event(env: &Env, fee_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_set")),
+        fee_bps,
+    );
+}
+
+pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_bnd")),
+        (min_bps, max_bps),
+    );
+}
+
 pub fn publish_admin_rotation_proposed(env: &Env, proposed_admin: &Address, accept_after: u64) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "admin_prop")),
@@ -270,10 +303,28 @@ pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
 }
 
-pub fn publish_draws_frozen_event(env: &Env, frozen: bool) {
+pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types::FreezeReason) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "drw_freeze")),
-        DrawsFrozenEvent { frozen },
+        DrawsFrozenEvent { frozen, reason },
+    );
+}
+
+/// Publish a per-credit-line freeze/unfreeze event.
+pub fn publish_credit_line_freeze_event(
+    env: &Env,
+    borrower: &soroban_sdk::Address,
+    reason: crate::types::FreezeReason,
+    frozen: bool,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "line_frz")),
+        CreditLineFreezeEvent {
+            borrower: borrower.clone(),
+            reason,
+            frozen,
+            ledger: env.ledger().sequence(),
+        },
     );
 }
 
@@ -434,6 +485,13 @@ pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) 
     );
 }
 
+pub fn publish_close_factor_bps_set_event(env: &Env, close_factor_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "clsfctr")),
+        close_factor_bps,
+    );
+}
+
 pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "orc_cfg")),
@@ -476,5 +534,57 @@ pub fn publish_grace_waiver_applied_event(
             waived_amount,
             mode,
         },
+    );
+}
+
+/// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalProposedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Snapshot of the treasury balance at proposal time.
+    pub amount: i128,
+    /// Admin who submitted the proposal.
+    pub proposer: Address,
+    /// Ledger timestamp when the proposal was created.
+    pub proposed_at: u64,
+    /// Earliest timestamp at which execution is permitted (proposed_at + 86_400).
+    pub execute_after: u64,
+}
+
+/// Emitted when a treasury withdrawal is executed via `execute_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalExecutedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Amount transferred.
+    pub amount: i128,
+    /// Admin who executed the withdrawal.
+    pub executor: Address,
+    /// Ledger timestamp at execution.
+    pub executed_at: u64,
+}
+
+/// Publish a treasury withdrawal proposed event.
+pub fn publish_treasury_withdrawal_proposed(
+    env: &Env,
+    event: TreasuryWithdrawalProposedEvent,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_prop")),
+        event,
+    );
+}
+
+/// Publish a treasury withdrawal executed event.
+pub fn publish_treasury_withdrawal_executed(
+    env: &Env,
+    event: TreasuryWithdrawalExecutedEvent,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
+        event,
     );
 }

@@ -29,6 +29,7 @@ done
 echo "==> Building and running budget_baseline example …"
 cargo run \
   --manifest-path "${CRATE}/Cargo.toml" \
+  --features instrument \
   --example budget_baseline \
   2>&1
 

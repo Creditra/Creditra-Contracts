@@ -93,6 +93,8 @@ fn run_auction(env: &Env, deployment: &Deployment, settlement_id: &Symbol, highe
         &0_u32,
         &None,
         &None,
+        &None,
+        &None,
     );
     auction.place_bid(settlement_id, &bidder, &(highest_bid / 2));
     auction.place_bid(settlement_id, &winner, &highest_bid);

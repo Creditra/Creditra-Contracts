@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env};
 
-fn setup<'a>(env: &'a Env) -> (Address, Address, Address, Address, CreditClient<'a>) {
-    env.mock_all_auths();
+fn setup<'a>(env: &'a Env) -> (Address, Address, Address, CreditClient<'a>) {
+    env.mock_all_auths_allowing_non_root_auth();
 
     let admin = Address::generate(env);
     let borrower = Address::generate(env);
-    let reserve = Address::generate(env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(env, &contract_id);
     client.init(&admin);
@@ -17,15 +16,15 @@ fn setup<'a>(env: &'a Env) -> (Address, Address, Address, Address, CreditClient<
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_address = token_id.address();
     client.set_liquidity_token(&token_address);
-    client.set_liquidity_source(&reserve);
+    client.set_liquidity_source(&contract_id);
 
-    (contract_id, token_address, borrower, reserve, client)
+    (contract_id, token_address, borrower, client)
 }
 
 #[test]
 fn protocol_summary_empty_state_returns_zeroes() {
     let env = Env::default();
-    let (_contract_id, _token_address, _borrower, _reserve, client) = setup(&env);
+    let (_contract_id, _token_address, _borrower, client) = setup(&env);
 
     let summary = client.get_protocol_summary();
 
@@ -33,12 +32,13 @@ fn protocol_summary_empty_state_returns_zeroes() {
     assert_eq!(summary.total_utilized, 0);
     assert_eq!(summary.total_collateral, 0);
     assert_eq!(summary.treasury_balance, 0);
+    assert_eq!(summary.bounty_balance, 0);
 }
 
 #[test]
 fn protocol_summary_returns_aggregate_totals() {
     let env = Env::default();
-    let (contract_id, token_address, borrower, _reserve, client) = setup(&env);
+    let (contract_id, token_address, borrower, client) = setup(&env);
 
     let asset = token::StellarAssetClient::new(&env, &token_address);
     asset.mint(&borrower, &5_000);
@@ -50,9 +50,9 @@ fn protocol_summary_returns_aggregate_totals() {
 
     client.set_protocol_fee_bps(&1_000_u32);
     env.ledger()
-        .with_mut(|ledger| ledger.timestamp = 31_536_000);
+        .with_mut(|ledger| ledger.timestamp = 31_557_600);
     asset.mint(&borrower, &1_100);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &1_100, &u32::MAX);
+    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &1_100, &6_000_000_u32);
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
@@ -61,4 +61,5 @@ fn protocol_summary_returns_aggregate_totals() {
     assert_eq!(summary.total_utilized, 0);
     assert_eq!(summary.total_collateral, 3_000);
     assert_eq!(summary.treasury_balance, 10);
+    assert_eq!(summary.bounty_balance, 0);
 }

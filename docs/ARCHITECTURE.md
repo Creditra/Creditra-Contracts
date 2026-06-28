@@ -185,8 +185,8 @@ sequenceDiagram
     Credit-->>Indexer: emit ("credit","liq_req") = (borrower, utilized_amount)
     Indexer-->>Orchestrator: notify of liq_req
 
-    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?)
-    Auction->>Auction: validate start<end, min_inc<=10000, Dutch invariants
+    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?, dutch_decay?, dutch_steps?)
+    Auction->>Auction: validate start<end, min_inc<=10000, Dutch invariants + stepped config
     Auction-->>Indexer: (init events)
 
     loop English mode: ascending bids until close
@@ -206,7 +206,7 @@ sequenceDiagram
         Auction->>Auction: status := Closed
         Auction-->>Indexer: emit AUC_CLOSE
     else Dutch mode: first qualifying bid auto-closes
-        Bidder->>Auction: place_bid (qualifies vs compute_dutch_price)
+        Bidder->>Auction: place_bid (qualifies vs compute_dutch_price using linear or stepped decay)
         Auction->>Auction: status := Closed (atomic with bid record)
         Auction-->>Indexer: emit AUC_CLOSE
     end

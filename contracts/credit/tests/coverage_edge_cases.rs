@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, Env};
 
@@ -58,7 +58,7 @@ fn draw_credit_negative_amount_panics() {
 fn draw_credit_when_draws_frozen() {
     let (env, _admin, contract_id, borrower, _token) = setup_with_credit_line();
     let client = CreditClient::new(&env, &contract_id);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     client.draw_credit(&borrower, &100);
 }
 

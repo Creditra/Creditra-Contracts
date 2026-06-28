@@ -36,4 +36,6 @@ pub enum AuctionError {
     NotFound = 12,
     /// `settle_default_liquidation` was called a second time for the same auction.
     AlreadySettled = 13,
+    /// The liquidation grace window has not yet elapsed; bidding is blocked.
+    GracePeriodActive = 14,
 }

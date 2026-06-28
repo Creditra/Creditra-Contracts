@@ -1,0 +1,26 @@
+---
+source: contracts/credit/tests/snap_prorate.rs
+expression: time_cases
+---
+[
+    (
+        86400,
+        0,
+    ),
+    (
+        604800,
+        5,
+    ),
+    (
+        2592000,
+        24,
+    ),
+    (
+        31557600,
+        300,
+    ),
+    (
+        63115200,
+        600,
+    ),
+]

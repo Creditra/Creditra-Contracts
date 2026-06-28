@@ -39,6 +39,7 @@ if $REBUILD || $REBUILD_ONLY; then
   echo "==> Regenerating budget baselines …"
   cargo run \
     --manifest-path "${CRATE}/Cargo.toml" \
+    --features instrument \
     --example budget_baseline \
     2>&1
   echo "    Done."
@@ -53,5 +54,7 @@ fi
 echo "==> Running budget-regression tests …"
 exec cargo test \
   --manifest-path "${CRATE}/Cargo.toml" \
+  --features instrument \
+  --test instrument \
   --test budget_regression \
   2>&1

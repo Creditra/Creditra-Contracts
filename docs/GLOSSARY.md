@@ -31,9 +31,11 @@ refund the prior highest bidder under the reentrancy guard. Closed
 manually by admin after `end_time`. Source:
 `gateway-contract/contracts/auction_contract/src/lib.rs`.
 
-**Auction (Dutch)**. Descending-price auction with linear decay
-`p(t) = p_0 - (p_0 - p_f) * min(t, T) / T`. First qualifying bid wins
-and atomically closes the auction.
+**Auction (Dutch)**. Descending-price auction with configurable
+linear or stepped decay. Linear mode uses
+`p(t) = p_0 - (p_0 - p_f) * min(t, T) / T`; stepped mode keeps price
+constant within each bucket and drops discretely between buckets. First
+qualifying bid wins and atomically closes the auction.
 
 **`AuctionContract`**. Address of the deployed `gateway-auction` contract
 that the credit contract calls on
@@ -314,6 +316,9 @@ credit line currently drawn.
 
 ## W
 
-**WASM size budget**. Hard CI limit: 50 KB
-(`THRESHOLD_BYTES=51200` in `.github/workflows/ci.yml`). Achieved via
+**WASM size budget**. Two CI limits: (1) **50 KB** for `creditra_credit.wasm`
+only (`THRESHOLD_BYTES=51200` in `.github/workflows/ci.yml` and
+`build-wasm.yml`); (2) **100 KiB** for every workspace contract WASM
+(`scripts/check-wasm-size.sh`, `.github/workflows/wasm-size.yml`,
+`THRESHOLD_BYTES=102400`). Achieved via
 `opt-level = "z"`, full LTO, stripped symbols, single codegen unit.

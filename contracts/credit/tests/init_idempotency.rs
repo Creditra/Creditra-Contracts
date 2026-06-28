@@ -15,7 +15,7 @@
 
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -146,7 +146,7 @@ fn admin_gated_call_before_init_reverts() {
 
     // No init call — admin is not set — this must panic.
     // freeze_draws requires admin auth and will fail because no admin is stored.
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

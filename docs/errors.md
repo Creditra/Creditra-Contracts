@@ -47,6 +47,7 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `17` | `DrawExceedsMaxAmount`           | The requested draw amount exceeds the per-transaction cap set via `set_max_draw_amount`. | Split the draw into smaller transactions or request a cap increase from the admin. |
 | `18` | `Paused`                         | The protocol is paused via the emergency circuit breaker; operation is blocked. | Wait for the admin to unpause the protocol via `set_protocol_paused(false)`. `repay_credit` remains active during a pause. |
 | `19` | `DrawsFrozen`                    | Draws are globally frozen during liquidity reserve operations. | Wait for the admin to call `unfreeze_draws`. Repayments remain available. |
+| `41` | `CreditLineFrozen`               | The credit line has an admin freeze with structured reason; draws are blocked. | Wait for admin `unfreeze_credit_line` or resolve the underlying hold. Repayments remain available. |
 | `20` | `CreditLineSuspended`            | A draw was attempted while the credit line status is `Suspended`. | Reinstate the line or resolve the suspension before drawing. |
 | `21` | `CreditLineDefaulted`            | A draw was attempted while the credit line status is `Defaulted`. | Defaulted lines cannot draw; use repayment or liquidation workflows. |
 | `22` | `MissingLiquidityToken`          | `draw_credit` or `repay_credit` requires a liquidity token, but none is configured. | Admin must call `set_liquidity_token` before liquidity-moving operations. |

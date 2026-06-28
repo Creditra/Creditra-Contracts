@@ -76,3 +76,47 @@ fn test_draw_credit_succeeds_with_sufficient_collateral() {
     client.draw_credit(&borrower, &1000);
     assert_eq!(client.get_collateral(&borrower), 1500);
 }
+
+#[test]
+fn test_withdraw_with_open_credit_line_zero_utilized() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+    client.deposit_collateral(&borrower, &5000);
+    assert_eq!(client.get_collateral(&borrower), 5000);
+
+    // Credit line exists but utilized_amount = 0 → no ratio check → can withdraw all.
+    client.withdraw_collateral(&borrower, &5000);
+    assert_eq!(client.get_collateral(&borrower), 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #22)")] // MissingLiquidityToken
+fn test_deposit_without_collateral_token_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    // No liquidity token set → deposit should fail with MissingLiquidityToken.
+    client.deposit_collateral(&borrower, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #22)")] // MissingLiquidityToken
+fn test_withdraw_without_collateral_token_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    // No liquidity token set → withdraw should fail with MissingLiquidityToken.
+    client.withdraw_collateral(&borrower, &1000);
+}

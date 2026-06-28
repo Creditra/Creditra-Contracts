@@ -215,6 +215,17 @@ All errors are represented as `ContractError` enum variants with stable discrimi
 
 ---
 
+### 41. CreditLineFrozen (Code: 41)
+**Description:** The borrower's credit line has an admin freeze with a structured [`FreezeReason`]; draws are blocked without changing `CreditStatus`.
+
+**Trigger Conditions:**
+- Attempting to draw while `DataKey::CreditLineFreeze` is set for the borrower
+- Per-line compliance, investigation, or operational holds
+
+**Recovery:** Admin calls `unfreeze_credit_line`. Repayments remain available.
+
+---
+
 ### 20. CreditLineSuspended (Code: 20)
 **Description:** Action cannot be performed because the credit line is suspended.
 

@@ -43,6 +43,10 @@ fn prepare_repay(
     asset.mint(contract_id, &draw_amount);
     client.draw_credit(borrower, &draw_amount);
 
+    // Widen bounds to accommodate the requested fee_bps
+    if fee_bps > 1000 {
+        client.set_protocol_fee_bounds(&0_u32, &fee_bps);
+    }
     client.set_protocol_fee_bps(&fee_bps);
 
     env.ledger()

@@ -56,3 +56,13 @@ cargo test -p creditra-credit --test token_failure_rollback rollback
 
 `MockLiquidityToken` is test-only (`#[cfg(test)]`) and must not be imported
 into contract runtime logic.
+
+## Installment schedule property test
+
+`contracts/credit/tests/proptest_installment.rs` covers installment due-date
+advancement with randomized repayment schedules.  The model mirrors the public
+`repay_credit` behaviour: each requested repayment is capped to the remaining
+outstanding debt, then `next_due_ts` advances by
+`floor(effective_repay / amount_per_period) * period_seconds` using saturating
+`u64` arithmetic.  The test also keeps deterministic edge cases for partial,
+exact, multi-installment, and over-repayment scenarios.

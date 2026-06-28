@@ -14,8 +14,28 @@ workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Host-side per-entrypoint budget instrumentation (tests, examples, CI gas regression).
+instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
+
 [dependencies]
 soroban-sdk = { workspace = true }
+serde = { version = "1.0", optional = true, features = ["derive"] }
+serde_json = { version = "1.0", optional = true }
+
+[[example]]
+name = "budget_baseline"
+required-features = ["instrument"]
+
+[[test]]
+name = "budget_regression"
+path = "tests/budget_regression.rs"
+required-features = ["instrument"]
+
+[[test]]
+name = "instrument"
+path = "tests/instrument.rs"
+required-features = ["instrument"]
 
 [dev-dependencies]
 gateway-auction = { path = "../../gateway-contract/contracts/auction_contract" }
@@ -25,3 +45,4 @@ proptest = "1.4"
 primitive-types = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+insta = "1.40"

@@ -7,6 +7,7 @@
 //! - [`AuctionMode`] — English (ascending) or Dutch (descending) bid model.
 //! - [`AuctionStatus`] — Open → Closed → Claimed terminal lifecycle.
 //! - [`AuctionConfig`] — immutable per-auction parameters set at init.
+//! - [`DutchAuctionDecay`] — Dutch price-curve shape (linear or stepped).
 //! - [`AuctionState`] — mutable bid state (highest bidder & bid amount).
 //! - [`Bid`] — single-bid record (currently informational, not persisted
 //!   per-bid).
@@ -61,12 +62,29 @@ pub enum AuctionStatus {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DutchAuctionDecay {
+    /// No decay configured — used for English auctions or Dutch auctions
+    /// that default to linear decay.
+    None,
+    /// Continuous linear interpolation from start price to floor price.
+    Linear,
+    /// Piecewise-constant staircase decay with `dutch_step_count` equal drops.
+    Stepped,
+    /// Multiplicative ~1%-per-step exponential decay.
+    Exponential,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Status,
     HighestBidder,
     FactoryContract,
     EndTime,
     HighestBid,
+    /// Contract-level grace window (in seconds) that must elapse after
+    /// auction creation before the first bid can be placed.
+    LiquidationGraceWindow,
 }
 
 #[contracttype]
@@ -94,10 +112,15 @@ pub struct AuctionConfig {
     /// Each new bid must be at least `highest * (1 + min_increment_bps / 10_000)`.
     /// Capped at 10_000 (100%) on init. Use 0 to require only a 1-stroop increment.
     pub min_increment_bps: u32,
-    /// Starting price for Dutch auction (only used in Dutch mode)
+    /// Starting price for Dutch auction (only used in Dutch mode).
     pub dutch_start_price: Option<i128>,
-    /// Floor price for Dutch auction (only used in Dutch mode)
+    /// Floor price for Dutch auction (only used in Dutch mode).
     pub dutch_floor_price: Option<i128>,
+    /// Dutch decay shape. `DutchAuctionDecay::None` means linear (default).
+    pub dutch_decay: DutchAuctionDecay,
+    /// Number of equal time buckets used by [`DutchAuctionDecay::Stepped`].
+    /// Required for stepped Dutch auctions; ignored for all other decay kinds.
+    pub dutch_step_count: Option<u32>,
 }
 
 #[contracttype]

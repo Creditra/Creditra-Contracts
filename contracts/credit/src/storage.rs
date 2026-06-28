@@ -58,7 +58,10 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
+    TreasuryWithdrawalProposal,
+};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -72,7 +75,8 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `CreditLineCount`, `TotalUtilized`, `MaxDrawAmount`, `MaxRepayAmount`,
 ///   `DrawMinIntervalSeconds`, `MinCreditLimit`, `MaxCreditLimit`,
 ///   `PenaltySurchargeBps`, `LateFeeFlat`, `AuctionContract`, `MaxTotalExposure`,
-///   `ProtocolFeeBps`, `TreasuryAddress`, `TreasuryBalance`,
+///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
+///   `BountyAddress`, `BountyBalance`,
 ///   `TotalCollateral`,
 ///   `MinCollateralRatioBps`, `OracleConfig`, `OracleLastPrice`,
 ///   `OracleLastPriceTs`).
@@ -118,6 +122,9 @@ pub enum DataKey {
     /// Per-borrower temporary freeze expiry timestamp; draws blocked while now < expiry_ts.
     /// When key is absent or expiry_ts <= now, the borrower is not frozen.
     FrozenBorrower(Address),
+    /// Per-borrower credit-line draw freeze with structured reason taxonomy.
+    /// When absent, the line is not admin-frozen (distinct from [`CreditStatus::Suspended`]).
+    CreditLineFreeze(Address),
 
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
@@ -151,10 +158,21 @@ pub enum DataKey {
     MaxTotalExposure,
     /// Protocol fee in basis points applied to interest portion of repayments.
     ProtocolFeeBps,
+    /// Minimum allowed protocol fee in basis points (governance-configurable).
+    MinProtocolFeeBps,
+    /// Maximum allowed protocol fee in basis points (governance-configurable).
+    MaxProtocolFeeBps,
+    /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
+    /// When unset, defaults to 10_000 (100 % treasury).
+    TreasuryFeeShareBps,
     /// Treasury address where withdrawn fees will be sent.
     TreasuryAddress,
     /// Accumulated treasury balance held in contract (fees collected).
     TreasuryBalance,
+    /// Bounty pool address where withdrawn bounty fees will be sent.
+    BountyAddress,
+    /// Accumulated bounty pool balance held in contract (fee share).
+    BountyBalance,
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
@@ -171,6 +189,9 @@ pub enum DataKey {
     OracleLastPriceTs,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
+    /// Pending treasury withdrawal proposal (at most one at a time).
+    /// Stored in instance storage; cleared after successful execution.
+    PendingTreasuryWithdrawal,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -450,6 +471,38 @@ pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
 }
 
+/// Return the minimum allowed protocol fee in basis points.
+/// Defaults to 0 when not set.
+pub fn get_min_protocol_fee_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinProtocolFeeBps)
+        .unwrap_or(0)
+}
+
+/// Persist the minimum allowed protocol fee in basis points.
+pub fn set_min_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MinProtocolFeeBps, &bps);
+}
+
+/// Return the maximum allowed protocol fee in basis points.
+/// Defaults to `MAX_PROTOCOL_FEE_BPS` (1000) when not set.
+pub fn get_max_protocol_fee_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxProtocolFeeBps)
+        .unwrap_or(1_000)
+}
+
+/// Persist the maximum allowed protocol fee in basis points.
+pub fn set_max_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MaxProtocolFeeBps, &bps);
+}
+
 /// Return configured treasury address, if set.
 pub fn get_treasury_address(env: &Env) -> Option<Address> {
     env.storage().instance().get(&DataKey::TreasuryAddress)
@@ -488,6 +541,81 @@ pub fn clear_treasury_balance(env: &Env) {
     env.storage()
         .instance()
         .set(&DataKey::TreasuryBalance, &0_i128);
+}
+
+/// Return the pending treasury withdrawal proposal, if any.
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<TreasuryWithdrawalProposal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+/// Store a pending treasury withdrawal proposal.
+pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &TreasuryWithdrawalProposal) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+/// Remove the pending treasury withdrawal proposal after execution.
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
+}
+
+/// Return configured treasury fee share in basis points, if set.
+pub fn get_treasury_fee_share_bps(env: &Env) -> Option<u32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::TreasuryFeeShareBps)
+}
+
+/// Persist treasury fee share in basis points.
+pub fn set_treasury_fee_share_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryFeeShareBps, &bps);
+}
+
+/// Return configured bounty pool address, if set.
+pub fn get_bounty_address(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::BountyAddress)
+}
+
+/// Persist configured bounty pool address.
+pub fn set_bounty_address(env: &Env, bounty: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::BountyAddress, bounty);
+}
+
+/// Return accumulated bounty pool balance.
+pub fn get_bounty_balance(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::BountyBalance)
+        .unwrap_or(0)
+}
+
+/// Add to accumulated bounty pool balance.
+pub fn add_bounty_balance(env: &Env, amount: i128) {
+    if amount == 0 {
+        return;
+    }
+    let updated_balance = get_bounty_balance(env)
+        .checked_add(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    env.storage()
+        .instance()
+        .set(&DataKey::BountyBalance, &updated_balance);
+}
+
+/// Clear accumulated bounty pool balance after withdrawal.
+pub fn clear_bounty_balance(env: &Env) {
+    env.storage()
+        .instance()
+        .set(&DataKey::BountyBalance, &0_i128);
 }
 
 pub fn admin_key(env: &Env) -> Symbol {
@@ -700,6 +828,26 @@ pub fn set_auction_contract(env: &Env, addr: &Address) {
         .set(&DataKey::AuctionContract, addr);
 }
 
+// ── Close factor (partial liquidation cap) ─────────────────────────────────────
+
+/// Return the protocol-level max close factor in basis points.
+/// Defaults to 10_000 (full liquidation allowed) when not set.
+pub fn get_close_factor_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::CloseFactorBps)
+        .unwrap_or(10_000)
+}
+
+/// Set the protocol-level max close factor in basis points (admin only).
+/// Supply `10_000` for full-liquidation-only (no partial), or any value
+/// `1..=10_000` to cap partial settlements.
+pub fn set_close_factor_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CloseFactorBps, &bps);
+}
+
 /// Return the installment schedule for a borrower, if configured.
 pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<RepaymentSchedule> {
     env.storage()
@@ -767,16 +915,18 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
 }
 
 /// Set/unset the global draws frozen flag (admin only, enforced by caller).
-pub fn set_draws_frozen(env: &Env, frozen: bool) {
-    env.storage().instance().set(&DataKey::DrawsFrozen, &frozen);
+pub fn set_draws_frozen(env: &Env, frozen: bool, reason: FreezeReason) {
+    env.storage()
+        .instance()
+        .set(&DataKey::DrawsFrozen, &DrawsFreezeState { frozen, reason });
 }
 
 /// Check if draws are globally frozen.
 pub fn is_draws_frozen(env: &Env) -> bool {
     env.storage()
         .instance()
-        .get(&DataKey::DrawsFrozen)
-        .unwrap_or(false)
+        .get::<DataKey, DrawsFreezeState>(&DataKey::DrawsFrozen)
+        .map_or(false, |state| state.frozen)
 }
 
 /// Check if the protocol is paused.
@@ -795,6 +945,28 @@ pub fn is_paused(env: &Env) -> bool {
 /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
+    if !paused {
+        // Clear the pause reason when unpausing.
+        env.storage().instance().remove(&DataKey::PauseReason);
+    }
+}
+
+/// Get the structured pause reason, if one was recorded during the last pause.
+///
+/// Returns `None` when no pause reason was set (e.g., before any pause or
+/// if the admin used the reason-less `set_protocol_paused(bool)`).
+pub fn get_pause_reason(env: &Env) -> Option<crate::types::PauseReason> {
+    env.storage().instance().get(&DataKey::PauseReason)
+}
+
+/// Store a structured pause reason alongside the pause flag.
+///
+/// Should be called by the entrypoint that sets the pause flag, so the reason
+/// and the flag are written atomically within the same host transaction.
+pub fn set_pause_reason(env: &Env, reason: &crate::types::PauseReason) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PauseReason, reason);
 }
 
 /// Assert the protocol is not paused. Reverts with ContractError::Paused if paused.

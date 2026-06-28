@@ -35,8 +35,10 @@
 | `clear_rate_formula_config` | Admin | `require_admin_auth` | Auth before storage remove. |
 | `set_grace_period_config` | Admin | `require_admin_auth` | Auth before validation and write. |
 | `set_protocol_paused` | Admin | `require_admin_auth` | Circuit-breaker control. |
-| `freeze_draws` | Admin | `require_admin_auth` | Emergency draw freeze. |
+| `freeze_draws` | Admin | `require_admin_auth` | Emergency draw freeze with [`FreezeReason`]. |
 | `unfreeze_draws` | Admin | `require_admin_auth` | Lifts emergency draw freeze. |
+| `freeze_credit_line` | Admin | `require_admin_auth` | Per-line draw freeze with [`FreezeReason`]. |
+| `unfreeze_credit_line` | Admin | `require_admin_auth` | Lifts per-line draw freeze. |
 | `suspend_credit_line` | Admin | `require_admin_auth` | Auth before state read. |
 | `self_suspend_credit_line` | Borrower | `borrower.require_auth()` | No admin path; borrower-only. |
 | `default_credit_line` | Admin | `require_admin_auth` | Auth before state read. |
