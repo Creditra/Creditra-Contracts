@@ -198,6 +198,8 @@ pub enum DataKey {
     /// Structured pause reason recorded alongside the pause flag.
     /// Cleared when the protocol is unpaused.
     PauseReason,
+    /// Per-borrower attestation batch Merkle root.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.

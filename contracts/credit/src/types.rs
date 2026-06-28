@@ -242,6 +242,12 @@ pub enum ContractError {
     CloseFactorAboveMax = 45,
     /// Credit line has an active admin freeze; draws are blocked.
     CreditLineFrozen = 46,
+    /// No attestation batch has been committed for this borrower.
+    AttestationBatchNotFound = 47,
+    /// Draw reversal window has expired; the draw is too old to reverse.
+    DrawReversalWindowExpired = 48,
+    /// Original draw audit record not found for the given borrower and timestamp.
+    OriginalDrawNotFound = 49,
 }
 
 /// Stored credit line data for a borrower.
@@ -424,6 +430,18 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Proof-of-reserve balances for the protocol treasury.
+///
+/// Returned by `get_proof_of_reserve` for off-chain reserve verification.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees awaiting treasury withdrawal.
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees awaiting bounty withdrawal.
+    pub bounty_balance: i128,
 }
 
 /// Reason for a global or per-line draw freeze.
