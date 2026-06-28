@@ -183,6 +183,8 @@ pub enum DataKey {
     DrawReversedAmount(Address, u64),
     /// Oracle circuit-breaker configuration.
     OracleConfig,
+    /// Multi-oracle quorum configuration.
+    OracleQuorumConfig,
     /// Last accepted oracle price.
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
@@ -1014,6 +1016,27 @@ pub fn get_oracle_config(env: &Env) -> Option<crate::types::OracleConfig> {
 /// config satisfies the invariants documented on [`crate::types::OracleConfig`].
 pub fn set_oracle_config(env: &Env, cfg: &crate::types::OracleConfig) {
     env.storage().instance().set(&DataKey::OracleConfig, cfg);
+}
+
+/// Get the multi-oracle quorum configuration, if set.
+///
+/// When `Some`, `submit_oracle_prices` uses the quorum-of-K algorithm to
+/// validate submitted prices before storing the canonical price.
+/// When `None`, quorum mode is disabled and the single-oracle circuit breaker
+/// applies (if [`get_oracle_config`] is also set).
+pub fn get_oracle_quorum_config(env: &Env) -> Option<crate::types::OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+/// Set the multi-oracle quorum configuration.
+///
+/// Caller is responsible for admin auth and for validating that the supplied
+/// config satisfies the invariants documented on
+/// [`crate::types::OracleQuorumConfig`].
+pub fn set_oracle_quorum_config(env: &Env, cfg: &crate::types::OracleQuorumConfig) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumConfig, cfg);
 }
 
 /// Get the last accepted oracle price, if any.

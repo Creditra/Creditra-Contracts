@@ -116,7 +116,7 @@ fn settle_without_oracle_config_accepts_none_price() {
     let borrower = open_and_default(&client, &env, &contract_id, 500);
 
     // No oracle config set — None price must be accepted.
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &None);
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
 
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
@@ -134,7 +134,13 @@ fn settle_with_oracle_config_first_price_accepted() {
     let borrower = open_and_default(&client, &env, &contract_id, 500);
 
     // First call — no prior price stored, any positive price is accepted.
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
@@ -152,11 +158,23 @@ fn settle_within_deviation_bound_accepted() {
 
     // First settlement — seeds the last accepted price at 1_000.
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Second settlement — price 1_040 is 4% deviation from 1_000 (within 5%).
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_040_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &10_000_u32,
+        &Some(1_040_i128),
+    );
 
     assert_eq!(
         client.get_credit_line(&b2).unwrap().status,
@@ -175,11 +193,23 @@ fn settle_over_deviation_panics() {
 
     // Seed last price at 1_000.
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Price 1_100 is 10% deviation — exceeds 5% threshold.
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_100_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &10_000_u32,
+        &Some(1_100_i128),
+    );
 }
 
 #[test]
@@ -190,11 +220,23 @@ fn settle_over_deviation_downward_panics() {
     client.set_oracle_config(&500_u32, &3600_u64);
 
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Price 900 is 10% below 1_000 — exceeds 5% threshold.
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(900_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &10_000_u32,
+        &Some(900_i128),
+    );
 }
 
 // ── stale price rejected ──────────────────────────────────────────────────────
@@ -209,14 +251,26 @@ fn settle_stale_price_panics() {
     // Seed last price at t=1000.
     env.ledger().with_mut(|l| l.timestamp = 1_000);
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Advance time beyond max_age_seconds (1 hour = 3600s).
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
 
     // Price is now stale — should panic.
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_010_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &10_000_u32,
+        &Some(1_010_i128),
+    );
 }
 
 #[test]
@@ -227,12 +281,24 @@ fn settle_price_at_exact_max_age_accepted() {
 
     env.ledger().with_mut(|l| l.timestamp = 1_000);
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &b1,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Advance exactly max_age_seconds — age == 3600, not > 3600, so accepted.
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600);
     let b2 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&b2, &200_i128, &sid(&env, "s2"), &Some(1_010_i128));
+    client.settle_default_liquidation(
+        &b2,
+        &200_i128,
+        &sid(&env, "s2"),
+        &10_000_u32,
+        &Some(1_010_i128),
+    );
 
     assert_eq!(
         client.get_credit_line(&b2).unwrap().status,
@@ -249,7 +315,13 @@ fn settle_zero_oracle_price_panics() {
     let (client, contract_id, _) = setup(&env);
     client.set_oracle_config(&500_u32, &3600_u64);
     let borrower = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&borrower, &200_i128, &sid(&env, "s1"), &Some(0_i128));
+    client.settle_default_liquidation(
+        &borrower,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(0_i128),
+    );
 }
 
 #[test]
@@ -259,7 +331,13 @@ fn settle_negative_oracle_price_panics() {
     let (client, contract_id, _) = setup(&env);
     client.set_oracle_config(&500_u32, &3600_u64);
     let borrower = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(&borrower, &200_i128, &sid(&env, "s1"), &Some(-1_i128));
+    client.settle_default_liquidation(
+        &borrower,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(-1_i128),
+    );
 }
 
 #[test]
@@ -270,5 +348,11 @@ fn settle_missing_price_when_config_set_panics() {
     client.set_oracle_config(&500_u32, &3600_u64);
     let borrower = open_and_default(&client, &env, &contract_id, 200);
     // oracle_price is None but config is set — must panic.
-    client.settle_default_liquidation(&borrower, &200_i128, &sid(&env, "s1"), &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &200_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &None,
+    );
 }

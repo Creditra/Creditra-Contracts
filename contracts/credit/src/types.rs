@@ -8,7 +8,7 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 40-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 45-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. See
 //!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
@@ -144,6 +144,7 @@ pub enum CreditStatus {
 /// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
 /// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
 /// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `OracleQuorumNotMet`           | Not enough oracle prices agreed within deviation threshold |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -236,6 +237,8 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// Not enough oracle prices agreed within the configured deviation threshold.
+    OracleQuorumNotMet = 45,
 }
 
 /// Stored credit line data for a borrower.
@@ -358,6 +361,33 @@ pub struct OracleConfig {
     /// E.g. 500 = 5 %.
     pub max_deviation_bps: u32,
     /// Maximum age of an oracle price in seconds before it is considered stale.
+    pub max_age_seconds: u64,
+}
+
+/// Multi-oracle quorum configuration.
+///
+/// When set, `submit_oracle_prices` runs the quorum-of-K algorithm over the
+/// supplied prices before storing the resolved canonical price. Settlement via
+/// `settle_default_liquidation` then only validates that this stored price is
+/// still within `max_age_seconds`; the per-call deviation check is replaced by
+/// the quorum consensus established at submission time.
+///
+/// # Invariants
+/// - `min_quorum_k` must be ≥ 2 (a single feed is not a quorum).
+/// - `max_deviation_bps` must be in `0..=10_000` (0 = exact match required).
+/// - `max_age_seconds` must be > 0.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of submitted prices that must agree within
+    /// `max_deviation_bps` to form a valid quorum.
+    pub min_quorum_k: u32,
+    /// Maximum allowed price deviation between the highest and lowest prices
+    /// in the qualifying quorum window, in basis points.
+    /// E.g. 500 = 5%.
+    pub max_deviation_bps: u32,
+    /// Maximum age of the stored quorum price in seconds before it is
+    /// considered stale for settlement purposes.
     pub max_age_seconds: u64,
 }
 

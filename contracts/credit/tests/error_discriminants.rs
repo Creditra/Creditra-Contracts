@@ -59,6 +59,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
+    assert_eq!(ContractError::OracleQuorumNotMet as u32, 45);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -113,6 +114,7 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::OracleQuorumNotMet as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -127,8 +129,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 44 variants as of this writing (added 42-44 for treasury timelock in #606).
-    const EXPECTED_VARIANT_COUNT: usize = 44;
+    // 45 variants as of this writing (added 45 for oracle quorum in #630).
+    const EXPECTED_VARIANT_COUNT: usize = 45;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -175,6 +177,7 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::OracleQuorumNotMet as u32,
     ];
 
     assert_eq!(
