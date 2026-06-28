@@ -3636,7 +3636,87 @@ mod test_mock_liquidity_token {
             client.suspend_credit_line(&borrower);
         }
     }
+    
+// ── Collateral risk weight tests ─────────────────────────────────────────────
 
+#[cfg(test)]
+mod test_collateral_risk_weight {
+    use super::*;
+
+    /// Setup: initialized contract + admin + an arbitrary asset address.
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let asset = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        (client, admin, asset)
+    }
+
+    #[test]
+    fn default_weight_is_10000_when_unset() {
+        let env = Env::default();
+        let (client, _admin, asset) = setup(&env);
+        assert_eq!(client.get_collateral_risk_weight(&asset), 10_000);
+    }
+
+    #[test]
+    fn set_then_get_round_trips() {
+        let env = Env::default();
+        let (client, _admin, asset) = setup(&env);
+        client.set_collateral_risk_weight(&asset, &5_000);
+        assert_eq!(client.get_collateral_risk_weight(&asset), 5_000);
+    }
+
+    #[test]
+    fn set_to_exactly_10000_succeeds() {
+        let env = Env::default();
+        let (client, _admin, asset) = setup(&env);
+        client.set_collateral_risk_weight(&asset, &10_000);
+        assert_eq!(client.get_collateral_risk_weight(&asset), 10_000);
+    }
+
+    #[test]
+    fn set_to_zero_succeeds() {
+        let env = Env::default();
+        let (client, _admin, asset) = setup(&env);
+        client.set_collateral_risk_weight(&asset, &0);
+        assert_eq!(client.get_collateral_risk_weight(&asset), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #45)")]
+    fn set_above_10000_reverts() {
+        let env = Env::default();
+        let (client, _admin, asset) = setup(&env);
+        client.set_collateral_risk_weight(&asset, &10_001);
+    }
+
+    #[test]
+    fn weight_is_per_asset_independent() {
+        let env = Env::default();
+        let (client, _admin, asset_a) = setup(&env);
+        let asset_b = Address::generate(&env);
+        client.set_collateral_risk_weight(&asset_a, &3_000);
+        assert_eq!(client.get_collateral_risk_weight(&asset_a), 3_000);
+        assert_eq!(client.get_collateral_risk_weight(&asset_b), 10_000);
+    }
+
+    /// Calling the admin-gated setter before init must revert (no admin configured).
+    #[test]
+    #[should_panic]
+    fn set_before_init_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let asset = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        // No init — set_collateral_risk_weight requires admin, must panic.
+        client.set_collateral_risk_weight(&asset, &5_000);
+    }
+}
     #[cfg(test)]
     pub mod test_helpers {
         use soroban_sdk::{
