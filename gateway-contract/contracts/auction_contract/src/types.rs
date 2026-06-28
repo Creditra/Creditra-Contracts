@@ -82,6 +82,9 @@ pub enum DataKey {
     FactoryContract,
     EndTime,
     HighestBid,
+    /// Contract-level grace window (in seconds) that must elapse after
+    /// auction creation before the first bid can be placed.
+    LiquidationGraceWindow,
 }
 
 #[contracttype]

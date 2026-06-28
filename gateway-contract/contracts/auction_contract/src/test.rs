@@ -1902,3 +1902,356 @@ mod reentrancy_preservation {
         assert!(settlement_found, "LIQ_SETL event must be emitted");
     }
 }
+
+// ── liquidation_grace_window ──────────────────────────────────────────────────
+#[cfg(test)]
+mod liquidation_grace_window {
+    extern crate std;
+    use super::super::*;
+    use crate::errors::AuctionError;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::{Address, Env, Symbol};
+
+    fn setup_grace_window_test(
+        env: &Env,
+        start_time: u64,
+        end_time: u64,
+    ) -> (AuctionClient, Address, Address, Symbol) {
+        env.mock_all_auths();
+        let factory = Address::generate(env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(env, &contract_id);
+        let auction_id = Symbol::new(env, "grace_auc");
+
+        client.set_factory_contract(&factory);
+        client.set_liquidation_grace_window(&60_u64);
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &start_time,
+            &end_time,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+
+        (client, factory, contract_id, auction_id)
+    }
+
+    /// 1. Grace window enabled: bid before grace period expires is rejected.
+    #[test]
+    fn bid_rejected_during_grace_window() {
+        let env = Env::default();
+        let start_time = 1000;
+        let end_time = 2000;
+        let (client, _factory, _contract_id, auction_id) =
+            setup_grace_window_test(&env, start_time, end_time);
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1050);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_err(),
+            "bid before grace window expires must be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err().unwrap(),
+            AuctionError::GracePeriodActive.into(),
+        );
+    }
+
+    /// 2. Grace period elapsed: auction starts successfully.
+    #[test]
+    fn bid_accepted_after_grace_window() {
+        let env = Env::default();
+        let start_time = 1000;
+        let end_time = 2000;
+        let (client, _factory, _contract_id, auction_id) =
+            setup_grace_window_test(&env, start_time, end_time);
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1100);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_ok(),
+            "bid after grace window must succeed"
+        );
+    }
+
+    /// 3. Configuration update: authorized user can update grace window.
+    #[test]
+    fn authorized_set_liquidation_grace_window() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let factory = Address::generate(&env);
+        client.set_factory_contract(&factory);
+
+        client.set_liquidation_grace_window(&120_u64);
+        assert_eq!(client.get_liquidation_grace_window(), 120_u64);
+
+        client.set_liquidation_grace_window(&0_u64);
+        assert_eq!(client.get_liquidation_grace_window(), 0_u64);
+    }
+
+    /// 4. Unauthorized update: rejected without auth from factory contract.
+    #[test]
+    fn unauthorized_set_liquidation_grace_window_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let factory = Address::generate(&env);
+        client.set_factory_contract(&factory);
+
+        let intruder = Address::generate(&env);
+        use soroban_sdk::IntoVal;
+        let result = client
+            .mock_auths(&[soroban_sdk::testutils::MockAuth {
+                address: &intruder,
+                invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "set_liquidation_grace_window",
+                    args: (60_u64,).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_set_liquidation_grace_window(&60_u64);
+        assert!(
+            result.is_err(),
+            "unauthorized grace window update should be rejected"
+        );
+    }
+
+    /// 5a. Boundary: bid at the exact expiry time succeeds.
+    #[test]
+    fn bid_at_exact_grace_window_expiry() {
+        let env = Env::default();
+        let start_time = 1000;
+        let end_time = 2000;
+        let (client, _factory, _contract_id, auction_id) =
+            setup_grace_window_test(&env, start_time, end_time);
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1060);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_ok(),
+            "bid at exact grace window expiry must succeed"
+        );
+    }
+
+    /// 5b. Boundary: bid one second before expiry fails.
+    #[test]
+    fn bid_one_second_before_expiry() {
+        let env = Env::default();
+        let start_time = 1000;
+        let end_time = 2000;
+        let (client, _factory, _contract_id, auction_id) =
+            setup_grace_window_test(&env, start_time, end_time);
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1059);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_err(),
+            "bid one second before grace expiry must be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err().unwrap(),
+            AuctionError::GracePeriodActive.into(),
+        );
+    }
+
+    /// Grace window disabled (default) preserves existing behavior.
+    #[test]
+    fn no_grace_window_default_behavior() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let factory = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "no_grace");
+
+        client.set_factory_contract(&factory);
+
+        // Never set a grace window — defaults to 0 (disabled).
+        assert_eq!(client.get_liquidation_grace_window(), 0_u64);
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1000);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_ok(),
+            "bid at start_time must be accepted when grace window is disabled"
+        );
+    }
+
+    /// Grace window with Dutch auction: bid before expiry is blocked.
+    #[test]
+    fn dutch_auction_bid_during_grace_window_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let factory = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "dutch_grace");
+
+        client.set_factory_contract(&factory);
+        client.set_liquidation_grace_window(&60_u64);
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::Dutch,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &Some(500_i128),
+            &Some(100_i128),
+            &DutchAuctionDecay::Linear,
+            &None,
+        );
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1050);
+        let result = client.try_place_bid(&auction_id, &bidder, &300_i128);
+        assert!(
+            result.is_err(),
+            "Dutch bid during grace window must be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err().unwrap(),
+            AuctionError::GracePeriodActive.into(),
+        );
+    }
+
+    /// Grace window with Dutch auction: bid after expiry is accepted.
+    #[test]
+    fn dutch_auction_bid_after_grace_window_accepted() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let factory = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "dutch_grace_ok");
+
+        client.set_factory_contract(&factory);
+        client.set_liquidation_grace_window(&60_u64);
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::Dutch,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &Some(500_i128),
+            &Some(100_i128),
+            &DutchAuctionDecay::Linear,
+            &None,
+        );
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1100);
+        let result = client.try_place_bid(&auction_id, &bidder, &300_i128);
+        assert!(
+            result.is_ok(),
+            "Dutch bid after grace window must succeed"
+        );
+    }
+
+    /// Grace window does not affect close_auction or other non-bid operations.
+    #[test]
+    fn close_auction_unaffected_by_grace_window() {
+        let env = Env::default();
+        let start_time = 1000;
+        let end_time = 2000;
+        let (client, _factory, _contract_id, auction_id) =
+            setup_grace_window_test(&env, start_time, end_time);
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1100);
+        client.place_bid(&auction_id, &bidder, &100_i128);
+
+        env.ledger().set_timestamp(2000);
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "close_auction must not be blocked by grace window"
+        );
+    }
+
+    /// Grace window requires factory to be set.
+    #[test]
+    fn set_grace_window_requires_factory() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let result = client.try_set_liquidation_grace_window(&60_u64);
+        assert!(
+            result.is_err(),
+            "setting grace window without factory must fail"
+        );
+    }
+
+    /// Zero grace window: bid immediately after start_time succeeds.
+    #[test]
+    fn zero_grace_window_allows_immediate_bid() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let factory = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "zero_grace_ok");
+
+        client.set_factory_contract(&factory);
+        client.set_liquidation_grace_window(&0_u64);
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &1000,
+            &2000,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+
+        let bidder = Address::generate(&env);
+        env.ledger().set_timestamp(1000);
+        let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
+        assert!(
+            result.is_ok(),
+            "zero grace window must allow immediate bid at start_time"
+        );
+    }
+}

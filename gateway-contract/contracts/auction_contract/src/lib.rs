@@ -192,6 +192,32 @@ impl Auction {
         storage::set_factory_contract(&env, &factory);
     }
 
+    /// Set the liquidation auction grace window duration in seconds (admin only).
+    ///
+    /// This is the minimum time that must elapse between auction creation
+    /// (`start_time` in `init_auction`) and when the first bid can be placed.
+    /// During the grace period, calls to `place_bid` will fail with
+    /// [`AuctionError::GracePeriodActive`]. After the grace window expires,
+    /// existing auction behavior is preserved.
+    ///
+    /// Pass `0` to disable the grace window (default).
+    ///
+    /// # Authorization
+    /// Requires auth from the configured factory/credit contract.
+    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+        storage::set_liquidation_grace_window(&env, seconds);
+    }
+
+    /// Return the configured liquidation auction grace window in seconds.
+    ///
+    /// Returns `0` when never configured (no grace period enforced).
+    pub fn get_liquidation_grace_window(env: Env) -> u64 {
+        storage::get_liquidation_grace_window(&env)
+    }
+
     pub fn close_auction(env: Env, auction_id: Symbol) {
         let mut state: AuctionState = env
             .storage()
@@ -232,6 +258,15 @@ impl Auction {
         let now = env.ledger().timestamp();
         if now >= state.config.end_time {
             env.panic_with_error(AuctionError::AuctionNotOpen);
+        }
+
+        // Enforce liquidation grace window: no bids until start_time + grace_window.
+        let grace_window = storage::get_liquidation_grace_window(&env);
+        if grace_window > 0 {
+            let earliest_start = state.config.start_time.saturating_add(grace_window);
+            if now < earliest_start {
+                env.panic_with_error(AuctionError::GracePeriodActive);
+            }
         }
 
         match state.config.mode {
