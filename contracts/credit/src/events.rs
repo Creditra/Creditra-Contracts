@@ -247,6 +247,20 @@ pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
 }
 
+pub fn publish_protocol_fee_bps_set_event(env: &Env, fee_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_set")),
+        fee_bps,
+    );
+}
+
+pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_bnd")),
+        (min_bps, max_bps),
+    );
+}
+
 pub fn publish_admin_rotation_proposed(env: &Env, proposed_admin: &Address, accept_after: u64) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "admin_prop")),

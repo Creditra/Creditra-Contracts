@@ -57,6 +57,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::BorrowerFrozen as u32, 40);
     assert_eq!(ContractError::DrawReversalWindowExpired as u32, 41);
     assert_eq!(ContractError::OriginalDrawNotFound as u32, 42);
+    assert_eq!(ContractError::CloseFactorAboveMax as u32, 43);
 }
 
 /// Verify no two variants share the same discriminant.

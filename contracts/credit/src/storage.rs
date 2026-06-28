@@ -157,6 +157,10 @@ pub enum DataKey {
     MaxTotalExposure,
     /// Protocol fee in basis points applied to interest portion of repayments.
     ProtocolFeeBps,
+    /// Minimum allowed protocol fee in basis points (governance-configurable).
+    MinProtocolFeeBps,
+    /// Maximum allowed protocol fee in basis points (governance-configurable).
+    MaxProtocolFeeBps,
     /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
     /// When unset, defaults to 10_000 (100 % treasury).
     TreasuryFeeShareBps,
@@ -464,6 +468,38 @@ pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
 /// Persist protocol fee basis points.
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
+}
+
+/// Return the minimum allowed protocol fee in basis points.
+/// Defaults to 0 when not set.
+pub fn get_min_protocol_fee_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinProtocolFeeBps)
+        .unwrap_or(0)
+}
+
+/// Persist the minimum allowed protocol fee in basis points.
+pub fn set_min_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MinProtocolFeeBps, &bps);
+}
+
+/// Return the maximum allowed protocol fee in basis points.
+/// Defaults to `MAX_PROTOCOL_FEE_BPS` (1000) when not set.
+pub fn get_max_protocol_fee_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxProtocolFeeBps)
+        .unwrap_or(1_000)
+}
+
+/// Persist the maximum allowed protocol fee in basis points.
+pub fn set_max_protocol_fee_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::MaxProtocolFeeBps, &bps);
 }
 
 /// Return configured treasury address, if set.

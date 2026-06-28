@@ -126,10 +126,11 @@ mod views_tests;
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_paused_event, publish_rate_formula_config_event,
+    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_close_factor_bps_set_event,
+    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
+    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event, ContractUpgradedEvent, CreditLineEvent,
     DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
@@ -856,18 +857,49 @@ impl Credit {
     }
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
-    /// Admin only. Fee is bounded by `MAX_PROTOCOL_FEE_BPS`.
+    /// Admin only. Fee must be within the configured min/max bounds.
+    ///
+    /// # Events
+    /// Emits a `fee_set` event with the new value.
     pub fn set_protocol_fee_bps(env: Env, bps: u32) {
         require_admin_auth(&env);
-        if bps > MAX_PROTOCOL_FEE_BPS {
-            env.panic_with_error(crate::types::ContractError::Overflow);
+        let min_bps = crate::storage::get_min_protocol_fee_bps(&env);
+        let max_bps = crate::storage::get_max_protocol_fee_bps(&env);
+        if bps < min_bps || bps > max_bps {
+            env.panic_with_error(ContractError::InvalidAmount);
         }
         crate::storage::set_protocol_fee_bps(&env, bps);
+        publish_protocol_fee_bps_set_event(&env, bps);
     }
 
     /// Get configured protocol fee in basis points, if set.
     pub fn get_protocol_fee_bps(env: Env) -> Option<u32> {
         crate::storage::get_protocol_fee_bps(&env)
+    }
+
+    /// Set protocol fee bounds (min/max) in basis points (admin only).
+    ///
+    /// These bounds constrain future calls to `set_protocol_fee_bps`.
+    /// `min_bps` must be <= `max_bps`, and `max_bps` must not exceed
+    /// `MAX_PROTOCOL_FEE_BPS` (1000 = 10%).
+    ///
+    /// # Events
+    /// Emits a `fee_bnd` event with the new min and max.
+    pub fn set_protocol_fee_bounds(env: Env, min_bps: u32, max_bps: u32) {
+        require_admin_auth(&env);
+        if min_bps > max_bps || max_bps > MAX_PROTOCOL_FEE_BPS {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        crate::storage::set_min_protocol_fee_bps(&env, min_bps);
+        crate::storage::set_max_protocol_fee_bps(&env, max_bps);
+        publish_protocol_fee_bounds_set_event(&env, min_bps, max_bps);
+    }
+
+    /// Get the current protocol fee bounds (min, max).
+    pub fn get_protocol_fee_bounds(env: Env) -> (u32, u32) {
+        let min = crate::storage::get_min_protocol_fee_bps(&env);
+        let max = crate::storage::get_max_protocol_fee_bps(&env);
+        (min, max)
     }
 
     /// Configure the treasury address where withdrawn fees will be sent (admin only).
