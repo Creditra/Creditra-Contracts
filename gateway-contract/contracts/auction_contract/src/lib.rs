@@ -1,62 +1,5 @@
 #![cfg_attr(not(test), no_std)]
 
-//! # gateway-auction
-//!
-//! Minimal English / Dutch auction contract used by the Creditra credit
-//! contract to settle defaulted collateral. The cross-contract handoff is
-//! documented in
-//! [`docs/default-liquidation-auction-hook.md`](../../../../docs/default-liquidation-auction-hook.md);
-//! the credit-side call lives in
-//! [`crate::lib::settle_default_liquidation`](../../../../contracts/credit/src/lib.rs)
-//! (cross-repo path).
-//!
-//! ## What
-//!
-//! - English (open ascending) mode with a configurable
-//!   `min_increment_bps`. Previous highest bidder is **atomically refunded**
-//!   when outbid, under the reentrancy guard.
-//! - Dutch (descending) mode with configurable linear or stepped price decay.
-//!   Linear uses `p(t) = p_0 - (p_0 - p_f) * min(t, T) / T`; stepped uses
-//!   equal time buckets with discrete downward repricing. First qualifying bid
-//!   atomically flips status to Closed.
-//! - One-shot `settle_default_liquidation(auction_id, credit_contract, borrower)`
-//!   callable only by the registered factory (= the credit contract).
-//!   Replay-protected by the persistent
-//!   `AuctionKey::LiquidationSettled(auction_id)` flag.
-//! - `claim_auction(auction_id)` — winner-only payout under the
-//!   reentrancy guard.
-//!
-//! ## How
-//!
-//! - 13 `AuctionError` discriminants pinned by ABI; contract failures use
-//!   `env.panic_with_error(AuctionError::…)` so clients receive stable codes
-//!   (never `panic!(AuctionError::…)` or string panics on error paths).
-//!   `AuctionError::Reentrancy = 10` reverts on re-entered refund or claim.
-//! - Three event topics under stable symbols (`BID_RFDN`, `AUC_CLOSE`,
-//!   `LIQ_SETL`) — see [`events`].
-//! - Storage tier discipline mirrors the credit contract: small instance
-//!   state for the current auction, id-scoped persistent state for
-//!   multi-auction deployments. TTL bump cadence is ~30 d / ~7 d (auctions
-//!   are short-lived).
-//!
-//! ## Anti-snipe disclosure
-//!
-//! The PR #430 feature branch added an end-time-extension code path
-//! intended to push the close time out when a bid lands inside an
-//! extension window. After the reconciliation with
-//! `AUCTION_CLOSE_TIME_FIX.md`, the live [`place_bid`] hard-rejects bids
-//! when `now >= end_time` without extending. The anti-snipe behavior is
-//! therefore **documented but not active** in this release; treat it as
-//! planned, not delivered. See
-//! [`docs/SECURITY.md`](../../../../docs/SECURITY.md) §6 ("Known gaps") and
-//! [`WHITEPAPER.md`](../../../../WHITEPAPER.md) §6.3.
-//!
-//! ## Modules
-//! - [`errors`] — `AuctionError` codes used by the contract.
-//! - [`events`] — Soroban events emitted by the contract.
-//! - [`storage`] — Persistent/instance keys and TTL helpers.
-//! - [`types`] — Stored data types (`AuctionState`, etc.).
-
 mod errors;
 mod events;
 mod storage;
@@ -68,9 +11,7 @@ pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
-use crate::storage::{
-    clear_reentrancy_guard, get_factory_contract, set_factory_contract, set_reentrancy_guard,
-};
+use crate::storage::{clear_reentrancy_guard, get_factory_contract, set_reentrancy_guard};
 use crate::types::*;
 use events::{
     publish_auction_closed_event, publish_bid_refunded_event,
@@ -78,22 +19,12 @@ use events::{
 };
 use storage::{bump_auction_state_ttl, bump_settlement_marker_ttl};
 
-/// Returns the minimum bid that must be placed to outbid `highest_bid`.
-///
-/// increment = ceil(highest_bid * min_increment_bps / 10_000)
-///
-/// Ceiling is computed as `q / d + (q % d != 0)` to avoid the `q + (d-1)`
-/// addition that would overflow when q is near i128::MAX.
-///
-/// A floor of 1 stroop is applied so that a zero-bps config still requires
-/// a strictly higher bid, preventing equal-amount griefing.
 fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
     let bps = min_increment_bps as i128;
     let product = highest_bid
         .checked_mul(bps)
         .expect("overflow in bid increment calculation");
     let bps_increment = product / 10_000 + i128::from(product % 10_000 != 0);
-    // Always require at least +1 stroop even when bps == 0
     let increment = bps_increment.max(1);
     highest_bid
         .checked_add(increment)
@@ -102,36 +33,10 @@ fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
 
 /// Computes the current Dutch auction price based on elapsed time.
 ///
-/// ### Mathematical Formula
-/// For [`DutchAuctionDecay::Linear`], the price decays continuously from
-/// `start_price` to `floor_price` over the auction `duration`:
-/// `current_price = start_price - ((start_price - floor_price) * elapsed_time) / duration`
-///
-/// For [`DutchAuctionDecay::Stepped`], the same total drop is split into
-/// `step_count` equal time buckets and reprices only when a new bucket begins.
-///
-/// ### Parameters
-/// * `start_price` - The starting price of the auction (when `elapsed_time` is `0`).
-/// * `floor_price` - The minimum/floor price of the auction (reached when `elapsed_time >= duration`).
-/// * `elapsed_time` - The duration of time (in seconds) elapsed since the auction start.
-/// * `duration` - The total duration of the auction (in seconds).
-///
-/// ### Return Value
-/// Returns the calculated `i128` current price for the auction at the given `elapsed_time`.
-/// The price is guaranteed to be at least `floor_price`.
-///
-/// ### Assumptions
-/// * `start_price >= floor_price`. If this invariant is violated, the function will panic.
-///
-/// ### Edge Cases
-/// * **`duration == 0`**: Returns `floor_price` immediately to avoid division by zero.
-/// * **`elapsed_time >= duration`**: Returns `floor_price` immediately, clamping the price decay once the auction has expired.
-///
-/// ### Overflow / Panic Behavior
-/// This function uses checked arithmetic to prevent overflow:
-/// * Panics with `"start_price must be >= floor_price"` if `start_price < floor_price`.
-/// * Panics with `"overflow in Dutch price calculation"` if `(start_price - floor_price) * elapsed_time` overflows `i128`.
-/// * Panics with `"current price should not underflow"` if the subtraction from `start_price` underflows.
+/// - [`DutchAuctionDecay::None`] / [`DutchAuctionDecay::Linear`]: `p(t) = start - (start - floor) * t / T`
+/// - [`DutchAuctionDecay::Stepped`]: equal time buckets, discrete downward steps.
+/// - [`DutchAuctionDecay::Exponential`]: ~1% multiplicative decay per time unit,
+///   capped at 100 iterations for safety.
 pub fn compute_dutch_price(
     start_price: i128,
     floor_price: i128,
@@ -141,59 +46,65 @@ pub fn compute_dutch_price(
     step_count: Option<u32>,
 ) -> i128 {
     if duration == 0 {
-        return floor_price; // Avoid division by zero
+        return floor_price;
     }
-
     if elapsed_time >= duration {
-        return floor_price; // Clamp at floor when auction ends
+        return floor_price;
     }
 
-    // Compute total price drop
     let price_drop = start_price
         .checked_sub(floor_price)
         .expect("start_price must be >= floor_price");
 
-    // Compute the portion of time elapsed as a fraction
-    // Use checked arithmetic to prevent overflow
     let elapsed_i128 = elapsed_time as i128;
     let duration_i128 = duration as i128;
 
     let drop_so_far = match decay {
-        DutchAuctionDecay::Linear => price_drop
+        DutchAuctionDecay::None | DutchAuctionDecay::Linear => price_drop
             .checked_mul(elapsed_i128)
             .expect("overflow in Dutch price calculation")
             .checked_div(duration_i128)
             .expect("division should succeed with positive duration"),
+
         DutchAuctionDecay::Stepped => {
             let steps = match step_count {
-                Some(steps) if steps > 0 => i128::from(steps),
-                Some(_) => {
-                    panic!("dutch_step_count must be greater than zero for stepped Dutch auctions")
-                }
+                Some(s) if s > 0 => i128::from(s),
+                Some(_) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
                 None => panic!("dutch_step_count required for stepped Dutch auctions"),
             };
-
             let elapsed_steps = i128::from(
                 elapsed_time
                     .checked_mul(steps as u64)
                     .expect("overflow in stepped Dutch step calculation")
                     / duration,
             );
-
             price_drop
                 .checked_mul(elapsed_steps)
                 .expect("overflow in Dutch price calculation")
                 .checked_div(steps)
                 .expect("division should succeed with positive step count")
         }
+
+        DutchAuctionDecay::Exponential => {
+            let t = elapsed_i128.min(100);
+            let mut factor = 10_000i128;
+            for _ in 0..t {
+                factor = factor
+                    .checked_mul(9_900)
+                    .expect("overflow in exponential factor")
+                    / 10_000;
+            }
+            price_drop
+                .checked_mul(10_000 - factor)
+                .expect("overflow in exponential drop calculation")
+                / 10_000
+        }
     };
 
-    // Current price = start_price - drop_so_far
     let current_price = start_price
         .checked_sub(drop_so_far)
         .expect("current price should not underflow");
 
-    // Ensure we never go below floor (shouldn't happen with correct math, but safety check)
     current_price.max(floor_price)
 }
 
@@ -219,18 +130,16 @@ impl Auction {
         min_increment_bps: u32,
         dutch_start_price: Option<i128>,
         dutch_floor_price: Option<i128>,
-        dutch_decay: Option<DutchAuctionDecay>,
+        dutch_decay: DutchAuctionDecay,
         dutch_step_count: Option<u32>,
     ) {
         if start_time >= end_time {
             panic!("invalid times");
         }
-        // Cap at 100% (10_000 bps) — a requirement higher than that is nonsensical
         if min_increment_bps > 10_000 {
             panic!("min_increment_bps exceeds maximum of 10000 (100%)");
         }
 
-        // Validate Dutch auction parameters
         if mode == AuctionMode::Dutch {
             let start = dutch_start_price.expect("dutch_start_price required for Dutch mode");
             let floor = dutch_floor_price.expect("dutch_floor_price required for Dutch mode");
@@ -241,17 +150,16 @@ impl Auction {
                 panic!("dutch_start_price must be >= min_bid");
             }
 
-            match dutch_decay.as_ref().unwrap_or(&DutchAuctionDecay::Linear) {
-                DutchAuctionDecay::Linear => {}
-                DutchAuctionDecay::Stepped => {
-                    match dutch_step_count {
-                        Some(0) => {
-                            panic!("dutch_step_count must be greater than zero for stepped Dutch auctions")
-                        }
-                        Some(_) => {}
-                        None => panic!("dutch_step_count required for stepped Dutch auctions"),
+            match &dutch_decay {
+                DutchAuctionDecay::None | DutchAuctionDecay::Linear => {}
+                DutchAuctionDecay::Stepped => match dutch_step_count {
+                    Some(0) => {
+                        panic!("dutch_step_count must be > 0 for stepped Dutch auctions")
                     }
-                }
+                    Some(_) => {}
+                    None => panic!("dutch_step_count required for stepped Dutch auctions"),
+                },
+                DutchAuctionDecay::Exponential => {}
             }
         }
 
@@ -303,18 +211,6 @@ impl Auction {
         publish_auction_closed_event(&env, auction_id, state.highest_bidder, state.highest_bid);
     }
 
-    /// Place a bid for an auction identified by `auction_id`.
-    ///
-    /// For English auctions:
-    /// - Bid floor: `amount` must be strictly greater than `max(min_bid - 1, highest_bid)`.
-    /// - First bid must be at least `min_bid`, every later bid must exceed the current highest.
-    /// - When outbidding, the previous highest bidder is refunded exactly `highest_bid`.
-    ///
-    /// For Dutch auctions:
-    /// - First bid at or above the current Dutch price wins immediately.
-    /// - Price decays using the configured Dutch curve (`Linear` by default,
-    ///   `Stepped` when `dutch_decay` and `dutch_step_count` are set).
-    /// - No outbidding - first qualifying bid settles the auction.
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
@@ -334,14 +230,12 @@ impl Auction {
         }
 
         let now = env.ledger().timestamp();
-
         if now >= state.config.end_time {
             env.panic_with_error(AuctionError::AuctionNotOpen);
         }
 
         match state.config.mode {
             AuctionMode::English => {
-                // English auction: require bid to exceed current highest
                 let min_floor = state.config.min_bid.saturating_sub(1);
                 let required_floor = if state.highest_bid > min_floor {
                     state.highest_bid
@@ -357,16 +251,11 @@ impl Auction {
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
 
-                if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
+                if let (Some(prev_bidder), Some(tkn)) =
+                    (state.highest_bidder.clone(), token_addr)
+                {
                     let refund_amount = state.highest_bid;
-
-                    // Emit refund event before performing token transfer
                     publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
-
-                    // Set reentrancy guard before the token transfer to block any
-                    // reentrant call to place_bid or claim_auction during the CPI.
-                    // Soroban transaction rollback clears instance storage on panic,
-                    // so the flag cannot be left permanently set on failure.
                     set_reentrancy_guard(&env);
                     let token_client = token::Client::new(&env, &tkn);
                     token_client.transfer(
@@ -380,8 +269,8 @@ impl Auction {
                 state.highest_bidder = Some(bidder);
                 state.highest_bid = amount;
             }
+
             AuctionMode::Dutch => {
-                // Dutch auction: first qualifying bid wins
                 let current_time = env.ledger().timestamp();
                 let elapsed_time = current_time
                     .checked_sub(state.config.start_time)
@@ -401,11 +290,7 @@ impl Auction {
                     .dutch_floor_price
                     .unwrap_or(state.config.min_bid);
 
-                let decay = state
-                    .config
-                    .dutch_decay
-                    .clone()
-                    .unwrap_or(DutchAuctionDecay::Linear);
+                let decay = state.config.dutch_decay.clone();
 
                 let current_price = compute_dutch_price(
                     start_price,
@@ -416,22 +301,17 @@ impl Auction {
                     state.config.dutch_step_count,
                 );
 
-                // Bid must be at least current price
                 if amount < current_price {
                     env.panic_with_error(AuctionError::BidTooLow);
                 }
-
-                // Bid must be at least min_bid
                 if amount < state.config.min_bid {
                     env.panic_with_error(AuctionError::BidTooLow);
                 }
 
-                // In Dutch auction, first qualifying bid wins - close the auction
                 state.highest_bidder = Some(bidder);
                 state.highest_bid = amount;
                 state.status = AuctionStatus::Closed;
 
-                // Publish close event for Dutch auction settlement
                 publish_auction_closed_event(
                     &env,
                     auction_id.clone(),
@@ -445,12 +325,6 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
-    /// Emit an auction settlement signal for credit default liquidation orchestration.
-    ///
-    /// Requirements:
-    /// - caller must be the registered factory contract (`set_factory_contract`)
-    /// - auction must be closed
-    /// - settlement signal is one-time per auction_id
     pub fn settle_default_liquidation(
         env: Env,
         auction_id: Symbol,
@@ -502,11 +376,6 @@ impl Auction {
         state.highest_bid
     }
 
-    /// Claim the auction proceeds for the winner.
-    /// Requirements:
-    /// - auction must be closed
-    /// - caller must be the winner
-    /// - auction must have a bid
     pub fn claim_auction(env: Env, auction_id: Symbol) {
         let state: AuctionState = env
             .storage()
@@ -531,16 +400,13 @@ impl Auction {
 
         let mut updated_state = state;
         updated_state.status = AuctionStatus::Claimed;
-        env.storage().persistent().set(&auction_id, &updated_state);
+        env.storage()
+            .persistent()
+            .set(&auction_id, &updated_state);
         bump_auction_state_ttl(&env, &auction_id);
 
-        // Reentrancy guard wraps the transfer site (defense-in-depth).
-        // The status is already updated to Claimed above (checks-effects-interactions),
-        // so a reentrant claim_auction call will hit AuctionNotClosed before reaching here.
-        // The guard provides an additional layer: any reentrant call during the token
-        // transfer will revert with AuctionError::Reentrancy.
         set_reentrancy_guard(&env);
-        // token_client.transfer(...) — proceeds to winner (transfer to be wired up)
+        // token_client.transfer(...) — proceeds to winner (to be wired up)
         clear_reentrancy_guard(&env);
     }
 }

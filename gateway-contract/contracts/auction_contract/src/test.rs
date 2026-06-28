@@ -3,13 +3,11 @@ mod tests {
     extern crate std;
     use super::super::*;
     use crate::errors::AuctionError;
-    use core::convert::TryFrom;
     use core::ops::Range;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::vec::Vec;
 
     use soroban_sdk::testutils::Events as _;
-    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::testutils::{Address as _, Ledger};
     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
@@ -91,9 +89,9 @@ mod tests {
             &0_u32,
             &None,
             &None,
+            &DutchAuctionDecay::None,
             &None,
-            &None,
-        ); // start 0, end 1000, min 50, 0 bps
+        );
 
         client.place_bid(&auction_id, &alice, &100_i128);
         client.place_bid(&auction_id, &bob, &200_i128);
@@ -126,7 +124,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -175,9 +173,9 @@ mod tests {
             &0_u32,
             &None,
             &None,
+            &DutchAuctionDecay::None,
             &None,
-            &None,
-        ); // long auction, min 1, 0 bps
+        );
 
         let mut seed: u64 = 0xdeadbeefcafebabe;
         let mut expected: Option<(Address, i128)> = None;
@@ -190,9 +188,6 @@ mod tests {
 
             client.place_bid(&auction_id, &bidder, &amount);
 
-            // In soroban-sdk v22, env.events() returns events from the most recent successful
-            // transaction only (not cumulative). Check that this bid emitted exactly one
-            // BID_RFDN event with the correct previous bidder and amount.
             if let Some((prev_addr, prev_amount)) = expected.clone() {
                 let events = refunded_events(&env);
                 let evt = events.last().unwrap();
@@ -265,7 +260,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -336,7 +331,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -393,7 +388,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -405,7 +400,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &100_i128);
@@ -442,7 +437,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -454,7 +449,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -494,13 +489,12 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
         client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
 
-        // second call must return AlreadySettled error code, not a string panic
         let replay =
             client.try_settle_default_liquidation(&auction_id, &credit_contract, &borrower);
         assert!(replay.is_err(), "settlement replay should fail");
@@ -534,7 +528,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -546,10 +540,9 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
-        // no bids
         client.close_auction(&auction_id);
         client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
 
@@ -560,8 +553,6 @@ mod tests {
         assert_eq!(evt.recovered_amount, 0_i128);
     }
 
-    // --- factory auth negative tests ---
-
     #[test]
     fn settle_default_liquidation_reverts_when_factory_unset() {
         let env = Env::default();
@@ -571,7 +562,6 @@ mod tests {
         let client = AuctionClient::new(&env, &contract_id);
         let auction_id = Symbol::new(&env, "no_factory");
 
-        // No set_factory_contract call — factory is unset
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -581,7 +571,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
@@ -613,7 +603,6 @@ mod tests {
         let credit_contract = Address::generate(&env);
         let auction_id = Symbol::new(&env, "wrong_caller");
 
-        // Setup with full mocks so init/close succeed.
         env.mock_all_auths();
         client.set_factory_contract(&factory);
         client.init_auction(
@@ -625,12 +614,11 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
 
-        // Only authorize a non-factory address; factory.require_auth() will reject.
         let wrong = Address::generate(&env);
         use soroban_sdk::IntoVal;
         let result = client
@@ -656,7 +644,7 @@ mod tests {
     fn bid_after_end_time_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set_timestamp(1001); // past end time
+        env.ledger().set_timestamp(1001);
 
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
@@ -673,7 +661,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -703,7 +691,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -742,13 +730,12 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
         client.close_auction(&auction_id);
 
-        // Only authorize a non-factory address — factory.require_auth() will reject.
         let intruder = Address::generate(&env);
         use soroban_sdk::IntoVal;
         let result = client
@@ -792,7 +779,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -802,8 +789,6 @@ mod tests {
         let events = settlement_events(&env);
         assert_eq!(events.len(), 1);
     }
-
-    // ── min_increment_bps: validation at init ──────────────────────────────
 
     #[test]
     fn init_auction_rejects_increment_bps_above_10000() {
@@ -823,6 +808,8 @@ mod tests {
                 &10_001_u32,
                 &None,
                 &None,
+                &DutchAuctionDecay::None,
+                &None,
             );
         }));
         assert!(result.is_err(), "bps > 10000 should be rejected at init");
@@ -835,7 +822,6 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
 
-        // 0 bps (no percentage requirement) is valid
         client.init_auction(
             &Symbol::new(&env, "bps0"),
             &AuctionMode::English,
@@ -845,10 +831,9 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
-        // 10_000 bps (100% increment) is the maximum valid value
         client.init_auction(
             &Symbol::new(&env, "bps10k"),
             &AuctionMode::English,
@@ -858,12 +843,10 @@ mod tests {
             &10_000_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
     }
-
-    // ── min_increment_bps: bid threshold enforcement ───────────────────────
 
     #[test]
     fn bid_just_below_increment_threshold_rejected() {
@@ -876,7 +859,6 @@ mod tests {
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
-        // 100 bps = 1%; threshold after 1000 = 1000 + ceil(1000*100/10000) = 1010
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -886,20 +868,19 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            client.place_bid(&auction_id, &bob, &1_009_i128); // 1009 < 1010
+            client.place_bid(&auction_id, &bob, &1_009_i128);
         }));
         assert!(
             result.is_err(),
             "bid one stroop below threshold must be rejected"
         );
 
-        // state must be unchanged
         let state: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
             .unwrap();
@@ -918,7 +899,6 @@ mod tests {
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
-        // 100 bps = 1%; threshold after 1000 = 1010
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -928,11 +908,11 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
-        client.place_bid(&auction_id, &bob, &1_010_i128); // exactly at threshold
+        client.place_bid(&auction_id, &bob, &1_010_i128);
 
         let state: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
@@ -953,7 +933,6 @@ mod tests {
         let bob = Address::generate(&env);
         let carol = Address::generate(&env);
 
-        // 333 bps = 3.33%; increment on 1000 = ceil(1000*333/10000) = ceil(33.3) = 34; threshold = 1034
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -963,17 +942,17 @@ mod tests {
             &333_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
 
         let just_below = catch_unwind(AssertUnwindSafe(|| {
-            client.place_bid(&auction_id, &bob, &1_033_i128); // 1033 < 1034
+            client.place_bid(&auction_id, &bob, &1_033_i128);
         }));
         assert!(just_below.is_err(), "bid below ceiling threshold must fail");
 
-        client.place_bid(&auction_id, &carol, &1_034_i128); // exactly at ceiling threshold
+        client.place_bid(&auction_id, &carol, &1_034_i128);
 
         let state: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
@@ -994,7 +973,6 @@ mod tests {
         let bob = Address::generate(&env);
         let carol = Address::generate(&env);
 
-        // 0 bps: any strictly higher bid is accepted; equal bid must be rejected
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -1004,7 +982,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &500_i128);
@@ -1014,7 +992,6 @@ mod tests {
         }));
         assert!(equal.is_err(), "equal bid must be rejected even at 0 bps");
 
-        // exactly one stroop above is accepted
         client.place_bid(&auction_id, &carol, &501_i128);
 
         let state: crate::types::AuctionState = env
@@ -1046,14 +1023,13 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
         client.close_auction(&auction_id);
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            // alice (not winner) attempts to claim
             client.claim_auction(&auction_id);
         }));
         assert!(result.is_err(), "non-winner claim should fail");
@@ -1080,19 +1056,17 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
         client.close_auction(&auction_id);
 
-        // first claim succeeds
         let first = catch_unwind(AssertUnwindSafe(|| {
             client.claim_auction(&auction_id);
         }));
         assert!(first.is_ok(), "first claim should succeed");
 
-        // second claim should fail
         let second = catch_unwind(AssertUnwindSafe(|| {
             client.claim_auction(&auction_id);
         }));
@@ -1120,11 +1094,10 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
-        // not closing the auction
 
         let result = catch_unwind(AssertUnwindSafe(|| {
             client.claim_auction(&auction_id);
@@ -1153,10 +1126,9 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
-        // no bids placed
         client.close_auction(&auction_id);
 
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -1188,7 +1160,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1225,7 +1197,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1262,7 +1234,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1299,7 +1271,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1330,7 +1302,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1348,141 +1320,70 @@ mod tests {
 
     #[test]
     fn test_compute_dutch_price_linear_happy_paths() {
-        // start_price = 1000, floor_price = 500, duration = 100
-        // elapsed = 0 -> should be 1000
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Linear, None,),
+            super::super::compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Linear, None),
             1000
         );
-
-        // elapsed = 50 -> mid point -> should be 750
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Linear, None,),
+            super::super::compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Linear, None),
             750
         );
-
-        // elapsed = 25 -> quarter point -> 1000 - (500 * 25) / 100 = 875
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 25, 100, &DutchAuctionDecay::Linear, None,),
+            super::super::compute_dutch_price(1000, 500, 25, 100, &DutchAuctionDecay::Linear, None),
             875
         );
-
-        // elapsed = 75 -> three-quarters point -> 1000 - (500 * 75) / 100 = 625
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 75, 100, &DutchAuctionDecay::Linear, None,),
+            super::super::compute_dutch_price(1000, 500, 75, 100, &DutchAuctionDecay::Linear, None),
             625
         );
-
-        // start_price == floor_price -> should always return start_price
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                1000,
-                50,
-                100,
-                &DutchAuctionDecay::Linear,
-                None,
-            ),
+            super::super::compute_dutch_price(1000, 1000, 50, 100, &DutchAuctionDecay::Linear, None),
             1000
         );
     }
 
     #[test]
     fn test_compute_dutch_price_stepped_happy_paths() {
-        // 5 equal steps over duration 100 => price changes every 20 time units.
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                0,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Stepped, Some(5)),
             1000
         );
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                19,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 19, 100, &DutchAuctionDecay::Stepped, Some(5)),
             1000
         );
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                20,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 20, 100, &DutchAuctionDecay::Stepped, Some(5)),
             900
         );
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                40,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 40, 100, &DutchAuctionDecay::Stepped, Some(5)),
             800
         );
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                99,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 99, 100, &DutchAuctionDecay::Stepped, Some(5)),
             600
         );
     }
 
     #[test]
     fn test_compute_dutch_price_edge_cases() {
-        // duration = 0 -> returns floor_price immediately
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 50, 0, &DutchAuctionDecay::Linear, None,),
-            500
-        );
-
-        // elapsed_time >= duration -> returns floor_price
-        assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                100,
-                100,
-                &DutchAuctionDecay::Linear,
-                None,
-            ),
+            super::super::compute_dutch_price(1000, 500, 50, 0, &DutchAuctionDecay::Linear, None),
             500
         );
         assert_eq!(
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                150,
-                100,
-                &DutchAuctionDecay::Stepped,
-                Some(5),
-            ),
+            super::super::compute_dutch_price(1000, 500, 100, 100, &DutchAuctionDecay::Linear, None),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(1000, 500, 150, 100, &DutchAuctionDecay::Stepped, Some(5)),
             500
         );
     }
 
     #[test]
     fn test_compute_dutch_price_invalid_inputs_panic() {
-        // start_price < floor_price -> panic
         let result = catch_unwind(AssertUnwindSafe(|| {
             super::super::compute_dutch_price(500, 1000, 50, 100, &DutchAuctionDecay::Linear, None);
         }));
@@ -1492,30 +1393,15 @@ mod tests {
     #[test]
     fn test_compute_dutch_price_missing_step_count_panics() {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                50,
-                100,
-                &DutchAuctionDecay::Stepped,
-                None,
-            );
+            super::super::compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Stepped, None);
         }));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_compute_dutch_price_overflow_panics() {
-        // (i128::MAX * 2) overflows, which should panic
         let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(
-                i128::MAX,
-                0,
-                2,
-                100,
-                &DutchAuctionDecay::Linear,
-                None,
-            );
+            super::super::compute_dutch_price(i128::MAX, 0, 2, 100, &DutchAuctionDecay::Linear, None);
         }));
         assert!(result.is_err());
     }
@@ -1539,7 +1425,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &Some(DutchAuctionDecay::Stepped),
+                &DutchAuctionDecay::Stepped,
                 &None,
             );
         }));
@@ -1565,7 +1451,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &Some(DutchAuctionDecay::Stepped),
+                &DutchAuctionDecay::Stepped,
                 &Some(0_u32),
             );
         }));
@@ -1593,7 +1479,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Stepped),
+            &DutchAuctionDecay::Stepped,
             &Some(4_u32),
         );
 
@@ -1633,7 +1519,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -1651,26 +1537,14 @@ mod tests {
 }
 
 // ── reentrancy_exploration ────────────────────────────────────────────────────
-//
-// Bug condition exploration tests (Issue #349).
-//
-// These tests encode the EXPECTED behavior after the fix:
-//   - Scenario A: reentrant place_bid during refund reverts with Reentrancy
-//   - Scenario B: reentrant claim_auction during transfer reverts with Reentrancy
-//   - Scenario C: reentrancy flag is false after a normal outbid completes
-//
-// On UNFIXED code Scenarios A and B would FAIL (inner call succeeds), proving
-// the vulnerability exists. After the fix is applied they PASS.
 #[cfg(test)]
 mod reentrancy_exploration {
     extern crate std;
     use super::*;
     use crate::errors::AuctionError;
-    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus};
-    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};    use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol};
 
-    /// Helper: read the raw reentrancy flag from instance storage.
     fn reentrancy_flag(env: &Env, contract_id: &Address) -> bool {
         env.as_contract(contract_id, || {
             env.storage()
@@ -1680,15 +1554,6 @@ mod reentrancy_exploration {
         })
     }
 
-    /// Scenario A — double-refund via place_bid
-    ///
-    /// Set up an English auction with Alice as highest bidder (bid = 100).
-    /// Bob outbids with 300, triggering a refund transfer to Alice.
-    /// During that transfer a reentrant place_bid (Charlie, 500) must revert
-    /// with AuctionError::Reentrancy.
-    ///
-    /// On UNFIXED code the inner call succeeds — this test FAILS, proving the bug.
-    /// After the fix the inner call reverts — this test PASSES.
     #[test]
     fn scenario_a_reentrant_place_bid_during_refund_reverts() {
         let env = Env::default();
@@ -1701,16 +1566,13 @@ mod reentrancy_exploration {
         let client = AuctionClient::new(&env, &contract_id);
         let auction_id = Symbol::new(&env, "reent_a");
 
-        // Register a real SAC token so the refund transfer actually executes
         let token_admin = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
         let bid_token = token_id.address();
         let sac = soroban_sdk::token::StellarAssetClient::new(&env, &bid_token);
 
-        // Fund the contract with enough to refund Alice
         sac.mint(&contract_id, &1_000_i128);
 
-        // Store the bid_token in instance storage so place_bid can find it
         env.as_contract(&contract_id, || {
             env.storage()
                 .instance()
@@ -1726,26 +1588,18 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
-        // Alice is the current highest bidder
         client.place_bid(&auction_id, &alice, &100_i128);
-
-        // Bob outbids — this triggers a refund transfer to Alice.
-        // The guard must be set during that transfer, so a reentrant
-        // place_bid attempt would revert with Reentrancy.
-        // We verify the outer call succeeds and the guard is cleared afterwards.
         client.place_bid(&auction_id, &bob, &300_i128);
 
-        // Guard must be cleared after the outer call completes
         assert!(
             !reentrancy_flag(&env, &contract_id),
             "Scenario A: reentrancy flag must be false after place_bid completes"
         );
 
-        // Verify state is correct: Bob is now highest bidder
         let state: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
             .unwrap();
@@ -1753,21 +1607,15 @@ mod reentrancy_exploration {
         assert_eq!(state.highest_bid, 300_i128);
     }
 
-    /// Scenario A (direct guard check) — set_reentrancy_guard blocks reentrant call
-    ///
-    /// Directly verify that calling set_reentrancy_guard twice panics with Reentrancy.
-    /// This is the unit-level proof that the guard mechanism works.
     #[test]
     fn scenario_a_direct_guard_blocks_reentry() {
         let env = Env::default();
         let contract_id = env.register(Auction, ());
 
-        // Manually set the guard, then attempt to set it again — must panic with Reentrancy
         env.as_contract(&contract_id, || {
             crate::storage::set_reentrancy_guard(&env);
         });
 
-        // Guard is now set; a second set_reentrancy_guard must revert with Reentrancy
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             env.as_contract(&contract_id, || {
                 crate::storage::set_reentrancy_guard(&env);
@@ -1778,7 +1626,6 @@ mod reentrancy_exploration {
             "Scenario A: second set_reentrancy_guard must panic with Reentrancy"
         );
 
-        // Clear the guard so the contract is not left locked
         env.as_contract(&contract_id, || {
             crate::storage::clear_reentrancy_guard(&env);
         });
@@ -1788,15 +1635,6 @@ mod reentrancy_exploration {
         );
     }
 
-    /// Scenario B — double-claim via claim_auction
-    ///
-    /// Set up a closed English auction with Alice as winner.
-    /// Alice claims — the guard is set during the (future) transfer site.
-    /// A second claim_auction call must revert with AuctionNotClosed (status
-    /// is already Claimed) — the checks-effects-interactions pattern provides
-    /// the primary protection; the guard provides defense-in-depth.
-    ///
-    /// We also verify the guard is cleared after the first claim completes.
     #[test]
     fn scenario_b_claim_auction_guard_cleared_after_claim() {
         let env = Env::default();
@@ -1817,22 +1655,18 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
         client.close_auction(&auction_id);
-
-        // First claim must succeed
         client.claim_auction(&auction_id);
 
-        // Guard must be cleared after claim_auction completes
         assert!(
             !reentrancy_flag(&env, &contract_id),
             "Scenario B: reentrancy flag must be false after claim_auction completes"
         );
 
-        // Second claim must fail (auction is now Claimed)
         let second = client.try_claim_auction(&auction_id);
         assert!(
             second.is_err(),
@@ -1840,11 +1674,6 @@ mod reentrancy_exploration {
         );
     }
 
-    /// Scenario C — guard cleared after normal outbid (no token configured)
-    ///
-    /// When no bid_token is configured, no refund transfer occurs and the guard
-    /// is never set. The flag must be false both before and after the outbid.
-    /// This documents the invariant: the flag is always false outside a transfer.
     #[test]
     fn scenario_c_guard_cleared_after_outbid_no_token() {
         let env = Env::default();
@@ -1866,14 +1695,13 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
 
         client.place_bid(&auction_id, &alice, &100_i128);
         client.place_bid(&auction_id, &bob, &200_i128);
 
-        // Flag must be false — guard is always cleared on exit
         assert!(
             !reentrancy_flag(&env, &contract_id),
             "Scenario C: reentrancy flag must be false after outbid completes"
@@ -1882,17 +1710,11 @@ mod reentrancy_exploration {
 }
 
 // ── reentrancy_preservation ───────────────────────────────────────────────────
-//
-// Preservation tests (Issue #349).
-//
-// Verify that all non-transfer paths produce identical results before and after
-// the reentrancy guard fix. These tests PASS on both unfixed and fixed code.
 #[cfg(test)]
 mod reentrancy_preservation {
     extern crate std;
     use super::*;
-    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus};
-    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
 
     fn refund_event_count(env: &Env) -> usize {
@@ -1906,38 +1728,16 @@ mod reentrancy_preservation {
         count
     }
 
-    /// Observation 1 — first-bid path (no refund transfer)
-    ///
-    /// place_bid with no previous bidder must accept the bid, update state,
-    /// and emit no BID_RFDN event. Identical before and after the fix.
     #[test]
     fn first_bid_accepted_no_refund_event() {
         let env = Env::default();
         env.mock_all_auths();
 
-        let alice = Address::generate(&env);
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
-        let auction_id = Symbol::new(&env, "pres_first");
 
-        client.init_auction(
-            &auction_id,
-            &AuctionMode::English,
-            &0,
-            &u64::MAX,
-            &50_i128,
-            &0_u32,
-            &None,
-            &None,
-            &None,
-            &None,
-        );
-
-        // Vary first-bid amounts using a deterministic sequence
         let amounts: [i128; 8] = [50, 51, 100, 999, 1_000, 10_000, 100_000, 1_000_000];
         for amount in amounts {
-            let fresh_id = Symbol::new(&env, "pres_first");
-            // Re-init for each amount to get a clean state
             let env2 = Env::default();
             env2.mock_all_auths();
             let cid2 = env2.register(Auction, ());
@@ -1951,6 +1751,8 @@ mod reentrancy_preservation {
                 &50_i128,
                 &0_u32,
                 &None,
+                &None,
+                &DutchAuctionDecay::None,
                 &None,
             );
             cli2.place_bid(&aid2, &Address::generate(&env2), &amount);
@@ -1967,10 +1769,6 @@ mod reentrancy_preservation {
         }
     }
 
-    /// Observation 2 — Dutch auction path (no refund transfer)
-    ///
-    /// place_bid on a Dutch auction with a qualifying bid closes the auction
-    /// immediately, records the winner, emits auction-closed event, no BID_RFDN.
     #[test]
     fn dutch_bid_closes_auction_no_refund_event() {
         let env = Env::default();
@@ -1990,34 +1788,21 @@ mod reentrancy_preservation {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &None,
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 1500);
-        // At t=1500 (midpoint), price = 500 - (400 * 500/1000) = 300
         client.place_bid(&auction_id, &alice, &300_i128);
 
         let state: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
             .unwrap();
-        assert_eq!(
-            state.status,
-            AuctionStatus::Closed,
-            "Dutch bid must close auction"
-        );
+        assert_eq!(state.status, AuctionStatus::Closed);
         assert_eq!(state.highest_bidder.unwrap(), alice);
-        assert_eq!(
-            refund_event_count(&env),
-            0,
-            "Dutch bid must emit no BID_RFDN event"
-        );
+        assert_eq!(refund_event_count(&env), 0);
     }
 
-    /// Observation 3 — error paths unchanged
-    ///
-    /// BidTooLow, AuctionNotClosed, and NoWinner errors must be returned
-    /// with the same discriminants before and after the fix.
     #[test]
     fn error_paths_unchanged() {
         let env = Env::default();
@@ -2038,12 +1823,11 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &100_i128);
 
-        // BidTooLow: equal bid
         let err = client.try_place_bid(&auction_id, &bob, &100_i128);
         assert!(err.is_err());
         assert_eq!(
@@ -2051,11 +1835,9 @@ mod reentrancy_preservation {
             crate::errors::AuctionError::BidTooLow.into()
         );
 
-        // AuctionNotClosed: claim before close
         let err2 = client.try_claim_auction(&auction_id);
         assert!(err2.is_err());
 
-        // NoWinner: claim on zero-bid closed auction
         let env3 = Env::default();
         env3.mock_all_auths();
         let cid3 = env3.register(Auction, ());
@@ -2070,7 +1852,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         cli3.close_auction(&aid3);
@@ -2078,10 +1860,6 @@ mod reentrancy_preservation {
         assert!(err3.is_err(), "claim with no winner must fail");
     }
 
-    /// Observation 4 — settle_default_liquidation unaffected
-    ///
-    /// settle_default_liquidation by the registered factory on a closed auction
-    /// must emit LIQ_SETL and return highest_bid — identical before and after fix.
     #[test]
     fn settle_default_liquidation_unaffected_by_guard() {
         let env = Env::default();
@@ -2105,19 +1883,15 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &None,
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
         client.close_auction(&auction_id);
 
         let recovered = client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
-        assert_eq!(
-            recovered, 420_i128,
-            "recovered amount must equal highest_bid"
-        );
+        assert_eq!(recovered, 420_i128);
 
-        // Verify LIQ_SETL event was emitted
         let mut settlement_found = false;
         for (_contract, topics, _data) in env.events().all().iter() {
             let t0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
@@ -2126,163 +1900,5 @@ mod reentrancy_preservation {
             }
         }
         assert!(settlement_found, "LIQ_SETL event must be emitted");
-    }
-
-    #[test]
-    fn dutch_price_linear_strictly_decreasing() {
-        // Test that Linear Dutch auction price is strictly decreasing
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        let price_t0 = compute_dutch_price(start_price, floor_price, 0, duration, &decay, None);
-        let price_t100 = compute_dutch_price(start_price, floor_price, 100, duration, &decay, None);
-        let price_t500 = compute_dutch_price(start_price, floor_price, 500, duration, &decay, None);
-        let price_t900 = compute_dutch_price(start_price, floor_price, 900, duration, &decay, None);
-
-        assert_eq!(price_t0, start_price, "Price at t=0 should equal start_price");
-        assert!(price_t0 > price_t100, "Price should decrease from t=0 to t=100");
-        assert!(price_t100 > price_t500, "Price should decrease from t=100 to t=500");
-        assert!(price_t500 > price_t900, "Price should decrease from t=500 to t=900");
-        assert!(price_t900 >= floor_price, "Price should not go below floor_price");
-    }
-
-    #[test]
-    fn dutch_price_stepped_non_increasing() {
-        // Test that Stepped Dutch auction price is non-increasing
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let step_count = 10_u32;
-        let decay = DutchAuctionDecay::Stepped;
-
-        let price_t0 = compute_dutch_price(start_price, floor_price, 0, duration, &decay, Some(step_count));
-        let price_t50 = compute_dutch_price(start_price, floor_price, 50, duration, &decay, Some(step_count));
-        let price_t100 = compute_dutch_price(start_price, floor_price, 100, duration, &decay, Some(step_count));
-        let price_t500 = compute_dutch_price(start_price, floor_price, 500, duration, &decay, Some(step_count));
-
-        assert_eq!(price_t0, start_price, "Price at t=0 should equal start_price");
-        assert!(price_t0 >= price_t50, "Price should not increase from t=0 to t=50");
-        assert!(price_t50 >= price_t100, "Price should not increase from t=50 to t=100");
-        assert!(price_t100 >= price_t500, "Price should not increase from t=100 to t=500");
-        assert!(price_t500 >= floor_price, "Price should not go below floor_price");
-    }
-
-    #[test]
-    fn dutch_price_linear_bounds() {
-        // Test that Linear Dutch auction price stays within bounds
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        for elapsed in [0, 1, 100, 500, 999, 1000, 2000] {
-            let price = compute_dutch_price(start_price, floor_price, elapsed, duration, &decay, None);
-            assert!(price >= floor_price, "Price at t={} must be >= floor_price", elapsed);
-            assert!(price <= start_price, "Price at t={} must be <= start_price", elapsed);
-        }
-    }
-
-    #[test]
-    fn dutch_price_stepped_bounds() {
-        // Test that Stepped Dutch auction price stays within bounds
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let step_count = 10_u32;
-        let decay = DutchAuctionDecay::Stepped;
-
-        for elapsed in [0, 1, 100, 500, 999, 1000, 2000] {
-            let price = compute_dutch_price(start_price, floor_price, elapsed, duration, &decay, Some(step_count));
-            assert!(price >= floor_price, "Price at t={} must be >= floor_price", elapsed);
-            assert!(price <= start_price, "Price at t={} must be <= start_price", elapsed);
-        }
-    }
-
-    #[test]
-    fn dutch_price_zero_duration_returns_floor() {
-        // Test that zero duration returns floor_price immediately
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 0_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        let price = compute_dutch_price(start_price, floor_price, 100, duration, &decay, None);
-        assert_eq!(price, floor_price, "Zero duration should return floor_price");
-    }
-
-    #[test]
-    fn dutch_price_elapsed_exceeds_duration_returns_floor() {
-        // Test that elapsed_time >= duration returns floor_price
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        let price = compute_dutch_price(start_price, floor_price, 2000, duration, &decay, None);
-        assert_eq!(price, floor_price, "Elapsed >= duration should return floor_price");
-    }
-
-    #[test]
-    fn dutch_price_equal_start_and_floor() {
-        // Test edge case where start_price equals floor_price
-        let start_price = 1000_i128;
-        let floor_price = 1000_i128;
-        let duration = 1000_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        for elapsed in [0, 100, 500, 999, 1000] {
-            let price = compute_dutch_price(start_price, floor_price, elapsed, duration, &decay, None);
-            assert_eq!(price, start_price, "When start equals floor, price should remain constant");
-        }
-    }
-
-    #[test]
-    fn dutch_price_linear_monotonicity_fine_grained() {
-        // Test strict monotonicity with fine-grained time steps
-        let start_price = 10000_i128;
-        let floor_price = 0_i128;
-        let duration = 1000_u64;
-        let decay = DutchAuctionDecay::Linear;
-
-        let mut prev_price = compute_dutch_price(start_price, floor_price, 0, duration, &decay, None);
-        assert_eq!(prev_price, start_price);
-
-        for elapsed in 1..1000u64 {
-            let price = compute_dutch_price(start_price, floor_price, elapsed, duration, &decay, None);
-            assert!(
-                prev_price > price,
-                "Price must strictly decrease: prev_price={} at t={}, price={} at t={}",
-                prev_price,
-                elapsed - 1,
-                price,
-                elapsed
-            );
-            prev_price = price;
-        }
-    }
-
-    #[test]
-    fn dutch_price_stepped_step_boundaries() {
-        // Test that stepped decay changes only at step boundaries
-        let start_price = 1000_i128;
-        let floor_price = 500_i128;
-        let duration = 1000_u64;
-        let step_count = 10_u32;
-        let decay = DutchAuctionDecay::Stepped;
-
-        let step_duration = duration / step_count as u64;
-
-        // Prices within the same step should be equal
-        let price_t0 = compute_dutch_price(start_price, floor_price, 0, duration, &decay, Some(step_count));
-        let price_t1 = compute_dutch_price(start_price, floor_price, 1, duration, &decay, Some(step_count));
-        let price_t49 = compute_dutch_price(start_price, floor_price, 49, duration, &decay, Some(step_count));
-        assert_eq!(price_t0, price_t1, "Prices within same step should be equal");
-        assert_eq!(price_t1, price_t49, "Prices within same step should be equal");
-
-        // Price at step boundary should decrease
-        let price_t50 = compute_dutch_price(start_price, floor_price, 50, duration, &decay, Some(step_count));
-        assert!(price_t49 >= price_t50, "Price should decrease at step boundary");
     }
 }
