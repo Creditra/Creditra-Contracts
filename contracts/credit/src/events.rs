@@ -588,3 +588,23 @@ pub fn publish_treasury_withdrawal_executed(
         event,
     );
 }
+
+/// Payload emitted when an admin commits a new attestation batch for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    /// Borrower whose attestation batch was updated.
+    pub borrower: Address,
+    /// SHA-256 Merkle root of all leaf hashes in the committed batch.
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    /// Number of leaves in the batch (informational).
+    pub count: u32,
+}
+
+/// Publish an attestation batch committed event.
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "atst_bat")),
+        event,
+    );
+}

@@ -81,7 +81,7 @@ mod test {
         advance_ledger(&env, &contract_id);
 
         // 8. reinstate_credit_line
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
         advance_ledger(&env, &contract_id);

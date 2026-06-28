@@ -10,14 +10,19 @@
 //! there is a real risk of expiry.
 
 use crate::auth::{require_admin, require_admin_auth};
-use crate::events::{publish_credit_line_event, CreditLineEvent};
+use crate::events::{
+    publish_credit_line_event, publish_default_liquidation_requested_event,
+    publish_default_liquidation_settled_event, CreditLineEvent, DefaultLiquidationSettledEvent,
+};
+use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, get_repayment_schedule,
+    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
+    liquidation_settlement_key, persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Helper: bump the TTL of a borrower's persistent credit-line entry.
 ///
@@ -182,7 +187,6 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         &env,
         (symbol_short!("credit"), symbol_short!("suspend")),
         CreditLineEvent {
-            event_type: symbol_short!("suspend"),
             borrower: borrower.clone(),
             status: CreditStatus::Suspended,
             credit_limit: credit_line.credit_limit,
@@ -220,7 +224,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = credit_line.utilized_amount;
+    let _previous_utilized = credit_line.utilized_amount;
 
     // Idempotent: already closed → nothing to do.
     if credit_line.status == CreditStatus::Closed {
@@ -245,7 +249,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         env.panic_with_error(ContractError::Unauthorized);
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
     env.storage().persistent().set(&borrower, &credit_line);
     // Bump TTL: keep the closed record live so history is queryable.
@@ -277,7 +281,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 /// # Errors
 /// - Reverts if any close fails (e.g., credit line not found, already closed).
 /// - Reverts if borrowers.len() > BATCH_CLOSE_MAX.
-pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
+pub fn close_credit_lines_batch(env: Env, borrowers: soroban_sdk::Vec<Address>) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -416,7 +420,7 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -488,7 +492,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
 
     publish_credit_line_event(
         &env,
@@ -858,9 +862,3 @@ mod installment {
         assert_eq!(treasury_after - treasury_before, 30);
     }
 }
-// Version Handshake Check
-let remote_version = auction_client.get_version();
-assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
-// Version Handshake Check
-let remote_version = auction_client.get_version();
-assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
