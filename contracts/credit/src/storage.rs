@@ -192,6 +192,12 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Protocol-level maximum close factor in basis points for partial liquidations.
+    /// Defaults to 10_000 (full liquidation) when not set.
+    CloseFactorBps,
+    /// Structured pause reason recorded alongside the pause flag.
+    /// Cleared when the protocol is unpaused.
+    PauseReason,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -218,6 +224,11 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
+
+/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
+/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;

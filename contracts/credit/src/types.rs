@@ -144,6 +144,8 @@ pub enum CreditStatus {
 /// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
 /// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
 /// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `CloseFactorAboveMax`          | Close factor exceeds the protocol-level maximum |
+/// | 46   | `CreditLineFrozen`             | Credit line has an active admin freeze |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -236,6 +238,10 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// Close factor exceeds the protocol-level maximum close factor.
+    CloseFactorAboveMax = 45,
+    /// Credit line has an active admin freeze; draws are blocked.
+    CreditLineFrozen = 46,
 }
 
 /// Stored credit line data for a borrower.
@@ -418,6 +424,52 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Reason for a global or per-line draw freeze.
+///
+/// # ABI stability
+/// Discriminants are stable. New variants must be appended.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Freeze triggered for scheduled liquidity-reserve maintenance.
+    LiquidityReserve = 0,
+    /// Freeze triggered for compliance / regulatory hold.
+    Compliance = 1,
+    /// Freeze triggered for active risk investigation.
+    RiskInvestigation = 2,
+    /// Freeze requested by the borrower themselves.
+    BorrowerRequest = 3,
+    /// Freeze triggered for operational maintenance.
+    OperationalMaintenance = 4,
+}
+
+/// Snapshot of the global draw-freeze state.
+///
+/// Stored under [`crate::storage::DataKey::DrawsFrozen`] in instance storage.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen.
+    pub frozen: bool,
+    /// The reason the freeze was initiated.
+    pub reason: FreezeReason,
+}
+
+/// Structured pause reason recorded when an admin pauses the protocol with context.
+///
+/// Stored under [`crate::storage::DataKey::PauseReason`] in instance storage.
+/// Cleared automatically when the protocol is unpaused.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable symbol describing why the protocol was paused.
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp at which the pause was initiated.
+    pub timestamp: u64,
+    /// Address of the admin who initiated the pause.
+    pub actor: Address,
 }
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.

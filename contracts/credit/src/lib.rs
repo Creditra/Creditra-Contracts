@@ -120,6 +120,7 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cross_chain;
 
 
