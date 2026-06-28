@@ -55,7 +55,7 @@
 #![warn(missing_docs)]
 
 use crate::events::{
-    publish_grace_waiver_applied_event, publish_interest_accrued_event,
+    publish_grace_waiver_receipt_event, publish_interest_accrued_event,
     publish_penalty_rate_entered_event, publish_penalty_rate_exited_event, InterestAccruedEvent,
 };
 use crate::math_utils::{prorate_interest, Rounding};
@@ -263,7 +263,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
                     let waived_amount = full_rate_interest.saturating_sub(actual_interest);
                     if waived_amount > 0 {
-                        publish_grace_waiver_applied_event(
+                        publish_grace_waiver_receipt_event(
                             env,
                             &line.borrower,
                             waived_amount,

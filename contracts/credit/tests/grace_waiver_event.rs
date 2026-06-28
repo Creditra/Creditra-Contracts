@@ -44,10 +44,7 @@ fn test_full_waiver_emits_event() {
         })
     });
 
-    assert!(
-        grace_event.is_some(),
-        "GraceWaiverAppliedEvent should be emitted"
-    );
+    assert!(grace_event.is_some(), "GraceWaiverReceiptEvent should be emitted");
 }
 
 #[test]

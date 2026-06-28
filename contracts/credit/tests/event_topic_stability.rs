@@ -4,7 +4,7 @@ use creditra_credit::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_default_liquidation_settled_event,
     publish_draw_reversed_event, publish_drawn_event, publish_draws_frozen_event,
-    publish_grace_waiver_applied_event, publish_interest_accrued_event,
+    publish_grace_waiver_receipt_event, publish_interest_accrued_event,
     publish_rate_formula_config_event, publish_repayment_event, publish_risk_parameters_updated,
     AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent,
     DrawReversedEvent, InterestAccruedEvent, RepaymentEvent, RiskParametersUpdatedEvent,
@@ -84,7 +84,7 @@ fn test_event_topics_stability() {
     publish_draws_frozen_event(&env, true, creditra_credit::FreezeReason::LiquidityReserve);
     publish_borrower_blocked_event(&env, &borrower, true);
     publish_rate_formula_config_event(&env, true);
-    publish_grace_waiver_applied_event(
+    publish_grace_waiver_receipt_event(
         &env,
         &borrower,
         10,
