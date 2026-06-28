@@ -239,6 +239,16 @@ Sets or replaces the installment schedule for a borrower credit line. Admin only
 - `period_seconds` must be positive.
 - The schedule is cleared automatically when the line is reopened or closed.
 
+### `set_borrower_exposure_cap(env, borrower, amount)`
+Set the maximum outstanding exposure permitted for a borrower across all active credit lines. Admin only.
+
+- `amount = 0` removes the cap.
+- Negative values revert with `ContractError::InvalidAmount`.
+- The cap is checked during `draw_credit` against the borrower's post-draw utilized balance.
+
+### `get_borrower_exposure_cap(env, borrower) -> Option<i128>`
+Returns the configured borrower exposure cap, if any.
+
 ### `is_delinquent(env, borrower)`
 Returns `true` when a borrower has a repayment schedule, still has debt, and the current time is past `next_due_ts + grace_period_seconds`.
 

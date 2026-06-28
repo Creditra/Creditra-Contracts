@@ -111,6 +111,7 @@ mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod limits;
 mod math_utils;
 mod query;
 mod views;
@@ -432,6 +433,12 @@ impl Credit {
             }
         }
 
+        // Enforce the borrower's maximum outstanding exposure across all lines.
+        if !limits::enforce_borrower_exposure_cap(&env, &borrower, updated_utilized) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::OverLimit);
+        }
+
         // Global protocol exposure cap: block draws that would push total
         // utilization across all lines above the configured maximum.
         if let Some(max_exposure) = crate::storage::get_max_total_exposure(&env) {
@@ -725,6 +732,18 @@ impl Credit {
     /// Get the utilization cap in basis points for a borrower, if set.
     pub fn get_utilization_cap(env: Env, borrower: Address) -> Option<u32> {
         storage_get_utilization_cap_bps(&env, &borrower)
+    }
+
+    /// Set the maximum outstanding exposure for a borrower across all credit lines.
+    ///
+    /// This cap is enforced on every draw. Passing `0` removes the cap.
+    pub fn set_borrower_exposure_cap(env: Env, borrower: Address, amount: i128) {
+        limits::set_borrower_exposure_cap(&env, &borrower, amount);
+    }
+
+    /// Get the configured borrower exposure cap, if any.
+    pub fn get_borrower_exposure_cap(env: Env, borrower: Address) -> Option<i128> {
+        limits::get_borrower_exposure_cap(&env, &borrower)
     }
 
     /// Commit to a VRF output for a borrower's credit score derivation (admin only).
