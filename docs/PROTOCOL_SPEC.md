@@ -313,6 +313,10 @@ See `contracts/credit/src/fees.rs`.
      (else `OraclePriceDeviation`)
    - Atomically write `OracleLastPrice`, `OracleLastPriceTs`; emit
      `("credit","orc_price")`
+
+   During an oracle outage, callers may resubmit the last accepted price to
+   continue settlement operations as long as the stored price remains within the
+   configured `max_age_seconds` freshness window.
 3. If `AuctionContract` is set, call
    `AuctionClient::settle_default_liquidation(settlement_id, contract, borrower) -> i128`
    and assert returned == `recovered_amount` (else `InvalidAmount`)
