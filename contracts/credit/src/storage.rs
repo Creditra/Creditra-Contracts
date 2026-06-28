@@ -79,7 +79,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
 ///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
-///   `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
+///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
 ///   `DrawReversedAmount`).
 ///
 /// Helper functions in this module always pick the correct tier; callers

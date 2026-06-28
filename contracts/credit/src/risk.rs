@@ -14,6 +14,7 @@
 //!   `(credit_limit, interest_rate_bps, risk_score)` triple, with the rate
 //!   either supplied or formula-derived, then bounded by:
 //!     - the per-borrower [`set_borrower_rate_floor`] floor,
+//!     - the per-borrower [`set_borrower_rate_ceiling`] ceiling,
 //!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
 //!       `Symbol("rate_cfg")` instance storage,
 //!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
@@ -22,6 +23,7 @@
 //! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
 //!   applied to delinquent lines during accrual (see [`crate::accrual`]).
 //! - [`set_borrower_rate_floor`] — per-borrower minimum.
+//! - [`set_borrower_rate_ceiling`] — per-borrower maximum.
 //!
 //! # How
 //!
@@ -148,10 +150,20 @@ pub fn set_rate_change_limits_legacy(
 }
 
 /// Set a per-borrower interest rate floor (admin only).
+///
+/// # Panics
+/// - If caller is not admin.
+/// - If `floor_bps` exceeds `MAX_INTEREST_RATE_BPS` (10_000).
+/// - If `floor_bps` is greater than the configured ceiling for this borrower.
 pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u32>) {
     require_admin_auth(&env);
     if let Some(floor) = floor_bps {
         assert!(floor <= MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
+        if let Some(ceiling) = crate::storage::get_borrower_rate_ceiling(&env, &borrower) {
+            if floor > ceiling {
+                env.panic_with_error(ContractError::RateTooHigh);
+            }
+        }
     }
     crate::storage::set_borrower_rate_floor(&env, &borrower, floor_bps);
 }

@@ -59,6 +59,7 @@ draw) and whose individual TTLs need to be tracked.
 | `BlockedBorrower(Address)` | Per-borrower block list. |
 | `UtilizationCapBps(Address)` | Per-borrower utilization ceiling. |
 | `RateFloorBps(Address)` | Per-borrower interest floor. |
+| `RateCeilingBps(Address)` | Per-borrower interest ceiling. |
 | `RepaymentSchedule(Address)` | Installment schedule. |
 | `CollateralBalance(Address)` | Per-borrower collateral. |
 | `DrawAudit(Address, u64)` | Audit trail entry. |

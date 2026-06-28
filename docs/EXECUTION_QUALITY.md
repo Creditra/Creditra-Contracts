@@ -26,6 +26,7 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 | `batch_accrual.rs` | `accrue_batch(borrowers)` keeper path; bounded to 50 |
 | `borrower_key_encoding.rs` | Storage key safety (collision resistance, stability) |
 | `borrower_rate_floor.rs` | Per-borrower `RateFloorBps` overriding formula |
+| `borrower_rate_ceiling.rs` | Per-borrower `RateCeilingBps` capping manual and formula rates |
 | `borrower_self_suspend.rs` | Borrower-initiated suspension; auth + state-machine |
 | `circuit_breaker.rs` | Admin pause / unpause; repay-credit exception |
 | `collateral.rs` | Collateral balance tracking and `MinCollateralRatioBps` |

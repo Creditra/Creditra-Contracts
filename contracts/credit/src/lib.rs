@@ -28,7 +28,7 @@
 //! - **Risk update** — `update_risk_parameters` either computes the new rate
 //!   from `risk_score` via the piecewise-linear formula (if configured) or
 //!   accepts an admin-supplied rate; both paths are clamped and gated by the
-//!   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+//!   per-borrower floor/ceiling and the `RateChangeConfig` magnitude+cadence cap.
 //! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
 //!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
 //!   mutation. See [`crate::lifecycle`].

@@ -334,7 +334,7 @@ flowchart TB
         P3["LastDrawTs(Address)"]
         P4["BlockedBorrower(Address)"]
         P5["UtilizationCapBps(Address)"]
-        P6["RateFloorBps(Address)"]
+        P6["RateFloorBps(Address) / RateCeilingBps(Address)"]
         P7["RepaymentSchedule(Address)"]
         P8["CollateralBalance(Address)"]
         P9["DrawAudit(Address,u64) / DrawReversedAmount(Address,u64)"]
