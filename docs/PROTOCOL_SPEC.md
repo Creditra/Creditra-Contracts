@@ -278,6 +278,7 @@ emits `("credit","rate_form")` with `true`.
 |---|---|---|
 | `deposit_collateral(borrower, amount)` | `lib.rs:805` → `collateral.rs:34` | `token::transfer` borrower → contract; `CollateralBalance += amount`. Emits `CollateralDepositedEvent`. |
 | `withdraw_collateral(borrower, amount)` | `lib.rs:809` → `collateral.rs:69` | Compute `post_balance`; require `utilized * MinCollateralRatioBps / 10000 <= post_balance` else `CollateralRatioBelowMinimum`; transfer out; persist; emit. |
+| `partial_release_collateral(borrower, amount)` | `lib.rs` → `collateral.rs` | Borrower-only entrypoint. Releases `amount` collateral back to borrower provided the health-factor invariant holds after the release: `post_balance >= utilized * MinCollateralRatioBps / 10_000`. Ratio check skipped when `utilized == 0`. Emits `CollateralPartialReleasedEvent` on topic `("credit","col_prel")` with `amount_released`, `new_balance`, and `health_factor_bps` (`u32::MAX` when no debt). Errors: `InvalidAmount(5)`, `InsufficientCollateralBalance(39)`, `CollateralRatioBelowMinimum(35)`, `MissingLiquidityToken(22)`, `Overflow(12)`. |
 | `get_collateral(borrower) -> i128` | `lib.rs:813` → `collateral.rs:124` | Read-only. |
 
 `InsufficientRepaymentBalance` is intentionally reused for over-withdraw

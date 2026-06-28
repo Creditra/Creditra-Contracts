@@ -192,7 +192,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `set_credit_limit_bounds`.
 - **Liquidity & treasury:** `set_liquidity_token`, `set_liquidity_source`,
   `set_protocol_fee_bps`, `set_treasury`, `withdraw_treasury`.
-- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`.
+- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`,
+  `partial_release_collateral` (borrower-callable; releases a portion of
+  collateral while keeping health-factor ≥ `MinCollateralRatioBps`).
 - **Repayment schedule:** `set_repayment_schedule`, `get_repayment_schedule`,
   `is_delinquent`.
 - **Operational controls:** `pause_protocol` / `unpause_protocol`,

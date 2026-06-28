@@ -29,6 +29,12 @@
 //! utilization, so a withdrawal can never push an active credit line
 //! under-collateralized.
 //!
+//! [`partial_release_collateral`] is a dedicated borrower-callable entrypoint
+//! that applies the same health-factor guard and emits a distinct
+//! [`crate::events::CollateralPartialReleasedEvent`] (topic `"col_prel"`),
+//! making it easy for indexers to distinguish a deliberate partial release
+//! from a generic withdrawal or an atomic repay-and-release.
+//!
 //! # Storage
 //!
 //! Per-borrower collateral balances live in persistent storage under
@@ -43,8 +49,9 @@
 //! for the full error table.
 
 use crate::events::{
-    publish_collateral_deposited_event, publish_collateral_withdrawn_event,
-    CollateralDepositedEvent, CollateralWithdrawnEvent,
+    publish_collateral_deposited_event, publish_collateral_partial_released_event,
+    publish_collateral_withdrawn_event, CollateralDepositedEvent, CollateralPartialReleasedEvent,
+    CollateralWithdrawnEvent,
 };
 use crate::storage::{
     get_collateral_balance, get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
@@ -149,6 +156,135 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 /// Read‑only getter for a borrower's collateral balance.
 pub fn get_collateral(env: &Env, borrower: &Address) -> i128 {
     get_collateral_balance(env, borrower)
+}
+
+/// Allow a borrower to release a portion of their collateral while keeping
+/// the credit line's health factor above the configured threshold.
+///
+/// # What
+///
+/// Transfers `amount` collateral tokens from the contract back to `borrower`,
+/// provided the remaining collateral satisfies the minimum collateral ratio:
+///
+/// ```text
+/// post_balance >= utilized_amount * min_ratio_bps / 10_000
+/// ```
+///
+/// When `utilized_amount == 0` the ratio check is skipped and the borrower
+/// can release any amount up to their full balance (subject to
+/// [`ContractError::InsufficientCollateralBalance`]).
+///
+/// # Health factor
+///
+/// After a successful release the function computes:
+///
+/// ```text
+/// health_factor_bps = post_balance * 10_000 / utilized_amount
+/// ```
+///
+/// and embeds it in the emitted [`CollateralPartialReleasedEvent`].
+/// When `utilized_amount == 0` the health factor is reported as `u32::MAX`.
+///
+/// # Authorization
+///
+/// Requires `borrower.require_auth()` — only the borrower themselves can
+/// release their own collateral.
+///
+/// # Errors
+///
+/// | Error | Condition |
+/// |---|---|
+/// | [`ContractError::InvalidAmount`] | `amount` is zero or negative |
+/// | [`ContractError::CreditLineNotFound`] — _not raised_; no line is fine | |
+/// | [`ContractError::InsufficientCollateralBalance`] | `amount > current_balance` |
+/// | [`ContractError::CollateralRatioBelowMinimum`] | post-release balance < required |
+/// | [`ContractError::MissingLiquidityToken`] | token address not configured |
+/// | [`ContractError::Overflow`] | arithmetic overflow in ratio calculation |
+///
+/// # Events
+///
+/// Emits [`CollateralPartialReleasedEvent`] on success with topic
+/// `("credit", "col_prel")`.
+pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
+    // ── 1. Input validation ────────────────────────────────────────────────
+    if amount <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    // ── 2. Authorization ───────────────────────────────────────────────────
+    // Only the borrower may release their own collateral.
+    borrower.require_auth();
+
+    // ── 3. Balance check ───────────────────────────────────────────────────
+    let cur_balance = get_collateral_balance(env, borrower);
+    if amount > cur_balance {
+        env.panic_with_error(ContractError::InsufficientCollateralBalance);
+    }
+
+    // post_balance is the collateral remaining if we proceed.
+    let post_balance = cur_balance
+        .checked_sub(amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+
+    // ── 4. Health-factor guard ─────────────────────────────────────────────
+    // Fetch the credit line (if any) and enforce MinCollateralRatioBps.
+    let utilized_amount = if let Some(credit_line) = get_credit_line(env, borrower) {
+        credit_line.utilized_amount
+    } else {
+        0_i128
+    };
+
+    if utilized_amount > 0 {
+        let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+
+        // required = ceil(utilized * min_ratio_bps / 10_000)
+        // We use checked_mul to detect overflow; the division itself cannot overflow.
+        let required = utilized_amount
+            .checked_mul(min_ratio_bps as i128)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
+            / 10_000_i128;
+
+        if post_balance < required {
+            env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
+        }
+    }
+
+    // ── 5. Compute reported health factor ──────────────────────────────────
+    // health_factor_bps = post_balance * 10_000 / utilized_amount
+    // u32::MAX signals "no outstanding debt" (unbounded).
+    let health_factor_bps: u32 = if utilized_amount == 0 {
+        u32::MAX
+    } else {
+        // post_balance * 10_000 fits in i128 for any realistic balance.
+        let hf = post_balance
+            .checked_mul(10_000_i128)
+            .unwrap_or(i128::MAX)
+            / utilized_amount;
+        // Saturate to u32::MAX if the ratio somehow exceeds 4_294_967_295 bps.
+        u32::try_from(hf).unwrap_or(u32::MAX)
+    };
+
+    // ── 6. Token transfer ──────────────────────────────────────────────────
+    let token_addr = get_collateral_token(env).unwrap_or_else(|| {
+        env.panic_with_error(ContractError::MissingLiquidityToken)
+    });
+    let token_client = token::Client::new(env, &token_addr);
+    let contract_addr = env.current_contract_address();
+    token_client.transfer(&contract_addr, borrower, &amount);
+
+    // ── 7. Persist updated balance ─────────────────────────────────────────
+    set_collateral_balance(env, borrower, post_balance);
+
+    // ── 8. Emit event ──────────────────────────────────────────────────────
+    publish_collateral_partial_released_event(
+        env,
+        CollateralPartialReleasedEvent {
+            borrower: borrower.clone(),
+            amount_released: amount,
+            new_balance: post_balance,
+            health_factor_bps,
+        },
+    );
 }
 
 /// Release collateral tokens to the borrower without requiring auth.
