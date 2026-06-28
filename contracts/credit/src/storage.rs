@@ -849,17 +849,29 @@ pub fn set_close_factor_bps(env: &Env, bps: u32) {
 }
 
 /// Return the installment schedule for a borrower, if configured.
+///
+/// When a schedule exists, its persistent entry's TTL is bumped so an active
+/// borrower's schedule is never archived independently of the credit line.
+/// Mirrors the read-path bump performed by [`get_credit_line`].
 pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RepaymentSchedule(borrower.clone()))
+    let key = DataKey::RepaymentSchedule(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
 }
 
-/// Persist the installment schedule for a borrower.
+/// Persist the installment schedule for a borrower and bump its TTL.
+///
+/// The schedule lives in its own persistent entry, so writing it must also
+/// extend that entry's TTL to keep it live for the lifetime of an active
+/// credit line.
 pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &RepaymentSchedule) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::RepaymentSchedule(borrower.clone()), schedule);
+    let key = DataKey::RepaymentSchedule(borrower.clone());
+    env.storage().persistent().set(&key, schedule);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the last draw timestamp for a borrower, if any.

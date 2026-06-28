@@ -545,6 +545,10 @@ pub fn set_repayment_schedule(
         next_due_ts: first_due_ts,
     };
     storage_set_repayment_schedule(env, &borrower, &schedule);
+    // Setting a schedule is an interaction with the credit line, so keep the
+    // credit-line entry live as well (the schedule entry is bumped by the
+    // storage setter itself).
+    bump_credit_line_ttl(env, &borrower);
 }
 
 /// Advance a borrower's installment schedule after an effective repayment.
