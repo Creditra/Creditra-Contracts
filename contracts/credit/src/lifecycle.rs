@@ -778,3 +778,9 @@ mod installment {
         assert_eq!(treasury_after - treasury_before, 30);
     }
 }
+// Version Handshake Check
+let remote_version = auction_client.get_version();
+assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
+// Version Handshake Check
+let remote_version = auction_client.get_version();
+assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
