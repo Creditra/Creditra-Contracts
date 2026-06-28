@@ -101,6 +101,7 @@ mod accrual_tests;
 mod amount_validation_tests;
 mod auth;
 mod borrow;
+mod collateral;
 mod config;
 pub mod events;
 mod fees;
@@ -108,6 +109,7 @@ mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+pub mod math_utils;
 mod query;
 mod risk;
 pub use crate::risk::compute_rate_from_score;
@@ -115,13 +117,23 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
+mod views;
 
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
+mod limit_decrease_tests;
+#[cfg(test)]
 mod risk_formula_tests;
 #[cfg(test)]
 mod views_tests;
+
+/// Kani proof harnesses for the interest-prorating math primitive.
+/// Compiled only under `cfg(kani)`; invisible to normal builds and tests.
+/// Run with `cargo kani -p creditra-credit`.
+#[cfg(kani)]
+#[path = "../proofs/prorate_interest.rs"]
+mod prorate_interest_proofs;
 
 use crate::auth::require_admin_auth;
 use crate::events::{
