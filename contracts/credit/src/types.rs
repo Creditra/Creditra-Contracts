@@ -447,3 +447,8 @@ pub struct TreasuryWithdrawalProposal {
     /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
     pub execute_after: u64,
 }
+
+/// Re-exports from [`crate::penalties`] for ABI-stable access.
+///
+/// See [`crate::penalties`] for full documentation.
+pub use crate::penalties::{AprFeeConfig, FlatFeeConfig, LateFeeConfig};
