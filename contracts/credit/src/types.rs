@@ -294,9 +294,9 @@ impl ContractError {
             | Self::TimestampRegression => ContractErrorCategory::Math,
 
             // ── Oracle (4) ────────────────────────────────────────────
-            Self::OraclePriceInvalid
-            | Self::OraclePriceStale
-            | Self::OraclePriceDeviation => ContractErrorCategory::Oracle,
+            Self::OraclePriceInvalid | Self::OraclePriceStale | Self::OraclePriceDeviation => {
+                ContractErrorCategory::Oracle
+            }
 
             // ── State (3) — everything else ───────────────────────────
             Self::CreditLineNotFound

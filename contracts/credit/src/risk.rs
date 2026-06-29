@@ -60,8 +60,12 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::publish_risk_parameters_updated;
-use crate::storage::{assert_not_paused, rate_cfg_key, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
+use crate::storage::{
+    assert_not_paused, rate_cfg_key, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
+};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Maximum interest rate in basis points (100%).
@@ -71,11 +75,7 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 pub const MAX_RISK_SCORE: u32 = 100;
 
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits(
-    env: Env,
-    max_rate_change_bps: u32,
-    rate_change_min_interval: u64,
-) {
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 

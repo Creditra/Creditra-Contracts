@@ -106,7 +106,12 @@ fn rounding_strategy() -> impl Strategy<Value = Rounding> {
 
 /// Generate comprehensive test cases across boundary inputs.
 fn prorate_test_case_strategy() -> impl Strategy<Value = ProrateTestCase> {
-    (principal_strategy(), rate_bps_strategy(), time_delta_strategy(), rounding_strategy())
+    (
+        principal_strategy(),
+        rate_bps_strategy(),
+        time_delta_strategy(),
+        rounding_strategy(),
+    )
         .prop_map(|(principal, rate_bps, time_delta, rounding)| {
             let result = prorate_interest(principal, rate_bps, time_delta, rounding);
             ProrateTestCase {
@@ -223,14 +228,24 @@ fn prorate_interest_boundary_snapshots() {
             rate_bps: 10_000,
             time_delta: SECONDS_PER_YEAR as u64,
             rounding: Rounding::Floor,
-            result: prorate_interest(BPS_YEAR_DENOM, 10_000, SECONDS_PER_YEAR as u64, Rounding::Floor),
+            result: prorate_interest(
+                BPS_YEAR_DENOM,
+                10_000,
+                SECONDS_PER_YEAR as u64,
+                Rounding::Floor,
+            ),
         },
         ProrateTestCase {
             principal: BPS_YEAR_DENOM,
             rate_bps: 10_000,
             time_delta: SECONDS_PER_YEAR as u64,
             rounding: Rounding::Ceil,
-            result: prorate_interest(BPS_YEAR_DENOM, 10_000, SECONDS_PER_YEAR as u64, Rounding::Ceil),
+            result: prorate_interest(
+                BPS_YEAR_DENOM,
+                10_000,
+                SECONDS_PER_YEAR as u64,
+                Rounding::Ceil,
+            ),
         },
         // u32::MAX time (large time delta)
         ProrateTestCase {
@@ -277,7 +292,12 @@ fn prorate_interest_boundary_snapshots() {
             rate_bps: 100,
             time_delta: SECONDS_PER_YEAR as u64,
             rounding: Rounding::Floor,
-            result: prorate_interest(1_000_000_000_000_000_000, 100, SECONDS_PER_YEAR as u64, Rounding::Floor),
+            result: prorate_interest(
+                1_000_000_000_000_000_000,
+                100,
+                SECONDS_PER_YEAR as u64,
+                Rounding::Floor,
+            ),
         },
         // Medium time (1 month)
         ProrateTestCase {
@@ -357,14 +377,24 @@ fn prorate_interest_fuzz_snapshots() {
             rate_bps: 2000,
             time_delta: (SECONDS_PER_YEAR * 2) as u64,
             rounding: Rounding::Ceil,
-            result: prorate_interest(10_000_000, 2000, (SECONDS_PER_YEAR * 2) as u64, Rounding::Ceil),
+            result: prorate_interest(
+                10_000_000,
+                2000,
+                (SECONDS_PER_YEAR * 2) as u64,
+                Rounding::Ceil,
+            ),
         },
         ProrateTestCase {
             principal: 100_000_000,
             rate_bps: 5000,
             time_delta: (SECONDS_PER_YEAR / 4) as u64,
             rounding: Rounding::Floor,
-            result: prorate_interest(100_000_000, 5000, (SECONDS_PER_YEAR / 4) as u64, Rounding::Floor),
+            result: prorate_interest(
+                100_000_000,
+                5000,
+                (SECONDS_PER_YEAR / 4) as u64,
+                Rounding::Floor,
+            ),
         },
         ProrateTestCase {
             principal: 1_000_000_000,
@@ -423,31 +453,92 @@ fn prorate_interest_monotonicity_snapshots() {
 
     // Monotonic in principal
     let principal_cases = vec![
-        (1, prorate_interest(1, base_rate, base_time, Rounding::Floor)),
-        (10, prorate_interest(10, base_rate, base_time, Rounding::Floor)),
-        (100, prorate_interest(100, base_rate, base_time, Rounding::Floor)),
-        (1_000, prorate_interest(1_000, base_rate, base_time, Rounding::Floor)),
-        (10_000, prorate_interest(10_000, base_rate, base_time, Rounding::Floor)),
-        (100_000, prorate_interest(100_000, base_rate, base_time, Rounding::Floor)),
+        (
+            1,
+            prorate_interest(1, base_rate, base_time, Rounding::Floor),
+        ),
+        (
+            10,
+            prorate_interest(10, base_rate, base_time, Rounding::Floor),
+        ),
+        (
+            100,
+            prorate_interest(100, base_rate, base_time, Rounding::Floor),
+        ),
+        (
+            1_000,
+            prorate_interest(1_000, base_rate, base_time, Rounding::Floor),
+        ),
+        (
+            10_000,
+            prorate_interest(10_000, base_rate, base_time, Rounding::Floor),
+        ),
+        (
+            100_000,
+            prorate_interest(100_000, base_rate, base_time, Rounding::Floor),
+        ),
     ];
 
     // Monotonic in rate
     let rate_cases = vec![
-        (1, prorate_interest(base_principal, 1, base_time, Rounding::Floor)),
-        (100, prorate_interest(base_principal, 100, base_time, Rounding::Floor)),
-        (300, prorate_interest(base_principal, 300, base_time, Rounding::Floor)),
-        (500, prorate_interest(base_principal, 500, base_time, Rounding::Floor)),
-        (1_000, prorate_interest(base_principal, 1_000, base_time, Rounding::Floor)),
-        (10_000, prorate_interest(base_principal, 10_000, base_time, Rounding::Floor)),
+        (
+            1,
+            prorate_interest(base_principal, 1, base_time, Rounding::Floor),
+        ),
+        (
+            100,
+            prorate_interest(base_principal, 100, base_time, Rounding::Floor),
+        ),
+        (
+            300,
+            prorate_interest(base_principal, 300, base_time, Rounding::Floor),
+        ),
+        (
+            500,
+            prorate_interest(base_principal, 500, base_time, Rounding::Floor),
+        ),
+        (
+            1_000,
+            prorate_interest(base_principal, 1_000, base_time, Rounding::Floor),
+        ),
+        (
+            10_000,
+            prorate_interest(base_principal, 10_000, base_time, Rounding::Floor),
+        ),
     ];
 
     // Monotonic in time
     let time_cases = vec![
-        (86_400, prorate_interest(base_principal, base_rate, 86_400, Rounding::Floor)),
-        (604_800, prorate_interest(base_principal, base_rate, 604_800, Rounding::Floor)),
-        (2_592_000, prorate_interest(base_principal, base_rate, 2_592_000, Rounding::Floor)),
-        (SECONDS_PER_YEAR as u64, prorate_interest(base_principal, base_rate, SECONDS_PER_YEAR as u64, Rounding::Floor)),
-        ((SECONDS_PER_YEAR * 2) as u64, prorate_interest(base_principal, base_rate, (SECONDS_PER_YEAR * 2) as u64, Rounding::Floor)),
+        (
+            86_400,
+            prorate_interest(base_principal, base_rate, 86_400, Rounding::Floor),
+        ),
+        (
+            604_800,
+            prorate_interest(base_principal, base_rate, 604_800, Rounding::Floor),
+        ),
+        (
+            2_592_000,
+            prorate_interest(base_principal, base_rate, 2_592_000, Rounding::Floor),
+        ),
+        (
+            SECONDS_PER_YEAR as u64,
+            prorate_interest(
+                base_principal,
+                base_rate,
+                SECONDS_PER_YEAR as u64,
+                Rounding::Floor,
+            ),
+        ),
+        (
+            (SECONDS_PER_YEAR * 2) as u64,
+            prorate_interest(
+                base_principal,
+                base_rate,
+                (SECONDS_PER_YEAR * 2) as u64,
+                Rounding::Floor,
+            ),
+        ),
     ];
 
     insta::assert_debug_snapshot!("prorate_interest_monotonic_principal", principal_cases);

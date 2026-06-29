@@ -52,7 +52,12 @@ fn protocol_summary_returns_aggregate_totals() {
     env.ledger()
         .with_mut(|ledger| ledger.timestamp = 31_557_600);
     asset.mint(&borrower, &1_100);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &1_100, &6_000_000_u32);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_100,
+        &6_000_000_u32,
+    );
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();

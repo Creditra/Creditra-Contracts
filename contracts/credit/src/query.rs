@@ -36,7 +36,6 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
         treasury_balance: crate::storage::get_treasury_balance(&env),
         bounty_balance: crate::storage::get_bounty_balance(&env),
     }
-    result
 }
 
 /// Return the configured installment repayment schedule for `borrower`, if any.

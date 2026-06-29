@@ -193,8 +193,12 @@ mod edge_cases {
     #[test]
     fn partial_repay_does_not_advance() {
         let ctx = setup_env();
-        ctx.client()
-            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &100_i128,
+            &86_400_u64,
+            &INITIAL_NEXT_DUE,
+        );
 
         fund_repayment(&ctx, 99);
         ctx.client().repay_credit(&ctx.borrower, &99);
@@ -206,8 +210,12 @@ mod edge_cases {
     #[test]
     fn exact_installment_advances_one_period() {
         let ctx = setup_env();
-        ctx.client()
-            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &100_i128,
+            &86_400_u64,
+            &INITIAL_NEXT_DUE,
+        );
 
         fund_repayment(&ctx, 100);
         ctx.client().repay_credit(&ctx.borrower, &100);
@@ -219,8 +227,12 @@ mod edge_cases {
     #[test]
     fn multiple_installments_advance_multiple_periods() {
         let ctx = setup_env();
-        ctx.client()
-            .set_repayment_schedule(&ctx.borrower, &200_i128, &3_600_u64, &INITIAL_NEXT_DUE);
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &200_i128,
+            &3_600_u64,
+            &INITIAL_NEXT_DUE,
+        );
 
         fund_repayment(&ctx, 600);
         ctx.client().repay_credit(&ctx.borrower, &600);

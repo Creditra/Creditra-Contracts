@@ -173,6 +173,8 @@ pub enum DataKey {
     BountyAddress,
     /// Accumulated bounty pool balance held in contract (fee share).
     BountyBalance,
+    /// Per-borrower attestation batch for cross-chain verification.
+    AttestationBatch(Address),
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
@@ -566,9 +568,7 @@ pub fn clear_pending_treasury_withdrawal(env: &Env) {
 
 /// Return configured treasury fee share in basis points, if set.
 pub fn get_treasury_fee_share_bps(env: &Env) -> Option<u32> {
-    env.storage()
-        .instance()
-        .get(&DataKey::TreasuryFeeShareBps)
+    env.storage().instance().get(&DataKey::TreasuryFeeShareBps)
 }
 
 /// Persist treasury fee share in basis points.
@@ -843,9 +843,7 @@ pub fn get_close_factor_bps(env: &Env) -> u32 {
 /// Supply `10_000` for full-liquidation-only (no partial), or any value
 /// `1..=10_000` to cap partial settlements.
 pub fn set_close_factor_bps(env: &Env, bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CloseFactorBps, &bps);
+    env.storage().instance().set(&DataKey::CloseFactorBps, &bps);
 }
 
 /// Return the installment schedule for a borrower, if configured.
@@ -964,9 +962,7 @@ pub fn get_pause_reason(env: &Env) -> Option<crate::types::PauseReason> {
 /// Should be called by the entrypoint that sets the pause flag, so the reason
 /// and the flag are written atomically within the same host transaction.
 pub fn set_pause_reason(env: &Env, reason: &crate::types::PauseReason) {
-    env.storage()
-        .instance()
-        .set(&DataKey::PauseReason, reason);
+    env.storage().instance().set(&DataKey::PauseReason, reason);
 }
 
 /// Assert the protocol is not paused. Reverts with ContractError::Paused if paused.

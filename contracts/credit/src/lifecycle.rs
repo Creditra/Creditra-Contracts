@@ -25,9 +25,11 @@ use soroban_sdk::{symbol_short, Address, Env};
 /// "interaction" with the credit line so the ledger entry never silently
 /// expires while the line is still in use.
 fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
-    env.storage()
-        .persistent()
-        .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        borrower,
+        CREDIT_LINE_TTL_THRESHOLD,
+        CREDIT_LINE_TTL_EXTEND_TO,
+    );
 }
 
 /// Set credit limit bounds (admin only, called through contractimpl).
@@ -858,9 +860,3 @@ mod installment {
         assert_eq!(treasury_after - treasury_before, 30);
     }
 }
-// Version Handshake Check
-let remote_version = auction_client.get_version();
-assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
-// Version Handshake Check
-let remote_version = auction_client.get_version();
-assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");

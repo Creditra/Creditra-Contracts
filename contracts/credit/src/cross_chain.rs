@@ -77,10 +77,7 @@ impl CrossChainHook {
 
     /// MOCK liquidation logic hook
     fn trigger_liquidation(user: &str, amount: u128) -> bool {
-        println!(
-            "Liquidation triggered for user={} amount={}",
-            user, amount
-        );
+        println!("Liquidation triggered for user={} amount={}", user, amount);
         true
     }
 }

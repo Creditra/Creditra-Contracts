@@ -568,10 +568,7 @@ pub struct TreasuryWithdrawalExecutedEvent {
 }
 
 /// Publish a treasury withdrawal proposed event.
-pub fn publish_treasury_withdrawal_proposed(
-    env: &Env,
-    event: TreasuryWithdrawalProposedEvent,
-) {
+pub fn publish_treasury_withdrawal_proposed(env: &Env, event: TreasuryWithdrawalProposedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "tre_prop")),
         event,
@@ -579,10 +576,7 @@ pub fn publish_treasury_withdrawal_proposed(
 }
 
 /// Publish a treasury withdrawal executed event.
-pub fn publish_treasury_withdrawal_executed(
-    env: &Env,
-    event: TreasuryWithdrawalExecutedEvent,
-) {
+pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawalExecutedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
         event,

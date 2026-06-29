@@ -1,4 +1,3 @@
-mod handshake;
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
@@ -68,32 +67,32 @@ mod handshake;
 //! wallet out of on-chain credit. Creditra prices and sizes the credit line
 //! from a deterministic function of behavioral signal plus an optional
 //! collateral floor, configurable from "fully unsecured" to "150 % LTV"
-//! at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
-//! the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
-//! for the algorithm with worked examples.
-//!
-//! ## Security invariants
-//!
-//! - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
-//!   `persist_credit_line` with `previous_utilized` capture).
-//! - `interest_rate_bps <= 10_000` after every mutation.
-//! - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
-//!   `suspension_ts`; backward writes revert
-//!   `ContractError::TimestampRegression = 33`.
-//! - `(borrower, settlement_id)` is the dedup key for cross-contract
-//!   settlement replay safety.
-//! - 38 `ContractError` discriminants are ABI-stable; CI test
-//!   `tests/error_discriminants.rs` reverts on reorder.
-//! - 25+ event topics under the `credit` namespace are stability-pinned by
-//!   `tests/event_topic_stability.rs`.
-//!
-//! See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
-//! per-entrypoint contract surface and
-//! [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
-//!
-//! Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
-//! lives in [`instrument`] (requires the `instrument` Cargo feature; not
-//! compiled into WASM).
+// at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+// the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+// for the algorithm with worked examples.
+//
+// ## Security invariants
+//
+// - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+//   `persist_credit_line` with `previous_utilized` capture).
+// - `interest_rate_bps <= 10_000` after every mutation.
+// - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+//   `suspension_ts`; backward writes revert
+//   `ContractError::TimestampRegression = 33`.
+// - `(borrower, settlement_id)` is the dedup key for cross-contract
+//   settlement replay safety.
+// - 38 `ContractError` discriminants are ABI-stable; CI test
+//   `tests/error_discriminants.rs` reverts on reorder.
+// - 25+ event topics under the `credit` namespace are stability-pinned by
+//   `tests/event_topic_stability.rs`.
+//
+// See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+// per-entrypoint contract surface and
+// [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
+//
+// Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
+// lives in [`instrument`] (requires the `instrument` Cargo feature; not
+// compiled into WASM).
 
 mod accrual;
 #[cfg(test)]
@@ -108,20 +107,20 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
+mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
 mod math_utils;
 mod query;
-mod views;
 mod risk;
+mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
+pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
-pub mod cross_chain;
-
 
 #[cfg(test)]
 mod boundary_tests;
@@ -130,19 +129,18 @@ mod risk_formula_tests;
 #[cfg(test)]
 mod views_tests;
 
-use crate::auth::require_admin_auth;
 use crate::attestation::AttestationBatch;
+use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
     publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
     publish_interest_accrued_event, publish_oracle_config_set_event,
     publish_oracle_price_accepted_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
-    InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
-    TreasuryWithdrawalProposedEvent,
+    publish_repayment_event, publish_token_rescued_event, publish_treasury_withdrawal_executed,
+    publish_treasury_withdrawal_proposed, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
+    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::storage::{
@@ -157,11 +155,11 @@ use crate::storage::{
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
-use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::storage::{
     clear_pending_treasury_withdrawal, get_pending_treasury_withdrawal,
     set_pending_treasury_withdrawal,
 };
+use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
     ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
@@ -1801,11 +1799,7 @@ impl Credit {
     ///
     /// # Events
     /// Emits `("credit", "paused")` or `("credit", "unpaused")`.
-    pub fn set_protocol_paused_with_reason(
-        env: Env,
-        paused: bool,
-        reason: soroban_sdk::Symbol,
-    ) {
+    pub fn set_protocol_paused_with_reason(env: Env, paused: bool, reason: soroban_sdk::Symbol) {
         let admin = require_admin_auth(&env);
 
         if paused {
@@ -2024,14 +2018,14 @@ impl Credit {
 #[cfg(test)]
 mod test_rate_change_limits {
     use super::*;
+    use crate::events::RepaymentEvent;
+    use crate::storage::DataKey;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{symbol_short, Symbol};
     use soroban_sdk::{TryFromVal, TryIntoVal};
-    use crate::storage::DataKey;
-    use crate::events::RepaymentEvent;
 
     fn setup<'a>(
         env: &'a Env,
@@ -3203,8 +3197,6 @@ mod test_mock_liquidity_token {
     use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
     use std::boxed::Box;
     use std::panic::{catch_unwind, AssertUnwindSafe};
-
-
 
     fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
         env.mock_all_auths();
@@ -5171,198 +5163,8 @@ mod test_mock_liquidity_token {
         use soroban_sdk::testutils::Ledger;
         use soroban_sdk::token::StellarAssetClient;
 
-    #[test]
-    fn close_credit_line_idempotent_when_already_closed() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-        // close twice — should be idempotent
-        client.close_credit_line(&borrower, &admin);
-        client.close_credit_line(&borrower, &admin);
-        assert_eq!(
-            client.get_credit_line(&borrower).unwrap().status,
-            CreditStatus::Closed
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Tests: reentrancy guard for draw_credit and repay_credit
-    // ─────────────────────────────────────────────────────────────────────────────
-    #[cfg(test)]
-    mod test_reentrancy_guard {
-        use super::*;
-        use soroban_sdk::token::StellarAssetClient;
-
-        /// Helper: deploy contract, init admin, open a credit line with a token-backed reserve.
-        fn setup_with_reserve<'a>(
-            env: &'a Env,
-            borrower: &Address,
-            credit_limit: i128,
-            reserve: i128,
-        ) -> (CreditClient<'a>, Address) {
-            env.mock_all_auths();
-            let admin = Address::generate(env);
-            let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(env, &contract_id);
-            client.init(&admin);
-
-            let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-            let token_address = token_id.address();
-            client.set_liquidity_token(&token_address);
-            if reserve > 0 {
-                StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve);
-            }
-            client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-            (client, contract_id)
-        }
-
-        /// Simulate a reentrant call to draw_credit by pre-setting the reentrancy guard
-        /// in instance storage before the call. The contract must revert with
-        /// ContractError::Reentrancy (error code #11).
         #[test]
-        #[should_panic(expected = "Error(Contract, #11)")]
-        fn draw_credit_reverts_with_reentrancy_when_guard_already_set() {
-            let env = Env::default();
-            env.mock_all_auths();
-            let borrower = Address::generate(&env);
-            let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
-
-            // Pre-set the reentrancy guard to simulate a reentrant call in progress.
-            env.as_contract(&contract_id, || {
-                let key = crate::storage::reentrancy_key(&env);
-                env.storage().instance().set(&key, &true);
-            });
-
-            // This call must revert with ContractError::Reentrancy because the guard is set.
-            client.draw_credit(&borrower, &100);
-        }
-
-        /// Simulate a reentrant call to repay_credit by pre-setting the reentrancy guard
-        /// in instance storage before the call. The contract must revert with
-        /// ContractError::Reentrancy (error code #11).
-        #[test]
-        #[should_panic(expected = "Error(Contract, #11)")]
-        fn repay_credit_reverts_with_reentrancy_when_guard_already_set() {
-            let env = Env::default();
-            env.mock_all_auths();
-            let borrower = Address::generate(&env);
-            let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
-
-            // Draw some credit first so there is something to repay.
-            client.draw_credit(&borrower, &500);
-
-            // Pre-set the reentrancy guard to simulate a reentrant call in progress.
-            env.as_contract(&contract_id, || {
-                let key = crate::storage::reentrancy_key(&env);
-                env.storage().instance().set(&key, &true);
-            });
-
-            // This call must revert with ContractError::Reentrancy because the guard is set.
-            client.repay_credit(&borrower, &100);
-        }
-
-        /// After a failed draw (guard pre-set), the guard must remain set (as we set it
-        /// externally). A subsequent normal call after clearing the guard must succeed,
-        /// proving the guard logic is correct.
-        #[test]
-        fn draw_credit_guard_cleared_after_normal_success_allows_sequential_draws() {
-            let env = Env::default();
-            env.mock_all_auths();
-            let borrower = Address::generate(&env);
-            let (client, _contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
-
-            // First draw succeeds and clears the guard.
-            client.draw_credit(&borrower, &200);
-            assert_eq!(
-                client.get_credit_line(&borrower).unwrap().utilized_amount,
-                200
-            );
-
-            // Second draw also succeeds — guard was properly cleared after first draw.
-            client.draw_credit(&borrower, &300);
-            assert_eq!(
-                client.get_credit_line(&borrower).unwrap().utilized_amount,
-                500
-            );
-        }
-
-        /// After a failed repay (guard pre-set), a subsequent normal call after clearing
-        /// the guard must succeed, proving the guard logic is correct.
-        #[test]
-        fn repay_credit_guard_cleared_after_normal_success_allows_sequential_repays() {
-            let env = Env::default();
-            env.mock_all_auths();
-            let borrower = Address::generate(&env);
-            let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
-
-            client.draw_credit(&borrower, &600);
-
-            let token_address: soroban_sdk::Address = env.as_contract(&contract_id, || {
-                env.storage()
-                    .instance()
-                    .get(&crate::storage::DataKey::LiquidityToken)
-                    .unwrap()
-            });
-
-            StellarAssetClient::new(&env, &token_address).mint(&borrower, &600);
-            soroban_sdk::token::Client::new(&env, &token_address).approve(
-                &borrower,
-                &contract_id,
-                &600_i128,
-                &1_000_u32,
-            );
-
-            // First repay succeeds and clears the guard.
-            client.repay_credit(&borrower, &200);
-            assert_eq!(
-                client.get_credit_line(&borrower).unwrap().utilized_amount,
-                400
-            );
-
-            // Second repay also succeeds — guard was properly cleared after first repay.
-            client.repay_credit(&borrower, &200);
-            assert_eq!(
-                client.get_credit_line(&borrower).unwrap().utilized_amount,
-                200
-            );
-        }
-    }
-
-    // (test_credit_error_from_conversion removed: CreditError is not defined in this crate)
-
-    #[cfg(test)]
-    mod test_liquidity_error_codes {
-        use super::*;
-        use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
-
-        fn setup<'a>(env: &'a Env, reserve: i128) -> (CreditClient<'a>, Address, Address, Address) {
-            env.mock_all_auths();
-            let admin = Address::generate(env);
-            let borrower = Address::generate(env);
-            let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(env, &contract_id);
-            client.init(&admin);
-
-            let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-            let token_address = token_id.address();
-            client.set_liquidity_token(&token_address);
-            client.set_liquidity_source(&contract_id);
-            if reserve > 0 {
-                StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve);
-            }
-
-            client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
-            (client, contract_id, borrower, token_address)
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #22)")]
-        fn draw_without_liquidity_token_uses_stable_error_code() {
+        fn close_credit_line_idempotent_when_already_closed() {
             let env = Env::default();
             env.mock_all_auths();
             let admin = Address::generate(&env);
@@ -5370,202 +5172,253 @@ mod test_mock_liquidity_token {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
-            client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
-
-            client.draw_credit(&borrower, &100);
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #23)")]
-        fn draw_without_liquidity_source_uses_stable_error_code() {
-            let env = Env::default();
-            let (client, contract_id, borrower, _token) = setup(&env, 1_000);
-            env.as_contract(&contract_id, || {
-                env.storage().instance().remove(&DataKey::LiquiditySource);
-            });
-
-            client.draw_credit(&borrower, &100);
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #24)")]
-        fn draw_with_insufficient_reserve_uses_stable_error_code() {
-            let env = Env::default();
-            let (client, _contract_id, borrower, _token) = setup(&env, 50);
-
-            client.draw_credit(&borrower, &100);
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #26)")]
-        fn repay_with_insufficient_allowance_uses_stable_error_code() {
-            let env = Env::default();
-            let (client, _contract_id, borrower, token) = setup(&env, 1_000);
-            client.draw_credit(&borrower, &200);
-            StellarAssetClient::new(&env, &token).mint(&borrower, &200);
-
-            client.repay_credit(&borrower, &200);
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #27)")]
-        fn repay_with_insufficient_balance_uses_stable_error_code() {
-            let env = Env::default();
-            let (client, contract_id, borrower, token) = setup(&env, 1_000);
-            client.draw_credit(&borrower, &200);
-            TokenClient::new(&env, &token).approve(&borrower, &contract_id, &200, &1_000_u32);
-            TokenClient::new(&env, &token).transfer(&borrower, &Address::generate(&env), &200);
-
-            client.repay_credit(&borrower, &200);
-        }
-    }
-
-    /// draw_credit reverts on a Defaulted credit line per behavior spec.
-    #[test]
-    #[should_panic(expected = "credit line is defaulted")]
-    fn test_draw_credit_rejected_on_defaulted_line() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
-        client.default_credit_line(&borrower);
-        // Per behavior notes: draw_credit reverts when status is Defaulted.
-        client.draw_credit(&borrower, &100_i128);
-    }
-
-    #[cfg(test)]
-    mod test_max_repay_amount {
-        use super::*;
-        use soroban_sdk::token::StellarAssetClient;
-        use soroban_sdk::Env;
-
-        fn setup_with_token(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
-            env.mock_all_auths();
-            let admin = Address::generate(env);
-            let borrower = Address::generate(env);
-            let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(env, &contract_id);
-            client.init(&admin);
-
-            let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-            let token = token_id.address();
-            client.set_liquidity_token(&token);
-
-            // Mint to contract to allow draw
-            StellarAssetClient::new(env, &token).mint(&contract_id, &5_000_i128);
-
             client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-            // Draw some credit to repay later
-            client.draw_credit(&borrower, &500_i128);
-
-            // Mint to borrower so they have funds to repay
-            StellarAssetClient::new(env, &token).mint(&borrower, &5_000_i128);
-            soroban_sdk::token::Client::new(env, &token).approve(
-                &borrower,
-                &contract_id,
-                &10_000_i128,
-                &1_000_000_u32,
+            // close twice — should be idempotent
+            client.close_credit_line(&borrower, &admin);
+            client.close_credit_line(&borrower, &admin);
+            assert_eq!(
+                client.get_credit_line(&borrower).unwrap().status,
+                CreditStatus::Closed
             );
-
-            (client, admin, borrower, token)
         }
 
-        #[test]
-        fn test_unset_max_repay_amount_allows_any() {
-            let env = Env::default();
-            let (client, _admin, borrower, _token) = setup_with_token(&env);
+        // ─────────────────────────────────────────────────────────────────────────────
+        // Tests: reentrancy guard for draw_credit and repay_credit
+        // ─────────────────────────────────────────────────────────────────────────────
+        #[cfg(test)]
+        mod test_reentrancy_guard {
+            use super::*;
+            use soroban_sdk::token::StellarAssetClient;
 
-            assert_eq!(client.get_max_repay_amount(), None);
+            /// Helper: deploy contract, init admin, open a credit line with a token-backed reserve.
+            fn setup_with_reserve<'a>(
+                env: &'a Env,
+                borrower: &Address,
+                credit_limit: i128,
+                reserve: i128,
+            ) -> (CreditClient<'a>, Address) {
+                env.mock_all_auths();
+                let admin = Address::generate(env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(env, &contract_id);
+                client.init(&admin);
 
-            client.repay_credit(&borrower, &400_i128);
-            let line = client.get_credit_line(&borrower).unwrap();
-            assert_eq!(line.utilized_amount, 100);
-        }
-
-        #[test]
-        fn test_set_and_get_max_repay_amount() {
-            let env = Env::default();
-            let (client, _admin, _borrower, _token) = setup_with_token(&env);
-
-            client.set_max_repay_amount(&300_i128);
-            assert_eq!(client.get_max_repay_amount(), Some(300_i128));
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #28)")]
-        fn test_repay_exceeds_max_cap_reverts() {
-            let env = Env::default();
-            let (client, _admin, borrower, _token) = setup_with_token(&env);
-
-            client.set_max_repay_amount(&300_i128);
-            client.repay_credit(&borrower, &400_i128);
-        }
-
-        #[test]
-        fn test_repay_within_max_cap_succeeds() {
-            let env = Env::default();
-            let (client, _admin, borrower, _token) = setup_with_token(&env);
-
-            client.set_max_repay_amount(&300_i128);
-            client.repay_credit(&borrower, &300_i128);
-            let line = client.get_credit_line(&borrower).unwrap();
-            assert_eq!(line.utilized_amount, 200);
-        }
-
-        #[test]
-        #[should_panic(expected = "Error(Contract, #5)")]
-        fn test_set_max_repay_amount_zero_or_negative() {
-            let env = Env::default();
-            let (client, _admin, _borrower, _token) = setup_with_token(&env);
-
-            client.set_max_repay_amount(&0_i128);
-        }
-    }
-
-    // ── get_health_factor query tests ─────────────────────────────────────────
-    #[cfg(test)]
-    mod test_health_factor {
-        use super::*;
-        use crate::collateral;
-        use soroban_sdk::testutils::Address as _;
-        use soroban_sdk::token::StellarAssetClient;
-
-        /// Setup: contract + admin + borrower + token (used for both liquidity
-        /// and collateral — the contract shares one token).  `reserve` tokens
-        /// are minted to the contract so draws can succeed.
-        fn setup(
-            env: &Env,
-            credit_limit: i128,
-            reserve: i128,
-        ) -> (CreditClient<'_>, Address, Address, Address) {
-            env.mock_all_auths();
-            let admin = Address::generate(env);
-            let borrower = Address::generate(env);
-            let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(env, &contract_id);
-            client.init(&admin);
-
-            // One token serves as both liquidity and collateral.
-            let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-            let token = token_id.address();
-            client.set_liquidity_token(&token);
-            if reserve > 0 {
-                StellarAssetClient::new(env, &token).mint(&contract_id, &reserve);
+                let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+                let token_address = token_id.address();
+                client.set_liquidity_token(&token_address);
+                if reserve > 0 {
+                    StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve);
+                }
+                client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+                (client, contract_id)
             }
 
-            client.open_credit_line(&borrower, &credit_limit, &300_u32, &70_u32);
-            (client, contract_id, borrower, token)
+            /// Simulate a reentrant call to draw_credit by pre-setting the reentrancy guard
+            /// in instance storage before the call. The contract must revert with
+            /// ContractError::Reentrancy (error code #11).
+            #[test]
+            #[should_panic(expected = "Error(Contract, #11)")]
+            fn draw_credit_reverts_with_reentrancy_when_guard_already_set() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let borrower = Address::generate(&env);
+                let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
+
+                // Pre-set the reentrancy guard to simulate a reentrant call in progress.
+                env.as_contract(&contract_id, || {
+                    let key = crate::storage::reentrancy_key(&env);
+                    env.storage().instance().set(&key, &true);
+                });
+
+                // This call must revert with ContractError::Reentrancy because the guard is set.
+                client.draw_credit(&borrower, &100);
+            }
+
+            /// Simulate a reentrant call to repay_credit by pre-setting the reentrancy guard
+            /// in instance storage before the call. The contract must revert with
+            /// ContractError::Reentrancy (error code #11).
+            #[test]
+            #[should_panic(expected = "Error(Contract, #11)")]
+            fn repay_credit_reverts_with_reentrancy_when_guard_already_set() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let borrower = Address::generate(&env);
+                let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
+
+                // Draw some credit first so there is something to repay.
+                client.draw_credit(&borrower, &500);
+
+                // Pre-set the reentrancy guard to simulate a reentrant call in progress.
+                env.as_contract(&contract_id, || {
+                    let key = crate::storage::reentrancy_key(&env);
+                    env.storage().instance().set(&key, &true);
+                });
+
+                // This call must revert with ContractError::Reentrancy because the guard is set.
+                client.repay_credit(&borrower, &100);
+            }
+
+            /// After a failed draw (guard pre-set), the guard must remain set (as we set it
+            /// externally). A subsequent normal call after clearing the guard must succeed,
+            /// proving the guard logic is correct.
+            #[test]
+            fn draw_credit_guard_cleared_after_normal_success_allows_sequential_draws() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let borrower = Address::generate(&env);
+                let (client, _contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
+
+                // First draw succeeds and clears the guard.
+                client.draw_credit(&borrower, &200);
+                assert_eq!(
+                    client.get_credit_line(&borrower).unwrap().utilized_amount,
+                    200
+                );
+
+                // Second draw also succeeds — guard was properly cleared after first draw.
+                client.draw_credit(&borrower, &300);
+                assert_eq!(
+                    client.get_credit_line(&borrower).unwrap().utilized_amount,
+                    500
+                );
+            }
+
+            /// After a failed repay (guard pre-set), a subsequent normal call after clearing
+            /// the guard must succeed, proving the guard logic is correct.
+            #[test]
+            fn repay_credit_guard_cleared_after_normal_success_allows_sequential_repays() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let borrower = Address::generate(&env);
+                let (client, contract_id) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
+
+                client.draw_credit(&borrower, &600);
+
+                let token_address: soroban_sdk::Address = env.as_contract(&contract_id, || {
+                    env.storage()
+                        .instance()
+                        .get(&crate::storage::DataKey::LiquidityToken)
+                        .unwrap()
+                });
+
+                StellarAssetClient::new(&env, &token_address).mint(&borrower, &600);
+                soroban_sdk::token::Client::new(&env, &token_address).approve(
+                    &borrower,
+                    &contract_id,
+                    &600_i128,
+                    &1_000_u32,
+                );
+
+                // First repay succeeds and clears the guard.
+                client.repay_credit(&borrower, &200);
+                assert_eq!(
+                    client.get_credit_line(&borrower).unwrap().utilized_amount,
+                    400
+                );
+
+                // Second repay also succeeds — guard was properly cleared after first repay.
+                client.repay_credit(&borrower, &200);
+                assert_eq!(
+                    client.get_credit_line(&borrower).unwrap().utilized_amount,
+                    200
+                );
+            }
         }
 
-        // ── edge case: no credit line → u32::MAX ─────────────────────────────
+        // (test_credit_error_from_conversion removed: CreditError is not defined in this crate)
 
+        #[cfg(test)]
+        mod test_liquidity_error_codes {
+            use super::*;
+            use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+
+            fn setup<'a>(
+                env: &'a Env,
+                reserve: i128,
+            ) -> (CreditClient<'a>, Address, Address, Address) {
+                env.mock_all_auths();
+                let admin = Address::generate(env);
+                let borrower = Address::generate(env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(env, &contract_id);
+                client.init(&admin);
+
+                let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+                let token_address = token_id.address();
+                client.set_liquidity_token(&token_address);
+                client.set_liquidity_source(&contract_id);
+                if reserve > 0 {
+                    StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve);
+                }
+
+                client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+                (client, contract_id, borrower, token_address)
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #22)")]
+            fn draw_without_liquidity_token_uses_stable_error_code() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let admin = Address::generate(&env);
+                let borrower = Address::generate(&env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(&env, &contract_id);
+                client.init(&admin);
+                client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
+
+                client.draw_credit(&borrower, &100);
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #23)")]
+            fn draw_without_liquidity_source_uses_stable_error_code() {
+                let env = Env::default();
+                let (client, contract_id, borrower, _token) = setup(&env, 1_000);
+                env.as_contract(&contract_id, || {
+                    env.storage().instance().remove(&DataKey::LiquiditySource);
+                });
+
+                client.draw_credit(&borrower, &100);
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #24)")]
+            fn draw_with_insufficient_reserve_uses_stable_error_code() {
+                let env = Env::default();
+                let (client, _contract_id, borrower, _token) = setup(&env, 50);
+
+                client.draw_credit(&borrower, &100);
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #26)")]
+            fn repay_with_insufficient_allowance_uses_stable_error_code() {
+                let env = Env::default();
+                let (client, _contract_id, borrower, token) = setup(&env, 1_000);
+                client.draw_credit(&borrower, &200);
+                StellarAssetClient::new(&env, &token).mint(&borrower, &200);
+
+                client.repay_credit(&borrower, &200);
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #27)")]
+            fn repay_with_insufficient_balance_uses_stable_error_code() {
+                let env = Env::default();
+                let (client, contract_id, borrower, token) = setup(&env, 1_000);
+                client.draw_credit(&borrower, &200);
+                TokenClient::new(&env, &token).approve(&borrower, &contract_id, &200, &1_000_u32);
+                TokenClient::new(&env, &token).transfer(&borrower, &Address::generate(&env), &200);
+
+                client.repay_credit(&borrower, &200);
+            }
+        }
+
+        /// draw_credit reverts on a Defaulted credit line per behavior spec.
         #[test]
-        fn no_credit_line_returns_max() {
+        #[should_panic(expected = "credit line is defaulted")]
+        fn test_draw_credit_rejected_on_defaulted_line() {
             let env = Env::default();
             env.mock_all_auths();
             let admin = Address::generate(&env);
@@ -5573,157 +5426,299 @@ mod test_mock_liquidity_token {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
-            assert_eq!(client.get_health_factor(&borrower), u32::MAX);
-        }
-
-        // ── edge case: zero utilized → u32::MAX ──────────────────────────────
-
-        #[test]
-        fn zero_utilized_returns_max() {
-            let env = Env::default();
-            let (client, _contract, borrower, _token) = setup(&env, 1_000, 0);
-            assert_eq!(client.get_health_factor(&borrower), u32::MAX);
-        }
-
-        // ── edge case: no collateral, with debt → health = 0 ─────────────────
-
-        #[test]
-        fn no_collateral_with_debt_returns_zero() {
-            let env = Env::default();
-            let (client, _contract, borrower, _token) = setup(&env, 1_000, 1_000);
-
-            // Draw without depositing any collateral.
-            client.draw_credit(&borrower, &500);
-
-            // health = 0 * 100_000_000 / (500 * 15_000) = 0
-            assert_eq!(client.get_health_factor(&borrower), 0);
-        }
-
-        // ── full integration: deposit collateral, draw, check ratio ──────────
-
-        #[test]
-        fn full_integration_draw_and_collateral() {
-            let env = Env::default();
-            let (client, contract_id, borrower, token) = setup(&env, 5_000, 10_000);
-
-            // Mint tokens to the borrower so they can deposit collateral.
-            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 3_000);
-
-            // No debt → u32::MAX.
-            assert_eq!(client.get_health_factor(&borrower), u32::MAX);
-
-            // Draw 2_000 — health exactly at threshold (10_000).
-            client.draw_credit(&borrower, &2_000);
-
-            let hf = client.get_health_factor(&borrower);
-            assert_eq!(hf, 10_000, "3k collateral / 2k debt @ 150 % = 10_000");
-
-            // Draw another 500 → utilized = 2_500, under-collateralized.
-            client.draw_credit(&borrower, &500);
-
-            let hf2 = client.get_health_factor(&borrower);
-            assert!(hf2 < 10_000, "expected under-collateralized, got {}", hf2);
-            assert_eq!(hf2, 8_000);
-
-            // Repay 1_500 → utilized = 1_000, over-collateralized.
-            // The borrower already has 2_500 tokens from the two draws.
-            soroban_sdk::token::Client::new(&env, &token).approve(
-                &borrower,
-                &contract_id,
-                &5_000,
-                &1_000_000_u32,
-            );
-            client.repay_credit(&borrower, &1_500);
-
-            let hf3 = client.get_health_factor(&borrower);
-            assert!(hf3 > 10_000, "expected over-collateralized, got {}", hf3);
-            assert_eq!(hf3, 20_000);
-        }
-
-        // ── read-only: repeated queries produce the same result ───────────────
-
-        #[test]
-        fn query_is_read_only() {
-            let env = Env::default();
-            let (client, _contract, borrower, token) = setup(&env, 1_000, 0);
-
-            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 1_500);
-
-            let hf_before = client.get_health_factor(&borrower);
-            let hf_after = client.get_health_factor(&borrower);
-            assert_eq!(hf_before, hf_after);
-
-            let line_before = client.get_credit_line(&borrower).unwrap();
-            let collateral_before = client.get_collateral(&borrower);
-
-            let hf_again = client.get_health_factor(&borrower);
-
-            let line_after = client.get_credit_line(&borrower).unwrap();
-            let collateral_after = client.get_collateral(&borrower);
-
-            assert_eq!(hf_again, hf_before);
-            assert_eq!(line_before.utilized_amount, line_after.utilized_amount);
-            assert_eq!(line_before.accrued_interest, line_after.accrued_interest);
-            assert_eq!(collateral_before, collateral_after);
-        }
-
-        // ── default min_ratio fallback (15_000) ──────────────────────────────
-
-        #[test]
-        fn default_min_collateral_ratio_is_15000() {
-            let env = Env::default();
-            let (client, _contract, borrower, token) = setup(&env, 1_000, 10_000);
-
-            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 1_500);
-            client.draw_credit(&borrower, &1_000);
-
-            // health = 1_500 * 100_000_000 / (1_000 * 15_000) = 10_000
-            assert_eq!(client.get_health_factor(&borrower), 10_000);
-        }
-
-        // ── keeper-style: below threshold → keeper should liquidate ──────────
-
-        #[test]
-        fn keeper_scenario_below_threshold_triggers_liquidation() {
-            let env = Env::default();
-            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
-
-            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 3_000);
-            client.draw_credit(&borrower, &2_500);
-
-            // health = 3_000 * 100_000_000 / (2_500 * 15_000) = 8_000 < 10_000
-            let hf = client.get_health_factor(&borrower);
-            assert!(hf < 10_000, "health factor {} should be below 10_000", hf);
-            assert_eq!(hf, 8_000);
-
-            // A keeper checking hf < 10_000 triggers default_credit_line.
+            client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
             client.default_credit_line(&borrower);
-            let line = client.get_credit_line(&borrower).unwrap();
-            assert_eq!(line.status, CreditStatus::Defaulted);
+            // Per behavior notes: draw_credit reverts when status is Defaulted.
+            client.draw_credit(&borrower, &100_i128);
         }
 
-        // ── keeper-style: healthy position → keeper skips ───────────────────
+        #[cfg(test)]
+        mod test_max_repay_amount {
+            use super::*;
+            use soroban_sdk::token::StellarAssetClient;
+            use soroban_sdk::Env;
 
-        #[test]
-        fn keeper_scenario_healthy_position_skipped() {
-            let env = Env::default();
-            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+            fn setup_with_token(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
+                env.mock_all_auths();
+                let admin = Address::generate(env);
+                let borrower = Address::generate(env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(env, &contract_id);
+                client.init(&admin);
 
-            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 10_000);
-            client.draw_credit(&borrower, &1_000);
+                let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+                let token = token_id.address();
+                client.set_liquidity_token(&token);
 
-            // health = 10_000 * 100_000_000 / (1_000 * 15_000) = 66_666 > 10_000
-            let hf = client.get_health_factor(&borrower);
-            assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
-            assert_eq!(hf, 66_666);
+                // Mint to contract to allow draw
+                StellarAssetClient::new(env, &token).mint(&contract_id, &5_000_i128);
+
+                client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+                // Draw some credit to repay later
+                client.draw_credit(&borrower, &500_i128);
+
+                // Mint to borrower so they have funds to repay
+                StellarAssetClient::new(env, &token).mint(&borrower, &5_000_i128);
+                soroban_sdk::token::Client::new(env, &token).approve(
+                    &borrower,
+                    &contract_id,
+                    &10_000_i128,
+                    &1_000_000_u32,
+                );
+
+                (client, admin, borrower, token)
+            }
+
+            #[test]
+            fn test_unset_max_repay_amount_allows_any() {
+                let env = Env::default();
+                let (client, _admin, borrower, _token) = setup_with_token(&env);
+
+                assert_eq!(client.get_max_repay_amount(), None);
+
+                client.repay_credit(&borrower, &400_i128);
+                let line = client.get_credit_line(&borrower).unwrap();
+                assert_eq!(line.utilized_amount, 100);
+            }
+
+            #[test]
+            fn test_set_and_get_max_repay_amount() {
+                let env = Env::default();
+                let (client, _admin, _borrower, _token) = setup_with_token(&env);
+
+                client.set_max_repay_amount(&300_i128);
+                assert_eq!(client.get_max_repay_amount(), Some(300_i128));
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #28)")]
+            fn test_repay_exceeds_max_cap_reverts() {
+                let env = Env::default();
+                let (client, _admin, borrower, _token) = setup_with_token(&env);
+
+                client.set_max_repay_amount(&300_i128);
+                client.repay_credit(&borrower, &400_i128);
+            }
+
+            #[test]
+            fn test_repay_within_max_cap_succeeds() {
+                let env = Env::default();
+                let (client, _admin, borrower, _token) = setup_with_token(&env);
+
+                client.set_max_repay_amount(&300_i128);
+                client.repay_credit(&borrower, &300_i128);
+                let line = client.get_credit_line(&borrower).unwrap();
+                assert_eq!(line.utilized_amount, 200);
+            }
+
+            #[test]
+            #[should_panic(expected = "Error(Contract, #5)")]
+            fn test_set_max_repay_amount_zero_or_negative() {
+                let env = Env::default();
+                let (client, _admin, _borrower, _token) = setup_with_token(&env);
+
+                client.set_max_repay_amount(&0_i128);
+            }
+        }
+
+        // ── get_health_factor query tests ─────────────────────────────────────────
+        #[cfg(test)]
+        mod test_health_factor {
+            use super::*;
+            use crate::collateral;
+            use soroban_sdk::testutils::Address as _;
+            use soroban_sdk::token::StellarAssetClient;
+
+            /// Setup: contract + admin + borrower + token (used for both liquidity
+            /// and collateral — the contract shares one token).  `reserve` tokens
+            /// are minted to the contract so draws can succeed.
+            fn setup(
+                env: &Env,
+                credit_limit: i128,
+                reserve: i128,
+            ) -> (CreditClient<'_>, Address, Address, Address) {
+                env.mock_all_auths();
+                let admin = Address::generate(env);
+                let borrower = Address::generate(env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(env, &contract_id);
+                client.init(&admin);
+
+                // One token serves as both liquidity and collateral.
+                let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+                let token = token_id.address();
+                client.set_liquidity_token(&token);
+                if reserve > 0 {
+                    StellarAssetClient::new(env, &token).mint(&contract_id, &reserve);
+                }
+
+                client.open_credit_line(&borrower, &credit_limit, &300_u32, &70_u32);
+                (client, contract_id, borrower, token)
+            }
+
+            // ── edge case: no credit line → u32::MAX ─────────────────────────────
+
+            #[test]
+            fn no_credit_line_returns_max() {
+                let env = Env::default();
+                env.mock_all_auths();
+                let admin = Address::generate(&env);
+                let borrower = Address::generate(&env);
+                let contract_id = env.register(Credit, ());
+                let client = CreditClient::new(&env, &contract_id);
+                client.init(&admin);
+                assert_eq!(client.get_health_factor(&borrower), u32::MAX);
+            }
+
+            // ── edge case: zero utilized → u32::MAX ──────────────────────────────
+
+            #[test]
+            fn zero_utilized_returns_max() {
+                let env = Env::default();
+                let (client, _contract, borrower, _token) = setup(&env, 1_000, 0);
+                assert_eq!(client.get_health_factor(&borrower), u32::MAX);
+            }
+
+            // ── edge case: no collateral, with debt → health = 0 ─────────────────
+
+            #[test]
+            fn no_collateral_with_debt_returns_zero() {
+                let env = Env::default();
+                let (client, _contract, borrower, _token) = setup(&env, 1_000, 1_000);
+
+                // Draw without depositing any collateral.
+                client.draw_credit(&borrower, &500);
+
+                // health = 0 * 100_000_000 / (500 * 15_000) = 0
+                assert_eq!(client.get_health_factor(&borrower), 0);
+            }
+
+            // ── full integration: deposit collateral, draw, check ratio ──────────
+
+            #[test]
+            fn full_integration_draw_and_collateral() {
+                let env = Env::default();
+                let (client, contract_id, borrower, token) = setup(&env, 5_000, 10_000);
+
+                // Mint tokens to the borrower so they can deposit collateral.
+                StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+                collateral::deposit_collateral(&env, &borrower, 3_000);
+
+                // No debt → u32::MAX.
+                assert_eq!(client.get_health_factor(&borrower), u32::MAX);
+
+                // Draw 2_000 — health exactly at threshold (10_000).
+                client.draw_credit(&borrower, &2_000);
+
+                let hf = client.get_health_factor(&borrower);
+                assert_eq!(hf, 10_000, "3k collateral / 2k debt @ 150 % = 10_000");
+
+                // Draw another 500 → utilized = 2_500, under-collateralized.
+                client.draw_credit(&borrower, &500);
+
+                let hf2 = client.get_health_factor(&borrower);
+                assert!(hf2 < 10_000, "expected under-collateralized, got {}", hf2);
+                assert_eq!(hf2, 8_000);
+
+                // Repay 1_500 → utilized = 1_000, over-collateralized.
+                // The borrower already has 2_500 tokens from the two draws.
+                soroban_sdk::token::Client::new(&env, &token).approve(
+                    &borrower,
+                    &contract_id,
+                    &5_000,
+                    &1_000_000_u32,
+                );
+                client.repay_credit(&borrower, &1_500);
+
+                let hf3 = client.get_health_factor(&borrower);
+                assert!(hf3 > 10_000, "expected over-collateralized, got {}", hf3);
+                assert_eq!(hf3, 20_000);
+            }
+
+            // ── read-only: repeated queries produce the same result ───────────────
+
+            #[test]
+            fn query_is_read_only() {
+                let env = Env::default();
+                let (client, _contract, borrower, token) = setup(&env, 1_000, 0);
+
+                StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+                collateral::deposit_collateral(&env, &borrower, 1_500);
+
+                let hf_before = client.get_health_factor(&borrower);
+                let hf_after = client.get_health_factor(&borrower);
+                assert_eq!(hf_before, hf_after);
+
+                let line_before = client.get_credit_line(&borrower).unwrap();
+                let collateral_before = client.get_collateral(&borrower);
+
+                let hf_again = client.get_health_factor(&borrower);
+
+                let line_after = client.get_credit_line(&borrower).unwrap();
+                let collateral_after = client.get_collateral(&borrower);
+
+                assert_eq!(hf_again, hf_before);
+                assert_eq!(line_before.utilized_amount, line_after.utilized_amount);
+                assert_eq!(line_before.accrued_interest, line_after.accrued_interest);
+                assert_eq!(collateral_before, collateral_after);
+            }
+
+            // ── default min_ratio fallback (15_000) ──────────────────────────────
+
+            #[test]
+            fn default_min_collateral_ratio_is_15000() {
+                let env = Env::default();
+                let (client, _contract, borrower, token) = setup(&env, 1_000, 10_000);
+
+                StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+                collateral::deposit_collateral(&env, &borrower, 1_500);
+                client.draw_credit(&borrower, &1_000);
+
+                // health = 1_500 * 100_000_000 / (1_000 * 15_000) = 10_000
+                assert_eq!(client.get_health_factor(&borrower), 10_000);
+            }
+
+            // ── keeper-style: below threshold → keeper should liquidate ──────────
+
+            #[test]
+            fn keeper_scenario_below_threshold_triggers_liquidation() {
+                let env = Env::default();
+                let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+                StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+                collateral::deposit_collateral(&env, &borrower, 3_000);
+                client.draw_credit(&borrower, &2_500);
+
+                // health = 3_000 * 100_000_000 / (2_500 * 15_000) = 8_000 < 10_000
+                let hf = client.get_health_factor(&borrower);
+                assert!(hf < 10_000, "health factor {} should be below 10_000", hf);
+                assert_eq!(hf, 8_000);
+
+                // A keeper checking hf < 10_000 triggers default_credit_line.
+                client.default_credit_line(&borrower);
+                let line = client.get_credit_line(&borrower).unwrap();
+                assert_eq!(line.status, CreditStatus::Defaulted);
+            }
+
+            // ── keeper-style: healthy position → keeper skips ───────────────────
+
+            #[test]
+            fn keeper_scenario_healthy_position_skipped() {
+                let env = Env::default();
+                let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+                StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+                collateral::deposit_collateral(&env, &borrower, 10_000);
+                client.draw_credit(&borrower, &1_000);
+
+                // health = 10_000 * 100_000_000 / (1_000 * 15_000) = 66_666 > 10_000
+                let hf = client.get_health_factor(&borrower);
+                assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
+                assert_eq!(hf, 66_666);
+            }
         }
     }
-}
 }
 
 #[cfg(test)]

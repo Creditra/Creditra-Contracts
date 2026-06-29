@@ -222,8 +222,7 @@ fn withdraw_bounty_without_address_reverts() {
 #[test]
 fn set_treasury_fee_share_bps_rejects_above_max() {
     let env = Env::default();
-    let (_contract_id, _token_address, _admin, _borrower, _treasury, _bounty, client) =
-        setup(&env);
+    let (_contract_id, _token_address, _admin, _borrower, _treasury, _bounty, client) = setup(&env);
 
     let result = client.try_set_treasury_fee_share_bps(&10_001_u32);
     assert!(result.is_err());
@@ -236,7 +235,6 @@ fn set_treasury_fee_share_bps_rejects_above_max() {
 #[test]
 fn get_bounty_returns_configured_address() {
     let env = Env::default();
-    let (_contract_id, _token_address, _admin, _borrower, _treasury, bounty, client) =
-        setup(&env);
+    let (_contract_id, _token_address, _admin, _borrower, _treasury, bounty, client) = setup(&env);
     assert_eq!(client.get_bounty(), Some(bounty));
 }
