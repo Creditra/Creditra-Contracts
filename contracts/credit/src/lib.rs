@@ -1355,7 +1355,7 @@ impl Credit {
     /// # Returns
     /// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
     pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
-        lifecycle::get_credit_limit_bounds(env)
+        lifecycle::get_credit_limit_bounds(&env)
     }
 
     /// Get the number of indexed credit lines.

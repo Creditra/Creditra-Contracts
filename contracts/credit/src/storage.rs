@@ -842,22 +842,6 @@ pub fn set_auction_contract(env: &Env, addr: &Address) {
         .set(&DataKey::AuctionContract, addr);
 }
 
-/// Return the configured close factor in basis points, if set.
-///
-/// The close factor limits the fraction of a defaulted borrower's debt that
-/// can be settled in a single `settle_default_liquidation` call.
-/// When absent, the full outstanding debt may be settled.
-pub fn get_close_factor_bps(env: &Env) -> Option<u32> {
-    env.storage().instance().get(&DataKey::CloseFactorBps)
-}
-
-/// Persist the close factor in basis points (admin only, enforced by caller).
-pub fn set_close_factor_bps(env: &Env, bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CloseFactorBps, &bps);
-}
-
 // ── Close factor (partial liquidation cap) ─────────────────────────────────────
 
 /// Return the protocol-level max close factor in basis points.

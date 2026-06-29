@@ -10,14 +10,18 @@
 //! there is a real risk of expiry.
 
 use crate::auth::{require_admin, require_admin_auth};
-use crate::events::{publish_credit_line_event, CreditLineEvent};
+use crate::events::{
+    publish_credit_line_event, publish_default_liquidation_requested_event,
+    publish_default_liquidation_settled_event, CreditLineEvent, DefaultLiquidationSettledEvent,
+};
 use crate::storage::{
-    assert_not_paused, get_repayment_schedule,
-    set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
+    assert_not_paused, clear_repayment_schedule, get_repayment_schedule, persist_credit_line,
+    set_repayment_schedule as storage_set_repayment_schedule, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env};
+use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Helper: bump the TTL of a borrower's persistent credit-line entry.
 ///
@@ -182,7 +186,53 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         &env,
         (symbol_short!("credit"), symbol_short!("suspend")),
         CreditLineEvent {
-            event_type: symbol_short!("suspend"),
+            borrower: borrower.clone(),
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
+}
+
+/// Borrower-initiated suspension of their own credit line.
+///
+/// Unlike [`suspend_credit_line`] (admin-only), this allows the borrower
+/// themselves to voluntarily freeze their line without admin intervention.
+///
+/// # Authorization
+/// Requires `borrower.require_auth()` — only the borrower can self-suspend
+/// their own line. Admin cannot invoke this on behalf of a borrower.
+///
+/// # Panics
+/// - If no credit line exists for the given borrower (`"Credit line not found"`).
+/// - If the credit line is not currently Active (`"Only active credit lines can be self-suspended"`).
+///
+/// # Events
+/// Emits a `("credit", "selfsus")` [`CreditLineEvent`].
+pub fn self_suspend_credit_line(env: Env, borrower: Address) {
+    assert_not_paused(&env);
+    // Only the borrower themselves may self-suspend — not the admin.
+    borrower.require_auth();
+
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    if credit_line.status != CreditStatus::Active {
+        panic!("Only active credit lines can be self-suspended");
+    }
+
+    credit_line.status = CreditStatus::Suspended;
+    env.storage().persistent().set(&borrower, &credit_line);
+    bump_credit_line_ttl(&env, &borrower);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("selfsus")),
+        CreditLineEvent {
             borrower: borrower.clone(),
             status: CreditStatus::Suspended,
             credit_limit: credit_line.credit_limit,
@@ -374,10 +424,10 @@ pub fn settle_default_liquidation(
 
     let max_close_factor = crate::storage::get_close_factor_bps(&env);
     if close_factor_bps > max_close_factor {
-        env.panic_with_error(ContractError::CloseFactorAboveMax);
+        env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    let settlement_key = DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
@@ -388,6 +438,7 @@ pub fn settle_default_liquidation(
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     // Apply interest accrual before any mutation
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
@@ -416,7 +467,7 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -479,6 +530,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 
@@ -488,7 +540,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 
     publish_credit_line_event(
         &env,

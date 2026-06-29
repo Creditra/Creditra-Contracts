@@ -1,6 +1,10 @@
 //! Cross-chain liquidation hook
 //! Consumes bridge attestations and triggers local liquidation safely.
 
+// This module uses std types and is only compiled in test builds,
+// where the crate-level `no_std` is not active.
+#![cfg(test)]
+
 use std::collections::HashSet;
 
 /// Bridge attestation coming from external chain
