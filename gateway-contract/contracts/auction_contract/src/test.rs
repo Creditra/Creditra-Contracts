@@ -1534,6 +1534,190 @@ mod tests {
         assert_eq!(stored.highest_bidder.unwrap(), bob);
         assert_eq!(stored.highest_bid, 200_i128);
     }
+
+    // ── min-bid bps enforcement (English auction) ─────────────────────────────
+
+    /// Helper: open an English auction with the given min_increment_bps.
+    fn english_auction_with_bps(env: &Env, client: &AuctionClient, auction_id: &Symbol, bps: u32) {
+        client.init_auction(
+            auction_id,
+            &AuctionMode::English,
+            &0,
+            &1_000_000,
+            &1_i128,
+            &bps,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+    }
+
+    /// Exact threshold bid (= min_next_bid result) must be accepted.
+    #[test]
+    fn bps_exact_threshold_accepted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_exact");
+
+        // 500 bps = 5%; highest = 1000 → threshold = 1050
+        english_auction_with_bps(&env, &client, &auction_id, 500);
+        client.place_bid(&auction_id, &alice, &1_000_i128);
+        client.place_bid(&auction_id, &bob, &1_050_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored.highest_bid, 1_050_i128);
+        assert_eq!(stored.highest_bidder.unwrap(), bob);
+    }
+
+    /// One stroop below threshold must be rejected with BidTooLow.
+    #[test]
+    fn bps_one_below_threshold_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_low");
+
+        // 500 bps; highest = 1000 → threshold = 1050; 1049 must fail
+        english_auction_with_bps(&env, &client, &auction_id, 500);
+        client.place_bid(&auction_id, &alice, &1_000_i128);
+
+        let result = client.try_place_bid(&auction_id, &bob, &1_049_i128);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().unwrap(), AuctionError::BidTooLow.into());
+    }
+
+    /// A bid equal to the current highest (0 bps, but no increment) must be rejected.
+    #[test]
+    fn bps_equal_to_highest_rejected_at_zero_bps() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_zero_eq");
+
+        // 0 bps means 1-stroop increment; highest + 0 must be rejected
+        english_auction_with_bps(&env, &client, &auction_id, 0);
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        let result = client.try_place_bid(&auction_id, &bob, &100_i128);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().unwrap(), AuctionError::BidTooLow.into());
+    }
+
+    /// At 0 bps the floor increment is 1 stroop; highest + 1 must be accepted.
+    #[test]
+    fn bps_zero_requires_one_stroop_increment() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_zero_one");
+
+        english_auction_with_bps(&env, &client, &auction_id, 0);
+        client.place_bid(&auction_id, &alice, &100_i128);
+        client.place_bid(&auction_id, &bob, &101_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored.highest_bid, 101_i128);
+    }
+
+    /// First bid in an English auction only needs to meet min_bid, not bps.
+    #[test]
+    fn bps_first_bid_only_needs_min_bid() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_first");
+
+        // 10_000 bps (100%) would double the price — but on the first bid
+        // there is no highest_bid, so min_bid (= 100) applies directly.
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &1_000_000,
+            &100_i128,
+            &10_000_u32,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+        client.place_bid(&auction_id, &alice, &100_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored.highest_bid, 100_i128);
+    }
+
+    /// Ceiling division: fractional bps must round up (1 bps on 999 = ceil(0.999) = 1).
+    #[test]
+    fn bps_ceiling_division_rounds_up() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_ceil");
+
+        // 1 bps on 999 → floor(999/10_000) = 0, but remainder ≠ 0 → increment = 1
+        // threshold = 1000; bid of 999 must fail.
+        english_auction_with_bps(&env, &client, &auction_id, 1);
+        client.place_bid(&auction_id, &alice, &999_i128);
+
+        let result = client.try_place_bid(&auction_id, &bob, &999_i128);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().unwrap(), AuctionError::BidTooLow.into());
+
+        // 1000 = 999 + ceil(0.0999) = 999 + 1 must succeed.
+        client.place_bid(&auction_id, &bob, &1_000_i128);
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored.highest_bid, 1_000_i128);
+    }
+
+    /// A bid far above threshold is always accepted.
+    #[test]
+    fn bps_bid_well_above_threshold_accepted() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let auction_id = Symbol::new(&env, "bps_high");
+
+        english_auction_with_bps(&env, &client, &auction_id, 1_000); // 10%
+        client.place_bid(&auction_id, &alice, &1_000_i128);
+        // threshold = 1100; bid 5000 >> 1100 → accepted
+        client.place_bid(&auction_id, &bob, &5_000_i128);
+
+        let stored: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored.highest_bid, 5_000_i128);
+    }
 }
 
 // ── reentrancy_exploration ────────────────────────────────────────────────────
