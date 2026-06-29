@@ -768,4 +768,90 @@ mod tests {
     fn deviation_negative_last_price_returns_none() {
         assert_eq!(compute_deviation_bps(100, -1), None);
     }
+    // ── prorate_interest: monotonicity & overflow-safety properties ──────────
+    //
+    // These mirror the `cfg(kani)` harnesses in `proofs/prorate_interest.rs`
+    // so the same guarantees run under the normal `cargo test` suite (Kani
+    // runs only in CI). Inputs use the same overflow-safe envelope.
+    mod prorate_interest_properties {
+        use crate::math_utils::{prorate_interest, Rounding};
+        use proptest::prelude::*;
+
+        const PRINCIPAL_MAX: u128 = 1_000_000_000_000_000_000_000_000; // 10^24
+        const RATE_MAX: u32 = 10_000;
+        const TIME_MAX: u64 = 1_000_000_000; // 10^9 (~31.7 years)
+
+        #[test]
+        fn overflow_safe_at_envelope_corners() {
+            let _ = prorate_interest(PRINCIPAL_MAX, RATE_MAX, TIME_MAX, Rounding::Floor);
+            let _ = prorate_interest(PRINCIPAL_MAX, RATE_MAX, TIME_MAX, Rounding::Ceil);
+        }
+
+        #[test]
+        fn ceil_within_one_of_floor() {
+            for &(p, r, t) in &[
+                (10_000u128, 300u32, 86_400u64),
+                (1, 1, 1),
+                (PRINCIPAL_MAX, RATE_MAX, TIME_MAX),
+                (123_456_789, 777, 1_000_000),
+            ] {
+                let f = prorate_interest(p, r, t, Rounding::Floor);
+                let c = prorate_interest(p, r, t, Rounding::Ceil);
+                assert!(c >= f, "ceil < floor for ({p}, {r}, {t})");
+                assert!(c - f <= 1, "ceil - floor > 1 for ({p}, {r}, {t})");
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn monotonic_in_principal(
+                principal in 0u128..PRINCIPAL_MAX,
+                rate_bps in 0u32..=RATE_MAX,
+                time_delta in 0u64..=TIME_MAX,
+            ) {
+                prop_assert!(
+                    prorate_interest(principal + 1, rate_bps, time_delta, Rounding::Floor)
+                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
+                );
+                prop_assert!(
+                    prorate_interest(principal + 1, rate_bps, time_delta, Rounding::Ceil)
+                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Ceil)
+                );
+            }
+
+            #[test]
+            fn monotonic_in_rate(
+                principal in 0u128..=PRINCIPAL_MAX,
+                rate_bps in 0u32..RATE_MAX,
+                time_delta in 0u64..=TIME_MAX,
+            ) {
+                prop_assert!(
+                    prorate_interest(principal, rate_bps + 1, time_delta, Rounding::Floor)
+                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
+                );
+            }
+
+            #[test]
+            fn monotonic_in_time(
+                principal in 0u128..=PRINCIPAL_MAX,
+                rate_bps in 0u32..=RATE_MAX,
+                time_delta in 0u64..TIME_MAX,
+            ) {
+                prop_assert!(
+                    prorate_interest(principal, rate_bps, time_delta + 1, Rounding::Floor)
+                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
+                );
+            }
+
+            #[test]
+            fn overflow_safe_envelope(
+                principal in 0u128..=PRINCIPAL_MAX,
+                rate_bps in 0u32..=RATE_MAX,
+                time_delta in 0u64..=TIME_MAX,
+            ) {
+                let _ = prorate_interest(principal, rate_bps, time_delta, Rounding::Floor);
+                let _ = prorate_interest(principal, rate_bps, time_delta, Rounding::Ceil);
+            }
+        }
+    }
 }

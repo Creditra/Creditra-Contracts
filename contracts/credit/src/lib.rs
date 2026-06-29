@@ -130,9 +130,18 @@ pub mod cross_chain;
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
+mod limit_decrease_tests;
+#[cfg(test)]
 mod risk_formula_tests;
 #[cfg(test)]
 mod views_tests;
+
+/// Kani proof harnesses for the interest-prorating math primitive.
+/// Compiled only under `cfg(kani)`; invisible to normal builds and tests.
+/// Run with `cargo kani -p creditra-credit`.
+#[cfg(kani)]
+#[path = "../proofs/prorate_interest.rs"]
+mod prorate_interest_proofs;
 
 use crate::auth::require_admin_auth;
 use crate::attestation::AttestationBatch;
