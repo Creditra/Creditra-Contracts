@@ -136,6 +136,7 @@ pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
 /// - `credit_line.accrued_interest -= interest_repaid`
 /// - `credit_line.utilized_amount -= effective_repay`
 /// - Persists the credit line via [`persist_credit_line`]
+/// - Advances the installment schedule by principal installments only
 /// - Emits [`InterestAccruedEvent`] and [`RepaymentEvent`]
 pub(crate) fn repay_credit_internal(
     env: &Env,
@@ -158,6 +159,12 @@ pub(crate) fn repay_credit_internal(
     credit_line.utilized_amount = new_utilized;
 
     persist_credit_line(env, borrower, credit_line, previous_utilized, Some(previous_status));
+    lifecycle::advance_repayment_schedule_after_repay(
+        env,
+        borrower,
+        effective_repay,
+        interest_repaid,
+    );
 
     publish_interest_accrued_event(
         env,

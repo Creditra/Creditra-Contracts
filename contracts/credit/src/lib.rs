@@ -636,7 +636,12 @@ impl Credit {
             previous_utilized,
             Some(previous_status),
         );
-        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
+        lifecycle::advance_repayment_schedule_after_repay(
+            &env,
+            &borrower,
+            effective_repay,
+            interest_repaid,
+        );
 
         let _timestamp = env.ledger().timestamp();
         publish_interest_accrued_event(

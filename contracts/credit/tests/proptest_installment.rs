@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: MIT
 //! Property tests for installment-schedule advancement during repayments.
 //!
-//! The schedule is advanced from `repay_credit` via
-//! `advance_repayment_schedule_after_repay`.  These tests exercise random
+//! The schedule is advanced from `repay_credit` through
+//! `advance_repayment_schedule_after_repay`. These tests exercise random
 //! repayment schedules and random repayment streams, asserting that
-//! `next_due_ts` advances by exactly the whole number of installments covered
-//! by the effective repayment amount:
+//! `next_due_ts` advances by exactly the whole number of principal installments
+//! covered by the effective repayment amount:
 //!
 //! ```text
-//! installments_paid = floor(effective_repay / amount_per_period)
+//! principal_repaid  = effective_repay - interest_repaid
+//! installments_paid = floor(principal_repaid / amount_per_period)
 //! next_due_ts       = previous_next_due_ts + installments_paid * period_seconds
 //! ```
 //!
-//! Partial repayments (`effective_repay < amount_per_period`) must not advance
-//! the due date.  Repayments above the remaining debt are capped by
+//! Interest-only repayments and partial principal installments must not advance
+//! the due date. Repayments above the remaining debt are capped by
 //! `repay_credit`, so the expected model applies the same cap before computing
 //! installment advancement.
 use soroban_sdk::testutils::Ledger as _;
 
 use proptest::prelude::*;
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env};
 
 use creditra_credit::{Credit, CreditClient};
@@ -30,6 +31,8 @@ const CREDIT_LIMIT: i128 = 30_000;
 const DRAW_AMOUNT: i128 = 10_000;
 const COLLATERAL_AMOUNT: i128 = 15_000;
 const TOKEN_BALANCE: i128 = 1_000_000;
+const RATE_BPS: u32 = 2_500;
+const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 /// Test harness for a funded borrower with an open, drawn credit line.
 struct Ctx {
@@ -67,10 +70,10 @@ fn setup_env() -> Ctx {
     token_admin.mint(&contract_id, &TOKEN_BALANCE);
     token_admin.mint(&borrower, &TOKEN_BALANCE);
 
-    // The same token is used for collateral and repayments.  Deposit enough
+    // The same token is used for collateral and repayments. Deposit enough
     // collateral before drawing so the default collateral-ratio guard is met.
     client.deposit_collateral(&borrower, &COLLATERAL_AMOUNT);
-    client.open_credit_line(&borrower, &CREDIT_LIMIT, &500_u32, &50_u32);
+    client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
     client.draw_credit(&borrower, &DRAW_AMOUNT);
 
     Ctx {
@@ -95,16 +98,26 @@ fn fund_repayment(ctx: &Ctx, amount: i128) {
 /// Model the installment advancement performed by the contract.
 fn expected_next_due(
     current_next_due: u64,
-    effective_repay: i128,
+    principal_repaid: i128,
     amount_per_period: i128,
     period_seconds: u64,
 ) -> u64 {
-    let installments_paid = (effective_repay / amount_per_period) as u64;
+    let installments_paid = (principal_repaid / amount_per_period) as u64;
     current_next_due.saturating_add(installments_paid.saturating_mul(period_seconds))
 }
 
+/// Floor interest used by the contract's prorating helper.
+fn accrued_interest(principal: i128, elapsed_seconds: u64) -> i128 {
+    (principal as u128)
+        .saturating_mul(RATE_BPS as u128)
+        .saturating_mul(elapsed_seconds as u128)
+        .checked_div(10_000_u128.saturating_mul(SECONDS_PER_YEAR as u128))
+        .unwrap_or(0) as i128
+}
+
 proptest! {
-    /// A single random repayment advances the schedule by `floor(repay / installment)` periods.
+    /// A single random repayment advances the schedule by
+    /// `floor(principal_repaid / installment)` periods.
     #[test]
     fn installment_advance_single_random_repayment(
         amount_per_period in 1_i128..=2_000_i128,
@@ -185,6 +198,59 @@ proptest! {
             );
         }
     }
+
+    /// Repayment streams with accrued interest only advance by the principal
+    /// component after the interest-first allocation is applied.
+    #[test]
+    fn installment_advance_random_repayment_schedule_with_interest(
+        amount_per_period in 1_i128..=2_000_i128,
+        period_seconds in 1_u64..=86_400_u64,
+        elapsed_seconds in 1_000_u64..=2_000_000_u64,
+        repayments in proptest::collection::vec(1_i128..=5_000_i128, 1..8),
+    ) {
+        let ctx = setup_env();
+        ctx.env.ledger().set_timestamp(INITIAL_TIMESTAMP + elapsed_seconds);
+
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &amount_per_period,
+            &period_seconds,
+            &INITIAL_NEXT_DUE,
+        );
+
+        let mut expected_due = INITIAL_NEXT_DUE;
+        let mut accrued = accrued_interest(DRAW_AMOUNT, elapsed_seconds);
+        let mut outstanding = DRAW_AMOUNT + accrued;
+
+        for requested_repay in repayments {
+            if outstanding == 0 {
+                break;
+            }
+
+            let effective_repay = requested_repay.min(outstanding);
+            let interest_repaid = effective_repay.min(accrued);
+            let principal_repaid = effective_repay - interest_repaid;
+
+            fund_repayment(&ctx, requested_repay);
+            ctx.client().repay_credit(&ctx.borrower, &requested_repay);
+
+            expected_due = expected_next_due(
+                expected_due,
+                principal_repaid,
+                amount_per_period,
+                period_seconds,
+            );
+            accrued -= interest_repaid;
+            outstanding -= effective_repay;
+
+            let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
+            prop_assert_eq!(
+                schedule.next_due_ts,
+                expected_due,
+                "amount_per_period={amount_per_period}, period_seconds={period_seconds}, elapsed_seconds={elapsed_seconds}, requested_repay={requested_repay}, effective_repay={effective_repay}, interest_repaid={interest_repaid}, principal_repaid={principal_repaid}, outstanding={outstanding}",
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -245,5 +311,43 @@ mod edge_cases {
         let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
         let expected = expected_next_due(INITIAL_NEXT_DUE, DRAW_AMOUNT, 3_000, 60);
         assert_eq!(schedule.next_due_ts, expected);
+    }
+
+    #[test]
+    fn interest_only_repay_does_not_advance() {
+        let ctx = setup_env();
+        let elapsed_seconds = 1_000_000;
+        ctx.env
+            .ledger()
+            .set_timestamp(INITIAL_TIMESTAMP + elapsed_seconds);
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+
+        let interest = accrued_interest(DRAW_AMOUNT, elapsed_seconds);
+        assert!(interest > 0);
+
+        fund_repayment(&ctx, interest);
+        ctx.client().repay_credit(&ctx.borrower, &interest);
+
+        let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
+        assert_eq!(schedule.next_due_ts, INITIAL_NEXT_DUE);
+    }
+
+    #[test]
+    fn interest_plus_installment_advances_one_period() {
+        let ctx = setup_env();
+        let elapsed_seconds = 1_000_000;
+        ctx.env
+            .ledger()
+            .set_timestamp(INITIAL_TIMESTAMP + elapsed_seconds);
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+
+        let repay = accrued_interest(DRAW_AMOUNT, elapsed_seconds) + 100;
+        fund_repayment(&ctx, repay);
+        ctx.client().repay_credit(&ctx.borrower, &repay);
+
+        let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
+        assert_eq!(schedule.next_due_ts, INITIAL_NEXT_DUE + 86_400);
     }
 }
