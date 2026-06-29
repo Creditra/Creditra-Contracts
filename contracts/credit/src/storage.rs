@@ -78,7 +78,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
 ///   `BountyAddress`, `BountyBalance`,
 ///   `TotalCollateral`,
-///   `MinCollateralRatioBps`, `OracleConfig`, `OracleLastPrice`,
+///   `MinCollateralRatioBps`, `CollateralRiskWeightBps`, `OracleConfig`, `OracleLastPrice`,
 ///   `OracleLastPriceTs`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
@@ -179,6 +179,9 @@ pub enum DataKey {
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
+    /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
+    /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
+    CollateralRiskWeightBps(Address),
     /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
     DrawAudit(Address, u64),
     /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
@@ -500,6 +503,22 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
     env.storage()
         .instance()
         .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+/// Return the risk weight for a specific collateral asset, in basis points,
+/// if explicitly configured. `None` means no weight was ever set for this
+/// asset; callers should treat that as 10_000 bps (100%, full value).
+pub fn get_collateral_risk_weight_bps(env: &Env, asset: &Address) -> Option<u32> {
+    env.storage()
+        .instance()
+        .get(&DataKey::CollateralRiskWeightBps(asset.clone()))
+}
+
+/// Set the risk weight for a specific collateral asset, in basis points.
+/// Caller is responsible for admin auth and for validating `weight_bps <= 10_000`.
+pub fn set_collateral_risk_weight_bps(env: &Env, asset: &Address, weight_bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CollateralRiskWeightBps(asset.clone()), &weight_bps);
 }
 
 /// Return configured protocol fee basis points, if set.
