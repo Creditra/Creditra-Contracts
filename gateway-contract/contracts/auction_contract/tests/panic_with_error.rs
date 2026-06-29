@@ -10,7 +10,7 @@
 //! ```
 
 use gateway_auction::{Auction, AuctionClient, AuctionError, AuctionMode};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env, Symbol};
 
 fn init_open_auction(client: &AuctionClient<'_>, auction_id: &Symbol, end_time: u64) {
@@ -23,7 +23,7 @@ fn init_open_auction(client: &AuctionClient<'_>, auction_id: &Symbol, end_time: 
         &0_u32,
         &None,
         &None,
-        &None,
+        &DutchAuctionDecay::None,
         &None,
     );
 }
