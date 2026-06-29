@@ -1,16 +1,36 @@
 [workspace]
+# Resolver "2" is required for Soroban contracts: it disables feature
+# unification across the cdylib and rlib targets that ship the contract WASM.
 resolver = "2"
-members = ["contracts/credit"]
+
+members = [
+    # The credit-line contract is the primary protocol entrypoint.
+    "contracts/credit",
+    # The auction contract is consumed as a dev-dependency by credit tests
+    # to exercise the default-liquidation hook.
+    "gateway-contract/contracts/auction_contract",
+]
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)'] }
 
 [workspace.dependencies]
 soroban-sdk = "22"
 
 [profile.release]
+# Optimise for size — Soroban charges by deployed WASM bytes.
 opt-level = "z"
+# Keep arithmetic checked even in release: contracts trade gas for safety.
 overflow-checks = true
+# No debuginfo in the deployed binary.
 debug = 0
+# Strip symbol names to further shrink the WASM payload.
 strip = "symbols"
+# Disable extra `debug_assert!` checks; contracts use explicit guards.
 debug-assertions = false
+# Soroban does not provide an unwinder — panics must abort.
 panic = "abort"
+# Single codegen unit produces a smaller, more aggressively inlined binary.
 codegen-units = 1
+# Full link-time optimisation across crates for maximum size win.
 lto = true

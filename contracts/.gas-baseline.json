@@ -1,0 +1,92 @@
+[
+  {
+    "entrypoint": "init",
+    "cpu_instructions": 47851,
+    "memory_bytes": 4700,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "open_credit_line",
+    "cpu_instructions": 214413,
+    "memory_bytes": 41732,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "draw_credit",
+    "cpu_instructions": 533640,
+    "memory_bytes": 89266,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "repay_credit",
+    "cpu_instructions": 462875,
+    "memory_bytes": 74167,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "update_risk_parameters",
+    "cpu_instructions": 197046,
+    "memory_bytes": 34383,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "set_rate_formula_config",
+    "cpu_instructions": 94052,
+    "memory_bytes": 17069,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "set_credit_limit_bounds",
+    "cpu_instructions": 97639,
+    "memory_bytes": 16508,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "set_utilization_cap",
+    "cpu_instructions": 70748,
+    "memory_bytes": 14113,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "deposit_collateral",
+    "cpu_instructions": 278833,
+    "memory_bytes": 49795,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "withdraw_collateral",
+    "cpu_instructions": 322970,
+    "memory_bytes": 53119,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "accrue_batch",
+    "cpu_instructions": 969708,
+    "memory_bytes": 154805,
+    "tolerance_pct": 10.0
+  },
+  {
+    "entrypoint": "freeze_draws",
+    "cpu_instructions": 92109,
+    "memory_bytes": 16285,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "unfreeze_draws",
+    "cpu_instructions": 109835,
+    "memory_bytes": 19160,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "default_credit_line",
+    "cpu_instructions": 264271,
+    "memory_bytes": 42217,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "close_credit_line",
+    "cpu_instructions": 189764,
+    "memory_bytes": 32696,
+    "tolerance_pct": 5.0
+  }
+]
