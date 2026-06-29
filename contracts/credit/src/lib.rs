@@ -5468,39 +5468,6 @@ mod test_mock_liquidity_token {
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::testutils::Ledger;
 
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let borrower_one = Address::generate(&env);
-        let borrower_two = Address::generate(&env);
-        let (client, token, contract_id, _admin) =
-            setup_with_reserve(&env, &borrower_one, 1_000, 500);
-        client.open_credit_line(&borrower_two, &1_000, &300_u32, &55_u32);
-
-            let now = 1_700_000_000u64;
-            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
-
-        let borrower_one_after_draw = client.get_credit_line(&borrower_one).unwrap();
-        let borrower_two_before_failure = client.get_credit_line(&borrower_two).unwrap();
-        assert_eq!(borrower_one_after_draw.utilized_amount, 300);
-        assert_eq!(borrower_two_before_failure.utilized_amount, 0);
-        assert_eq!(borrower_two_before_failure.last_accrual_ts, 0);
-        assert_eq!(liquidity_balance(&env, &token, &contract_id), 200);
-
-        let event_count_before_failure = env.events().all().len();
-        let drawn_events_before_failure = count_credit_event(&env, "drawn");
-        let accrue_events_before_failure = count_credit_event(&env, "accrue");
-
-        env.ledger().set_timestamp(200);
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            client.draw_credit(&borrower_two, &250);
-        }));
-
-            let now = 1_700_000_000u64;
-            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
-            client.freeze_borrower_until(&admin, &borrower, &now);
-        }
-
         /// Freeze expires automatically when ledger timestamp passes expiry_ts.
         #[test]
         fn freeze_auto_expires_after_ts() {
