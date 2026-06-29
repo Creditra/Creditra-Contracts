@@ -197,7 +197,7 @@ pub fn commit_attestation_batch(env: Env, borrower: Address, merkle_root: BytesN
 /// `true` if the recomputed root matches the stored root; `false` otherwise.
 ///
 /// # Errors
-/// - `ContractError::AttestationBatchNotFound` if no batch has been committed
+/// - `ContractError::InvalidAttestation` if no batch has been committed
 ///   for this borrower.
 pub fn verify_attestation_proof(
     env: Env,
@@ -210,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
 
     // Bump TTL on read.
     env.storage()
