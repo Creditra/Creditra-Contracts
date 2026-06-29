@@ -96,6 +96,7 @@
 
 mod handshake;
 mod accrual;
+mod handshake;
 #[cfg(test)]
 mod accrual_tests;
 mod oracles;
@@ -1427,6 +1428,44 @@ impl Credit {
     /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
     pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::partial_release_collateral(&env, &borrower, amount);
+    }
+
+    // ── Multi-collateral entrypoints ─────────────────────────────────────────
+
+    /// Admin: add a token to the collateral allowlist.
+    ///
+    /// The token must be a valid SAC-compatible contract address. Once listed
+    /// borrowers can call [`deposit_collateral_token`] / [`withdraw_collateral_token`]
+    /// using this token.
+    pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
+        require_admin_auth(&env);
+        crate::storage::set_collateral_token_allowlist(&env, &tokens);
+    }
+
+    /// Query: return the current collateral token allowlist.
+    pub fn get_collateral_tokens(env: Env) -> soroban_sdk::Vec<Address> {
+        crate::storage::get_collateral_token_allowlist(&env)
+    }
+
+    /// Deposit a specific allowlisted collateral token from the borrower.
+    ///
+    /// Requires borrower `require_auth`. Reverts with `MissingLiquidityToken` if
+    /// `token` is not on the allowlist.
+    pub fn deposit_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
+        crate::collateral::deposit_collateral_token(&env, &borrower, &token, amount);
+    }
+
+    /// Withdraw a specific allowlisted collateral token to the borrower.
+    ///
+    /// Requires borrower `require_auth`. Reverts with `InsufficientCollateralBalance`
+    /// if the borrower's balance for `token` is below `amount`.
+    pub fn withdraw_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
+        crate::collateral::withdraw_collateral_token(&env, &borrower, &token, amount);
+    }
+
+    /// Query: return a borrower's balance for a specific collateral token.
+    pub fn get_collateral_for_token(env: Env, borrower: Address, token: Address) -> i128 {
+        crate::collateral::get_collateral_for_token(&env, &borrower, &token)
     }
 
     /// Set the maximum total utilization allowed across all credit lines (admin only).

@@ -1253,3 +1253,43 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
         .persistent()
         .remove(&DataKey::FrozenBorrower(borrower.clone()));
 }
+
+// ── Multi-collateral (per-borrower, per-token) ────────────────────────────────
+
+/// Return a borrower's balance for a specific collateral token.
+pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
+    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Persist a borrower's balance for a specific collateral token and update the global accumulator.
+pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
+    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let previous = get_collateral_balance_for_token(env, borrower, token);
+    env.storage().persistent().set(&key, &balance);
+    bump_persistent_ttl(env, &key);
+    adjust_total_collateral(env, previous, balance);
+}
+
+/// Return the allowlisted collateral token addresses, or an empty vec.
+pub fn get_collateral_token_allowlist(env: &Env) -> soroban_sdk::Vec<Address> {
+    env.storage()
+        .instance()
+        .get(&DataKey::CollateralTokenAllowlist)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+}
+
+/// Overwrite the collateral token allowlist.
+pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Address>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CollateralTokenAllowlist, tokens);
+}
+
+/// Return `true` when `token` is in the collateral allowlist.
+pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
+    get_collateral_token_allowlist(env).contains(token.clone())
+}
