@@ -94,6 +94,7 @@
 //! lives in [`instrument`] (requires the `instrument` Cargo feature; not
 //! compiled into WASM).
 
+mod handshake;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
@@ -1295,6 +1296,49 @@ impl Credit {
 
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
+    }
+
+    /// Release a portion of collateral to the borrower while the credit line
+    /// stays above the configured health-factor threshold.
+    ///
+    /// # What
+    ///
+    /// Transfers exactly `amount` collateral tokens from the contract back to
+    /// `borrower`, subject to two invariants:
+    ///
+    /// 1. **Balance invariant** — `amount` must not exceed the borrower's
+    ///    current collateral balance.
+    /// 2. **Health-factor invariant** — after the release,
+    ///    `remaining_collateral >= utilized_amount * min_collateral_ratio_bps / 10_000`.
+    ///    When `utilized_amount == 0` the ratio is not checked.
+    ///
+    /// # Authorization
+    ///
+    /// `borrower.require_auth()` — only the borrower may release their own
+    /// collateral.
+    ///
+    /// # Parameters
+    ///
+    /// - `borrower` — address whose collateral balance is reduced; must
+    ///   authorize this call.
+    /// - `amount` — token units to release; must be strictly positive.
+    ///
+    /// # Errors
+    ///
+    /// | Error | Condition |
+    /// |---|---|
+    /// | [`ContractError::InvalidAmount`] (5) | `amount <= 0` |
+    /// | [`ContractError::InsufficientCollateralBalance`] (39) | `amount > current_balance` |
+    /// | [`ContractError::CollateralRatioBelowMinimum`] (35) | post-release HF < threshold |
+    /// | [`ContractError::MissingLiquidityToken`] (22) | no token configured |
+    /// | [`ContractError::Overflow`] (12) | arithmetic overflow |
+    ///
+    /// # Events
+    ///
+    /// Emits `("credit", "col_prel")` → [`crate::events::CollateralPartialReleasedEvent`]
+    /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
+    pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
+        crate::collateral::partial_release_collateral(&env, &borrower, amount);
     }
 
     /// Set the maximum total utilization allowed across all credit lines (admin only).

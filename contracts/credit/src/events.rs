@@ -440,6 +440,25 @@ pub struct CollateralDepositedEvent {
     pub new_balance: i128,
 }
 
+/// Event emitted by [`crate::collateral::partial_release_collateral`].
+///
+/// Distinct from [`CollateralWithdrawnEvent`] so indexers can distinguish a
+/// borrower-initiated partial release (health-factor gated) from a generic
+/// withdrawal or an atomic repay-and-release.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralPartialReleasedEvent {
+    /// Borrower whose collateral is being partially released.
+    pub borrower: Address,
+    /// Token amount returned to the borrower.
+    pub amount_released: i128,
+    /// Collateral balance remaining in the contract after the release.
+    pub new_balance: i128,
+    /// Health factor (collateral * 10_000 / utilized) after the release.
+    /// `u32::MAX` when `utilized_amount == 0` (fully repaid / unconstrained).
+    pub health_factor_bps: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CollateralWithdrawnEvent {

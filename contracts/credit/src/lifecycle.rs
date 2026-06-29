@@ -378,10 +378,10 @@ pub fn settle_default_liquidation(
 
     let max_close_factor = crate::storage::get_close_factor_bps(&env);
     if close_factor_bps > max_close_factor {
-        env.panic_with_error(ContractError::CloseFactorAboveMax);
+        env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    let settlement_key = DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
@@ -392,6 +392,7 @@ pub fn settle_default_liquidation(
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     // Apply interest accrual before any mutation
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
@@ -483,6 +484,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 

@@ -60,6 +60,12 @@
     "tolerance_pct": 5.0
   },
   {
+    "entrypoint": "partial_release_collateral",
+    "cpu_instructions": 340000,
+    "memory_bytes": 55000,
+    "tolerance_pct": 10.0
+  },
+  {
     "entrypoint": "accrue_batch",
     "cpu_instructions": 969708,
     "memory_bytes": 154805,

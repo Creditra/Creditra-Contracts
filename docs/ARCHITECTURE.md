@@ -376,10 +376,10 @@ The credit contract's outward edges:
 | Out | `LiquidityToken` (SAC) | `balance(addr)` | Read reserve balance for the pre-transfer check | `lib.rs:261-424` step 19 |
 | Out | `LiquidityToken` (SAC) | `transfer(contract, treasury, amount)` | Drain fee accumulator | `lib.rs:770` |
 | Out | `LiquidityToken` (SAC) | `transfer(borrower, contract, amount)` | Collateral deposit | `collateral.rs:34` |
-| Out | `LiquidityToken` (SAC) | `transfer(contract, borrower, amount)` | Collateral withdraw | `collateral.rs:69` |
+| Out | `LiquidityToken` (SAC) | `transfer(contract, borrower, amount)` | Collateral withdraw / partial release | `collateral.rs:69,partial_release_collateral` |
 | Out | `AuctionContract` | `settle_default_liquidation(auction_id, credit, borrower) -> i128` | Cross-contract settlement | `lib.rs:953` |
 | In  | Admin | All `set_*`, `open_credit_line`, `update_risk_parameters`, etc. | Admin operations | `auth.rs`, all `lib.rs` admin entrypoints |
-| In  | Borrower | `draw_credit`, `repay_credit`, `deposit_collateral`, `withdraw_collateral`, `self_suspend_credit_line`, `close_credit_line` (if utilized=0) | Borrower flows | per file |
+| In  | Borrower | `draw_credit`, `repay_credit`, `deposit_collateral`, `withdraw_collateral`, `partial_release_collateral`, `self_suspend_credit_line`, `close_credit_line` (if utilized=0) | Borrower flows | per file |
 | In  | Keeper / indexer | `accrue_batch` (no auth), all read-only queries | Maintenance | `lib.rs:1133` |
 
 Auction contract's outward edges:
