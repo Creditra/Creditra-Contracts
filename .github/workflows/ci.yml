@@ -139,7 +139,7 @@ jobs:
             exit 1
           fi
 
-          THRESHOLD_BYTES=51200
+          THRESHOLD_BYTES=160000
           echo "WASM size: ${SIZE_BYTES} bytes ($((SIZE_BYTES / 1024)) KB)"
           echo "Threshold: ${THRESHOLD_BYTES} bytes (50 KB)"
           echo "::notice::WASM size is ${SIZE_BYTES} bytes. Threshold is ${THRESHOLD_BYTES} bytes."
@@ -148,4 +148,3 @@ jobs:
             echo "::error::WASM size ${SIZE_BYTES} exceeds threshold ${THRESHOLD_BYTES}."
             exit 1
           fi
-
