@@ -286,9 +286,7 @@ impl Auction {
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
 
-                if let (Some(prev_bidder), Some(tkn)) =
-                    (state.highest_bidder.clone(), token_addr)
-                {
+                if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
                     let refund_amount = state.highest_bid;
                     publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
                     set_reentrancy_guard(&env);
@@ -446,23 +444,17 @@ impl Auction {
             .storage()
             .instance()
             .get(&Symbol::new(&env, "bid_token"));
-        let token_addr = token_addr
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::InvalidState));
+        let token_addr =
+            token_addr.unwrap_or_else(|| env.panic_with_error(AuctionError::InvalidState));
 
         let mut updated_state = state;
         updated_state.status = AuctionStatus::Claimed;
-        env.storage()
-            .persistent()
-            .set(&auction_id, &updated_state);
+        env.storage().persistent().set(&auction_id, &updated_state);
         bump_auction_state_ttl(&env, &auction_id);
 
         set_reentrancy_guard(&env);
         let token_client = token::Client::new(&env, &token_addr);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &winner,
-            &recovered_amount,
-        );
+        token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
     }
 }

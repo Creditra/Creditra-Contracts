@@ -28,7 +28,8 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
+    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus,
+    DutchAuctionDecay,
 };
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, Symbol};
@@ -216,7 +217,7 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
         &1_i128,
         &0_u32,
         &DutchAuctionDecay::None,
-       &DutchAuctionDecay::None,
+        &DutchAuctionDecay::None,
         &DutchAuctionDecay::None,
         &DutchAuctionDecay::None,
     );

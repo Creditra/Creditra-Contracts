@@ -1337,7 +1337,14 @@ mod tests {
             625
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 1000, 50, 100, &DutchAuctionDecay::Linear, None),
+            super::super::compute_dutch_price(
+                1000,
+                1000,
+                50,
+                100,
+                &DutchAuctionDecay::Linear,
+                None
+            ),
             1000
         );
     }
@@ -1345,23 +1352,58 @@ mod tests {
     #[test]
     fn test_compute_dutch_price_stepped_happy_paths() {
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                0,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             1000
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 19, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                19,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             1000
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 20, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                20,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             900
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 40, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                40,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             800
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 99, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                99,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             600
         );
     }
@@ -1373,11 +1415,25 @@ mod tests {
             500
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 100, 100, &DutchAuctionDecay::Linear, None),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                100,
+                100,
+                &DutchAuctionDecay::Linear,
+                None
+            ),
             500
         );
         assert_eq!(
-            super::super::compute_dutch_price(1000, 500, 150, 100, &DutchAuctionDecay::Stepped, Some(5)),
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                150,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
             500
         );
     }
@@ -1393,7 +1449,14 @@ mod tests {
     #[test]
     fn test_compute_dutch_price_missing_step_count_panics() {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Stepped, None);
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                50,
+                100,
+                &DutchAuctionDecay::Stepped,
+                None,
+            );
         }));
         assert!(result.is_err());
     }
@@ -1401,7 +1464,14 @@ mod tests {
     #[test]
     fn test_compute_dutch_price_overflow_panics() {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(i128::MAX, 0, 2, 100, &DutchAuctionDecay::Linear, None);
+            super::super::compute_dutch_price(
+                i128::MAX,
+                0,
+                2,
+                100,
+                &DutchAuctionDecay::Linear,
+                None,
+            );
         }));
         assert!(result.is_err());
     }
@@ -1542,7 +1612,8 @@ mod reentrancy_exploration {
     extern crate std;
     use super::*;
     use crate::errors::AuctionError;
-    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol};
 
     fn reentrancy_flag(env: &Env, contract_id: &Address) -> bool {
@@ -1714,7 +1785,8 @@ mod reentrancy_exploration {
 mod reentrancy_preservation {
     extern crate std;
     use super::*;
-    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+    use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};
+    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
 
     fn refund_event_count(env: &Env) -> usize {
@@ -1977,10 +2049,7 @@ mod liquidation_grace_window {
         let bidder = Address::generate(&env);
         env.ledger().set_timestamp(1100);
         let result = client.try_place_bid(&auction_id, &bidder, &100_i128);
-        assert!(
-            result.is_ok(),
-            "bid after grace window must succeed"
-        );
+        assert!(result.is_ok(), "bid after grace window must succeed");
     }
 
     /// 3. Configuration update: authorized user can update grace window.
@@ -2177,10 +2246,7 @@ mod liquidation_grace_window {
         let bidder = Address::generate(&env);
         env.ledger().set_timestamp(1100);
         let result = client.try_place_bid(&auction_id, &bidder, &300_i128);
-        assert!(
-            result.is_ok(),
-            "Dutch bid after grace window must succeed"
-        );
+        assert!(result.is_ok(), "Dutch bid after grace window must succeed");
     }
 
     /// Grace window does not affect close_auction or other non-bid operations.
