@@ -19,16 +19,25 @@ use events::{
 };
 use storage::{bump_auction_state_ttl, bump_settlement_marker_ttl};
 
-fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
+/// Returns the minimum bid amount that satisfies the `min_increment_bps`
+/// requirement over `highest_bid`.
+///
+/// The threshold is `highest_bid + ceil(highest_bid * bps / 10_000)`, with a
+/// floor increment of 1 stroop so there is always forward progress.
+///
+/// # Errors
+/// Panics with [`AuctionError::BidTooLow`] on i128 overflow (requires a bid
+/// in the quintillion-strobe range; effectively unreachable in practice).
+fn min_next_bid(env: &Env, highest_bid: i128, min_increment_bps: u32) -> i128 {
     let bps = min_increment_bps as i128;
     let product = highest_bid
         .checked_mul(bps)
-        .expect("overflow in bid increment calculation");
+        .unwrap_or_else(|| env.panic_with_error(AuctionError::BidTooLow));
     let bps_increment = product / 10_000 + i128::from(product % 10_000 != 0);
     let increment = bps_increment.max(1);
     highest_bid
         .checked_add(increment)
-        .expect("overflow computing minimum next bid threshold")
+        .unwrap_or_else(|| env.panic_with_error(AuctionError::BidTooLow))
 }
 
 /// Computes the current Dutch auction price based on elapsed time.
@@ -198,13 +207,16 @@ impl Auction {
 
         match state.config.mode {
             AuctionMode::English => {
-                let min_floor = state.config.min_bid.saturating_sub(1);
-                let required_floor = if state.highest_bid > min_floor {
-                    state.highest_bid
+                // When no bid has been placed yet, enforce the configured min_bid.
+                // Once a bid exists, enforce min_increment_bps over the current
+                // highest bid (≥ 1-stroop forward progress even at 0 bps).
+                let threshold = if state.highest_bid > 0 {
+                    min_next_bid(&env, state.highest_bid, state.config.min_increment_bps)
+                        .max(state.config.min_bid)
                 } else {
-                    min_floor
+                    state.config.min_bid
                 };
-                if amount <= required_floor {
+                if amount < threshold {
                     env.panic_with_error(AuctionError::BidTooLow);
                 }
 
