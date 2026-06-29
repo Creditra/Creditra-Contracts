@@ -122,123 +122,48 @@ pub enum AuctionKey {
 
 #[contractimpl]
 impl Auction {
-    pub fn init_auction(
-        env: Env,
-        auction_id: Symbol,
-        mode: AuctionMode,
-        start_time: u64,
-        end_time: u64,
-        min_bid: i128,
-        min_increment_bps: u32,
-        dutch_start_price: Option<i128>,
-        dutch_floor_price: Option<i128>,
-        dutch_decay: DutchAuctionDecay,
-        dutch_step_count: Option<u32>,
-    ) {
-        if start_time >= end_time {
-            panic!("invalid times");
-        }
-        if min_increment_bps > 10_000 {
-            panic!("min_increment_bps exceeds maximum of 10000 (100%)");
-        }
-
-        if mode == AuctionMode::Dutch {
-            let start = dutch_start_price.expect("dutch_start_price required for Dutch mode");
-            let floor = dutch_floor_price.expect("dutch_floor_price required for Dutch mode");
-            if start < floor {
-                panic!("dutch_start_price must be >= dutch_floor_price");
-            }
-            if start < min_bid {
-                panic!("dutch_start_price must be >= min_bid");
-            }
-
-            match &dutch_decay {
-                DutchAuctionDecay::None | DutchAuctionDecay::Linear => {}
-                DutchAuctionDecay::Stepped => match dutch_step_count {
-                    Some(0) => {
-                        panic!("dutch_step_count must be > 0 for stepped Dutch auctions")
-                    }
-                    Some(_) => {}
-                    None => panic!("dutch_step_count required for stepped Dutch auctions"),
-                },
-                DutchAuctionDecay::Exponential => {}
-            }
-        }
-
-        let config = AuctionConfig {
-            mode,
-            username_hash: BytesN::from_array(&env, &[0; 32]),
-            start_time,
-            end_time,
-            min_bid,
-            min_increment_bps,
-            dutch_start_price,
-            dutch_floor_price,
-            dutch_decay,
-            dutch_step_count,
-        };
-        let state = AuctionState {
-            config,
-            status: AuctionStatus::Open,
-            highest_bidder: None,
-            highest_bid: 0,
-        };
-        env.storage().persistent().set(&auction_id, &state);
-        bump_auction_state_ttl(&env, &auction_id);
-    }
-
-    /// Register the factory/credit contract address that is permitted to call
-    /// `settle_default_liquidation`. Must be called once after deployment.
-    pub fn set_factory_contract(env: Env, factory: Address) {
-        factory.require_auth();
-        storage::set_factory_contract(&env, &factory);
-    }
-
-    /// Set the liquidation auction grace window duration in seconds (admin only).
+    /// Place a bid in an English ascending-price auction.
     ///
-    /// This is the minimum time that must elapse between auction creation
-    /// (`start_time` in `init_auction`) and when the first bid can be placed.
-    /// During the grace period, calls to `place_bid` will fail with
-    /// [`AuctionError::GracePeriodActive`]. After the grace window expires,
-    /// existing auction behavior is preserved.
+    /// # Parameters
     ///
-    /// Pass `0` to disable the grace window (default).
+    /// * `env` — The Soroban contract environment.
+    /// * `auction_id` — Symbol identifying the auction. Multiple auctions may coexist in persistent storage.
+    /// * `bidder` — Address of the bidder. Must authorize this invocation; unauthorized calls panic.
+    /// * `amount` — Bid amount in the auction's token denomination. Must be strictly positive and strictly greater than the current highest bid (if any).
     ///
-    /// # Authorization
-    /// Requires auth from the configured factory/credit contract.
-    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
-        let factory = get_factory_contract(&env)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
-        factory.require_auth();
-        storage::set_liquidation_grace_window(&env, seconds);
-    }
-
-    /// Return the configured liquidation auction grace window in seconds.
+    /// # Panics
     ///
-    /// Returns `0` when never configured (no grace period enforced).
-    pub fn get_liquidation_grace_window(env: Env) -> u64 {
-        storage::get_liquidation_grace_window(&env)
-    }
-
-    pub fn close_auction(env: Env, auction_id: Symbol) {
-        let mut state: AuctionState = env
-            .storage()
-            .persistent()
-            .get(&auction_id)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
-        bump_auction_state_ttl(&env, &auction_id);
-        if state.status == AuctionStatus::Claimed {
-            env.panic_with_error(AuctionError::AlreadyClaimed);
-        }
-        if state.status != AuctionStatus::Open {
-            env.panic_with_error(AuctionError::AuctionNotOpen);
-        }
-        state.status = AuctionStatus::Closed;
-        env.storage().persistent().set(&auction_id, &state);
-        bump_auction_state_ttl(&env, &auction_id);
-        publish_auction_closed_event(&env, auction_id, state.highest_bidder, state.highest_bid);
-    }
-
+    /// * If `amount <= 0` — bids must be positive.
+    /// * If `amount <= previous_highest_bid.amount` — bids must strictly increase.
+    ///
+    /// # Behavior
+    ///
+    /// 1. **Authorization check**: `bidder.require_auth()` — panics if caller is not the bidder.
+    /// 2. **Load previous highest bid** from persistent storage keyed by `auction_id`.
+    /// 3. **If a previous bid exists**:
+    ///    - Validate new bid is strictly higher (panics otherwise).
+    ///    - **Emit** `BID_RFDN` event (via `publish_bid_refunded_event`) *before* transfer — ensures event ordering even if transfer fails.
+    ///    - **Refund** previous bidder: if a `bid_token` address is stored in instance storage, transfers `prev.amount` from contract to `prev.bidder`. If no token is configured, refund is skipped (useful for test mocks).
+    /// 4. **Store new highest bid**: overwrites `auction_id` key with `AuctionState { bidder, amount }`.
+    ///
+    /// # Refund Safety
+    ///
+    /// Event emission precedes the token transfer. If the transfer fails (e.g., insufficient contract balance, token panic), the event is already recorded, enabling off-chain reconciliation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Alice bids 100 on auction "rare_nft"
+    /// place_bid(env.clone(), symbol_short!("rare_nft"), alice_addr.clone(), 100);
+    /// // State: { bidder: alice_addr, amount: 100 } stored under "rare_nft"
+    ///
+    /// // Bob bids 150 — Alice receives refund of 100, BID_RFDN event emitted
+    /// place_bid(env.clone(), symbol_short!("rare_nft"), bob_addr.clone(), 150);
+    /// // State: { bidder: bob_addr, amount: 150 }
+    ///
+    /// // Charlie attempts to bid 120 — panics (120 <= 150)
+    /// // place_bid(env, symbol_short!("rare_nft"), charlie_addr, 120); // ❌ panic
+    /// ```
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
