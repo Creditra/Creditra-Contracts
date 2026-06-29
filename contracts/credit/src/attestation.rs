@@ -111,7 +111,7 @@ fn hash_pair(env: &Env, a: &BytesN<32>, b: &BytesN<32>) -> BytesN<32> {
     let right_bytes: Bytes = right.clone().into();
     buf.append(&left_bytes);
     buf.append(&right_bytes);
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).into()
 }
 
 /// Compute the Merkle root from a `leaf` and an ordered sibling `proof` path.

@@ -1,4 +1,3 @@
-mod handshake;
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
@@ -95,6 +94,7 @@ mod handshake;
 //! lives in [`instrument`] (requires the `instrument` Cargo feature; not
 //! compiled into WASM).
 
+mod handshake;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
@@ -137,7 +137,9 @@ use crate::events::{
     publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
     publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
     publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
+    publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bps_set_event,
+    publish_protocol_fee_bounds_set_event, publish_close_factor_bps_set_event,
+    publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
@@ -164,8 +166,8 @@ use crate::storage::{
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
-    TreasuryWithdrawalProposal,
+    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, ProofOfReserve, RateChangeConfig,
+    RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -1865,7 +1867,7 @@ impl Credit {
     }
 
     pub fn freeze_draws(env: Env) {
-        freeze::freeze_draws(env)
+        freeze::freeze_draws(env, crate::types::FreezeReason::AdminDiscretion)
     }
 
     pub fn unfreeze_draws(env: Env) {

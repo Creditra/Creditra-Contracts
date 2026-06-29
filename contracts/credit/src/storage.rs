@@ -192,6 +192,15 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Close factor in basis points used in default liquidation settlement.
+    /// When set, limits the fraction of debt that can be settled in one call.
+    CloseFactorBps,
+    /// Structured pause reason stored alongside the pause flag.
+    /// Cleared on unpause.
+    PauseReason,
+    /// Per-borrower Merkle-root attestation batch.
+    /// Stored in persistent storage; keyed by borrower address.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -218,6 +227,11 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
+
+/// Aliases used by older modules (`borrow.rs`, `risk.rs`, `query.rs`) that
+/// import these names directly. They are identical to the canonical constants.
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
@@ -826,6 +840,22 @@ pub fn set_auction_contract(env: &Env, addr: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::AuctionContract, addr);
+}
+
+/// Return the configured close factor in basis points, if set.
+///
+/// The close factor limits the fraction of a defaulted borrower's debt that
+/// can be settled in a single `settle_default_liquidation` call.
+/// When absent, the full outstanding debt may be settled.
+pub fn get_close_factor_bps(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&DataKey::CloseFactorBps)
+}
+
+/// Persist the close factor in basis points (admin only, enforced by caller).
+pub fn set_close_factor_bps(env: &Env, bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::CloseFactorBps, &bps);
 }
 
 // ── Close factor (partial liquidation cap) ─────────────────────────────────────

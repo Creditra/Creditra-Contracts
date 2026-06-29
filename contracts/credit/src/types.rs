@@ -236,6 +236,14 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// No attestation batch has been committed for this borrower.
+    AttestationBatchNotFound = 45,
+    /// Draw-credit was blocked because the credit line has an admin-imposed freeze.
+    CreditLineFrozen = 46,
+    /// The draw-reversal time window (default 1 hour) has expired.
+    DrawReversalWindowExpired = 47,
+    /// The original draw audit record was not found for the supplied timestamp.
+    OriginalDrawNotFound = 48,
 }
 
 /// Stored credit line data for a borrower.
@@ -446,4 +454,63 @@ pub struct TreasuryWithdrawalProposal {
     pub proposed_at: u64,
     /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
     pub execute_after: u64,
+}
+
+/// Reason taxonomy for draw-freeze operations.
+///
+/// Emitted in [`DrawsFrozenEvent`] and stored alongside the freeze flag so
+/// indexers and governance tooling can classify operational actions without
+/// relying on off-chain metadata.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Draws frozen for a scheduled liquidity-reserve operation.
+    LiquidityReserve = 0,
+    /// Draws frozen for a regulatory compliance hold.
+    Compliance = 1,
+    /// Draws frozen while an oracle price anomaly is investigated.
+    OracleAnomaly = 2,
+    /// Draws frozen for any other administrative reason.
+    AdminDiscretion = 3,
+}
+
+/// Companion state stored with the global draw-freeze flag.
+///
+/// Stores both the boolean freeze flag and the structured reason so a single
+/// storage read returns all the context needed by `freeze.rs`.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// `true` when draws are globally frozen.
+    pub frozen: bool,
+    /// Structured reason for the current freeze state.
+    pub reason: FreezeReason,
+}
+
+/// Structured pause reason recorded alongside the protocol pause flag.
+///
+/// Stored in instance storage under `DataKey::PauseReason` when an admin
+/// calls `set_protocol_paused_with_reason`. Cleared on unpause.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable reason symbol (e.g. `Symbol::new(&env, "oracle-outage")`).
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp when the pause was activated.
+    pub timestamp: u64,
+    /// Admin address who activated the pause.
+    pub actor: Address,
+}
+
+/// Proof-of-reserve snapshot returned by `get_proof_of_reserve`.
+///
+/// Callers can compare `treasury_balance + bounty_balance` against the
+/// on-chain token balance of the contract to verify reserve integrity.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees awaiting treasury withdrawal.
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees awaiting bounty withdrawal.
+    pub bounty_balance: i128,
 }

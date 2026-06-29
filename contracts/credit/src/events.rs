@@ -625,3 +625,26 @@ pub fn publish_collateral_partial_released_event(
         event,
     );
 }
+
+/// Event emitted when an attestation batch is committed for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    /// Borrower whose attestation batch was committed.
+    pub borrower: soroban_sdk::Address,
+    /// SHA-256 Merkle root of all leaf hashes in the batch.
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    /// Informational leaf count.
+    pub count: u32,
+}
+
+/// Publish an attestation batch committed event.
+///
+/// # Topic
+/// `("credit", "atst_bat")`
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "atst_bat")),
+        event,
+    );
+}
