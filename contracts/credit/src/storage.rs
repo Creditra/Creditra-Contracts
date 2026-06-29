@@ -352,6 +352,26 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
     }
 }
 
+/// Return the configured per-borrower exposure cap, if set.
+pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
+}
+
+/// Set the per-borrower exposure cap. Passing `0` removes the cap.
+pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128>) {
+    if let Some(cap) = cap {
+        env.storage()
+            .persistent()
+            .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
+    } else {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BorrowerExposureCap(borrower.clone()));
+    }
+}
+
 /// Return the stable id for a borrower, if present.
 pub fn get_credit_line_id(env: &Env, borrower: &Address) -> Option<u32> {
     env.storage()

@@ -238,8 +238,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Admin-gated WASM upgrade with schema version bump.
 - Circuit breaker (`pause_protocol`) with repay-credit exception.
 - Treasury + protocol fee on interest portion.
-- Per-borrower utilization cap, global exposure cap, draw cooldown, per-tx
-  caps.
+- Per-borrower utilization cap, per-borrower exposure cap, global exposure
+  cap, draw cooldown, per-tx caps.
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.
