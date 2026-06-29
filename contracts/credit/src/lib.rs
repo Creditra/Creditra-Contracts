@@ -148,6 +148,8 @@ use crate::events::{
     publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+    publish_protocol_fee_bps_set_event, publish_protocol_fee_bounds_set_event,
+    publish_close_factor_bps_set_event, publish_paused_event,
     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
     TreasuryWithdrawalProposedEvent,

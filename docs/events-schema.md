@@ -1,7 +1,7 @@
 # Creditra Event Schema Reference
 
-**Version:** 1.0
-**Status:** authoritative for `main` at the time of writing
+**Version:** 1.0  
+**Status:** Superseded by [`docs/EVENTS_CATALOG.md`](../EVENTS_CATALOG.md)  
 **Scope:** `creditra-credit` (`contracts/credit/`)
 
 ---
