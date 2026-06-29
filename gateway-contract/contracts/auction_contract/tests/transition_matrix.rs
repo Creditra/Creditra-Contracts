@@ -216,7 +216,7 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
         &1_i128,
         &0_u32,
         &DutchAuctionDecay::None,
-       &DutchAuctionDecay::None,
+        &DutchAuctionDecay::None,
         &DutchAuctionDecay::None,
         &DutchAuctionDecay::None,
     );
