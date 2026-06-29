@@ -163,9 +163,9 @@ use crate::storage::{
     set_pending_treasury_withdrawal,
 };
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditLineSnapshot, CreditStatus, GracePeriodConfig,
+    GraceWaiverMode, OracleConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary,
+    ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -1638,6 +1638,31 @@ impl Credit {
     /// Backward-compatible alias for older tests and SDK callers.
     pub fn get_credit_line_summary(env: Env, borrower: Address) -> Option<CreditLineData> {
         Self::get_credit_line(env, borrower)
+    }
+
+    /// Return a full snapshot of `borrower`'s credit line, or `None` if no line exists.
+    ///
+    /// Assembles all per-borrower state — the core [`CreditLineData`] record, collateral
+    /// balance, health factor, repayment schedule, and delinquency flag — in a single
+    /// read-only call. This avoids the multiple round-trips that callers would otherwise
+    /// issue for `get_credit_line` + `get_collateral` + `get_health_factor` +
+    /// `get_repayment_schedule` + `is_delinquent`.
+    ///
+    /// # Returns
+    /// - `Some(CreditLineSnapshot)` when a credit line exists for the borrower.
+    /// - `None` when no credit line has been opened for the borrower.
+    ///
+    /// # Authentication
+    /// None — pure read with no state mutations.
+    ///
+    /// # Accrual laziness
+    /// `snapshot.line.accrued_interest` and `snapshot.line.utilized_amount` reflect the
+    /// last mutating checkpoint (draw, repay, suspend, etc.), not the current ledger time.
+    pub fn get_credit_line_snapshot(
+        env: Env,
+        borrower: Address,
+    ) -> Option<CreditLineSnapshot> {
+        views::get_credit_line_snapshot(env, borrower)
     }
 
     pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {

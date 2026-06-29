@@ -420,6 +420,55 @@ pub struct ProtocolSummaryView {
     pub active_line_count: u32,
 }
 
+/// Reserve balances returned by `get_proof_of_reserve`.
+///
+/// Exposes the accumulated treasury and bounty pool reserves for transparency
+/// and indexer integration. Callers may compare the sum of these fields against
+/// the on-chain token balance to verify reserve integrity.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees awaiting treasury withdrawal.
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees awaiting bounty withdrawal.
+    pub bounty_balance: i128,
+}
+
+/// Full snapshot of a credit line returned by `get_credit_line_snapshot`.
+///
+/// Aggregates every piece of per-borrower state that an indexer, keeper, or
+/// risk dashboard might need in a single read-only call, avoiding multiple
+/// round-trips for the common "show me everything about this borrower" query.
+///
+/// # Field notes
+///
+/// - `line` — the core [`CreditLineData`] record (limit, utilized, rate, score,
+///   status, accrual timestamps). Accrual is **lazy**: `accrued_interest` and
+///   `utilized_amount` reflect the last checkpoint, not the current ledger time.
+/// - `collateral_balance` — tokens deposited against this line (may be `0` if
+///   collateral is not in use or has not been deposited).
+/// - `health_factor_bps` — collateral health expressed in basis points. `u32::MAX`
+///   means no debt; below `10_000` the line is eligible for liquidation. See
+///   `get_health_factor` for the formula.
+/// - `repayment_schedule` — the optional installment schedule; `None` when no
+///   schedule has been set.
+/// - `is_delinquent` — `true` if the line has missed an installment past the
+///   grace window. Always `false` when `repayment_schedule` is `None`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineSnapshot {
+    /// Core per-borrower credit line record.
+    pub line: CreditLineData,
+    /// Tokens deposited as collateral against this credit line.
+    pub collateral_balance: i128,
+    /// Collateral health factor in basis points. `u32::MAX` = no debt.
+    pub health_factor_bps: u32,
+    /// Configured installment repayment schedule, if any.
+    pub repayment_schedule: Option<RepaymentSchedule>,
+    /// `true` if the borrower has missed an installment past the grace window.
+    pub is_delinquent: bool,
+}
+
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///
 /// Exactly one proposal can exist at a time. It must be executed (or superseded
