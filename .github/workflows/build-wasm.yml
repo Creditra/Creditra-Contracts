@@ -14,23 +14,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust and target
-        uses: actions-rs/toolchain@v1
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
-          override: true
-          components: rust-src
           targets: wasm32-unknown-unknown
 
-      - name: Ensure wasm target installed
-        run: rustup target add wasm32-unknown-unknown --toolchain stable
-
       - name: Build WASM
-        run: |
-          set -euo pipefail
-          rustup show
-          cargo check -p creditra-credit --target wasm32-unknown-unknown --verbose
-          cargo build --release -p creditra-credit --target wasm32-unknown-unknown --verbose
+        run: cargo build --release -p creditra-credit --target wasm32-unknown-unknown
 
       - name: Verify WASM size threshold
         run: |
@@ -50,7 +41,7 @@ jobs:
             exit 1
           fi
 
-          THRESHOLD_BYTES=160000
+          THRESHOLD_BYTES=51200
           echo "WASM size: ${SIZE_BYTES} bytes ($((SIZE_BYTES / 1024)) KB)"
           echo "Threshold: ${THRESHOLD_BYTES} bytes (50 KB)"
           echo "::notice::WASM size is ${SIZE_BYTES} bytes. Threshold is ${THRESHOLD_BYTES} bytes."
