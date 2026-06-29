@@ -39,6 +39,7 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
     }
 }
 
+
 /// Return the configured installment repayment schedule for `borrower`, if any.
 ///
 /// Delegates to [`crate::storage::get_repayment_schedule`], which bumps the
