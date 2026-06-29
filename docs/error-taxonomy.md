@@ -29,20 +29,21 @@ valid admin address before any admin-gated operation.
 
 ---
 
-## Lifecycle (codes 4, 14, 20, 21)
+## Lifecycle (codes 4, 14, 20, 21, 45)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 4    | `CreditLineClosed` | Action attempted on a permanently closed credit line. |
-| 14   | `AlreadyInitialized` | `init()` called more than once, or settlement replay detected. |
+| 14   | `AlreadyInitialized` | `init()` called more than once. |
 | 20   | `CreditLineSuspended` | Draw or admin action on a suspended credit line. |
 | 21   | `CreditLineDefaulted` | Draw or admin action on a defaulted credit line. |
+| 45   | `AlreadySettled` | The liquidation for this (borrower, settlement_id) pair has already been processed. |
 
 **Recovery action:**
 - `CreditLineClosed`: No recovery — the line is terminal. Create a new credit
   line.
-- `AlreadyInitialized`: No action needed (contract is already live). If this
-  surfaces in a settlement context, the settlement has already been processed.
+- `AlreadyInitialized`: No action needed (contract is already live).
+- `AlreadySettled`: No action needed — the settlement has already been processed.
 - `CreditLineSuspended`: Wait for admin reinstatement or self-reinstatement
   (see [`lifecycle.rs`](../contracts/credit/src/lifecycle.rs)); repayments are
   still allowed.
@@ -240,14 +241,14 @@ ensure it does not re-enter the credit contract during `transfer` /
 | Category | Codes | Count | Dominant SDK recovery |
 | -------- | ----- | ----- | --------------------- |
 | Auth | 1, 2, 32 | 3 | Reconnect wallet / re-deploy with admin init |
-| Lifecycle | 4, 14, 20, 21 | 4 | Await admin action or create new line |
+| Lifecycle | 4, 14, 20, 21, 45 | 5 | Await admin action or create new line |
 | Numeric | 5, 7, 12, 33, 34 | 5 | Validate inputs / re-sync ledger view |
 | Limit | 6, 10, 13, 17, 28 | 5 | Reduce amount or repay first |
-| Liquidity | 22, 23, 24, 25, 26, 27, 30, 31 | 8 | Replenish allowance / wait for reserve |
+| Liquidity | 22, 23, 24, 25, 26, 27, 30, 31, 41 | 9 | Replenish allowance / wait for reserve |
 | Risk | 8, 9, 18, 29 | 4 | Clamp inputs / wait for cooldown or unpause |
 | Oracle | 36, 37, 38 | 3 | Await valid price feed |
 | Collateral | 35, 39 | 2 | Reduce withdrawal amount |
 | Block | 16, 19, 40 | 3 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
-| Misc | 3, 15 | 2 | Create line first / wait for delay |
-| **Total** | 1–40 | **40** | — |
+| Misc | 3, 15, 42, 43, 44 | 5 | Create line first / wait for delay |
+| **Total** | 1–45 | **45** | — |

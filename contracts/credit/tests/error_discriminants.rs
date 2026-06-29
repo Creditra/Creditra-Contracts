@@ -483,6 +483,11 @@ fn every_variant_has_known_category() {
         ContractError::OraclePriceDeviation.category(),
         ContractError::InsufficientCollateralBalance.category(),
         ContractError::BorrowerFrozen.category(),
+        ContractError::BountyNotSet.category(),
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractError::TreasuryTimelockActive.category(),
+        ContractError::TreasuryProposalExists.category(),
+        ContractError::AlreadySettled.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -946,5 +951,55 @@ mod error_path_tests {
             // Could be TimestampRegression or another validation error
             assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression.into());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 16: AlreadySettled - replay of same settlement_id
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_settlement_replay_returns_already_settled() {
+        let (env, client, _contract_id, _admin, _token) = setup_with_token();
+
+        let borrower = Address::generate(&env);
+
+        // Open and default a credit line
+        client.open_credit_line(&borrower, &2000_i128, &500_u32, &50_u32);
+        client.default_credit_line(&borrower);
+
+        let settlement_id = soroban_sdk::Symbol::new(&env, "test_replay");
+
+        // First settlement should succeed
+        client.settle_default_liquidation(
+            &borrower,
+            &500_i128,
+            &settlement_id,
+            &10_000_u32,
+            &None,
+        );
+
+        // Replay with the same settlement_id must fail with AlreadySettled
+        let result = client.try_settle_default_liquidation(
+            &borrower,
+            &200_i128,
+            &settlement_id,
+            &10_000_u32,
+            &None,
+        );
+
+        assert!(result.is_err(), "Replay of settlement_id must fail");
+        let err = result.err().unwrap();
+        assert_eq!(
+            err.unwrap(),
+            ContractError::AlreadySettled,
+            "Expected AlreadySettled error on settlement replay"
+        );
+
+        // Verify state was not mutated by the replay attempt
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            line.utilized_amount, 1500_i128,
+            "State must not change after replay attempt"
+        );
     }
 }

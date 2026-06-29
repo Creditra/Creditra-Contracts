@@ -56,6 +56,7 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `25` | `LiquidityTokenCallFailed`       | A liquidity token interaction failed where the contract can expose a canonical token-call failure. | Inspect the configured token contract and retry only after the token issue is resolved. |
 | `26` | `InsufficientRepaymentAllowance` | The borrower has not approved enough liquidity token allowance for `repay_credit`. | Approve at least the effective repayment amount for the credit contract. |
 | `27` | `InsufficientRepaymentBalance`   | The borrower's liquidity token balance is below the effective repayment amount. | Transfer or mint enough tokens to the borrower before retrying repayment. |
+| `45` | `AlreadySettled`                 | The liquidation for this (borrower, settlement_id) pair has already been settled. | No action needed — the settlement has already been processed. |
 
 ---
 
