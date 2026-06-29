@@ -40,10 +40,11 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
 }
 
 /// Return the configured installment repayment schedule for `borrower`, if any.
+///
+/// Delegates to [`crate::storage::get_repayment_schedule`], which bumps the
+/// schedule entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&crate::storage::DataKey::RepaymentSchedule(borrower))
+    crate::storage::get_repayment_schedule(&env, &borrower)
 }
 
 /// Return the collateral-aware health factor for a borrower, expressed in basis

@@ -107,6 +107,7 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
+mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;

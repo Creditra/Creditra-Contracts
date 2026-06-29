@@ -111,3 +111,61 @@ fn utilization_cap_and_last_draw_keys_bump_persistent_ttl() {
 
     let _ = admin;
 }
+
+#[test]
+fn set_repayment_schedule_bumps_schedule_and_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    // Drain the credit-line TTL to just below the refresh threshold so the
+    // next interaction must perform a real bump.
+    let line_ttl_initial = ttl_for_key(&env, &contract_id, &borrower);
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, line_ttl_initial.saturating_sub(target_remaining));
+
+    // Setting a schedule is a credit-line interaction: it must bump both the
+    // credit-line entry and the schedule entry.
+    client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+
+    let line_ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        line_ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on set_repayment_schedule: {line_ttl_after}"
+    );
+
+    let schedule_key = DataKey::RepaymentSchedule(borrower.clone());
+    let schedule_ttl = ttl_for_key(&env, &contract_id, &schedule_key);
+    assert!(
+        schedule_ttl >= LEDGER_BUMP_AMOUNT,
+        "schedule TTL not extended on write: {schedule_ttl}"
+    );
+}
+
+#[test]
+fn get_repayment_schedule_bumps_schedule_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+
+    let schedule_key = DataKey::RepaymentSchedule(borrower.clone());
+    let schedule_ttl_initial = ttl_for_key(&env, &contract_id, &schedule_key);
+
+    // Advance to just below the refresh threshold, then read via the getter.
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, schedule_ttl_initial.saturating_sub(target_remaining));
+
+    let schedule = client.get_repayment_schedule(&borrower);
+    assert!(schedule.is_some(), "schedule should exist");
+
+    let schedule_ttl_after = ttl_for_key(&env, &contract_id, &schedule_key);
+    assert!(
+        schedule_ttl_after >= LEDGER_BUMP_AMOUNT,
+        "schedule TTL not bumped on read: initial={schedule_ttl_initial} after={schedule_ttl_after}"
+    );
+}
