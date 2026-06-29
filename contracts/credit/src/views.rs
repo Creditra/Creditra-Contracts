@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: MIT
 
-//! Read-only query views for specialized campaign indexing.
+//! Read-only query views for the Creditra credit contract.
 //!
-//! Provides the protocol summary view requested for the GrantFox campaign
-//! and the proof-of-reserve view for protocol treasury transparency.
+//! Each function is a pure storage read — no state mutations, no token CPIs,
+//! no authentication required. TTL may be bumped by `get_credit_line` via the
+//! storage layer when the persistent entry nears expiry.
 
 use crate::storage::{get_borrower_by_credit_line_id, get_credit_line, MAX_ENUMERATION_LIMIT};
 use crate::types::{CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
 use soroban_sdk::{Env, Vec};
 
-/// Return protocol-level dashboard aggregates including ActiveLineCount.
+// ── Protocol-level views ─────────────────────────────────────────────────────
+
+/// Return protocol-level dashboard aggregates including `active_line_count`.
 ///
-/// This reads aggregate storage slots to return TotalUtilized, TotalCollateral,
-/// and ActiveLineCount without iterating through individual borrower records.
+/// Reads aggregate instance-storage slots only; does not touch per-borrower
+/// records and does not bump persistent-entry TTL.
 pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
     ProtocolSummaryView {
         total_utilized: crate::storage::get_total_utilized(&env),
@@ -24,8 +27,8 @@ pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
 /// Return proof-of-reserve balances for the protocol treasury.
 ///
 /// Exposes the accumulated treasury and bounty pool reserves held in the
-/// contract as a result of protocol fee collection. This is a pure
-/// storage read — no token CPIs or borrower records are touched.
+/// contract as a result of protocol fee collection. A pure storage read —
+/// no token CPIs or borrower records are touched.
 ///
 /// Callers can compare `treasury_balance + bounty_balance` against the
 /// on-chain token balance of the contract to verify reserve integrity.
