@@ -120,6 +120,7 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cross_chain;
 
 
@@ -139,10 +140,11 @@ use crate::events::publish_paused_event;
 use crate::types::ProofOfReserve;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
+    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_close_factor_bps_set_event,
+    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
+    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,

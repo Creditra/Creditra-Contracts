@@ -209,7 +209,7 @@ pub struct PenaltyRateExitedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GraceWaiverAppliedEvent {
+pub struct GraceWaiverReceiptEvent {
     pub borrower: Address,
     pub waived_amount: i128,
     pub mode: crate::types::GraceWaiverMode,
@@ -520,8 +520,8 @@ pub fn publish_late_fee_charged_event(env: &Env, event: LateFeeChargedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("late_fee")), event);
 }
 
-/// Publish a grace waiver applied event when a suspended line's accrual uses the grace period.
-pub fn publish_grace_waiver_applied_event(
+/// Publish a grace waiver receipt event when a suspended line's accrual uses the grace period.
+pub fn publish_grace_waiver_receipt_event(
     env: &Env,
     borrower: &Address,
     waived_amount: i128,
@@ -529,11 +529,28 @@ pub fn publish_grace_waiver_applied_event(
 ) {
     env.events().publish(
         (symbol_short!("credit"), symbol_short!("grace_wv")),
-        GraceWaiverAppliedEvent {
+        GraceWaiverReceiptEvent {
             borrower: borrower.clone(),
             waived_amount,
             mode,
         },
+    );
+}
+
+/// Emitted when an attestation batch is committed for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    pub borrower: soroban_sdk::Address,
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    pub count: u32,
+}
+
+/// Publish an attestation batch committed event.
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "att_batch")),
+        event,
     );
 }
 
