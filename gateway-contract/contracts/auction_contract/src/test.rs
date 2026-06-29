@@ -1981,7 +1981,6 @@ mod liquidation_grace_window {
     extern crate std;
     use super::super::*;
     use crate::errors::AuctionError;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol};

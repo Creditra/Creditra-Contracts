@@ -29,7 +29,8 @@
 
 use soroban_sdk::testutils::Ledger as _;
 use gateway_auction::{
-    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
+    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus,
+    DutchAuctionDecay,
 };
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, Symbol};

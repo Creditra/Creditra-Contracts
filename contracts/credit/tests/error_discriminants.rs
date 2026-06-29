@@ -195,16 +195,9 @@ fn variant_count_is_known() {
 #[test]
 fn category_discriminants_are_stable() {
     assert_eq!(ContractErrorCategory::Auth as u32, 1);
-    assert_eq!(ContractErrorCategory::Lifecycle as u32, 2);
-    assert_eq!(ContractErrorCategory::Numeric as u32, 3);
-    assert_eq!(ContractErrorCategory::Limit as u32, 4);
-    assert_eq!(ContractErrorCategory::Liquidity as u32, 5);
-    assert_eq!(ContractErrorCategory::Risk as u32, 6);
-    assert_eq!(ContractErrorCategory::Oracle as u32, 7);
-    assert_eq!(ContractErrorCategory::Collateral as u32, 8);
-    assert_eq!(ContractErrorCategory::Block as u32, 9);
-    assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
-    assert_eq!(ContractErrorCategory::Misc as u32, 11);
+    assert_eq!(ContractErrorCategory::Math as u32, 2);
+    assert_eq!(ContractErrorCategory::State as u32, 3);
+    assert_eq!(ContractErrorCategory::Oracle as u32, 4);
 }
 
 /// Verify no two `ContractErrorCategory` variants share a discriminant.
@@ -214,16 +207,9 @@ fn no_duplicate_category_discriminants() {
 
     let codes: Vec<u32> = vec![
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Lifecycle as u32,
-        ContractErrorCategory::Numeric as u32,
-        ContractErrorCategory::Limit as u32,
-        ContractErrorCategory::Liquidity as u32,
-        ContractErrorCategory::Risk as u32,
+        ContractErrorCategory::Math as u32,
+        ContractErrorCategory::State as u32,
         ContractErrorCategory::Oracle as u32,
-        ContractErrorCategory::Collateral as u32,
-        ContractErrorCategory::Block as u32,
-        ContractErrorCategory::Reentrancy as u32,
-        ContractErrorCategory::Misc as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -237,20 +223,13 @@ fn no_duplicate_category_discriminants() {
 /// Verify the total variant count for `ContractErrorCategory`.
 #[test]
 fn category_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 11;
+    const EXPECTED_VARIANT_COUNT: usize = 4;
 
     let codes = [
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Lifecycle as u32,
-        ContractErrorCategory::Numeric as u32,
-        ContractErrorCategory::Limit as u32,
-        ContractErrorCategory::Liquidity as u32,
-        ContractErrorCategory::Risk as u32,
+        ContractErrorCategory::Math as u32,
+        ContractErrorCategory::State as u32,
         ContractErrorCategory::Oracle as u32,
-        ContractErrorCategory::Collateral as u32,
-        ContractErrorCategory::Block as u32,
-        ContractErrorCategory::Reentrancy as u32,
-        ContractErrorCategory::Misc as u32,
     ];
 
     assert_eq!(

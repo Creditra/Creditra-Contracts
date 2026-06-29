@@ -73,11 +73,7 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 pub const MAX_RISK_SCORE: u32 = 100;
 
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits(
-    env: Env,
-    max_rate_change_bps: u32,
-    rate_change_min_interval: u64,
-) {
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 

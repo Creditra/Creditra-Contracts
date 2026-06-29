@@ -156,12 +156,7 @@ pub fn compute_root(env: &Env, leaf: BytesN<32>, proof: &Vec<BytesN<32>>) -> Byt
 /// # Errors
 /// - `ContractError::Paused` if the protocol is paused.
 /// - Auth panic if caller is not admin.
-pub fn commit_attestation_batch(
-    env: Env,
-    borrower: Address,
-    merkle_root: BytesN<32>,
-    count: u32,
-) {
+pub fn commit_attestation_batch(env: Env, borrower: Address, merkle_root: BytesN<32>, count: u32) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 

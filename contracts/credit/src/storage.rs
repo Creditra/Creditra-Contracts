@@ -175,6 +175,8 @@ pub enum DataKey {
     BountyAddress,
     /// Accumulated bounty pool balance held in contract (fee share).
     BountyBalance,
+    /// Per-borrower attestation batch for cross-chain verification.
+    AttestationBatch(Address),
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
@@ -241,6 +243,9 @@ pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 /// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 /// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
+
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).

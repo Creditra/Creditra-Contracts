@@ -11,10 +11,8 @@
 //! - [`ContractError`] — 45-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. See
-//!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
-//!   flat code table and
-//!   [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md) for the
-//!   categorized reference with recovery hints.
+//!   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md) for the
+//!   categorized reference with codes and recovery hints.
 //! - [`CreditStatus`] — 5-variant state-machine label (Active=0,
 //!   Suspended=1, Defaulted=2, Closed=3, Restricted=4). See
 //!   [`docs/state-machine.md`](../../../docs/state-machine.md) for the
@@ -105,7 +103,7 @@ pub enum CreditStatus {
 /// # Category
 /// Use [`ContractError::category`] to map any error to its
 /// [`ContractErrorCategory`] for client-side grouping. See
-/// [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md) for the
+/// [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md) for the
 /// categorized reference with recovery actions.
 ///
 /// # Discriminant table (source of truth)

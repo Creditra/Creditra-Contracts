@@ -675,7 +675,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = stored_line.utilized_amount;
+    let _previous_utilized = stored_line.utilized_amount;
 
     if stored_line.status == CreditStatus::Closed {
         env.panic_with_error(ContractError::CreditLineClosed);
@@ -693,7 +693,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
     persist_credit_line(
         &env,
