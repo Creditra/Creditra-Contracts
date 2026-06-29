@@ -8,7 +8,7 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 40-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 45-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. See
 //!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
@@ -144,6 +144,7 @@ pub enum CreditStatus {
 /// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
 /// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
 /// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `AlreadySettled`               | The liquidation for this (borrower, settlement_id) pair has already been settled |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -236,6 +237,80 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// The liquidation for this (borrower, settlement_id) pair has already been settled.
+    AlreadySettled = 45,
+}
+
+/// Stable category for grouping `ContractError` variants in SDK clients.
+///
+/// # Stability guarantee
+/// Discriminants are permanent. New categories may be appended; existing
+/// categories must never be reordered or renumbered.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authentication / authorization errors (1, 2, 32).
+    Auth = 1,
+    /// Credit-line lifecycle errors (4, 14, 20, 21, 45).
+    Lifecycle = 2,
+    /// Numeric validation errors (5, 7, 12, 33, 34).
+    Numeric = 3,
+    /// Credit-limit errors (6, 10, 13, 17, 28).
+    Limit = 4,
+    /// Liquidity / reserve errors (22–27, 30, 31).
+    Liquidity = 5,
+    /// Risk / rate / pause errors (8, 9, 18, 29).
+    Risk = 6,
+    /// Oracle price-feed errors (36–38).
+    Oracle = 7,
+    /// Collateral errors (35, 39).
+    Collateral = 8,
+    /// Borrower-block / freeze errors (16, 19, 40).
+    Block = 9,
+    /// Reentrancy guard error (11).
+    Reentrancy = 10,
+    /// Miscellaneous errors (3, 15).
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Map this error to its stable [`ContractErrorCategory`].
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            Self::Unauthorized | Self::NotAdmin | Self::AdminNotInitialized => ContractErrorCategory::Auth,
+            Self::CreditLineClosed
+            | Self::AlreadyInitialized
+            | Self::CreditLineSuspended
+            | Self::CreditLineDefaulted
+            | Self::AlreadySettled => ContractErrorCategory::Lifecycle,
+            Self::InvalidAmount | Self::NegativeLimit | Self::Overflow | Self::TimestampRegression | Self::LimitOutOfBounds => ContractErrorCategory::Numeric,
+            Self::OverLimit
+            | Self::UtilizationNotZero
+            | Self::LimitDecreaseRequiresRepayment
+            | Self::DrawExceedsMaxAmount
+            | Self::RepayExceedsMaxAmount => ContractErrorCategory::Limit,
+            Self::MissingLiquidityToken
+            | Self::MissingLiquiditySource
+            | Self::InsufficientLiquidityReserve
+            | Self::LiquidityTokenCallFailed
+            | Self::InsufficientRepaymentAllowance
+            | Self::InsufficientRepaymentBalance
+            | Self::TreasuryNotSet
+            | Self::ExposureCapExceeded
+            | Self::BountyNotSet => ContractErrorCategory::Liquidity,
+            Self::RateTooHigh | Self::ScoreTooHigh | Self::Paused | Self::DrawCooldownActive => ContractErrorCategory::Risk,
+            Self::OraclePriceInvalid | Self::OraclePriceStale | Self::OraclePriceDeviation => ContractErrorCategory::Oracle,
+            Self::CollateralRatioBelowMinimum | Self::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            Self::BorrowerBlocked | Self::DrawsFrozen | Self::BorrowerFrozen => ContractErrorCategory::Block,
+            Self::Reentrancy => ContractErrorCategory::Reentrancy,
+            Self::CreditLineNotFound
+            | Self::AdminAcceptTooEarly
+            | Self::NoPendingTreasuryWithdrawal
+            | Self::TreasuryTimelockActive
+            | Self::TreasuryProposalExists => ContractErrorCategory::Misc,
+        }
+    }
 }
 
 /// Stored credit line data for a borrower.

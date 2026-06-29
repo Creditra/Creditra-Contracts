@@ -379,7 +379,7 @@ pub fn settle_default_liquidation(
 
     let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
     if env.storage().persistent().has(&settlement_key) {
-        env.panic_with_error(ContractError::AlreadyInitialized);
+        env.panic_with_error(ContractError::AlreadySettled);
     }
 
     let stored_line: CreditLineData = env
