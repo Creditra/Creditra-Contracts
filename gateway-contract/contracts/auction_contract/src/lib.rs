@@ -411,6 +411,14 @@ impl Auction {
         state.highest_bid
     }
 
+    /// Claim the escrowed auction proceeds, transferring `highest_bid` to the winner.
+    ///
+    /// # Authorization
+    /// Requires auth from the configured winning bidder (stored as `highest_bidder`).
+    ///
+    /// # Panics
+    /// Panics with one of the [`AuctionError`] variants when the auction is not
+    /// in `Closed` state, already claimed, or has no winner.
     pub fn claim_auction(env: Env, auction_id: Symbol) {
         let state: AuctionState = env
             .storage()
@@ -433,6 +441,14 @@ impl Auction {
             env.panic_with_error(AuctionError::AlreadyClaimed);
         }
 
+        let recovered_amount = state.highest_bid;
+        let token_addr: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "bid_token"));
+        let token_addr = token_addr
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::InvalidState));
+
         let mut updated_state = state;
         updated_state.status = AuctionStatus::Claimed;
         env.storage()
@@ -441,7 +457,12 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
 
         set_reentrancy_guard(&env);
-        // token_client.transfer(...) — proceeds to winner (to be wired up)
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &winner,
+            &recovered_amount,
+        );
         clear_reentrancy_guard(&env);
     }
 }
