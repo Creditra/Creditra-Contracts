@@ -47,8 +47,9 @@ use crate::events::{
     CollateralDepositedEvent, CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
-    set_collateral_balance,
+    get_collateral_balance, get_collateral_balance_for_token, get_collateral_token,
+    get_credit_line, get_min_collateral_ratio_bps, is_collateral_token_allowed,
+    set_collateral_balance, set_collateral_balance_for_token,
 };
 use crate::types::ContractError;
 use soroban_sdk::{token, Address, Env};
@@ -191,4 +192,82 @@ pub fn release_collateral(env: &Env, borrower: &Address, amount: i128) {
             new_balance: post_balance,
         },
     );
+}
+
+// ── Multi-collateral: per-token deposit / withdraw / query ─────────────────────
+
+/// Deposit a specific allowlisted collateral token from the borrower into the contract.
+///
+/// `token` must be in the admin-configured collateral allowlist; if not, reverts with
+/// [`ContractError::MissingLiquidityToken`] (re-used as "token not accepted").
+/// Requires borrower authentication.
+pub fn deposit_collateral_token(env: &Env, borrower: &Address, token_addr: &Address, amount: i128) {
+    if amount <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    if !is_collateral_token_allowed(env, token_addr) {
+        env.panic_with_error(ContractError::MissingLiquidityToken);
+    }
+    borrower.require_auth();
+
+    let token_client = token::Client::new(env, token_addr);
+    let contract_addr = env.current_contract_address();
+    token_client.transfer(borrower, &contract_addr, &amount);
+
+    let cur_balance = get_collateral_balance_for_token(env, borrower, token_addr);
+    let new_balance = cur_balance.checked_add(amount).unwrap_or_else(|| {
+        env.panic_with_error(ContractError::Overflow);
+    });
+    set_collateral_balance_for_token(env, borrower, token_addr, new_balance);
+
+    publish_collateral_deposited_event(
+        env,
+        CollateralDepositedEvent {
+            borrower: borrower.clone(),
+            amount,
+            new_balance,
+        },
+    );
+}
+
+/// Withdraw a specific allowlisted collateral token to the borrower.
+///
+/// Requires borrower authentication. Does **not** enforce the `MinCollateralRatioBps`
+/// check on the per-token balance because cross-token ratio enforcement would require
+/// oracle pricing; callers relying on a collateral floor should use the single-token
+/// [`withdraw_collateral`] path.
+pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Address, amount: i128) {
+    if amount <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    if !is_collateral_token_allowed(env, token_addr) {
+        env.panic_with_error(ContractError::MissingLiquidityToken);
+    }
+    borrower.require_auth();
+
+    let cur_balance = get_collateral_balance_for_token(env, borrower, token_addr);
+    if amount > cur_balance {
+        env.panic_with_error(ContractError::InsufficientCollateralBalance);
+    }
+    let post_balance = cur_balance - amount;
+
+    let token_client = token::Client::new(env, token_addr);
+    let contract_addr = env.current_contract_address();
+    token_client.transfer(&contract_addr, borrower, &amount);
+
+    set_collateral_balance_for_token(env, borrower, token_addr, post_balance);
+
+    publish_collateral_withdrawn_event(
+        env,
+        CollateralWithdrawnEvent {
+            borrower: borrower.clone(),
+            amount,
+            new_balance: post_balance,
+        },
+    );
+}
+
+/// Read-only getter for a borrower's balance in a specific collateral token.
+pub fn get_collateral_for_token(env: &Env, borrower: &Address, token_addr: &Address) -> i128 {
+    get_collateral_balance_for_token(env, borrower, token_addr)
 }
