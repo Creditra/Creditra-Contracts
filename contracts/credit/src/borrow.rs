@@ -11,6 +11,15 @@ use crate::storage::{
 use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
 
+pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
+    match status {
+        CreditStatus::Active | CreditStatus::Restricted => None,
+        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
+        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
+        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
+    }
+}
+
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
@@ -91,14 +100,13 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     env.storage()
         .persistent()
         .extend_ttl(&borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
-    let timestamp = env.ledger().timestamp();
+
     publish_drawn_event(
         &env,
         DrawnEvent {
             borrower,
             amount,
             new_utilized_amount: updated_utilized,
-            timestamp,
         },
     );
     clear_reentrancy_guard(&env);

@@ -121,7 +121,10 @@ fn settle_exceeding_capped_close_factor_fails() {
             &None,
         );
     }));
-    assert!(result.is_err(), "settlement with over-cap close_factor should panic");
+    assert!(
+        result.is_err(),
+        "settlement with over-cap close_factor should panic"
+    );
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Defaulted);

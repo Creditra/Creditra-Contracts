@@ -16,6 +16,7 @@
 //! the due date.  Repayments above the remaining debt are capped by
 //! `repay_credit`, so the expected model applies the same cap before computing
 //! installment advancement.
+use soroban_sdk::testutils::Ledger as _;
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;

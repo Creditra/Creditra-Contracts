@@ -1,0 +1,1311 @@
+warning: function `min_next_bid` is never used
+  --> gateway-contract/contracts/auction_contract/src/lib.rs:22:4
+   |
+22 | fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
+   |    ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PERSISTENT_LIFETIME_THRESHOLD` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:45:18
+   |
+45 | pub(crate) const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_status` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:72:8
+   |
+72 | pub fn get_status(env: &Env) -> AuctionStatus {
+   |        ^^^^^^^^^^
+
+warning: function `set_status` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:79:8
+   |
+79 | pub fn set_status(env: &Env, status: AuctionStatus) {
+   |        ^^^^^^^^^^
+
+warning: function `get_highest_bidder` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:83:8
+   |
+83 | pub fn get_highest_bidder(env: &Env) -> Option<Address> {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bidder` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:87:8
+   |
+87 | pub fn set_highest_bidder(env: &Env, bidder: &Address) {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:165:8
+    |
+165 | pub fn get_end_time(env: &Env) -> u64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:169:8
+    |
+169 | pub fn set_end_time(env: &Env, end_time: u64) {
+    |        ^^^^^^^^^^^^
+
+warning: function `get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:173:8
+    |
+173 | pub fn get_highest_bid(env: &Env) -> u128 {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:180:8
+    |
+180 | pub fn set_highest_bid(env: &Env, bid: u128) {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `auction_exists` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:187:8
+    |
+187 | pub fn auction_exists(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `auction_get_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:191:8
+    |
+191 | pub fn auction_get_status(env: &Env, id: u32) -> crate::types::AuctionStatus {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:198:8
+    |
+198 | pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatus) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:208:8
+    |
+208 | pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:212:8
+    |
+212 | pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:222:8
+    |
+222 | pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:226:8
+    |
+226 | pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:236:8
+    |
+236 | pub fn auction_get_min_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:243:8
+    |
+243 | pub fn auction_set_min_bid(env: &Env, id: u32, min_bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:253:8
+    |
+253 | pub fn auction_get_end_time(env: &Env, id: u32) -> u64 {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:260:8
+    |
+260 | pub fn auction_set_end_time(env: &Env, id: u32, end_time: u64) {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:270:8
+    |
+270 | pub fn auction_get_highest_bidder(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:276:8
+    |
+276 | pub fn auction_set_highest_bidder(env: &Env, id: u32, bidder: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:286:8
+    |
+286 | pub fn auction_get_highest_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:293:8
+    |
+293 | pub fn auction_set_highest_bid(env: &Env, id: u32, bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_is_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:303:8
+    |
+303 | pub fn auction_is_claimed(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:310:8
+    |
+310 | pub fn auction_set_claimed(env: &Env, id: u32) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+   Compiling creditra-credit v0.1.0 (/Users/amankoli/Creditra-Contracts/contracts/credit)
+warning: unused import: `super::*`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1613:9
+     |
+1613 |     use super::*;
+     |         ^^^^^^^^
+     |
+     = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::errors::AuctionError`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1614:9
+     |
+1614 |     use crate::errors::AuctionError;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AuctionStatus`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1615:54
+     |
+1615 |     use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};
+     |                                                      ^^^^^^^^^^^^^
+
+warning: unused import: `super::*`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1787:9
+     |
+1787 |     use super::*;
+     |         ^^^^^^^^
+
+warning: unused import: `TryIntoVal`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1790:57
+     |
+1790 |     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
+     |                                                         ^^^^^^^^^^
+
+warning: unused imports: `AssertUnwindSafe` and `catch_unwind`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1984:22
+     |
+1984 |     use std::panic::{catch_unwind, AssertUnwindSafe};
+     |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused import: `Ledger`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1616:48
+     |
+1616 |     use soroban_sdk::testutils::{Address as _, Ledger as _};
+     |                                                ^^^^^^
+
+warning: unused variable: `alice`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1008:13
+     |
+1008 |         let alice = Address::generate(&env);
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_alice`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `bob`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1009:13
+     |
+1009 |         let bob = Address::generate(&env);
+     |             ^^^ help: if this is intentional, prefix it with an underscore: `_bob`
+
+warning: unused variable: `borrower`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1113:13
+     |
+1113 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `client`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1809:13
+     |
+1809 |         let client = AuctionClient::new(&env, &contract_id);
+     |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_client`
+
+warning: function `advance_ledgers` is never used
+  --> gateway-contract/contracts/auction_contract/src/test.rs:21:8
+   |
+21 |     fn advance_ledgers(env: &Env, ledgers: u32) {
+   |        ^^^^^^^^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1990:14
+     |
+1990 |         env: &Env,
+     |              ^^^^ the lifetime is elided here
+...
+1993 |     ) -> (AuctionClient, Address, Address, Symbol) {
+     |           ^^^^^^^^^^^^^ the same lifetime is hidden here
+     |
+     = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+     = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+     |
+1993 |     ) -> (AuctionClient<'_>, Address, Address, Symbol) {
+     |                        ++++
+
+warning: `gateway-auction` (lib) generated 27 warnings
+warning: `gateway-auction` (lib test) generated 40 warnings (27 duplicates) (run `cargo fix --lib -p gateway-auction --tests` to apply 11 suggestions)
+   Compiling gateway-auction v0.1.0 (/Users/amankoli/Creditra-Contracts/gateway-contract/contracts/auction_contract)
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:2:1
+  |
+2 | //! Integration tests for `env.panic_with_error(AuctionError::…)` on public paths (Issue #609).
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+2 - //! Integration tests for `env.panic_with_error(AuctionError::…)` on public paths (Issue #609).
+2 + // Integration tests for `env.panic_with_error(AuctionError::…)` on public paths (Issue #609).
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:3:1
+  |
+3 | //!
+  | ^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+3 - //!
+3 + //
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:4:1
+  |
+4 | //! Contract failures must surface stable `AuctionError` discriminants — not host
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+4 - //! Contract failures must surface stable `AuctionError` discriminants — not host
+4 + // Contract failures must surface stable `AuctionError` discriminants — not host
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:5:1
+  |
+5 | //! string panics — so indexers and cross-contract callers can decode reverts.
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+5 - //! string panics — so indexers and cross-contract callers can decode reverts.
+5 + // string panics — so indexers and cross-contract callers can decode reverts.
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:6:1
+  |
+6 | //!
+  | ^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+6 - //!
+6 + //
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:7:1
+  |
+7 | //! # Running
+  | ^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+7 - //! # Running
+7 + // # Running
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:8:1
+  |
+8 | //!
+  | ^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+8 - //!
+8 + //
+  |
+
+error[E0753]: expected outer doc comment
+ --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:9:1
+  |
+9 | //! ```bash
+  | ^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+9 - //! ```bash
+9 + // ```bash
+  |
+
+error[E0753]: expected outer doc comment
+  --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:10:1
+   |
+10 | //! cargo test -p gateway-auction --test panic_with_error
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+10 - //! cargo test -p gateway-auction --test panic_with_error
+10 + // cargo test -p gateway-auction --test panic_with_error
+   |
+
+error[E0753]: expected outer doc comment
+  --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:11:1
+   |
+11 | //! ```
+   | ^^^^^^^
+12 |
+13 | use gateway_auction::{Auction, AuctionClient, AuctionError, AuctionMode};
+   | ------------------------------------------------------------------------- the inner doc comment doesn't annotate this `use` import
+   |
+help: to annotate the `use` import, change the doc comment from inner to outer style
+   |
+11 - //! ```
+11 + /// ```
+   |
+
+warning: unused import: `DutchAuctionDecay`
+  --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:31:85
+   |
+31 |     Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
+   |                                                                                     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:27:9
+    |
+ 18 |     client.init_auction(
+    |            ------------ arguments to this method are incorrect
+...
+ 27 |         &None,
+    |         ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0308]: arguments to this method are incorrect
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:46:12
+    |
+ 46 |     client.init_auction(
+    |            ^^^^^^^^^^^^
+    |
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:53:9
+    |
+ 53 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:54:9
+    |
+ 54 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<u32>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:56:9
+    |
+ 56 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<u32>`
+               found reference `&DutchAuctionDecay`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/refund_atomic.rs:71:9
+    |
+ 62 |     client.init_auction(
+    |            ------------ arguments to this method are incorrect
+...
+ 71 |         &None,
+    |         ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0308, E0753.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `gateway-auction` (test "panic_with_error") due to 11 previous errors
+warning: build failed, waiting for other jobs to finish...
+For more information about this error, try `rustc --explain E0308`.
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:179:17
+    |
+170 |             client.init_auction(
+    |                    ------------ arguments to this method are incorrect
+...
+179 |                 &None,
+    |                 ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error: could not compile `gateway-auction` (test "auth_settle") due to 1 previous error
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:193:17
+    |
+184 |             client.init_auction(
+    |                    ------------ arguments to this method are incorrect
+...
+193 |                 &None,
+    |                 ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0599]: no method named `with_mut` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:196:33
+    |
+196 |             client.env.ledger().with_mut(|li| li.timestamp = 1_000);
+    |                                 ^^^^^^^^ method not found in `soroban_sdk::ledger::Ledger`
+    |
+   ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:284:8
+    |
+284 |     fn with_mut<F>(&self, f: F)
+    |        -------- the method is available for `soroban_sdk::ledger::Ledger` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Ledger` which provides `with_mut` is implemented but not in scope; perhaps you want to import it
+    |
+ 30 + use soroban_sdk::testutils::Ledger;
+    |
+
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:220:9
+    |
+211 |     client.init_auction(
+    |            ------------ arguments to this method are incorrect
+...
+220 |         &None,
+    |         ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error: could not compile `gateway-auction` (test "refund_atomic") due to 1 previous error
+Some errors have detailed explanations: E0308, E0599.
+warning: `gateway-auction` (test "transition_matrix") generated 1 warning
+error: could not compile `gateway-auction` (test "transition_matrix") due to 4 previous errors; 1 warning emitted
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+ --> contracts/credit/src/query.rs:1:22
+  |
+1 | use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+  --> contracts/credit/src/risk.rs:63:94
+   |
+63 | ...ate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Symbol` and `symbol_short`
+  --> contracts/credit/src/risk.rs:65:19
+   |
+65 | use soroban_sdk::{symbol_short, Address, Env, Symbol};
+   |                   ^^^^^^^^^^^^                ^^^^^^
+
+warning: unused imports: `CreditLineEvent`, `publish_credit_line_event`, and `publish_token_rescued_event`
+   --> contracts/credit/src/lib.rs:140:5
+    |
+140 |     publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+143 |     publish_repayment_event, publish_token_rescued_event,
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+147 |     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
+    |                            ^^^^^^^^^^^^^^^
+
+warning: unused imports: `clear_repayment_schedule` and `rate_cfg_key`
+   --> contracts/credit/src/lib.rs:154:5
+    |
+154 |     clear_repayment_schedule, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+159 |     proposed_at_key, rate_cfg_key, rate_formula_key,
+    |                      ^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+   --> contracts/credit/src/lib.rs:174:43
+    |
+174 | use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
+    |                                           ^^^^^^^^^^^^
+
+error[E0425]: cannot find value `reserve_amount` in this scope
+    --> contracts/credit/src/lib.rs:2066:12
+     |
+2066 |         if reserve_amount > 0 {
+     |            ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `reserve_amount` in this scope
+    --> contracts/credit/src/lib.rs:2067:78
+     |
+2067 |             StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve_amount);
+     |                                                                              ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `draw_amount` in this scope
+    --> contracts/credit/src/lib.rs:2070:12
+     |
+2070 |         if draw_amount > 0 {
+     |            ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `draw_amount` in this scope
+    --> contracts/credit/src/lib.rs:2071:43
+     |
+2071 |             client.draw_credit(borrower, &draw_amount);
+     |                                           ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `sac` in this scope
+    --> contracts/credit/src/lib.rs:2711:9
+     |
+2711 |         sac.mint(&borrower, &100_i128);
+     |         ^^^ not found in this scope
+
+error[E0425]: cannot find value `token_address` in this scope
+    --> contracts/credit/src/lib.rs:2712:33
+     |
+2712 |         TokenClient::new(&env, &token_address).approve(
+     |                                 ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `contract_id` in this scope
+    --> contracts/credit/src/lib.rs:2714:14
+     |
+2714 |             &contract_id,
+     |              ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:2720:46
+     |
+2702 |         let (client, _admin, borrower) = base(&env);
+     |                      ------ `_admin` defined here
+...
+2720 |         client.close_credit_line(&borrower, &admin);
+     |                                              ^^^^^
+     |
+help: the leading underscore in `_admin` marks it as unused, consider renaming it to `admin`
+     |
+2702 -         let (client, _admin, borrower) = base(&env);
+2702 +         let (client, admin, borrower) = base(&env);
+     |
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3386:9
+     |
+3386 |         client.init(&admin);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:3386:22
+     |
+3386 |         client.init(&admin);
+     |                      ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3387:9
+     |
+3387 |         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3387:34
+     |
+3387 |         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+     |                                  ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3388:9
+     |
+3388 |         client.draw_credit(&borrower, &200_i128);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3388:29
+     |
+3388 |         client.draw_credit(&borrower, &200_i128);
+     |                             ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3389:9
+     |
+3389 |         client.repay_credit(&borrower, &50_i128);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3389:30
+     |
+3389 |         client.repay_credit(&borrower, &50_i128);
+     |                              ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3390:9
+     |
+3390 |         client.suspend_credit_line(&borrower);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3390:37
+     |
+3390 |         client.suspend_credit_line(&borrower);
+     |                                     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3391:9
+     |
+3391 |         client.default_credit_line(&borrower);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3391:37
+     |
+3391 |         client.default_credit_line(&borrower);
+     |                                     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3392:9
+     |
+3392 |         client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3392:39
+     |
+3392 |         client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
+     |                                       ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3393:9
+     |
+3393 |         client.close_credit_line(&borrower, &admin);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3393:35
+     |
+3393 |         client.close_credit_line(&borrower, &admin);
+     |                                   ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:3393:46
+     |
+3393 |         client.close_credit_line(&borrower, &admin);
+     |                                              ^^^^^ not found in this scope
+
+error[E0433]: cannot find module or crate `types` in this scope
+  --> contracts/credit/src/test_ttl.rs:84:50
+   |
+84 |         client.reinstate_credit_line(&borrower, &types::CreditStatus::Active);
+   |                                                  ^^^^^ use of unresolved module or unlinked crate `types`
+   |
+help: to make use of source file contracts/credit/src/types.rs, use `mod types` in this file to declare the module
+  --> contracts/credit/src/lib.rs:98:1
+   |
+98 + mod types;
+   |
+help: consider importing this enum through its public re-export
+   |
+ 3 +     use crate::CreditStatus;
+   |
+help: if you import `CreditStatus`, refer to it directly
+   |
+84 -         client.reinstate_credit_line(&borrower, &types::CreditStatus::Active);
+84 +         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+   |
+
+warning: unused import: `crate::events::LateFeeChargedEvent`
+   --> contracts/credit/src/lifecycle.rs:600:9
+    |
+600 |     use crate::events::LateFeeChargedEvent;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `Events as _`, `Symbol`, `TryFromVal`, and `TryIntoVal`
+   --> contracts/credit/src/lifecycle.rs:604:35
+    |
+604 |         testutils::{Address as _, Events as _, Ledger},
+    |                                   ^^^^^^^^^^^
+605 |         token::StellarAssetClient,
+606 |         Address, Env, Symbol, TryFromVal, TryIntoVal,
+    |                       ^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+ --> contracts/credit/src/query.rs:1:22
+  |
+1 | use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events as _`
+    --> contracts/credit/src/lib.rs:2041:9
+     |
+2041 |     use soroban_sdk::testutils::Events as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Symbol` and `symbol_short`
+    --> contracts/credit/src/lib.rs:2044:23
+     |
+2044 |     use soroban_sdk::{symbol_short, Symbol};
+     |                       ^^^^^^^^^^^^  ^^^^^^
+
+warning: unused imports: `TryFromVal` and `TryIntoVal`
+    --> contracts/credit/src/lib.rs:2045:23
+     |
+2045 |     use soroban_sdk::{TryFromVal, TryIntoVal};
+     |                       ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `crate::storage::DataKey`
+    --> contracts/credit/src/lib.rs:2046:9
+     |
+2046 |     use crate::storage::DataKey;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::events::RepaymentEvent`
+    --> contracts/credit/src/lib.rs:2047:9
+     |
+2047 |     use crate::events::RepaymentEvent;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ContractError` and `CreditStatus`
+    --> contracts/credit/src/lib.rs:2215:24
+     |
+2215 |     use crate::types::{ContractError, CreditStatus};
+     |                        ^^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused import: `TryIntoVal`
+    --> contracts/credit/src/lib.rs:2221:40
+     |
+2221 |     use soroban_sdk::{Env, TryFromVal, TryIntoVal};
+     |                                        ^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:2987:9
+     |
+2987 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Client as TokenClient` and `StellarAssetClient`
+    --> contracts/credit/src/lib.rs:2990:30
+     |
+2990 |     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+     |                              ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+    --> contracts/credit/src/lib.rs:3051:33
+     |
+3051 |         contract, contractimpl, symbol_short,
+     |                                 ^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token`
+    --> contracts/credit/src/lib.rs:3219:9
+     |
+3219 |     use soroban_sdk::token;
+     |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+    --> contracts/credit/src/lib.rs:3220:9
+     |
+3220 |     use soroban_sdk::token::StellarAssetClient;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::boxed::Box`
+    --> contracts/credit/src/lib.rs:3222:9
+     |
+3222 |     use std::boxed::Box;
+     |         ^^^^^^^^^^^^^^^
+
+warning: unused imports: `AssertUnwindSafe` and `catch_unwind`
+    --> contracts/credit/src/lib.rs:3223:22
+     |
+3223 |     use std::panic::{catch_unwind, AssertUnwindSafe};
+     |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3414:9
+     |
+3414 |         #[test]
+     |         ^^^^^^^
+     |
+     = note: `#[warn(unnameable_test_items)]` on by default
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3434:9
+     |
+3434 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3453:9
+     |
+3453 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3472:9
+     |
+3472 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3491:9
+     |
+3491 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3514:9
+     |
+3514 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3544:9
+     |
+3544 |         #[test]
+     |         ^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:3590:9
+     |
+3590 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:3638:9
+     |
+3638 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+    --> contracts/credit/src/lib.rs:5196:13
+     |
+5196 |         use soroban_sdk::token::StellarAssetClient;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:5365:9
+     |
+5365 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:5468:9
+     |
+5468 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger as _`
+    --> contracts/credit/src/lib.rs:5560:9
+     |
+5560 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+ --> contracts/credit/src/test_ttl.rs:7:9
+  |
+7 |     use soroban_sdk::token::StellarAssetClient;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `previous_utilized`
+   --> contracts/credit/src/lifecycle.rs:318:9
+    |
+318 |     let previous_utilized = stored_line.utilized_amount;
+    |         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_previous_utilized`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `previous_status`
+   --> contracts/credit/src/lifecycle.rs:336:9
+    |
+336 |     let previous_status = credit_line.status;
+    |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_previous_status`
+
+warning: constant `SECONDS_PER_YEAR` is never used
+   --> contracts/credit/src/accrual.rs:112:18
+    |
+112 | pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
+    |                  ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `compute_interest` is never used
+   --> contracts/credit/src/accrual.rs:121:4
+    |
+121 | fn compute_interest(utilized: i128, rate_bps: i128, seconds: i128) -> Result<i128, ContractError> {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `get_current_version` is never used
+  --> contracts/credit/src/handshake.rs:10:8
+   |
+10 | pub fn get_current_version() -> ProtocolVersion {
+   |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `verify_version` is never used
+  --> contracts/credit/src/handshake.rs:14:8
+   |
+14 | pub fn verify_version(_env: &Env, other_version: ProtocolVersion) -> bool {
+   |        ^^^^^^^^^^^^^^
+
+warning: function `draw_credit` is never used
+  --> contracts/credit/src/borrow.rs:23:8
+   |
+23 | pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
+   |        ^^^^^^^^^^^
+
+warning: function `repay_credit` is never used
+   --> contracts/credit/src/borrow.rs:172:8
+    |
+172 | pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
+    |        ^^^^^^^^^^^^
+
+warning: function `set_penalty_surcharge_bps` is never used
+   --> contracts/credit/src/risk.rs:128:8
+    |
+128 | pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_penalty_surcharge_bps` is never used
+   --> contracts/credit/src/risk.rs:147:8
+    |
+147 | pub fn get_penalty_surcharge_bps(env: Env) -> u32 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VRF_COMMITMENT_HASH_LEN` is never used
+  --> contracts/credit/src/scoring.rs:37:11
+   |
+37 | pub const VRF_COMMITMENT_HASH_LEN: u32 = 32;
+   |           ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `derive_score_from_hash_test_helper` is never used
+   --> contracts/credit/src/scoring.rs:166:8
+    |
+166 | pub fn derive_score_from_hash_test_helper(hash: &BytesN<32>) -> u32 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_max_draw_amount` is never used
+   --> contracts/credit/src/storage.rs:911:8
+    |
+911 | pub fn get_max_draw_amount(env: &Env) -> Option<i128> {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `set_max_draw_amount` is never used
+   --> contracts/credit/src/storage.rs:916:8
+    |
+916 | pub fn set_max_draw_amount(env: &Env, amount: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_max_repay_amount` is never used
+   --> contracts/credit/src/storage.rs:923:8
+    |
+923 | pub fn get_max_repay_amount(env: &Env) -> Option<i128> {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `set_max_repay_amount` is never used
+   --> contracts/credit/src/storage.rs:928:8
+    |
+928 | pub fn set_max_repay_amount(env: &Env, amount: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `set_draws_frozen` is never used
+   --> contracts/credit/src/storage.rs:949:8
+    |
+949 | pub fn set_draws_frozen(env: &Env, frozen: bool, reason: FreezeReason) {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `is_draws_frozen` is never used
+   --> contracts/credit/src/storage.rs:956:8
+    |
+956 | pub fn is_draws_frozen(env: &Env) -> bool {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `assert_ts_monotonic` is never used
+    --> contracts/credit/src/storage.rs:1015:8
+     |
+1015 | pub fn assert_ts_monotonic(env: &Env, stored_ts: u64, new_ts: u64) {
+     |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `set_penalty_surcharge_bps` is never used
+    --> contracts/credit/src/storage.rs:1103:8
+     |
+1103 | pub fn set_penalty_surcharge_bps(env: &Env, bps: u32) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: comparison is useless due to type limits
+  --> contracts/credit/src/handshake.rs:17:45
+   |
+17 |     current.major == other_version.major && other_version.minor >= 0
+   |                                             ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_comparisons)]` on by default
+
+error[E0308]: mismatched types
+   --> contracts/credit/src/attestation.rs:281:9
+    |
+278 |     fn leaf(env: &Env, pattern: u8) -> BytesN<32> {
+    |                                        ---------- expected `soroban_sdk::BytesN<32>` because of return type
+...
+281 |         env.crypto().sha256(&data)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `BytesN<32>`, found `Hash<32>`
+    |
+    = note: expected struct `soroban_sdk::BytesN<32>`
+               found struct `soroban_sdk::crypto::Hash<32>`
+help: call `Into::into` on this expression to convert `soroban_sdk::crypto::Hash<32>` into `soroban_sdk::BytesN<32>`
+    |
+281 |         env.crypto().sha256(&data).into()
+    |                                   +++++++
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:16:27
+   |
+16 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:66:27
+   |
+66 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:87:27
+   |
+87 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+    --> contracts/credit/src/lib.rs:2073:9
+     |
+2054 |     ) -> (CreditClient<'a>, Address) {
+     |          --------------------------- expected `(CreditClient<'a>, soroban_sdk::Address)` because of return type
+...
+2073 |         (client, token_address, contract_id, admin)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected a tuple with 2 elements, found one with 4 elements
+     |
+     = note: expected tuple `(CreditClient<'a>, soroban_sdk::Address)`
+                found tuple `(CreditClient<'a>, soroban_sdk::Address, soroban_sdk::Address, soroban_sdk::Address)`
+
+warning: `creditra-credit` (lib) generated 27 warnings (run `cargo fix --lib -p creditra-credit` to apply 8 suggestions)
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:2213:9
+     |
+2213 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:2218:9
+     |
+2218 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:2653:9
+     |
+2653 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:3048:9
+     |
+3048 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:3217:9
+     |
+3217 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:3200:9
+     |
+3200 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:3751:13
+     |
+3751 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:3748:9
+     |
+3748 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:4813:13
+     |
+4813 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:4810:9
+     |
+4810 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:5563:13
+     |
+5563 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:5044:9
+     |
+5044 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:5047:13
+     |
+5047 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:5195:13
+     |
+5195 |         use soroban_sdk::testutils::Ledger;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:5193:9
+     |
+5193 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:5222:9
+     |
+5222 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `env`
+   --> contracts/credit/src/lifecycle.rs:634:9
+    |
+634 |         env: &Env,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `hash_zero`
+   --> contracts/credit/src/scoring.rs:242:13
+    |
+242 |         let hash_zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_zero`
+
+warning: unused variable: `hash_max`
+   --> contracts/credit/src/scoring.rs:243:13
+    |
+243 |         let hash_max: BytesN<32> = BytesN::from_array(&env, &[255u8; 32]);
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_max`
+
+warning: unused variable: `hash_mixed`
+   --> contracts/credit/src/scoring.rs:244:13
+    |
+244 | ...   let hash_mixed: BytesN<32> = BytesN::from_array(&env, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20...
+    |           ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_mixed`
+
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:3165:50
+     |
+3165 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                  ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:3165:63
+     |
+3165 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                               ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `from`
+    --> contracts/credit/src/lib.rs:3177:58
+     |
+3177 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                          ^^^^ help: if this is intentional, prefix it with an underscore: `_from`
+
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:3177:73
+     |
+3177 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                         ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:3177:86
+     |
+3177 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:3189:24
+     |
+3189 |         pub fn balance(env: Env, _id: Address) -> i128 {
+     |                        ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:3193:26
+     |
+3193 |         pub fn allowance(env: Env, _from: Address, _spender: Address) -> i128 {
+     |                          ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+Some errors have detailed explanations: E0308, E0425, E0433.
+warning: `creditra-credit` (lib test) generated 68 warnings (7 duplicates)
+error: could not compile `creditra-credit` (lib test) due to 28 previous errors; 68 warnings emitted

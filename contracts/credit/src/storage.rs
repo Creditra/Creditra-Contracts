@@ -192,6 +192,16 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Protocol-level max close factor in basis points for partial liquidation settlements.
+    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
+    CloseFactorBps,
+    /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
+    /// Stored when admin invokes pause with a reason; cleared on unpause.
+    PauseReason,
+    /// Per-borrower aggregated attestation batch committed as a Merkle root.
+    /// Stores an [`crate::attestation::AttestationBatch`] whose `merkle_root`
+    /// is the SHA-256 root of all leaf hashes in the batch.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -590,6 +600,15 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .set(&DataKey::BountyAddress, bounty);
 }
 
+/// Minimum TTL threshold for credit-line persistent entries.
+/// If the remaining TTL falls below this ledger count we extend it.
+/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
+
+/// Target TTL to extend credit-line persistent entries to on every interaction.
+/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
+
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
     env.storage()
@@ -651,6 +670,18 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Instance storage key for the grace period configuration.
 pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
+}
+
+/// Persistent storage key that acts as a replay guard for a default liquidation settlement.
+///
+/// A settlement is idempotent: the first call sets the key, subsequent calls
+/// detect the key and revert with [`ContractError::AlreadyInitialized`].
+///
+/// The key is constructed from the borrower address and a caller-supplied
+/// `settlement_id` symbol so that the same borrower can have multiple
+/// independent settlement events without collision.
+pub fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> (Address, Symbol) {
+    (borrower.clone(), settlement_id.clone())
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.

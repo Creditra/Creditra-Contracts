@@ -27,6 +27,7 @@
 //! cargo test -p gateway-auction --test transition_matrix
 //! ```
 
+use soroban_sdk::testutils::Ledger as _;
 use gateway_auction::{
     Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
 };
@@ -175,10 +176,10 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &1_i128,
                 &0_u32,
                 &None,
-                &None,
-                &None,
-                &None,
-            );
+        &None,
+        &gateway_auction::DutchAuctionDecay::None,
+        &None,
+);
         }
         AuctionMode::Dutch => {
             client.init_auction(
@@ -215,13 +216,13 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
         &u64::MAX,
         &1_i128,
         &0_u32,
+        &None,
+        &None,
         &DutchAuctionDecay::None,
-       &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
+        &None,
     );
 
-    match (mode, from) {
+    match (mode, from.clone()) {
         (_, AuctionStatus::Open) => {}
         (AuctionMode::English, AuctionStatus::Closed) => {
             client.place_bid(&auction_id, &winner, &100_i128);

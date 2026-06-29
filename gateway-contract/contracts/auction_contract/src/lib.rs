@@ -56,48 +56,50 @@ pub fn compute_dutch_price(
         .checked_sub(floor_price)
         .expect("start_price must be >= floor_price");
 
-    let elapsed_i128 = elapsed_time as i128;
-    let duration_i128 = duration as i128;
+    let p_u128 = price_drop as u128;
 
     let drop_so_far = match decay {
-        DutchAuctionDecay::None | DutchAuctionDecay::Linear => price_drop
-            .checked_mul(elapsed_i128)
-            .expect("overflow in Dutch price calculation")
-            .checked_div(duration_i128)
-            .expect("division should succeed with positive duration"),
+        DutchAuctionDecay::None | DutchAuctionDecay::Linear => {
+            let e_u128 = elapsed_time as u128;
+            let d_u128 = duration as u128;
+            
+            let q = p_u128 / d_u128;
+            let r = p_u128 % d_u128;
+            
+            let drop = (q * e_u128) + ((r * e_u128) / d_u128);
+            drop as i128
+        }
 
         DutchAuctionDecay::Stepped => {
             let steps = match step_count {
-                Some(s) if s > 0 => i128::from(s),
+                Some(s) if s > 0 => s as u128,
                 Some(_) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
                 None => panic!("dutch_step_count required for stepped Dutch auctions"),
             };
-            let elapsed_steps = i128::from(
-                elapsed_time
-                    .checked_mul(steps as u64)
-                    .expect("overflow in stepped Dutch step calculation")
-                    / duration,
-            );
-            price_drop
-                .checked_mul(elapsed_steps)
-                .expect("overflow in Dutch price calculation")
-                .checked_div(steps)
-                .expect("division should succeed with positive step count")
+            
+            let e_u128 = elapsed_time as u128;
+            let d_u128 = duration as u128;
+            let elapsed_steps = (e_u128 * steps) / d_u128;
+            
+            let q = p_u128 / steps;
+            let r = p_u128 % steps;
+            
+            let drop = (q * elapsed_steps) + ((r * elapsed_steps) / steps);
+            drop as i128
         }
 
         DutchAuctionDecay::Exponential => {
-            let t = elapsed_i128.min(100);
-            let mut factor = 10_000i128;
+            let t = elapsed_time.min(100);
+            let mut factor = 10_000u128;
             for _ in 0..t {
-                factor = factor
-                    .checked_mul(9_900)
-                    .expect("overflow in exponential factor")
-                    / 10_000;
+                factor = (factor * 9_900) / 10_000;
             }
-            price_drop
-                .checked_mul(10_000 - factor)
-                .expect("overflow in exponential drop calculation")
-                / 10_000
+            let drop_factor = 10_000 - factor;
+            let q = p_u128 / 10_000;
+            let r = p_u128 % 10_000;
+            
+            let drop = (q * drop_factor) + ((r * drop_factor) / 10_000);
+            drop as i128
         }
     };
 
@@ -286,9 +288,7 @@ impl Auction {
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
 
-                if let (Some(prev_bidder), Some(tkn)) =
-                    (state.highest_bidder.clone(), token_addr)
-                {
+                if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
                     let refund_amount = state.highest_bid;
                     publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
                     set_reentrancy_guard(&env);
@@ -435,9 +435,7 @@ impl Auction {
 
         let mut updated_state = state;
         updated_state.status = AuctionStatus::Claimed;
-        env.storage()
-            .persistent()
-            .set(&auction_id, &updated_state);
+        env.storage().persistent().set(&auction_id, &updated_state);
         bump_auction_state_ttl(&env, &auction_id);
 
         set_reentrancy_guard(&env);

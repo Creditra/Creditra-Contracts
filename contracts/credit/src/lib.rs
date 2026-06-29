@@ -1,4 +1,3 @@
-mod handshake;
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
@@ -132,6 +131,11 @@ mod views_tests;
 
 use crate::auth::require_admin_auth;
 use crate::attestation::AttestationBatch;
+use crate::events::publish_protocol_fee_bps_set_event;
+use crate::events::publish_protocol_fee_bounds_set_event;
+use crate::events::publish_close_factor_bps_set_event;
+use crate::events::publish_paused_event;
+use crate::types::ProofOfReserve;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
@@ -1310,7 +1314,7 @@ impl Credit {
     /// # Returns
     /// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
     pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
-        lifecycle::get_credit_limit_bounds(env)
+        lifecycle::get_credit_limit_bounds(&env)
     }
 
     /// Get the number of indexed credit lines.
@@ -1359,7 +1363,7 @@ impl Credit {
     }
 
     pub fn self_suspend_credit_line(env: Env, borrower: Address) {
-        lifecycle::self_suspend_credit_line(env, borrower)
+        lifecycle::suspend_credit_line(env, borrower)
     }
 
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
@@ -1821,8 +1825,12 @@ impl Credit {
         publish_paused_event(&env, paused);
     }
 
+    pub fn set_late_fee_flat(env: Env, fee: i128) {
+        crate::storage::set_late_fee_flat(&env, fee)
+    }
+
     pub fn freeze_draws(env: Env) {
-        freeze::freeze_draws(env)
+        freeze::freeze_draws(env, crate::types::FreezeReason::LiquidityReserve)
     }
 
     pub fn unfreeze_draws(env: Env) {
@@ -2038,7 +2046,9 @@ mod test_rate_change_limits {
         borrower: &Address,
         credit_limit: i128,
         interest_rate_bps: u32,
-    ) -> (CreditClient<'a>, Address) {
+        reserve_amount: i128,
+        draw_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address, Address) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
@@ -2138,11 +2148,11 @@ mod test_rate_change_limits {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+        let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
         client.set_rate_change_limits(&100_u32, &60_u64);
 
-        env.ledger().set_timestamp(100);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
         client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
         let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -2156,7 +2166,7 @@ mod test_rate_change_limits {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+        let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
         client.set_rate_change_limits(&50_u32, &0_u64);
         client.update_risk_parameters(&borrower, &5_000_i128, &400_u32, &70_u32);
@@ -2168,14 +2178,14 @@ mod test_rate_change_limits {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+        let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
         client.set_rate_change_limits(&100_u32, &3600_u64);
 
-        env.ledger().set_timestamp(100);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
         client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
-        env.ledger().set_timestamp(200);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(200); }
         client.update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
     }
 
@@ -2684,17 +2694,20 @@ mod test_smoke_coverage {
     #[test]
     fn lifecycle_suspend_and_reinstate() {
         let env = Env::default();
-        let (client, _admin, borrower) = base(&env);
+        let (client, token_address, contract_id, admin) = base(&env);
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Suspended
         );
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
 
+        let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
         sac.mint(&borrower, &100_i128);
-        TokenClient::new(&env, &token_address).approve(
+        soroban_sdk::token::TokenClient::new(&env, &token_address).approve(
             &borrower,
             &contract_id,
             &100_i128,
@@ -2773,7 +2786,7 @@ mod test_smoke_coverage {
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Active
@@ -2899,7 +2912,7 @@ mod test_smoke_coverage {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set_timestamp(1_000);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
         let borrower = Address::generate(&env);
         let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 400);
 
@@ -2909,12 +2922,12 @@ mod test_smoke_coverage {
         assert_eq!(line_before.accrued_interest, 0);
 
         // Advance ledger so the checkpoint is non-zero after accrual
-        env.ledger().set_timestamp(1_000);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
 
         StellarAssetClient::new(&env, &token).mint(&borrower, &100);
         approve(&env, &token, &borrower, &contract_id, 100);
 
-        env.ledger().set_timestamp(100);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
         client.repay_credit(&borrower, &100);
 
         let line_after = client.get_credit_line(&borrower).unwrap();
@@ -2929,17 +2942,17 @@ mod test_smoke_coverage {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set_timestamp(1_000);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
         let borrower = Address::generate(&env);
         let (client, token, contract_id, _admin) = setup(&env, &borrower, 10_000, 10_000, 1_000);
 
         // Set a non-zero timestamp so the accrual checkpoint is non-zero
-        env.ledger().set_timestamp(1_000);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
 
         // First repay sets the accrual checkpoint
         StellarAssetClient::new(&env, &token).mint(&borrower, &100);
         approve(&env, &token, &borrower, &contract_id, 100);
-        env.ledger().set_timestamp(100);
+        { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
         client.repay_credit(&borrower, &100);
 
         let line_after_first = client.get_credit_line(&borrower).unwrap();
@@ -3269,7 +3282,7 @@ mod test_mock_liquidity_token {
         let env = Env::default();
         let (client, _admin, borrower) = base_setup(&env);
         // Line is Active, not Defaulted
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
     }
 
     #[test]
@@ -3279,7 +3292,7 @@ mod test_mock_liquidity_token {
         let (client, _admin, borrower) = base_setup(&env);
         client.suspend_credit_line(&borrower);
         // Line is Suspended, not Defaulted
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
     }
 
     // ── open_credit_line: allows reopening after Closed status ───────────────
@@ -3317,7 +3330,7 @@ mod test_mock_liquidity_token {
         env.mock_all_auths();
         let (client, _admin, borrower) = base_setup(&env);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
         assert_eq!(
@@ -3371,7 +3384,7 @@ mod test_mock_liquidity_token {
         client.repay_credit(&borrower, &50_i128);
         client.suspend_credit_line(&borrower);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
         client.close_credit_line(&borrower, &admin);
 
         // ── Repayment Allocation Policy Tests ────────────────────────────────────
@@ -3498,7 +3511,7 @@ mod test_mock_liquidity_token {
             use soroban_sdk::testutils::Ledger;
             let env = Env::default();
             env.mock_all_auths();
-            env.ledger().set_timestamp(1_000);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
             let borrower = Address::generate(&env);
             let (client, token, contract_id, _admin) = setup(&env, &borrower, 1_000, 1_000, 400);
 
@@ -3508,12 +3521,12 @@ mod test_mock_liquidity_token {
             assert_eq!(line_before.accrued_interest, 0);
 
             // Advance ledger so the checkpoint is non-zero after accrual
-            env.ledger().set_timestamp(1_000);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
 
             StellarAssetClient::new(&env, &token).mint(&borrower, &100);
             approve(&env, &token, &borrower, &contract_id, 100);
 
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.repay_credit(&borrower, &100);
 
             let line_after = client.get_credit_line(&borrower).unwrap();
@@ -3528,18 +3541,18 @@ mod test_mock_liquidity_token {
             use soroban_sdk::testutils::Ledger;
             let env = Env::default();
             env.mock_all_auths();
-            env.ledger().set_timestamp(1_000);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
             let borrower = Address::generate(&env);
             let (client, token, contract_id, _admin) =
                 setup(&env, &borrower, 10_000, 10_000, 1_000);
 
             // Set a non-zero timestamp so the accrual checkpoint is non-zero
-            env.ledger().set_timestamp(1_000);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(1_000); }
 
             // First repay sets the accrual checkpoint
             StellarAssetClient::new(&env, &token).mint(&borrower, &100);
             approve(&env, &token, &borrower, &contract_id, 100);
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.repay_credit(&borrower, &100);
 
             let line_after_first = client.get_credit_line(&borrower).unwrap();
@@ -4205,7 +4218,7 @@ mod test_mock_liquidity_token {
             let (client, token, contract_id, _admin) =
                 setup_with_reserve(&env, &borrower, 1_000, 500);
 
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.draw_credit(&borrower, &300);
 
             let credit_line_after_first_draw = client.get_credit_line(&borrower).unwrap();
@@ -4217,7 +4230,7 @@ mod test_mock_liquidity_token {
             let drawn_events_before_failure = count_credit_event(&env, "drawn");
             let accrue_events_before_failure = count_credit_event(&env, "accrue");
 
-            env.ledger().set_timestamp(200);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(200); }
             let result = catch_unwind(AssertUnwindSafe(|| {
                 client.draw_credit(&borrower, &250);
             }));
@@ -4269,7 +4282,7 @@ mod test_mock_liquidity_token {
                 setup_with_reserve(&env, &borrower_one, 1_000, 500);
             client.open_credit_line(&borrower_two, &1_000, &300_u32, &55_u32);
 
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.draw_credit(&borrower_one, &300);
 
             let borrower_one_after_draw = client.get_credit_line(&borrower_one).unwrap();
@@ -4283,7 +4296,7 @@ mod test_mock_liquidity_token {
             let drawn_events_before_failure = count_credit_event(&env, "drawn");
             let accrue_events_before_failure = count_credit_event(&env, "accrue");
 
-            env.ledger().set_timestamp(200);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(200); }
             let result = catch_unwind(AssertUnwindSafe(|| {
                 client.draw_credit(&borrower_two, &250);
             }));
@@ -4332,10 +4345,10 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             let (client, _admin, borrower) = base_setup(&env);
             client.set_rate_change_limits(&1_000_u32, &86_400_u64);
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.update_risk_parameters(&borrower, &1_000, &600_u32, &60_u32);
             // Advance past the minimum interval
-            env.ledger().set_timestamp(100 + 86_400 + 1);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100 + 86_400 + 1); }
             client.update_risk_parameters(&borrower, &1_000, &700_u32, &60_u32);
             assert_eq!(
                 client.get_credit_line(&borrower).unwrap().interest_rate_bps,
@@ -4626,15 +4639,15 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             client.set_rate_change_limits(&100_u32, &3600_u64);
 
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
             // Exactly on the interval boundary: elapsed == 3600.
-            env.ledger().set_timestamp(3700);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(3700); }
             client.update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
 
             let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -4647,11 +4660,11 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             // Interval set but first update should always pass (last_rate_update_ts == 0).
             client.set_rate_change_limits(&100_u32, &86400_u64);
-            env.ledger().set_timestamp(10);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(10); }
             client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
             let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -4663,15 +4676,15 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             client.set_rate_change_limits(&100_u32, &0_u64);
 
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
             // Immediate subsequent update should still pass because interval == 0 disables the gate.
-            env.ledger().set_timestamp(101);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(101); }
             client.update_risk_parameters(&borrower, &5_000_i128, &330_u32, &70_u32);
 
             let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -4684,7 +4697,7 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             // Strict limits: 0 bps max change, huge interval.
             client.set_rate_change_limits(&0_u32, &999_999_u64);
@@ -4701,7 +4714,7 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 0);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 0, 0, 0);
 
             // No set_rate_change_limits call → unlimited changes.
             client.update_risk_parameters(&borrower, &5_000_i128, &9_999_u32, &70_u32);
@@ -4731,10 +4744,10 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             client.set_rate_change_limits(&100_u32, &0_u64);
-            env.ledger().set_timestamp(42);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(42); }
             client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
             let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -4746,20 +4759,20 @@ mod test_mock_liquidity_token {
             let env = Env::default();
             env.mock_all_auths();
             let borrower = Address::generate(&env);
-            let (client, _admin) = setup(&env, &borrower, 5_000, 300);
+            let (client, _, _, _admin) = setup(&env, &borrower, 5_000, 300, 0, 0);
 
             client.set_rate_change_limits(&50_u32, &60_u64);
 
             // First update at t=100: 300 → 350
-            env.ledger().set_timestamp(100);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(100); }
             client.update_risk_parameters(&borrower, &5_000_i128, &350_u32, &70_u32);
 
             // Second update at t=161: 350 → 320 (delta 30 ≤ 50)
-            env.ledger().set_timestamp(161);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(161); }
             client.update_risk_parameters(&borrower, &5_000_i128, &320_u32, &65_u32);
 
             // Third update at t=222: 320 → 370 (delta 50 == limit)
-            env.ledger().set_timestamp(222);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(222); }
             client.update_risk_parameters(&borrower, &5_000_i128, &370_u32, &60_u32);
 
             let line: CreditLineData = client.get_credit_line(&borrower).unwrap();
@@ -4825,7 +4838,7 @@ mod test_mock_liquidity_token {
         fn freeze_draws_sets_flag() {
             let env = Env::default();
             let (client, _admin, _borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             assert!(client.is_draws_frozen());
         }
 
@@ -4835,7 +4848,7 @@ mod test_mock_liquidity_token {
         fn draw_credit_reverts_when_frozen() {
             let env = Env::default();
             let (client, _admin, borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             client.draw_credit(&borrower, &100_i128);
         }
 
@@ -4859,7 +4872,7 @@ mod test_mock_liquidity_token {
             // Draw before freeze
             client.draw_credit(&borrower, &500_i128);
             // Freeze draws
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             // Fund borrower and approve for repayment
             sac.mint(&borrower, &200_i128);
             soroban_sdk::token::Client::new(&env, &token_address).approve(
@@ -4881,7 +4894,7 @@ mod test_mock_liquidity_token {
         fn unfreeze_draws_clears_flag() {
             let env = Env::default();
             let (client, _admin, _borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             assert!(client.is_draws_frozen());
             client.unfreeze_draws();
             assert!(!client.is_draws_frozen());
@@ -4892,7 +4905,7 @@ mod test_mock_liquidity_token {
         fn draw_credit_succeeds_after_unfreeze() {
             let env = Env::default();
             let (client, _admin, borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             client.unfreeze_draws();
             client.draw_credit(&borrower, &100_i128);
             assert_eq!(
@@ -4914,7 +4927,7 @@ mod test_mock_liquidity_token {
             let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
             // No auth mocked → should panic
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
         }
 
         /// Non-admin cannot unfreeze draws.
@@ -4940,7 +4953,7 @@ mod test_mock_liquidity_token {
 
             let env = Env::default();
             let (client, _admin, _borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
 
             let events = env.events().all();
             let (_contract, topics, data) = events.last().unwrap();
@@ -4960,7 +4973,7 @@ mod test_mock_liquidity_token {
 
             let env = Env::default();
             let (client, _admin, _borrower) = setup(&env);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
             client.unfreeze_draws();
 
             let events = env.events().all();
@@ -4986,7 +4999,7 @@ mod test_mock_liquidity_token {
             client.init(&admin);
             client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &70_u32);
             client.open_credit_line(&borrower_b, &2_000_i128, &300_u32, &70_u32);
-            client.freeze_draws(&FreezeReason::LiquidityReserve);
+            client.freeze_draws();
 
             // Verify the flag is set — both borrowers are blocked by the same flag
             assert!(client.is_draws_frozen());
@@ -5010,7 +5023,7 @@ mod test_mock_liquidity_token {
             client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
             client_b.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
-            client_a.freeze_draws(&FreezeReason::LiquidityReserve);
+            client_a.freeze_draws();
 
             assert!(client_a.is_draws_frozen());
             assert!(!client_b.is_draws_frozen());
@@ -5043,7 +5056,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
 
             client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
 
@@ -5062,7 +5075,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
             client.freeze_borrower_until(&admin, &borrower, &now);
         }
 
@@ -5073,12 +5086,12 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let start = 1_700_000_000u64;
-            env.ledger().set_timestamp(start);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(start); }
 
             client.freeze_borrower_until(&admin, &borrower, &(start + 3600));
             assert!(client.is_borrower_frozen(&borrower));
 
-            env.ledger().set_timestamp(start + 3600);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(start + 3600); }
             assert!(!client.is_borrower_frozen(&borrower));
         }
 
@@ -5091,7 +5104,7 @@ mod test_mock_liquidity_token {
             let non_admin = Address::generate(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
             client.freeze_borrower_until(&non_admin, &borrower, &(now + 3600));
         }
 
@@ -5102,7 +5115,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, _contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
 
             client.freeze_borrower_until(&admin, &borrower, &(now + 7200));
             assert!(client.is_borrower_frozen(&borrower));
@@ -5130,7 +5143,7 @@ mod test_mock_liquidity_token {
 
             let now = 1_700_000_000u64;
             let expiry = now + 3600;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
 
             client.freeze_borrower_until(&admin, &borrower, &expiry);
 
@@ -5152,7 +5165,7 @@ mod test_mock_liquidity_token {
             let (client, admin, borrower, contract_id) = setup(&env);
 
             let now = 1_700_000_000u64;
-            env.ledger().set_timestamp(now);
+            { use soroban_sdk::testutils::Ledger as _; env.ledger().set_timestamp(now); }
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
             let token = token_id.address();
@@ -5728,3 +5741,4 @@ mod test_mock_liquidity_token {
 
 #[cfg(test)]
 mod test_ttl;
+mod handshake;
