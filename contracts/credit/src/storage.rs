@@ -156,7 +156,7 @@ pub enum DataKey {
     AuctionContract,
     /// Maximum total exposure allowed across all credit lines (admin-configurable).
     MaxTotalExposure,
-    /// Protocol fee in basis points applied to interest portion of repayments.
+    /// Protocol fee in basis points applied to total repayment amount.
     ProtocolFeeBps,
     /// Minimum allowed protocol fee in basis points (governance-configurable).
     MinProtocolFeeBps,

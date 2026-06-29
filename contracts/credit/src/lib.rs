@@ -24,7 +24,7 @@
 //!   into the configured `LiquidityToken`.
 //! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
 //!   be able to deleverage. Interest-first allocation with optional
-//!   protocol-fee-on-interest split between treasury and bounty accumulators.
+//!   protocol-fee-on-repayment split between treasury and bounty accumulators.
 //! - **Risk update** — `update_risk_parameters` either computes the new rate
 //!   from `risk_score` via the piecewise-linear formula (if configured) or
 //!   accepts an admin-supplied rate; both paths are clamped and gated by the
@@ -570,12 +570,12 @@ impl Credit {
                 let token_client = token::Client::new(&env, &token_address);
                 let contract_address = env.current_contract_address();
 
-                // Compute protocol fee only on the interest component.
+                // Compute protocol fee on the total repayment amount.
                 let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
                 let mut fee: i128 = 0;
-                if fee_bps > 0 && interest_repaid > 0 {
+                if fee_bps > 0 && effective_repay > 0 {
                     fee = crate::math_utils::apply_bps(
-                        interest_repaid as u128,
+                        effective_repay as u128,
                         fee_bps,
                         Rounding::Floor,
                     ) as i128;

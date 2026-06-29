@@ -3,7 +3,7 @@ use crate::events::{
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
-use crate::math_utils::{mul_div, Rounding};
+use crate::math_utils::{apply_bps, mul_div, Rounding};
 use crate::storage::{
     clear_reentrancy_guard, get_collateral_balance, persist_credit_line, set_reentrancy_guard,
     DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
@@ -332,12 +332,39 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
                 panic!("Insufficient balance");
             }
 
-            token_client.transfer_from(
-                &contract_address,
-                &borrower,
-                &reserve_address,
-                &effective_repay,
-            );
+            // Compute protocol fee on the total repayment amount.
+            let fee_bps: u32 =
+                crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let mut fee: i128 = 0;
+            if fee_bps > 0 && effective_repay > 0 {
+                fee = apply_bps(
+                    effective_repay as u128,
+                    fee_bps,
+                    Rounding::Floor,
+                ) as i128;
+            }
+
+            // Transfer fee portion into contract (treasury accumulator), then
+            // transfer remaining amount into the reserve.
+            if fee > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &contract_address,
+                    &fee,
+                );
+                crate::fees::accrue_protocol_fee(&env, &borrower, fee);
+            }
+
+            let reserve_amount = effective_repay.saturating_sub(fee);
+            if reserve_amount > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &reserve_address,
+                    &reserve_amount,
+                );
+            }
         }
     }
 
