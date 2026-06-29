@@ -3177,6 +3177,48 @@ pub mod test_helpers {
             1_000_000 // dummy allowance
         }
     }
+
+    /// Return the stable numeric enumeration id assigned to `borrower`, if any.
+    ///
+    /// # Bijection property
+    ///
+    /// Every borrower that has ever been registered via [`ensure_credit_line_id`]
+    /// gets a unique `u32` id, and that id maps back to the exact same borrower
+    /// via [`get_borrower_by_credit_line_id`]. The two mappings jointly form a
+    /// bijection between the set of registered borrowers and `[0, n)`.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic. Returns `None` when no id has been assigned.
+    pub fn get_credit_line_id(env: &Env, borrower: &Address) -> Option<u32> {
+        crate::storage::get_credit_line_id(env, borrower)
+    }
+
+    /// Return the borrower address that was assigned `id`, if any.
+    ///
+    /// This is the left-inverse of [`get_credit_line_id`]. Together they form a
+    /// bijection between registered borrowers and their enumeration ids.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic. Returns `None` when no borrower carries this id.
+    pub fn get_borrower_by_credit_line_id(env: &Env, id: u32) -> Option<Address> {
+        crate::storage::get_borrower_by_credit_line_id(env, id)
+    }
+
+    /// Ensure a borrower has a stable enumeration id, creating a new one if
+    /// necessary, and return it.
+    ///
+    /// This function is idempotent: calling it multiple times with the same
+    /// borrower returns the same id.
+    pub fn ensure_credit_line_id(env: &Env, borrower: &Address) -> u32 {
+        crate::storage::ensure_credit_line_id(env, borrower)
+    }
+
+    /// Return the total number of credit lines that have ever been created.
+    pub fn get_credit_line_count(env: &Env) -> u32 {
+        crate::storage::get_credit_line_count(env)
+    }
 }
 #[cfg(test)]
 mod test_mock_liquidity_token {
