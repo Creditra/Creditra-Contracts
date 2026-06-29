@@ -22,6 +22,7 @@ Companion docs: `docs/risk-based-rate-formula.md` (terse normative reference),
 | Credit limit $\ell$ | `i128` | `[MinCreditLimit, MaxCreditLimit]` | Off-chain scorer / admin policy |
 | Rate config $(b, s, r_{\min}, r_{\max})$ | `RateFormulaConfig` | each `u32` in `[0, 10_000]`, `r_{\min} \leq r_{\max} \leq 10\,000` | `set_rate_formula_config` (`lib.rs:1159`) |
 | Per-borrower floor $r_{\text{floor}}$ | `Option<u32>` | `[0, 10_000]` | `set_borrower_rate_floor` (`lib.rs:578`) |
+| Per-borrower ceiling $r_{\text{ceiling}}$ | `Option<u32>` | `[0, 10_000]` and `floor <= ceiling` when both are set | `set_borrower_rate_ceiling` (`lib.rs:775`) |
 | Rate-change config $(\Delta r_{\max}, \tau_{\min})$ | `RateChangeConfig` | `bps, seconds` | `set_rate_change_limits` (`lib.rs:569`) |
 | Penalty surcharge $\rho$ | `u32` | `[0, 10_000]` | `set_penalty_surcharge_bps` (`lib.rs:587`) |
 | Grace period $(T_g, m, r_g)$ | `GracePeriodConfig` | $T_g$ in seconds, mode FullWaiver/ReducedRate, $r_g$ in bps | `set_grace_period_config` (`lib.rs:646`) |
@@ -30,7 +31,7 @@ Companion docs: `docs/risk-based-rate-formula.md` (terse normative reference),
 | Last accrual timestamp $t_{\text{last}}$ | `u64` | unix seconds | updated only when $\Delta I > 0$ |
 
 The on-chain function is therefore deterministic in
-$(k, \ell, b, s, r_{\min}, r_{\max}, r_{\text{floor}}, \rho, T_g, m, r_g, u, I, t_{\text{last}}, t_{\text{now}})$
+$(k, \ell, b, s, r_{\min}, r_{\max}, r_{\text{floor}}, r_{\text{ceiling}}, \rho, T_g, m, r_g, u, I, t_{\text{last}}, t_{\text{now}})$
 — there is no hidden state.
 
 ---
@@ -69,19 +70,27 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, k: u32) -> u32 {
 }
 ```
 
-### 2.2 Per-borrower floor
+### 2.2 Per-borrower floor and ceiling
 
 After the formula computes $r(k)$, an optional per-borrower floor
-$r_{\text{floor}}$ is applied:
+$r_{\text{floor}}$ and ceiling $r_{\text{ceiling}}$ are applied:
 
 $$
-r_{\text{eff}}(k, \text{borrower}) = \max\big(r(k), \; r_{\text{floor}}(\text{borrower}) \big)
+r_{\text{eff}}(k, \text{borrower}) = \min\Big(\max\big(r(k), \; r_{\text{floor}}(\text{borrower}) \big), \; r_{\text{ceiling}}(\text{borrower})\Big)
 $$
 
 The floor is stored under `DataKey::RateFloorBps(Address)` (Persistent,
 `contracts/credit/src/storage.rs:357`). Use cases: a borrower in a higher-risk
 jurisdiction, or one with a sticky penalty history, can be assigned a hard
 minimum rate that overrides a favorable formula.
+
+The ceiling is stored under `DataKey::RateCeilingBps(Address)` (Persistent).
+It caps that borrower's manual or formula-derived rate before rate-change
+guardrails run. The admin setters reject inconsistent bounds in either
+direction: a ceiling below an existing floor, or a floor above an existing
+ceiling, reverts with `ContractError::RateTooHigh`.
+
+When either bound is unset, that side of the clamp is skipped.
 
 ### 2.3 Rate-change cap
 
@@ -123,6 +132,10 @@ For $k \in \{0, 25, 50, 75, 100\}$:
 
 A borrower with $r_{\text{floor}} = 1000$ at $k=0$ would see $r_{\text{eff}}
 = \max(200, 1000) = 1000$ (10.00 %).
+
+A borrower with $r_{\text{ceiling}} = 4000$ at $k=100$ would see
+$r_{\text{eff}} = \min(5000, 4000) = 4000$ (40.00 %), even though the formula
+would otherwise clamp at 50.00 %.
 
 This example is the canonical test fixture in `tests/risk_formula_tests.rs`.
 
@@ -190,10 +203,10 @@ Example with `RateFormulaConfig(200, 50, 200, 5 000)`:
 | Floor + ceiling sandwich | 50 | 2 700 | 3 000 | 4 000 | 3 000 bps (30.00 %) |
 | Ceiling below floor (rejected) | 50 | 2 700 | 3 000 | 2 500 | Rejected at config-set time (`RateTooHigh`) |
 
-The stacking order means the ceiling **always wins** if it is set below the
-floor. The contract rejects `ceiling < floor` at configuration time
-(`risk.rs:169-174`), so a misconfigured admin cannot create an unresolvable
-ordering. Tested in `tests/borrower_rate_floor.rs` and
+The contract rejects inconsistent borrower-specific bounds in either
+direction: `ceiling < floor` when setting a ceiling and `floor > ceiling`
+when setting a floor. That prevents a misconfigured admin from creating an
+unresolvable ordering. Tested in `tests/borrower_rate_floor.rs` and
 `tests/borrower_rate_ceiling.rs`.
 
 ---
@@ -826,7 +839,7 @@ Key differences:
 | `compute_rate_from_score` clamp | `contracts/credit/src/risk_formula_tests.rs` (inline tests) |
 | Saturating arithmetic on rate | `risk_formula_tests.rs` |
 | Per-borrower rate floor override | `contracts/credit/tests/borrower_rate_floor.rs` |
-| Per-borrower rate ceiling interaction | `tests/borrower_rate_ceiling.rs` |
+| Per-borrower rate ceiling interaction | `contracts/credit/tests/borrower_rate_ceiling.rs` |
 | Rate-change cap (magnitude) | `tests/state_transition_invariants.rs`, worked example §2.5 |
 | Rate-change cap (cadence) | `tests/monotonic_timestamps.rs`, worked example §2.6 |
 | Floor-rounded accrual | `tests/accrual_overflow_audit.rs`, inline `accrual_tests.rs` |

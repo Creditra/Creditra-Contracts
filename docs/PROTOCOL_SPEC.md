@@ -234,19 +234,28 @@ All transitions invoke `apply_accrual` first and persist via
    - If `RateFormulaConfig` set: `compute_rate_from_score(cfg, risk_score)`
    - Else: provided `interest_rate_bps`
 8. Apply per-borrower `RateFloorBps` (max of effective_rate and floor)
-9. If `RateChangeConfig` set:
+9. Apply per-borrower `RateCeilingBps` (min of floor-adjusted rate and ceiling)
+10. If `RateChangeConfig` set:
    - `|new_rate - old_rate| <= max_rate_change_bps` (else `RateTooHigh`)
    - `now - last_rate_update_ts >= rate_change_min_interval`
      (else `TimestampRegression`)
-10. `effective_rate <= MAX_INTEREST_RATE_BPS` (sanity)
-11. If `utilized_amount > new credit_limit`: status → `Restricted`
-12. Persist; emit `RiskParametersUpdatedEvent` on `("credit","risk_upd")`.
+11. `effective_rate <= MAX_INTEREST_RATE_BPS` (sanity)
+12. If `utilized_amount > new credit_limit`: status → `Restricted`
+13. Persist; emit `RiskParametersUpdatedEvent` on `("credit","risk_upd")`.
 
 #### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
 `lib.rs:569`. Admin + pause. Writes `Symbol("rate_cfg")`.
 
 #### `set_borrower_rate_floor(env, borrower, floor_bps: Option<u32>)`
-`lib.rs:578`. Admin. Asserts `floor <= 10_000`. `None` clears.
+`lib.rs:578`. Admin. Asserts `floor <= 10_000` and rejects
+`floor > RateCeilingBps(borrower)` when a ceiling is configured. `None`
+clears.
+
+#### `set_borrower_rate_ceiling(env, borrower, ceiling_bps: Option<u32>)`
+`lib.rs:775`. Admin. Asserts `ceiling <= 10_000` and rejects
+`ceiling < RateFloorBps(borrower)` when a floor is configured. `None`
+clears. The value is applied during `update_risk_parameters` after any
+per-borrower floor and before rate-change guardrails.
 
 #### `set_penalty_surcharge_bps(env, bps)`
 `lib.rs:587`. Admin + pause. Surcharge added to base rate (and clamped to
@@ -359,6 +368,7 @@ See `contracts/credit/src/fees.rs`.
 | `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
 | `get_rate_change_limits()` | `Option<RateChangeConfig>` |
 | `get_borrower_rate_floor(borrower)` | `Option<u32>` |
+| `get_borrower_rate_ceiling(borrower)` | `Option<u32>` |
 | `get_grace_period_config()` | `Option<GracePeriodConfig>` |
 | `get_penalty_surcharge_bps()` | `u32` |
 | `get_max_total_exposure()` | `Option<i128>` |
@@ -432,6 +442,7 @@ table is also reflected in `docs/storage-layout.md`.)
 | `BlockedBorrower(Address)` | Persistent | Blocklist flag |
 | `UtilizationCapBps(Address)` | Persistent | Per-borrower utilization cap |
 | `RateFloorBps(Address)` | Persistent | Per-borrower rate floor |
+| `RateCeilingBps(Address)` | Persistent | Per-borrower rate ceiling |
 | `RepaymentSchedule(Address)` | Persistent | `RepaymentSchedule` payload |
 | `MinCreditLimit` | Instance | Lower bound on new lines |
 | `MaxCreditLimit` | Instance | Upper bound on new lines |
