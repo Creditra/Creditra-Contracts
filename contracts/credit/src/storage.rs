@@ -152,6 +152,10 @@ pub enum DataKey {
     /// Flat fee charged per missed installment.
     /// Admin-configurable via `set_late_fee_flat`. Default is 0 (disabled).
     LateFeeFlat,
+    /// Structured late-fee configuration (flat amount or APR-based surcharge).
+    /// Admin-configurable via `set_late_fee_config`. When absent, behavior
+    /// falls back to legacy `LateFeeFlat` / `PenaltySurchargeBps` keys.
+    LateFeeConfig,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
@@ -1179,6 +1183,36 @@ pub fn get_late_fee_flat(env: &Env) -> i128 {
 /// - **Key**: [`DataKey::LateFeeFlat`]
 pub fn set_late_fee_flat(env: &Env, fee: i128) {
     env.storage().instance().set(&DataKey::LateFeeFlat, &fee);
+}
+
+// ── LateFeeConfig helpers ─────────────────────────────────────────────────────
+
+/// Get the structured late-fee configuration, if set.
+///
+/// Returns `None` when no structured config has been stored, meaning the
+/// contract falls back to the legacy [`DataKey::LateFeeFlat`] and
+/// [`DataKey::PenaltySurchargeBps`] keys.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::LateFeeConfig`]
+pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+    env.storage().instance().get(&DataKey::LateFeeConfig)
+}
+
+/// Persist a structured late-fee configuration.
+///
+/// Passing `None` removes the entry, reverting to the legacy flat/surcharge
+/// keys.  Admin auth must be enforced by the caller.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::LateFeeConfig`]
+pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+    match config {
+        Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
+        None => env.storage().instance().remove(&DataKey::LateFeeConfig),
+    }
 }
 
 // ── Borrower blocklist helpers ───────────────────────────────────────────────

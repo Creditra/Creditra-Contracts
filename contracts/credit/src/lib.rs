@@ -116,6 +116,9 @@ pub mod instrument;
 mod lifecycle;
 mod limits;
 mod math_utils;
+mod penalties;
+#[cfg(test)]
+mod penalties_tests;
 mod query;
 mod risk;
 mod views;
@@ -962,6 +965,50 @@ impl Credit {
         env.storage()
             .instance()
             .get(&crate::storage::grace_period_key(&env))
+    }
+
+    /// Set the structured late-fee configuration (flat amount or APR-based).
+    ///
+    /// Pass `Some(LateFeeConfig::Flat(FlatFeeConfig { amount }))` to charge a
+    /// fixed token amount per overdue installment.  Pass
+    /// `Some(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps }))` to use
+    /// the existing APR-surcharge behaviour.  Pass `None` to remove the
+    /// structured config and fall back to the legacy `LateFeeFlat` /
+    /// `PenaltySurchargeBps` instance keys.
+    ///
+    /// # Authorization
+    /// Requires admin signature via [`require_admin_auth`].
+    ///
+    /// # Validation
+    /// - `Flat` mode: `amount` must be `>= 0`; negative amounts revert with
+    ///   [`ContractError::InvalidAmount`].
+    /// - `AprBased` mode: `surcharge_bps` must be `<= 10_000`; values above
+    ///   the cap revert with [`ContractError::RateTooHigh`].
+    pub fn set_late_fee_config(env: Env, config: Option<LateFeeConfig>) {
+        require_admin_auth(&env);
+        if let Some(cfg) = config {
+            match cfg {
+                LateFeeConfig::Flat(crate::penalties::FlatFeeConfig { amount }) => {
+                    if amount < 0 {
+                        env.panic_with_error(ContractError::InvalidAmount);
+                    }
+                }
+                LateFeeConfig::AprBased(crate::penalties::AprFeeConfig { surcharge_bps }) => {
+                    if surcharge_bps > crate::risk::MAX_INTEREST_RATE_BPS {
+                        env.panic_with_error(ContractError::RateTooHigh);
+                    }
+                }
+            }
+        }
+        crate::storage::set_late_fee_config(&env, config);
+    }
+
+    /// Get the currently configured structured late-fee configuration.
+    ///
+    /// Returns `None` when no structured config has been stored, meaning the
+    /// contract uses the legacy `LateFeeFlat` / `PenaltySurchargeBps` keys.
+    pub fn get_late_fee_config(env: Env) -> Option<LateFeeConfig> {
+        crate::storage::get_late_fee_config(&env)
     }
 
     pub fn set_repayment_schedule(
