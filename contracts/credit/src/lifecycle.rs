@@ -10,14 +10,19 @@
 //! there is a real risk of expiry.
 
 use crate::auth::{require_admin, require_admin_auth};
-use crate::events::{publish_credit_line_event, CreditLineEvent};
+use crate::events::{
+    publish_credit_line_event, publish_default_liquidation_requested_event,
+    publish_default_liquidation_settled_event, CreditLineEvent, DefaultLiquidationSettledEvent,
+};
+use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, get_repayment_schedule,
+    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
+    liquidation_settlement_key, persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Helper: bump the TTL of a borrower's persistent credit-line entry.
 ///
@@ -184,7 +189,46 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
         &env,
         (symbol_short!("credit"), symbol_short!("suspend")),
         CreditLineEvent {
-            event_type: symbol_short!("suspend"),
+            borrower: borrower.clone(),
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
+}
+
+/// Self-suspend one's own credit line (borrower only).
+///
+/// Unlike `suspend_credit_line` (admin-only), this entrypoint allows a
+/// borrower to voluntarily suspend their own credit line. The borrower
+/// must authenticate via `borrower.require_auth()`.
+///
+/// # Panics
+/// - If the credit line does not exist.
+/// - If the credit line is not currently `Active`.
+/// - If the caller is not the borrower.
+pub fn self_suspend_credit_line(env: Env, borrower: Address) {
+    assert_not_paused(&env);
+    borrower.require_auth();
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    if credit_line.status != CreditStatus::Active {
+        panic!("Only active credit lines can be suspended");
+    }
+
+    credit_line.status = CreditStatus::Suspended;
+    env.storage().persistent().set(&borrower, &credit_line);
+    bump_credit_line_ttl(&env, &borrower);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("suspend")),
+        CreditLineEvent {
             borrower: borrower.clone(),
             status: CreditStatus::Suspended,
             credit_limit: credit_line.credit_limit,
@@ -222,7 +266,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = credit_line.utilized_amount;
+    let _previous_utilized = credit_line.utilized_amount;
 
     // Idempotent: already closed → nothing to do.
     if credit_line.status == CreditStatus::Closed {
@@ -247,7 +291,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         env.panic_with_error(ContractError::Unauthorized);
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
     env.storage().persistent().set(&borrower, &credit_line);
     // Bump TTL: keep the closed record live so history is queryable.
@@ -313,7 +357,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = stored_line.utilized_amount;
+    let _previous_utilized = stored_line.utilized_amount;
 
     if stored_line.status == CreditStatus::Closed {
         env.panic_with_error(ContractError::CreditLineClosed);
@@ -331,7 +375,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
     env.storage().persistent().set(&borrower, &credit_line);
     // Bump TTL: defaulted lines must remain queryable during workout period.
@@ -418,7 +462,7 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -490,7 +534,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
 
     publish_credit_line_event(
         &env,

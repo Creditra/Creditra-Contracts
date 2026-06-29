@@ -240,6 +240,12 @@ pub enum ContractError {
     CreditLineFrozen = 45,
     /// No attestation batch has been committed for this borrower.
     AttestationBatchNotFound = 46,
+    /// The time window for reversing a draw has expired.
+    DrawReversalWindowExpired = 47,
+    /// The original draw for reversal was not found.
+    OriginalDrawNotFound = 48,
+    /// Close factor exceeds the configured maximum.
+    CloseFactorAboveMax = 49,
 }
 
 /// Logical category for grouping [`ContractError`] variants.
@@ -332,9 +338,52 @@ impl ContractError {
             | Self::TreasuryTimelockActive
             | Self::TreasuryProposalExists
             | Self::CreditLineFrozen
-            | Self::AttestationBatchNotFound => ContractErrorCategory::State,
+            | Self::AttestationBatchNotFound
+            | Self::DrawReversalWindowExpired
+            | Self::OriginalDrawNotFound
+            | Self::CloseFactorAboveMax => ContractErrorCategory::State,
         }
     }
+}
+
+/// Structured reason for freezing draws or credit lines.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Freeze due to liquidity reserve operations.
+    LiquidityReserve,
+}
+
+/// On-chain state for the global draws-freeze switch.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen.
+    pub frozen: bool,
+    /// Structured reason for the freeze action.
+    pub reason: FreezeReason,
+}
+
+/// Proof-of-reserve balances for protocol treasury transparency.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated treasury balance held in the contract.
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool balance held in the contract.
+    pub bounty_balance: i128,
+}
+
+/// Structured reason recorded when the protocol is paused.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable or machine-readable reason symbol.
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp when the pause was enacted.
+    pub timestamp: u64,
+    /// Admin address that initiated the pause.
+    pub actor: Address,
 }
 
 /// Stored credit line data for a borrower.

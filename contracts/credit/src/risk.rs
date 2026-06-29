@@ -61,12 +61,12 @@
 use crate::auth::require_admin_auth;
 use crate::events::publish_risk_parameters_updated;
 use crate::storage::{
-    assert_not_paused, rate_cfg_key, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    assert_not_paused, persist_credit_line, rate_cfg_key, rate_formula_key,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
 };
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
 pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;

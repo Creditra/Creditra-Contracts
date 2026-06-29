@@ -194,6 +194,17 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Protocol-level close factor cap in basis points (1..=10_000).
+    /// Limits the maximum fraction of a defaulted position that can be
+    /// settled in a single liquidation.
+    CloseFactorBps,
+    /// Structured reason for the last protocol pause.
+    /// Set alongside the `paused` instance flag by
+    /// [`set_pause_reason`]; cleared on unpause.
+    PauseReason,
+    /// Settlement replay-protection marker: `(borrower, settlement_id)`.
+    /// Stores `true` after a successful settlement to prevent replay.
+    LiquidationSettlement(Address, Symbol),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -220,6 +231,9 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
+
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
@@ -651,6 +665,15 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Instance storage key for the grace period configuration.
 pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
+}
+
+/// Persistent storage key for the settlement replay-protection marker.
+///
+/// The marker is `(borrower, settlement_id)` — a tuple encoded as a
+/// persistent-storage key. When present, the `settle_default_liquidation`
+/// entrypoint will reject a repeat `(borrower, settlement_id)` pair.
+pub fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> DataKey {
+    DataKey::LiquidationSettlement(borrower.clone(), settlement_id.clone())
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.

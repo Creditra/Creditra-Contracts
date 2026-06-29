@@ -117,6 +117,7 @@ mod risk;
 mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cross_chain;
 mod scoring;
 mod storage;
@@ -133,14 +134,17 @@ use crate::attestation::AttestationBatch;
 use crate::auth::require_admin_auth;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_contract_upgraded_event,
+    publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
     publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
     publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event, publish_treasury_withdrawal_executed,
-    publish_treasury_withdrawal_proposed, ContractUpgradedEvent, CreditLineEvent,
-    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    publish_oracle_price_accepted_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
+    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
+    TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::storage::{
@@ -162,8 +166,8 @@ use crate::storage::{
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig,
-    ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
-    TreasuryWithdrawalProposal,
+    ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
+    RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -1308,7 +1312,7 @@ impl Credit {
     /// # Returns
     /// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
     pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
-        lifecycle::get_credit_limit_bounds(env)
+        lifecycle::get_credit_limit_bounds(&env)
     }
 
     /// Get the number of indexed credit lines.
@@ -1815,8 +1819,8 @@ impl Credit {
         publish_paused_event(&env, paused);
     }
 
-    pub fn freeze_draws(env: Env) {
-        freeze::freeze_draws(env)
+    pub fn freeze_draws(env: Env, reason: FreezeReason) {
+        freeze::freeze_draws(env, reason)
     }
 
     pub fn unfreeze_draws(env: Env) {

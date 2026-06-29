@@ -93,14 +93,13 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         CREDIT_LINE_TTL_THRESHOLD,
         CREDIT_LINE_TTL_EXTEND_TO,
     );
-    let timestamp = env.ledger().timestamp();
+    let _timestamp = env.ledger().timestamp();
     publish_drawn_event(
         &env,
         DrawnEvent {
             borrower,
             amount,
             new_utilized_amount: updated_utilized,
-            timestamp,
         },
     );
     clear_reentrancy_guard(&env);
