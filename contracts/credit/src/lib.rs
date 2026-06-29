@@ -98,6 +98,7 @@ mod handshake;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
+mod oracles;
 #[cfg(test)]
 mod amount_validation_tests;
 mod attestation;
@@ -168,6 +169,8 @@ use crate::storage::{
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
+use crate::storage::{get_oracle_quorum_config, set_oracle_quorum_config};
+use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::storage::{
     clear_pending_treasury_withdrawal, get_pending_treasury_withdrawal,
     set_pending_treasury_withdrawal,
@@ -1531,8 +1534,27 @@ impl Credit {
         // with an external auction contract, so we guard the full path.
         set_reentrancy_guard(&env);
 
-        // Oracle price-feed circuit breaker: validate price before settlement.
-        if let Some(cfg) = crate::storage::get_oracle_config(&env) {
+        // Oracle price validation — quorum mode takes precedence over single-oracle mode.
+        if let Some(qcfg) = crate::storage::get_oracle_quorum_config(&env) {
+            // Quorum mode: price was pre-validated by `submit_oracle_prices`.
+            // Only check that the stored quorum price is still within max_age_seconds.
+            let last_ts = crate::storage::get_oracle_last_price_ts(&env).unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::OraclePriceInvalid)
+            });
+            let now = env.ledger().timestamp();
+            if now.saturating_sub(last_ts) > qcfg.max_age_seconds {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::OraclePriceStale);
+            }
+            let price = crate::storage::get_oracle_last_price(&env).unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::OraclePriceInvalid)
+            });
+            publish_oracle_price_accepted_event(&env, price, now);
+        } else if let Some(cfg) = crate::storage::get_oracle_config(&env) {
+            // Single-oracle mode: validate the caller-supplied price against the
+            // last accepted price and the staleness threshold.
             let price = oracle_price.unwrap_or_else(|| {
                 clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid)
@@ -1685,6 +1707,106 @@ impl Credit {
     /// Return the current oracle circuit-breaker configuration, if set.
     pub fn get_oracle_config(env: Env) -> Option<OracleConfig> {
         get_oracle_config(&env)
+    }
+
+    // ── Multi-oracle quorum admin ─────────────────────────────────────────────
+
+    /// Configure the multi-oracle quorum parameters (admin only).
+    ///
+    /// Once set, calls to `submit_oracle_prices` validate that at least
+    /// `min_quorum_k` of the supplied prices agree within `max_deviation_bps`
+    /// of each other. The resolved median price is stored and used by
+    /// `settle_default_liquidation` (staleness-checked against
+    /// `max_age_seconds`).
+    ///
+    /// Quorum mode takes precedence over the single-oracle circuit breaker:
+    /// when both are configured, `settle_default_liquidation` uses the quorum
+    /// price and ignores the `oracle_price` parameter.
+    ///
+    /// # Validation
+    /// - `min_quorum_k` must be ≥ 2.
+    /// - `max_deviation_bps` must be ≤ 10_000.
+    /// - `max_age_seconds` must be > 0.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits an `orc_qcfg` event with the new configuration.
+    pub fn set_oracle_quorum_config(
+        env: Env,
+        min_quorum_k: u32,
+        max_deviation_bps: u32,
+        max_age_seconds: u64,
+    ) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        if min_quorum_k < 2 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        if max_deviation_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        if max_age_seconds == 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        set_oracle_quorum_config(
+            &env,
+            &OracleQuorumConfig {
+                min_quorum_k,
+                max_deviation_bps,
+                max_age_seconds,
+            },
+        );
+        publish_oracle_quorum_config_set_event(&env, min_quorum_k, max_deviation_bps, max_age_seconds);
+    }
+
+    /// Return the current multi-oracle quorum configuration, if set.
+    pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+        get_oracle_quorum_config(&env)
+    }
+
+    /// Submit N oracle prices and resolve a quorum canonical price (admin only).
+    ///
+    /// Runs the quorum-of-K algorithm:
+    /// 1. Sorts submitted prices ascending.
+    /// 2. Finds the first K-wide window whose spread is within
+    ///    `max_deviation_bps` of the lowest price in that window.
+    /// 3. Returns the lower-median of that window as the canonical price.
+    /// 4. Stores the canonical price and the current ledger timestamp.
+    ///
+    /// The stored price is subsequently used by `settle_default_liquidation`
+    /// (staleness is re-checked there against `max_age_seconds`).
+    ///
+    /// # Validation
+    /// - Oracle quorum config must be set via `set_oracle_quorum_config` first.
+    /// - 2 ≤ `prices.len()` ≤ `MAX_ORACLE_FEEDS` (20).
+    /// - Every price must be strictly positive.
+    /// - At least `min_quorum_k` prices must agree within `max_deviation_bps`.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits an `orc_qprc` event with the resolved price, quorum K, and timestamp.
+    pub fn submit_oracle_prices(env: Env, prices: Vec<i128>) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        let qcfg = get_oracle_quorum_config(&env).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid)
+        });
+
+        if prices.len() > MAX_ORACLE_FEEDS {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        }
+
+        let canonical_price = resolve_quorum_price(&env, &prices, &qcfg);
+        let now = env.ledger().timestamp();
+        crate::storage::set_oracle_last_price(&env, canonical_price, now);
+        publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
 
     // ── Borrower blocklist ────────────────────────────────────────────────────

@@ -525,6 +525,34 @@ pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u6
     );
 }
 
+/// Emit when `set_oracle_quorum_config` is called.
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qcfg")),
+        (min_quorum_k, max_deviation_bps, max_age_seconds),
+    );
+}
+
+/// Emit when `submit_oracle_prices` successfully resolves a quorum price.
+///
+/// Data: `(resolved_price, min_quorum_k, timestamp)`.
+pub fn publish_oracle_quorum_price_set_event(
+    env: &Env,
+    price: i128,
+    quorum_k: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qprc")),
+        (price, quorum_k, timestamp),
+    );
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LateFeeChargedEvent {
