@@ -1,4 +1,3 @@
-mod handshake;
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
@@ -96,6 +95,7 @@ mod handshake;
 //! compiled into WASM).
 
 mod accrual;
+mod handshake;
 #[cfg(test)]
 mod accrual_tests;
 #[cfg(test)]
