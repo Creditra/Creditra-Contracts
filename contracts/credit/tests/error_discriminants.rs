@@ -552,7 +552,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::AdminNotInitialized,
+            ContractError::AdminNotInitialized.into(),
             "Expected AdminNotInitialized error"
         );
     }
@@ -574,7 +574,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on draw"
         );
     }
@@ -596,7 +596,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on repay"
         );
     }
@@ -618,7 +618,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on close"
         );
     }
@@ -640,7 +640,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on suspend"
         );
     }
@@ -662,7 +662,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on default"
         );
     }
@@ -684,7 +684,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::CreditLineNotFound,
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on risk update"
         );
     }
@@ -717,7 +717,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::Overflow,
+            ContractError::Overflow.into(),
             "Expected Overflow error on utilization add"
         );
     }
@@ -741,6 +741,8 @@ mod error_path_tests {
             &borrower,
             &2000_i128,
             &soroban_sdk::symbol_short!("settle1"),
+            &10_000_u32,
+            &None,
         );
 
         assert!(
@@ -773,7 +775,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::MissingLiquidityToken,
+            ContractError::MissingLiquidityToken.into(),
             "Expected MissingLiquidityToken error"
         );
     }
@@ -803,7 +805,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::MissingLiquiditySource,
+            ContractError::MissingLiquiditySource.into(),
             "Expected MissingLiquiditySource error"
         );
     }
@@ -823,7 +825,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::TreasuryNotSet,
+            ContractError::TreasuryNotSet.into(),
             "Expected TreasuryNotSet error"
         );
     }
@@ -858,7 +860,7 @@ mod error_path_tests {
             let err = result.err().unwrap();
             assert_eq!(
                 err.unwrap(),
-                ContractError::Overflow,
+                ContractError::Overflow.into(),
                 "Expected Overflow error on cap calculation"
             );
         }
@@ -897,7 +899,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::ExposureCapExceeded,
+            ContractError::ExposureCapExceeded.into(),
             "Expected ExposureCapExceeded error"
         );
     }
@@ -939,7 +941,7 @@ mod error_path_tests {
         if result.is_err() {
             let err = result.err().unwrap();
             // Could be TimestampRegression or another validation error
-            assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression);
+            assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression.into());
         }
     }
 }

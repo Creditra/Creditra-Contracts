@@ -18,7 +18,7 @@
 //!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
 //!       `Symbol("rate_cfg")` instance storage,
 //!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
-//! - [`set_rate_change_limits_legacy`] — configure the magnitude+cadence
+//! - [`set_rate_change_limits`] — configure the magnitude+cadence
 //!   cap.
 //! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
 //!   applied to delinquent lines during accrual (see [`crate::accrual`]).
