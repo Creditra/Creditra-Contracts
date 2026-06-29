@@ -144,6 +144,7 @@ pub enum CreditStatus {
 /// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
 /// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
 /// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `InvalidAttestation`           | Attestation batch is missing or the proof is invalid |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -236,6 +237,108 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// No attestation batch has been committed for this borrower, or the
+    /// supplied Merkle proof does not match the stored root.
+    InvalidAttestation = 45,
+}
+
+// ── Error category taxonomy ────────────────────────────────────────────────────
+
+/// High-level grouping of [`ContractError`] variants for client-side handling.
+///
+/// # Stability
+/// Discriminants are ABI-stable; do not reorder or renumber existing variants.
+/// New categories must be appended with the next integer.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authentication / authorization errors (caller identity).
+    Auth = 1,
+    /// Credit-line state-machine errors (wrong lifecycle phase).
+    Lifecycle = 2,
+    /// Arithmetic or value range errors.
+    Numeric = 3,
+    /// Credit limit or draw/repay amount cap violations.
+    Limit = 4,
+    /// Liquidity reserve, token, or treasury errors.
+    Liquidity = 5,
+    /// Risk-score or rate-related rejections.
+    Risk = 6,
+    /// Oracle price feed errors.
+    Oracle = 7,
+    /// Collateral ratio or balance errors.
+    Collateral = 8,
+    /// Blocking or freezing controls.
+    Block = 9,
+    /// Reentrancy guard.
+    Reentrancy = 10,
+    /// Miscellaneous / catch-all.
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Map every error variant to its [`ContractErrorCategory`].
+    pub fn category(self) -> ContractErrorCategory {
+        match self {
+            // Auth
+            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::NotAdmin => ContractErrorCategory::Auth,
+            ContractError::AdminNotInitialized => ContractErrorCategory::Auth,
+            // Lifecycle
+            ContractError::CreditLineClosed => ContractErrorCategory::Lifecycle,
+            ContractError::AlreadyInitialized => ContractErrorCategory::Lifecycle,
+            ContractError::CreditLineSuspended => ContractErrorCategory::Lifecycle,
+            ContractError::CreditLineDefaulted => ContractErrorCategory::Lifecycle,
+            // Numeric
+            ContractError::InvalidAmount => ContractErrorCategory::Numeric,
+            ContractError::NegativeLimit => ContractErrorCategory::Numeric,
+            ContractError::Overflow => ContractErrorCategory::Numeric,
+            ContractError::TimestampRegression => ContractErrorCategory::Numeric,
+            ContractError::LimitOutOfBounds => ContractErrorCategory::Numeric,
+            // Limit
+            ContractError::OverLimit => ContractErrorCategory::Limit,
+            ContractError::UtilizationNotZero => ContractErrorCategory::Limit,
+            ContractError::LimitDecreaseRequiresRepayment => ContractErrorCategory::Limit,
+            ContractError::DrawExceedsMaxAmount => ContractErrorCategory::Limit,
+            ContractError::RepayExceedsMaxAmount => ContractErrorCategory::Limit,
+            // Liquidity
+            ContractError::MissingLiquidityToken => ContractErrorCategory::Liquidity,
+            ContractError::MissingLiquiditySource => ContractErrorCategory::Liquidity,
+            ContractError::InsufficientLiquidityReserve => ContractErrorCategory::Liquidity,
+            ContractError::LiquidityTokenCallFailed => ContractErrorCategory::Liquidity,
+            ContractError::InsufficientRepaymentAllowance => ContractErrorCategory::Liquidity,
+            ContractError::InsufficientRepaymentBalance => ContractErrorCategory::Liquidity,
+            ContractError::TreasuryNotSet => ContractErrorCategory::Liquidity,
+            ContractError::ExposureCapExceeded => ContractErrorCategory::Liquidity,
+            ContractError::BountyNotSet => ContractErrorCategory::Liquidity,
+            ContractError::NoPendingTreasuryWithdrawal => ContractErrorCategory::Liquidity,
+            ContractError::TreasuryTimelockActive => ContractErrorCategory::Liquidity,
+            ContractError::TreasuryProposalExists => ContractErrorCategory::Liquidity,
+            // Risk
+            ContractError::RateTooHigh => ContractErrorCategory::Risk,
+            ContractError::ScoreTooHigh => ContractErrorCategory::Risk,
+            ContractError::Paused => ContractErrorCategory::Risk,
+            ContractError::DrawCooldownActive => ContractErrorCategory::Risk,
+            // Oracle
+            ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
+            ContractError::OraclePriceStale => ContractErrorCategory::Oracle,
+            ContractError::OraclePriceDeviation => ContractErrorCategory::Oracle,
+            // Collateral
+            ContractError::CollateralRatioBelowMinimum => ContractErrorCategory::Collateral,
+            ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            // Block
+            ContractError::BorrowerBlocked => ContractErrorCategory::Block,
+            ContractError::DrawsFrozen => ContractErrorCategory::Block,
+            ContractError::BorrowerFrozen => ContractErrorCategory::Block,
+            // Reentrancy
+            ContractError::Reentrancy => ContractErrorCategory::Reentrancy,
+            // Misc
+            ContractError::CreditLineNotFound => ContractErrorCategory::Misc,
+            ContractError::AdminAcceptTooEarly => ContractErrorCategory::Misc,
+            ContractError::InvalidAttestation => ContractErrorCategory::Misc,
+        }
+    }
 }
 
 /// Stored credit line data for a borrower.

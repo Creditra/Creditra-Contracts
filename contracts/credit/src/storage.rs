@@ -192,6 +192,9 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Per-borrower attestation batch committed by admin (Merkle root + count + timestamp).
+    /// Stored in persistent storage; overwritten on each new commit.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.

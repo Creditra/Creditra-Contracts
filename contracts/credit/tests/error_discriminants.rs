@@ -59,6 +59,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
+    assert_eq!(ContractError::InvalidAttestation as u32, 45);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -113,6 +114,7 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::InvalidAttestation as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -127,8 +129,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 44 variants as of this writing (added 42-44 for treasury timelock in #606).
-    const EXPECTED_VARIANT_COUNT: usize = 44;
+    // 45 variants as of this writing (added 45 for InvalidAttestation).
+    const EXPECTED_VARIANT_COUNT: usize = 45;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -175,6 +177,7 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::InvalidAttestation as u32,
     ];
 
     assert_eq!(
@@ -311,6 +314,7 @@ fn category_mappings_are_stable() {
     // Misc
     assert_eq!(ContractError::CreditLineNotFound.category(), ContractErrorCategory::Misc);
     assert_eq!(ContractError::AdminAcceptTooEarly.category(), ContractErrorCategory::Misc);
+    assert_eq!(ContractError::InvalidAttestation.category(), ContractErrorCategory::Misc);
 }
 
 /// Verify every ContractError variant's category matches its discriminant table.
@@ -360,11 +364,16 @@ fn every_variant_has_known_category() {
         ContractError::OraclePriceDeviation.category(),
         ContractError::InsufficientCollateralBalance.category(),
         ContractError::BorrowerFrozen.category(),
+        ContractError::BountyNotSet.category(),
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractError::TreasuryTimelockActive.category(),
+        ContractError::TreasuryProposalExists.category(),
+        ContractError::InvalidAttestation.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
     assert_eq!(unique.len(), 11, "Not all 11 categories are covered by variant mappings");
-    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+    assert_eq!(all_variants.len(), 45, "Expected 45 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

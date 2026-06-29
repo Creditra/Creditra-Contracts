@@ -111,7 +111,7 @@ fn hash_pair(env: &Env, a: &BytesN<32>, b: &BytesN<32>) -> BytesN<32> {
     let right_bytes: Bytes = right.clone().into();
     buf.append(&left_bytes);
     buf.append(&right_bytes);
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).into()
 }
 
 /// Compute the Merkle root from a `leaf` and an ordered sibling `proof` path.
@@ -202,7 +202,7 @@ pub fn commit_attestation_batch(
 /// `true` if the recomputed root matches the stored root; `false` otherwise.
 ///
 /// # Errors
-/// - `ContractError::AttestationBatchNotFound` if no batch has been committed
+/// - `ContractError::InvalidAttestation` if no batch has been committed
 ///   for this borrower.
 pub fn verify_attestation_proof(
     env: Env,
@@ -215,7 +215,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
 
     // Bump TTL on read.
     env.storage()
