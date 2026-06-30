@@ -14,14 +14,16 @@
 //!   `(credit_limit, interest_rate_bps, risk_score)` triple, with the rate
 //!   either supplied or formula-derived, then bounded by:
 //!     - the per-borrower [`set_borrower_rate_floor`] floor,
+//!     - the per-borrower [`set_borrower_rate_ceiling`] ceiling,
 //!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
 //!       `Symbol("rate_cfg")` instance storage,
 //!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
-//! - [`set_rate_change_limits_legacy`] — configure the magnitude+cadence
+//! - [`set_rate_change_limits`] — configure the magnitude+cadence
 //!   cap.
 //! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
 //!   applied to delinquent lines during accrual (see [`crate::accrual`]).
 //! - [`set_borrower_rate_floor`] — per-borrower minimum.
+//! - [`set_borrower_rate_ceiling`] — per-borrower maximum.
 //!
 //! # How
 //!
@@ -60,13 +62,8 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::publish_risk_parameters_updated;
-use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, get_credit_line, persist_credit_line, rate_cfg_key,
-    rate_formula_key,
-};
-use crate::types::{
-    ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,
-};
+use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
@@ -75,68 +72,8 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score on the normalized 0-100 scale.
 pub const MAX_RISK_SCORE: u32 = 100;
 
-/// Compute an interest rate in basis points from a normalised risk score.
-///
-/// Maps a borrower's risk score linearly onto the range
-/// `[min_rate_bps, max_rate_bps]`. A score of `0` maps to `min_rate_bps`
-/// (lowest risk, lowest rate) and a score of `100` maps to `max_rate_bps`
-/// (highest risk, highest rate).
-///
-/// Formula:
-/// ```text
-/// rate = min_rate_bps + (max_rate_bps - min_rate_bps) * score / 100
-/// ```
-///
-/// # Rounding
-/// Truncates toward zero. For example, a spread of `999` bps over a score of
-/// `1` yields `9` bps (`9.99` truncated), not `10`.
-///
-/// # Parameters
-/// assert_eq!(compute_rate_from_score_linear(50, 200, 800), 500);
-///                   Values outside this range are accepted but produce
-///                   extrapolated results; callers should validate first.
-/// assert_eq!(compute_rate_from_score_linear(0, 200, 800), 200);
-/// - `max_rate_bps`: Rate assigned to a score of `100` (worst credit).
-///
-/// assert_eq!(compute_rate_from_score_linear(100, 200, 800), 800);
-/// Interest rate in basis points for the given score, clamped implicitly by
-/// the linear interpolation between `min_rate_bps` and `max_rate_bps`.
-///
-/// # Panics
-/// - If `max_rate_bps < min_rate_bps` (invalid range).
-///
-/// Compute interest rate from risk score using piecewise-linear formula.
-///
-/// # Formula
-/// ```text
-/// raw_rate = base_rate_bps + (risk_score * slope_bps_per_score)
-/// effective_rate = clamp(raw_rate, min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS))
-/// ```
-///
-/// Uses saturating arithmetic to prevent overflow — if the multiplication
-/// overflows u32, it saturates to `u32::MAX` and is then clamped by the
-/// upper bound.
-///
-/// # Arguments
-/// * `cfg` — The rate formula configuration.
-/// * `risk_score` — The borrower's risk score (0–100).
-///
-/// # Returns
-/// The computed effective interest rate in basis points.
-pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 {
-    let raw = cfg
-        .base_rate_bps
-        .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
-    let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
-    raw.clamp(cfg.min_rate_bps, upper)
-}
-
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits_legacy(
-    env: Env,
-    max_rate_change_bps: u32,
-    rate_change_min_interval: u64,
-) {
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -148,10 +85,20 @@ pub fn set_rate_change_limits_legacy(
 }
 
 /// Set a per-borrower interest rate floor (admin only).
+///
+/// # Panics
+/// - If caller is not admin.
+/// - If `floor_bps` exceeds `MAX_INTEREST_RATE_BPS` (10_000).
+/// - If `floor_bps` is greater than the configured ceiling for this borrower.
 pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u32>) {
     require_admin_auth(&env);
     if let Some(floor) = floor_bps {
         assert!(floor <= MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
+        if let Some(ceiling) = crate::storage::get_borrower_rate_ceiling(&env, &borrower) {
+            if floor > ceiling {
+                env.panic_with_error(ContractError::RateTooHigh);
+            }
+        }
     }
     crate::storage::set_borrower_rate_floor(&env, &borrower, floor_bps);
 }
@@ -207,6 +154,23 @@ pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
 /// The penalty surcharge in basis points.
 pub fn get_penalty_surcharge_bps(env: Env) -> u32 {
     crate::storage::get_penalty_surcharge_bps(&env)
+}
+
+/// Compute a risk-score-based interest rate using the piecewise-linear formula.
+///
+/// The formula is:
+/// ```text
+/// raw_rate = base_rate_bps + risk_score * slope_bps_per_score
+/// effective = clamp(raw_rate, min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS))
+/// ```
+///
+/// All arithmetic is saturating so a misconfigured formula cannot overflow.
+pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 {
+    let raw = cfg
+        .base_rate_bps
+        .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
+    let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
+    raw.clamp(cfg.min_rate_bps, upper)
 }
 
 /// Update risk parameters for an existing credit line (admin only).

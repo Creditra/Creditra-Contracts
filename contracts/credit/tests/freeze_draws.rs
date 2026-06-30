@@ -8,7 +8,7 @@
 //! - freeze_draws/unfreeze_draws toggle the flag correctly
 //! - draw_credit is blocked when draws are frozen
 
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
@@ -56,7 +56,7 @@ fn freeze_draws_sets_flag_to_true() {
 
     assert!(!client.is_draws_frozen(), "should start unfrozen");
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(
         client.is_draws_frozen(),
         "should be frozen after freeze_draws"
@@ -68,7 +68,7 @@ fn unfreeze_draws_sets_flag_to_false() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     client.unfreeze_draws();
@@ -93,7 +93,7 @@ fn draw_credit_blocked_when_draws_frozen() {
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Draw should fail
@@ -124,7 +124,7 @@ fn repay_credit_succeeds_while_draws_frozen() {
     assert_eq!(before.utilized_amount, 500);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Mint tokens to borrower and approve contract
@@ -154,7 +154,7 @@ fn repay_credit_full_repayment_while_draws_frozen() {
     client.draw_credit(&borrower, &800);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Full repayment
@@ -180,7 +180,7 @@ fn freeze_draws_emits_event() {
 
     let _ = env.events().all(); // clear setup events
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     let events = env.events().all();
     assert_eq!(events.len(), 1, "should emit exactly one event");
@@ -197,7 +197,7 @@ fn unfreeze_draws_emits_event() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     let _ = env.events().all(); // clear
 
     client.unfreeze_draws();

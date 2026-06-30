@@ -26,6 +26,7 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 | `batch_accrual.rs` | `accrue_batch(borrowers)` keeper path; bounded to 50 |
 | `borrower_key_encoding.rs` | Storage key safety (collision resistance, stability) |
 | `borrower_rate_floor.rs` | Per-borrower `RateFloorBps` overriding formula |
+| `borrower_rate_ceiling.rs` | Per-borrower `RateCeilingBps` capping manual and formula rates |
 | `borrower_self_suspend.rs` | Borrower-initiated suspension; auth + state-machine |
 | `circuit_breaker.rs` | Admin pause / unpause; repay-credit exception |
 | `collateral.rs` | Collateral balance tracking and `MinCollateralRatioBps` |
@@ -160,6 +161,8 @@ CI workflows in `.github/workflows/`:
 | `coverage.yml` | push (`main`/`master`) and PR | `cargo llvm-cov --workspace --all-targets --fail-under-lines 95` |
 | `pr-coverage.yml` | PR | Comment-with-coverage-delta on PRs |
 | `build-wasm.yml` | push / PR | Release-WASM artifact build for `creditra-credit` and `gateway-auction`, uploads to artifact storage |
+| `wasm-size.yml` | push / PR | Build all workspace WASM via `scripts/check-wasm-size.sh`; fail if **any** artifact exceeds **100 KiB** (`THRESHOLD_BYTES=102400`) |
+| `gas.yml` | push / PR | Per-entrypoint CPU/memory budget regression against `contracts/.gas-baseline.json` (via `instrument` feature) |
 
 The size-budget enforcement is the load-bearing one: it guarantees the WASM
 artifact stays deployable under Soroban's per-contract bytecode limits. The
@@ -195,6 +198,11 @@ wrapping, even when CI builds with `--release`.
   `ContractError`, preventing breaking ABI changes.
 - **`event_topic_stability.rs`** — CI test pins event topic strings.
 - **WASM size budget** — CI fails if the release WASM exceeds 50 KB.
+- **Gas / CPU budget regression** — `gas.yml` compares Soroban resource usage
+  per entrypoint against pinned baselines. Implementation lives in
+  `contracts/credit/src/instrument.rs` (host-only, `instrument` Cargo feature).
+  Regenerate baselines with `./scripts/regen_budget_baseline.sh`; run checks
+  with `./scripts/gas-regression.sh`.
 
 ---
 

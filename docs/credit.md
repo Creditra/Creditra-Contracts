@@ -32,7 +32,7 @@ Optional per-borrower installment schedule stored in persistent storage under th
 
 | Field | Type | Description |
 |---|---|---|
-| `amount_per_period` | `i128` | Required amount for each installment |
+| `amount_per_period` | `i128` | Required principal amount for each installment; interest-only repayment does not advance the schedule |
 | `period_seconds` | `u64` | Installment interval in seconds |
 | `next_due_ts` | `u64` | Timestamp for the next installment due date |
 
@@ -238,6 +238,16 @@ Sets or replaces the installment schedule for a borrower credit line. Admin only
 - `amount_per_period` must be positive.
 - `period_seconds` must be positive.
 - The schedule is cleared automatically when the line is reopened or closed.
+
+### `set_borrower_exposure_cap(env, borrower, amount)`
+Set the maximum outstanding exposure permitted for a borrower across all active credit lines. Admin only.
+
+- `amount = 0` removes the cap.
+- Negative values revert with `ContractError::InvalidAmount`.
+- The cap is checked during `draw_credit` against the borrower's post-draw utilized balance.
+
+### `get_borrower_exposure_cap(env, borrower) -> Option<i128>`
+Returns the configured borrower exposure cap, if any.
 
 ### `is_delinquent(env, borrower)`
 Returns `true` when a borrower has a repayment schedule, still has debt, and the current time is past `next_due_ts + grace_period_seconds`.
@@ -489,25 +499,57 @@ if let Some((last_id, _)) = page1.last() {
 - **Ordering**: Insertion order (sequential IDs assigned at creation).
 - **Gas limit**: `limit` is capped at 100 to prevent gas exhaustion.
 
-### `freeze_draws(env)`
+### `freeze_draws(env, reason)`
 Freeze all `draw_credit` calls contract-wide (admin only).
 
-- Sets `DataKey::DrawsFrozen` to `true` in instance storage.
+- Sets `DataKey::DrawsFrozen` to [`DrawsFreezeState { frozen: true, reason }`] in instance storage.
+- `reason` must be a [`FreezeReason`] variant for structured audit/indexer classification.
 - Does **not** mutate any borrower's `CreditStatus`; lines remain Active, Defaulted, etc.
 - Repayments are never blocked by this flag.
-- Idempotent: calling when already frozen still emits the event.
 
-Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, timestamp, actor }`.
+Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, reason }`.
 
 ### `unfreeze_draws(env)`
 Re-enable `draw_credit` after a global freeze (admin only).
 
-- Sets `DataKey::DrawsFrozen` to `false` in instance storage.
-- Idempotent: calling when already unfrozen still emits the event.
+- Sets `DrawsFreezeState.frozen` to `false` while preserving the last recorded reason.
+- Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, reason }`.
 
-Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, timestamp, actor }`.
+### `get_draws_freeze_reason(env) -> Option<FreezeReason>`
+Returns the structured reason for the active global draw freeze. Returns `None` when draws are not frozen. No auth required.
 
-### `set_draw_min_interval(env, seconds)`
+### `freeze_credit_line(env, borrower, reason)`
+Freeze draws for a single credit line (admin only).
+
+- Records `reason` under `DataKey::CreditLineFreeze(Address)` in persistent storage.
+- Does **not** change `CreditStatus`; distinct from `suspend_credit_line`.
+- Repayments remain available.
+- Reverts with `CreditLineNotFound` when no line exists.
+
+Emits: `("credit", "line_frz")` with `CreditLineFreezeEvent { borrower, reason, frozen: true, ledger }`.
+
+### `unfreeze_credit_line(env, borrower)`
+Lift a per-credit-line draw freeze (admin only). No-op when not frozen.
+
+Emits: `("credit", "line_frz")` with `frozen: false` when a freeze record existed.
+
+### `is_credit_line_frozen(env, borrower) -> bool`
+Returns `true` when the borrower's credit line has an active admin freeze. No auth required.
+
+### `get_credit_line_freeze_reason(env, borrower) -> Option<FreezeReason>`
+Returns the structured freeze reason for a credit line, if frozen. No auth required.
+
+#### `FreezeReason` taxonomy
+
+| Variant | Value | Intended use |
+|---------|-------|--------------|
+| `LiquidityReserve` | 0 | Scheduled reserve / treasury operations |
+| `Compliance` | 1 | Regulatory or compliance-mandated pause |
+| `RiskInvestigation` | 2 | Active risk investigation or off-chain signal |
+| `OperationalMaintenance` | 3 | Planned maintenance window |
+| `BorrowerRequest` | 4 | Borrower-initiated voluntary draw pause |
+
+### `is_draws_frozen(env) -> bool`
 Set the per-borrower draw cooldown interval in seconds (admin only).
 
 - `seconds > 0` enforces a minimum interval between successful draws for every borrower.
@@ -667,7 +709,8 @@ cargo test -p creditra-credit amount_validation
 | `("credit", "liq_setl")`   | `liq_setl` | `settle_default_liquidation`| Auction settlement applied to debt accounting |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
-| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled |
+| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled (`frozen`, `reason`) |
+| `("credit", "line_frz")` | `CreditLineFreezeEvent` | `freeze_credit_line`, `unfreeze_credit_line` | Per-line draw freeze toggled (`borrower`, `reason`, `frozen`, `ledger`) |
 
 The contract also emits additive v2 event topics (for indexer analytics fields
 like actor/source/timestamp identifiers) while keeping v1 payloads stable. See

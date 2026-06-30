@@ -30,6 +30,26 @@ scripts/check_workspace.sh --release -p creditra-credit
 
 Useful as a hook target so contributors and CI invoke the same command.
 
+## `scripts/check-wasm-size.sh`
+
+Builds every workspace contract WASM (via `build_wasm.sh`) and fails if **any**
+release artifact exceeds the size budget. The default limit is **100 KiB**
+(`THRESHOLD_BYTES=102400`), enforced in CI by `.github/workflows/wasm-size.yml`.
+
+```bash
+scripts/check-wasm-size.sh              # build + verify all *.wasm
+scripts/check-wasm-size.sh --check-only # verify artifacts already in target/
+THRESHOLD_BYTES=102400 scripts/check-wasm-size.sh
+```
+
+Scans `target/wasm32-unknown-unknown/release/*.wasm` (override with `WASM_DIR`).
+
+Companion self-test (no contract build):
+
+```bash
+scripts/test_check_wasm_size.sh
+```
+
 ## `scripts/clean_profraw.sh`
 
 Removes stray `*.profraw` coverage files that pile up outside `target/`

@@ -44,4 +44,6 @@ jobs:
           cp contracts/.gas-baseline.json contracts/credit/test_snapshots/budget.json
 
       - name: Run budget-regression tests
-        run: cargo test --manifest-path contracts/credit/Cargo.toml --test budget_regression -- --nocapture
+        run: |
+          cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test instrument -- --nocapture
+          cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test budget_regression -- --nocapture

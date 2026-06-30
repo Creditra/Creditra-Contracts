@@ -142,6 +142,26 @@ pub fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
+/// Return the configured liquidation grace window in seconds.
+///
+/// Returns `0` when never configured (no grace period enforced).
+pub fn get_liquidation_grace_window(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LiquidationGraceWindow)
+        .unwrap_or(0)
+}
+
+/// Set the liquidation grace window (in seconds) for all future auctions.
+///
+/// When non-zero, `place_bid` will reject any bid placed before
+/// `start_time + grace_window` has elapsed.
+pub fn set_liquidation_grace_window(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquidationGraceWindow, &seconds);
+}
+
 pub fn get_end_time(env: &Env) -> u64 {
     env.storage().instance().get(&DataKey::EndTime).unwrap_or(0)
 }
@@ -185,11 +205,8 @@ pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatu
     );
 }
 
-pub fn auction_get_seller(env: &Env, id: u32) -> Address {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::Seller(id))
-        .unwrap()
+pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
+    env.storage().persistent().get(&AuctionKey::Seller(id))
 }
 
 pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
@@ -202,11 +219,8 @@ pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
     );
 }
 
-pub fn auction_get_asset(env: &Env, id: u32) -> Address {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::Asset(id))
-        .unwrap()
+pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
+    env.storage().persistent().get(&AuctionKey::Asset(id))
 }
 
 pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {

@@ -39,7 +39,9 @@ working set is bounded and frequently touched.
 | `AuctionContract` | Default-liquidation hook target. |
 | `MaxTotalExposure` | Protocol-level exposure cap. |
 | `ProtocolFeeBps` | Fee taken on interest portion of repayments. |
-| `TreasuryAddress` / `TreasuryBalance` | Fee sink. |
+| `TreasuryFeeShareBps` | Treasury share of skimmed protocol fees (bps). |
+| `TreasuryAddress` / `TreasuryBalance` | Treasury fee sink. |
+| `BountyAddress` / `BountyBalance` | Bounty pool fee sink. |
 | `MinCollateralRatioBps` | Collateral floor for withdrawals. |
 | `OracleConfig` / `OracleLastPrice` / `OracleLastPriceTs` | Oracle circuit breaker. |
 
@@ -59,6 +61,7 @@ draw) and whose individual TTLs need to be tracked.
 | `BlockedBorrower(Address)` | Per-borrower block list. |
 | `UtilizationCapBps(Address)` | Per-borrower utilization ceiling. |
 | `RateFloorBps(Address)` | Per-borrower interest floor. |
+| `RateCeilingBps(Address)` | Per-borrower interest ceiling. |
 | `RepaymentSchedule(Address)` | Installment schedule. |
 | `CollateralBalance(Address)` | Per-borrower collateral. |
 | `DrawAudit(Address, u64)` | Audit trail entry. |

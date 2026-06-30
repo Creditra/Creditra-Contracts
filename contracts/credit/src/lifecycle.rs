@@ -89,19 +89,17 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_credit_line_event, publish_default_liquidation_requested_event,
-    publish_default_liquidation_settled_event, publish_late_fee_charged_event, CreditLineEvent,
-    DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+    publish_default_liquidation_settled_event, CreditLineEvent, DefaultLiquidationSettledEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
-    clear_repayment_schedule, get_late_fee_flat as storage_get_late_fee_flat, get_max_credit_limit,
-    get_min_credit_limit, get_repayment_schedule as storage_get_repayment_schedule,
-    persist_credit_line, set_late_fee_flat as storage_set_late_fee_flat, set_max_credit_limit,
-    set_min_credit_limit, set_repayment_schedule as storage_set_repayment_schedule,
+    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
+    liquidation_settlement_key, persist_credit_line,
+    set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Generate a unique key for tracking liquidation settlements.
 ///
@@ -120,12 +118,44 @@ fn liquidation_settlement_key(
     )
 }
 
-// ── Credit Limit Bounds Management ───────────────────────────────────────────
-
-/// Set global credit limit bounds (admin only).
+/// Set credit limit bounds (admin only, called through contractimpl).
 ///
-/// Configures the minimum and maximum allowed credit limits for all credit lines.
-/// These bounds are enforced when opening new credit lines or increasing existing limits.
+/// These bounds are enforced by [`validate_credit_limit_bounds`] during
+/// `open_credit_line` and `update_risk_parameters`.
+pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
+    require_admin_auth(&env);
+    crate::storage::set_min_credit_limit(&env, min);
+    crate::storage::set_max_credit_limit(&env, max);
+}
+
+/// Get the current credit limit bounds, if configured.
+///
+/// Returns `(Option<min>, Option<max>)` where `None` means the bound is not set.
+pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
+    let min = crate::storage::get_min_credit_limit(env);
+    let max = crate::storage::get_max_credit_limit(env);
+    (min, max)
+}
+
+/// Validate that a credit limit falls within the configured min/max bounds (if set).
+///
+/// # Panics
+/// - `ContractError::LimitOutOfBounds` if `credit_limit` is outside the configured range.
+pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
+    let (min_limit, max_limit) = get_credit_limit_bounds(env);
+    if let Some(min) = min_limit {
+        if credit_limit < min {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+    if let Some(max) = max_limit {
+        if credit_limit > max {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+}
+
+/// Open a new credit line for a borrower (admin only).
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
@@ -462,7 +492,32 @@ pub fn open_credit_line(
 pub fn suspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    suspend_credit_line_internal(&env, borrower);
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    if credit_line.status != CreditStatus::Active {
+        panic!("Only active credit lines can be suspended");
+    }
+
+    credit_line.status = CreditStatus::Suspended;
+    env.storage().persistent().set(&borrower, &credit_line);
+    // Bump TTL: interacting with a suspended line keeps it live.
+    bump_credit_line_ttl(&env, &borrower);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("suspend")),
+        CreditLineEvent {
+            borrower: borrower.clone(),
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
 }
 
 /// Suspend the caller's own active credit line.
@@ -527,7 +582,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = credit_line.utilized_amount;
+    let _previous_utilized = credit_line.utilized_amount;
 
     // Idempotent: already closed → nothing to do.
     if credit_line.status == CreditStatus::Closed {
@@ -552,7 +607,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         panic!("unauthorized");
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
     persist_credit_line(
         &env,
@@ -589,7 +644,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 /// # Errors
 /// - Reverts if any close fails (e.g., credit line not found, already closed).
 /// - Reverts if borrowers.len() > BATCH_CLOSE_MAX.
-pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
+pub fn close_credit_lines_batch(env: Env, borrowers: soroban_sdk::Vec<Address>) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -620,7 +675,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = stored_line.utilized_amount;
+    let _previous_utilized = stored_line.utilized_amount;
 
     if stored_line.status == CreditStatus::Closed {
         env.panic_with_error(ContractError::CreditLineClosed);
@@ -638,7 +693,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    let previous_status = credit_line.status;
+    let _previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
     persist_credit_line(
         &env,
@@ -663,53 +718,6 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
-/// Forgive outstanding debt without transferring tokens (admin only).
-///
-/// This is an accounting-only write-off path intended for explicit admin debt
-/// relief or off-chain settlements that have already been handled elsewhere.
-/// The forgiven amount is capped to the current `utilized_amount`.
-pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
-    assert_not_paused(&env);
-    require_admin_auth(&env);
-
-    if amount <= 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = stored_line.utilized_amount;
-
-    if stored_line.status == CreditStatus::Closed {
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
-    let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
-    let effective_forgive = amount.min(credit_line.utilized_amount);
-    let interest_forgiven = effective_forgive.min(credit_line.accrued_interest);
-
-    credit_line.accrued_interest = credit_line
-        .accrued_interest
-        .checked_sub(interest_forgiven)
-        .unwrap_or(0);
-    credit_line.utilized_amount = credit_line
-        .utilized_amount
-        .checked_sub(effective_forgive)
-        .unwrap_or(0);
-
-    let previous_status = credit_line.status;
-    persist_credit_line(
-        &env,
-        &borrower,
-        &credit_line,
-        previous_utilized,
-        Some(previous_status),
-    );
-}
-
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
 ///
 /// This hook is accounting-only and intentionally performs no token transfer.
@@ -732,9 +740,14 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    let max_close_factor = crate::storage::get_close_factor_bps(&env);
+    if close_factor_bps > max_close_factor {
+        env.panic_with_error(ContractError::OverLimit);
+    }
+
+    let settlement_key = DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
     if env.storage().persistent().has(&settlement_key) {
-        env.panic_with_error(ContractError::AlreadyInitialized);
+        env.panic_with_error(ContractError::AlreadySettled);
     }
 
     let stored_line: CreditLineData = env
@@ -743,6 +756,7 @@ pub fn settle_default_liquidation(
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     // Apply interest accrual before any mutation
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
@@ -772,13 +786,7 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(
-        &env,
-        &borrower,
-        &credit_line,
-        previous_utilized,
-        Some(previous_status),
-    );
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -841,6 +849,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 
@@ -851,13 +860,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     let previous_status = credit_line.status;
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(
-        &env,
-        &borrower,
-        &credit_line,
-        previous_utilized,
-        Some(previous_status),
-    );
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
 
     publish_credit_line_event(
         &env,
@@ -872,9 +875,187 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     );
 }
 
+// ── repayment schedule helpers ───────────────────────────────────────────────
+
+/// Set or replace a borrower's installment repayment schedule (admin only).
+///
+/// # Parameters
+/// - `borrower`: Borrower whose credit line schedule is being configured.
+/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
+/// - `period_seconds`: Duration of each installment period in seconds; must be positive.
+/// - `first_due_ts`: Timestamp at which the first installment is due.
+///
+/// # Panics
+/// - [`ContractError::InvalidAmount`] when `amount_per_period <= 0` or
+///   `period_seconds == 0`.
+/// - [`ContractError::CreditLineNotFound`] when `borrower` has no credit line.
+///
+/// # Authorization
+/// Requires admin authorization because the schedule controls delinquency and
+/// due-date state for the borrower.
+pub fn set_repayment_schedule(
+    env: &Env,
+    borrower: Address,
+    amount_per_period: i128,
+    period_seconds: u64,
+    first_due_ts: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    if amount_per_period <= 0 || period_seconds == 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    if !env.storage().persistent().has(&borrower) {
+        env.panic_with_error(ContractError::CreditLineNotFound);
+    }
+
+    let schedule = RepaymentSchedule {
+        amount_per_period,
+        period_seconds,
+        next_due_ts: first_due_ts,
+    };
+    storage_set_repayment_schedule(env, &borrower, &schedule);
+    // Setting a schedule is an interaction with the credit line, so keep the
+    // credit-line entry live as well (the schedule entry is bumped by the
+    // storage setter itself).
+    bump_credit_line_ttl(env, &borrower);
+}
+
+/// Advance a borrower's installment schedule after a repayment.
+///
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
+///
+/// ```text
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
+/// ```
+///
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
+pub fn advance_repayment_schedule_after_repay(
+    env: &Env,
+    borrower: &Address,
+    effective_repay: i128,
+    interest_repaid: i128,
+) {
+    let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
+        Some(principal) if principal > 0 => principal,
+        _ => return,
+    };
+
+    let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
+        return;
+    };
+
+    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
+        return;
+    }
+
+    let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
+    if installments_paid == 0 {
+        return;
+    }
+
+    let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
+    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
+    storage_set_repayment_schedule(env, borrower, &schedule);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod self_suspend {
+    use crate::types::{ContractError, CreditStatus};
+    use crate::Credit;
+    use crate::CreditClient;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::Address;
+    use soroban_sdk::Env;
+
+    fn setup(env: &Env) -> (CreditClient<'_>, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &500_u32, &50_u32);
+        (client, borrower)
+    }
+
+    /// A borrower can self-suspend their own active line; status transitions
+    /// to Suspended without admin involvement.
+    #[test]
+    fn self_suspend_transitions_active_to_suspended() {
+        let env = Env::default();
+        let (client, borrower) = setup(&env);
+
+        client.self_suspend_credit_line(&borrower);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Suspended);
+    }
+
+    /// Self-suspend requires the borrower's own authorization. `init` and a
+    /// brand-new `open_credit_line` need no auth, so with nothing mocked at
+    /// all, only `self_suspend_credit_line`'s `borrower.require_auth()` can
+    /// be the source of the panic.
+    #[test]
+    #[should_panic]
+    fn self_suspend_requires_borrower_auth() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &500_u32, &50_u32);
+
+        client.self_suspend_credit_line(&borrower);
+    }
+
+    /// Once self-suspended, draws are blocked but repayments remain available.
+    #[test]
+    fn self_suspend_blocks_draws_but_allows_repay() {
+        let env = Env::default();
+        let (client, borrower) = setup(&env);
+
+        client.self_suspend_credit_line(&borrower);
+
+        let draw_result = client.try_draw_credit(&borrower, &100_i128);
+        assert_eq!(
+            draw_result.err().unwrap().unwrap(),
+            ContractError::CreditLineSuspended.into()
+        );
+
+        // Repayment against a Suspended line is allowed (no draw occurred, so
+        // utilized_amount is 0 — this just confirms repay_credit doesn't panic
+        // on the suspended status itself).
+        client.repay_credit(&borrower, &1_i128);
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Suspended);
+    }
+
+    /// Self-suspending an already-suspended line panics (not idempotent).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #20)")]
+    fn self_suspend_twice_reverts() {
+        let env = Env::default();
+        let (client, borrower) = setup(&env);
+
+        client.self_suspend_credit_line(&borrower);
+        client.self_suspend_credit_line(&borrower);
+    }
+}
 
 #[cfg(test)]
 mod installment {

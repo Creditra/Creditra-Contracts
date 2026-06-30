@@ -151,6 +151,9 @@ Creditra-Contracts/
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
 ├── gateway-contract/contracts/auction_contract/
+│   ├── tests/
+│   │   ├── transition_matrix.rs  # AuctionStatus transition matrix (Issue #614)
+│   │   └── auth_settle.rs       # settle_default_liquidation auth coverage
 │   └── src/
 │       ├── lib.rs             # Auction contract (English + Dutch modes)
 │       ├── types.rs           # AuctionMode, AuctionStatus, AuctionState
@@ -189,7 +192,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `set_credit_limit_bounds`.
 - **Liquidity & treasury:** `set_liquidity_token`, `set_liquidity_source`,
   `set_protocol_fee_bps`, `set_treasury`, `withdraw_treasury`.
-- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`.
+- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`,
+  `partial_release_collateral` (borrower-callable; releases a portion of
+  collateral while keeping health-factor ≥ `MinCollateralRatioBps`).
 - **Repayment schedule:** `set_repayment_schedule`, `get_repayment_schedule`,
   `is_delinquent`.
 - **Operational controls:** `pause_protocol` / `unpause_protocol`,
@@ -233,8 +238,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Admin-gated WASM upgrade with schema version bump.
 - Circuit breaker (`pause_protocol`) with repay-credit exception.
 - Treasury + protocol fee on interest portion.
-- Per-borrower utilization cap, global exposure cap, draw cooldown, per-tx
-  caps.
+- Per-borrower utilization cap, per-borrower exposure cap, global exposure
+  cap, draw cooldown, per-tx caps.
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.

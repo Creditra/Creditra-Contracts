@@ -4,16 +4,15 @@ use creditra_credit::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_default_liquidation_settled_event,
     publish_draw_reversed_event, publish_drawn_event, publish_draws_frozen_event,
-    publish_grace_waiver_applied_event, publish_interest_accrued_event, publish_paused_event,
+    publish_grace_waiver_receipt_event, publish_interest_accrued_event,
     publish_rate_formula_config_event, publish_repayment_event, publish_risk_parameters_updated,
-    AdminRotationAcceptedEvent, AdminRotationProposedEvent, BorrowerBlockedEvent,
-    DefaultLiquidationSettledEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent,
+    DrawReversedEvent, InterestAccruedEvent, RepaymentEvent, RiskParametersUpdatedEvent,
 };
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, TryFromVal};
 
 fn setup(env: &Env) -> (CreditClient, Address) {
     env.mock_all_auths();
@@ -27,9 +26,8 @@ fn setup(env: &Env) -> (CreditClient, Address) {
 #[test]
 fn test_event_topics_stability() {
     let env = Env::default();
-    let (client, admin) = setup(&env);
+    let (_client, admin) = setup(&env);
     let borrower = Address::generate(&env);
-    let recipient = Address::generate(&env);
 
     // Trigger all events
     publish_drawn_event(
@@ -64,6 +62,7 @@ fn test_event_topics_stability() {
             recovered_amount: 20,
             remaining_utilized_amount: 35,
             status: CreditStatus::Active,
+            close_factor_bps: 0,
         },
     );
     publish_admin_rotation_proposed(&env, &admin, 100);
@@ -82,16 +81,10 @@ fn test_event_topics_stability() {
             accounting_only: false,
         },
     );
-    publish_draws_frozen_event(&env, true);
-    publish_borrower_blocked_event(
-        &env,
-        BorrowerBlockedEvent {
-            borrower: borrower.clone(),
-            blocked: true,
-        },
-    );
+    publish_draws_frozen_event(&env, true, creditra_credit::FreezeReason::LiquidityReserve);
+    publish_borrower_blocked_event(&env, &borrower, true);
     publish_rate_formula_config_event(&env, true);
-    publish_grace_waiver_applied_event(
+    publish_grace_waiver_receipt_event(
         &env,
         &borrower,
         10,
@@ -107,8 +100,14 @@ fn test_event_topics_stability() {
         let t0 = topics.get(0).unwrap();
         let t1 = topics.get(1).unwrap();
 
-        assert_eq!(t0, symbol_short!("credit"));
-        assert_eq!(t1, Symbol::new(&env, expected_t1));
+        assert_eq!(
+            Symbol::try_from_val(&env, &t0).unwrap(),
+            symbol_short!("credit")
+        );
+        assert_eq!(
+            Symbol::try_from_val(&env, &t1).unwrap(),
+            Symbol::new(&env, expected_t1)
+        );
     };
 
     assert_topic(0, "credit", "drawn");
@@ -120,7 +119,13 @@ fn test_event_topics_stability() {
     assert_topic(6, "credit", "risk_upd");
     assert_topic(7, "credit", "draw_rev");
     assert_topic(8, "credit", "drw_freeze");
-    assert_topic(9, "credit", "blk_chg");
+    let blk_event = all_events.get(9).unwrap();
+    let blk_topics = blk_event.1;
+    assert_eq!(blk_topics.len(), 1);
+    assert_eq!(
+        Symbol::try_from_val(&env, &blk_topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&env, "blk_chg")
+    );
     assert_topic(10, "credit", "rate_form");
     assert_topic(11, "credit", "grace_wv");
 }

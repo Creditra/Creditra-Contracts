@@ -234,19 +234,28 @@ All transitions invoke `apply_accrual` first and persist via
    - If `RateFormulaConfig` set: `compute_rate_from_score(cfg, risk_score)`
    - Else: provided `interest_rate_bps`
 8. Apply per-borrower `RateFloorBps` (max of effective_rate and floor)
-9. If `RateChangeConfig` set:
+9. Apply per-borrower `RateCeilingBps` (min of floor-adjusted rate and ceiling)
+10. If `RateChangeConfig` set:
    - `|new_rate - old_rate| <= max_rate_change_bps` (else `RateTooHigh`)
    - `now - last_rate_update_ts >= rate_change_min_interval`
      (else `TimestampRegression`)
-10. `effective_rate <= MAX_INTEREST_RATE_BPS` (sanity)
-11. If `utilized_amount > new credit_limit`: status → `Restricted`
-12. Persist; emit `RiskParametersUpdatedEvent` on `("credit","risk_upd")`.
+11. `effective_rate <= MAX_INTEREST_RATE_BPS` (sanity)
+12. If `utilized_amount > new credit_limit`: status → `Restricted`
+13. Persist; emit `RiskParametersUpdatedEvent` on `("credit","risk_upd")`.
 
 #### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
 `lib.rs:569`. Admin + pause. Writes `Symbol("rate_cfg")`.
 
 #### `set_borrower_rate_floor(env, borrower, floor_bps: Option<u32>)`
-`lib.rs:578`. Admin. Asserts `floor <= 10_000`. `None` clears.
+`lib.rs:578`. Admin. Asserts `floor <= 10_000` and rejects
+`floor > RateCeilingBps(borrower)` when a ceiling is configured. `None`
+clears.
+
+#### `set_borrower_rate_ceiling(env, borrower, ceiling_bps: Option<u32>)`
+`lib.rs:775`. Admin. Asserts `ceiling <= 10_000` and rejects
+`ceiling < RateFloorBps(borrower)` when a floor is configured. `None`
+clears. The value is applied during `update_risk_parameters` after any
+per-borrower floor and before rate-change guardrails.
 
 #### `set_penalty_surcharge_bps(env, bps)`
 `lib.rs:587`. Admin + pause. Surcharge added to base rate (and clamped to
@@ -269,7 +278,7 @@ emits `("credit","rate_form")` with `true`.
 | `set_utilization_cap(borrower, cap_bps)` | `lib.rs:607` | `DataKey::UtilizationCapBps(borrower)` (Persistent) | `cap_bps ∈ 1..=10000`; `0` clears. |
 | `set_max_total_exposure(amount)` | `lib.rs:827` | `DataKey::MaxTotalExposure` | `0` removes the cap. |
 | `set_credit_limit_bounds(min, max)` | `lib.rs:862` | `MinCreditLimit`, `MaxCreditLimit` | `min >= 0`, `max >= min`. |
-| `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | All > 0. |
+| `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | `amount_per_period` is principal-only; interest repayments do not advance `next_due_ts`. All > 0. |
 | `set_grace_period_config(grace_period_seconds, waiver_mode, reduced_rate_bps)` | `lib.rs:646` | `Symbol("grace_cfg")` (Instance) | `reduced_rate <= 10000`. |
 
 ### 2.6 Collateral
@@ -278,18 +287,28 @@ emits `("credit","rate_form")` with `true`.
 |---|---|---|
 | `deposit_collateral(borrower, amount)` | `lib.rs:805` → `collateral.rs:34` | `token::transfer` borrower → contract; `CollateralBalance += amount`. Emits `CollateralDepositedEvent`. |
 | `withdraw_collateral(borrower, amount)` | `lib.rs:809` → `collateral.rs:69` | Compute `post_balance`; require `utilized * MinCollateralRatioBps / 10000 <= post_balance` else `CollateralRatioBelowMinimum`; transfer out; persist; emit. |
+| `partial_release_collateral(borrower, amount)` | `lib.rs` → `collateral.rs` | Borrower-only entrypoint. Releases `amount` collateral back to borrower provided the health-factor invariant holds after the release: `post_balance >= utilized * MinCollateralRatioBps / 10_000`. Ratio check skipped when `utilized == 0`. Emits `CollateralPartialReleasedEvent` on topic `("credit","col_prel")` with `amount_released`, `new_balance`, and `health_factor_bps` (`u32::MAX` when no debt). Errors: `InvalidAmount(5)`, `InsufficientCollateralBalance(39)`, `CollateralRatioBelowMinimum(35)`, `MissingLiquidityToken(22)`, `Overflow(12)`. |
 | `get_collateral(borrower) -> i128` | `lib.rs:813` → `collateral.rs:124` | Read-only. |
 
 `InsufficientRepaymentBalance` is intentionally reused for over-withdraw
 (see `collateral.rs:78-83` comment). Clients should disambiguate by entrypoint.
 
-### 2.7 Treasury & protocol fee
+### 2.7 Treasury, bounty pool & protocol fee
 
 | Entrypoint | Effect |
 |---|---|
-| `set_protocol_fee_bps(bps)` (`lib.rs:744`) | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded. |
-| `set_treasury(admin, treasury)` (`lib.rs:758`) | Double-auth (admin arg + `require_admin_auth`). |
-| `withdraw_treasury(admin)` (`lib.rs:770`) | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
+| `set_protocol_fee_bps(bps)` | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded. |
+| `set_treasury_fee_share_bps(bps)` | Admin; treasury share of skimmed fees in `0..=10_000`. Bounty pool receives the remainder. Default unset = 10_000 (100 % treasury). |
+| `get_treasury_fee_share_bps()` | Returns configured share or `None` when unset. |
+| `set_treasury(admin, treasury)` | Double-auth (admin arg + `require_admin_auth`). |
+| `withdraw_treasury(admin)` | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
+| `set_bounty(admin, bounty)` | Double-auth; configures bounty pool withdrawal address. |
+| `get_bounty()` | Returns configured bounty address, if any. |
+| `withdraw_bounty(admin)` | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`. |
+
+On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
+`TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
+See `contracts/credit/src/fees.rs`.
 
 ### 2.8 Settlement & oracle
 
@@ -304,6 +323,10 @@ emits `("credit","rate_form")` with `true`.
      (else `OraclePriceDeviation`)
    - Atomically write `OracleLastPrice`, `OracleLastPriceTs`; emit
      `("credit","orc_price")`
+
+   During an oracle outage, callers may resubmit the last accepted price to
+   continue settlement operations as long as the stored price remains within the
+   configured `max_age_seconds` freshness window.
 3. If `AuctionContract` is set, call
    `AuctionClient::settle_default_liquidation(settlement_id, contract, borrower) -> i128`
    and assert returned == `recovered_amount` (else `InvalidAmount`)
@@ -325,8 +348,9 @@ emits `("credit","rate_form")` with `true`.
 
 | Entrypoint | Effect |
 |---|---|
-| `freeze_draws(env)` / `unfreeze_draws(env)` | Global flag; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
-| `is_draws_frozen() -> bool` | Read-only. |
+| `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
+| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
+| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
 | `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
 | `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
 | `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
@@ -349,6 +373,7 @@ emits `("credit","rate_form")` with `true`.
 | `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
 | `get_rate_change_limits()` | `Option<RateChangeConfig>` |
 | `get_borrower_rate_floor(borrower)` | `Option<u32>` |
+| `get_borrower_rate_ceiling(borrower)` | `Option<u32>` |
 | `get_grace_period_config()` | `Option<GracePeriodConfig>` |
 | `get_penalty_surcharge_bps()` | `u32` |
 | `get_max_total_exposure()` | `Option<i128>` |
@@ -422,6 +447,7 @@ table is also reflected in `docs/storage-layout.md`.)
 | `BlockedBorrower(Address)` | Persistent | Blocklist flag |
 | `UtilizationCapBps(Address)` | Persistent | Per-borrower utilization cap |
 | `RateFloorBps(Address)` | Persistent | Per-borrower rate floor |
+| `RateCeilingBps(Address)` | Persistent | Per-borrower rate ceiling |
 | `RepaymentSchedule(Address)` | Persistent | `RepaymentSchedule` payload |
 | `MinCreditLimit` | Instance | Lower bound on new lines |
 | `MaxCreditLimit` | Instance | Upper bound on new lines |
@@ -681,6 +707,6 @@ unpaused (`assert_not_paused`). A safe upgrade procedure is therefore:
 | Oracle (price) | `WHITEPAPER.md` §7.1 |
 | Oracle (default signal, staged) | `docs/default-oracle.md` |
 | Upgrade policy | `docs/upgrade-policy.md` |
-| Event catalog | `docs/events-schema.md` |
+| Event catalog | `docs/EVENTS_CATALOG.md` |
 | Deployment | `docs/deploy.md` |
 | Test catalog | `docs/EXECUTION_QUALITY.md` |

@@ -22,6 +22,7 @@ Companion docs: `docs/risk-based-rate-formula.md` (terse normative reference),
 | Credit limit $\ell$ | `i128` | `[MinCreditLimit, MaxCreditLimit]` | Off-chain scorer / admin policy |
 | Rate config $(b, s, r_{\min}, r_{\max})$ | `RateFormulaConfig` | each `u32` in `[0, 10_000]`, `r_{\min} \leq r_{\max} \leq 10\,000` | `set_rate_formula_config` (`lib.rs:1159`) |
 | Per-borrower floor $r_{\text{floor}}$ | `Option<u32>` | `[0, 10_000]` | `set_borrower_rate_floor` (`lib.rs:578`) |
+| Per-borrower ceiling $r_{\text{ceiling}}$ | `Option<u32>` | `[0, 10_000]` and `floor <= ceiling` when both are set | `set_borrower_rate_ceiling` (`lib.rs:775`) |
 | Rate-change config $(\Delta r_{\max}, \tau_{\min})$ | `RateChangeConfig` | `bps, seconds` | `set_rate_change_limits` (`lib.rs:569`) |
 | Penalty surcharge $\rho$ | `u32` | `[0, 10_000]` | `set_penalty_surcharge_bps` (`lib.rs:587`) |
 | Grace period $(T_g, m, r_g)$ | `GracePeriodConfig` | $T_g$ in seconds, mode FullWaiver/ReducedRate, $r_g$ in bps | `set_grace_period_config` (`lib.rs:646`) |
@@ -30,7 +31,7 @@ Companion docs: `docs/risk-based-rate-formula.md` (terse normative reference),
 | Last accrual timestamp $t_{\text{last}}$ | `u64` | unix seconds | updated only when $\Delta I > 0$ |
 
 The on-chain function is therefore deterministic in
-$(k, \ell, b, s, r_{\min}, r_{\max}, r_{\text{floor}}, \rho, T_g, m, r_g, u, I, t_{\text{last}}, t_{\text{now}})$
+$(k, \ell, b, s, r_{\min}, r_{\max}, r_{\text{floor}}, r_{\text{ceiling}}, \rho, T_g, m, r_g, u, I, t_{\text{last}}, t_{\text{now}})$
 — there is no hidden state.
 
 ---
@@ -69,19 +70,27 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, k: u32) -> u32 {
 }
 ```
 
-### 2.2 Per-borrower floor
+### 2.2 Per-borrower floor and ceiling
 
 After the formula computes $r(k)$, an optional per-borrower floor
-$r_{\text{floor}}$ is applied:
+$r_{\text{floor}}$ and ceiling $r_{\text{ceiling}}$ are applied:
 
 $$
-r_{\text{eff}}(k, \text{borrower}) = \max\big(r(k), \; r_{\text{floor}}(\text{borrower}) \big)
+r_{\text{eff}}(k, \text{borrower}) = \min\Big(\max\big(r(k), \; r_{\text{floor}}(\text{borrower}) \big), \; r_{\text{ceiling}}(\text{borrower})\Big)
 $$
 
 The floor is stored under `DataKey::RateFloorBps(Address)` (Persistent,
 `contracts/credit/src/storage.rs:357`). Use cases: a borrower in a higher-risk
 jurisdiction, or one with a sticky penalty history, can be assigned a hard
 minimum rate that overrides a favorable formula.
+
+The ceiling is stored under `DataKey::RateCeilingBps(Address)` (Persistent).
+It caps that borrower's manual or formula-derived rate before rate-change
+guardrails run. The admin setters reject inconsistent bounds in either
+direction: a ceiling below an existing floor, or a floor above an existing
+ceiling, reverts with `ContractError::RateTooHigh`.
+
+When either bound is unset, that side of the clamp is skipped.
 
 ### 2.3 Rate-change cap
 
@@ -124,7 +133,81 @@ For $k \in \{0, 25, 50, 75, 100\}$:
 A borrower with $r_{\text{floor}} = 1000$ at $k=0$ would see $r_{\text{eff}}
 = \max(200, 1000) = 1000$ (10.00 %).
 
+A borrower with $r_{\text{ceiling}} = 4000$ at $k=100$ would see
+$r_{\text{eff}} = \min(5000, 4000) = 4000$ (40.00 %), even though the formula
+would otherwise clamp at 50.00 %.
+
 This example is the canonical test fixture in `tests/risk_formula_tests.rs`.
+
+### 2.5 Worked numerical example — rate-change magnitude cap
+
+`update_risk_parameters` enforces `|r_new - r_old| ≤ Δr_max` when
+`RateChangeConfig` is active (`risk.rs:340-355`).
+
+Configure `max_rate_change_bps = 200` (2.00 % per update).
+
+| Scenario | Old rate | New formula rate | Delta | Permitted? |
+|---|---|---|---|---|
+| Gradual increase | 500 bps (5.00 %) | 650 bps (6.50 %) | 150 bps | Yes (150 ≤ 200) |
+| Sharp increase | 500 bps (5.00 %) | 1 000 bps (10.00 %) | 500 bps | No (500 > 200) → revert `RateTooHigh` |
+| Gradual decrease | 3 000 bps (30.00 %) | 2 850 bps (28.50 %) | 150 bps | Yes (150 ≤ 200) |
+| Sharp decrease | 3 000 bps (30.00 %) | 2 500 bps (25.00 %) | 500 bps | No (500 > 200) → revert `RateTooHigh` |
+| No change | 1 500 bps | 1 500 bps | 0 bps | Skipped (no delta check) |
+
+The delta check uses `u32::abs_diff` (`risk.rs:343`), so the cap is
+**symmetric** — it applies equally to rate increases and decreases.
+
+Tested in `tests/state_transition_invariants.rs` (magnitude) and
+`risk_formula_tests.rs:514-535` (formula + rate-change limits).
+
+### 2.6 Worked numerical example — rate-change cadence cap
+
+`update_risk_parameters` also enforces a minimum interval between rate
+changes when `rate_change_min_interval > 0` (`risk.rs:348-355`).
+
+Configure `max_rate_change_bps = 500`, `rate_change_min_interval = 86 400`
+(1 day).
+
+| Event | Timestamp | Rate change | Permitted? | Reason |
+|---|---|---|---|---|
+| Open line | t=0 | 500 → 500 bps | N/A | No prior rate |
+| First update | t=3 600 (1 hr) | 500 → 700 bps (Δ=200) | Yes | No prior rate change |
+| Second update | t=3 600 + 43 200 (12 hr) | 700 → 900 bps (Δ=200) | No | 43 200 s < 86 400 s → revert `TimestampRegression` |
+| Third update | t=3 600 + 86 400 (1 day) | 700 → 900 bps (Δ=200) | Yes | 86 400 s ≥ 86 400 s |
+| Fourth update | t=3 600 + 86 400 + 1 | 900 → 800 bps (Δ=100) | Yes | ≥86 400 s elapsed |
+
+The cadence check is **skipped** when `rate_change_min_interval == 0`
+(no minimum) or when `last_rate_update_ts == 0` (no prior rate change,
+`risk.rs:348`). `last_rate_update_ts` is only advanced when the rate
+*actually changes*, so a no-op update does not reset the cadence clock.
+
+Tested in `tests/monotonic_timestamps.rs`.
+
+### 2.7 Worked numerical example — per-borrower floor/ceiling stacking
+
+After the formula computes the rate, two optional per-borrower overrides
+apply in sequence (`risk.rs:328-338`):
+
+```
+r_mid  = max(r_formula, r_floor)       // floor applied first
+r_eff  = min(r_mid,    r_ceiling)      // ceiling applied second
+```
+
+Example with `RateFormulaConfig(200, 50, 200, 5 000)`:
+
+| Scenario | $k$ | $r_{\text{formula}}$ | Floor (bps) | Ceiling (bps) | $r_{\text{eff}}$ |
+|---|---|---|---|---|---|
+| No overrides | 25 | 1 450 | — | — | 1 450 bps (14.50 %) |
+| Floor only | 0 | 200 | 1 000 | — | 1 000 bps (10.00 %) |
+| Ceiling only | 75 | 3 950 | — | 2 500 | 2 500 bps (25.00 %) |
+| Floor + ceiling sandwich | 50 | 2 700 | 3 000 | 4 000 | 3 000 bps (30.00 %) |
+| Ceiling below floor (rejected) | 50 | 2 700 | 3 000 | 2 500 | Rejected at config-set time (`RateTooHigh`) |
+
+The contract rejects inconsistent borrower-specific bounds in either
+direction: `ceiling < floor` when setting a ceiling and `floor > ceiling`
+when setting a floor. That prevents a misconfigured admin from creating an
+unresolvable ordering. Tested in `tests/borrower_rate_floor.rs` and
+`tests/borrower_rate_ceiling.rs`.
 
 ---
 
@@ -356,6 +439,80 @@ Compare to no-grace accrual (45 days at 15 %): $\approx 18.48$ XLM.
 
 The grace mode reduced the realized interest by ~8.20 XLM.
 
+### 4.6 Worked numerical example — multi-year simple interest (no compounding)
+
+Creditra uses simple interest capitalized at mutation. There is no automatic
+compounding loop. A borrower who draws and never touches the line for 5 years
+accrues interest linearly, *not* exponentially.
+
+Take the §4.4 scenario (1 000 XLM at 15.00 % APR). Compare simple vs.
+compound interest over multiple years:
+
+| Year | Simple interest accrued (cumulative) | Compound interest (annual compounding, cumulative) |
+|---|---|---|
+| 0 | — | — |
+| 1 | 12.32 XLM | 12.32 XLM |
+| 2 | 24.65 XLM | 26.49 XLM |
+| 3 | 36.97 XLM | 42.59 XLM |
+| 4 | 49.30 XLM | 60.99 XLM |
+| 5 | 61.62 XLM | 82.23 XLM |
+
+After 5 years the simple-interest borrower owes approximately **1 061.62
+XLM**, while a compound-interest equivalent would owe approximately
+**1 082.23 XLM** — a difference of ~20.61 XLM in the borrower's favor.
+
+The simple-interest design:
+- **Benefits consistent repayers.** A borrower who repays frequently
+  minimizes the principal on which future interest accrues, without being
+  penalised by a compounding treadmill.
+- **Eliminates the compounding oracle problem.** No need for keeper bots
+  to periodically compound — the contract charges interest only when a
+  mutation occurs.
+- **Is trivially auditable.** Every $\Delta I$ is a single
+  `mul_div(utilized, rate * Δt, 10_000 * Y, Floor)` call. There is no
+  compounding loop to reason about.
+
+The multi-period test in `contracts/credit/src/accrual_tests.rs:100-127`
+demonstrates the additive property across two six-month windows.
+
+### 4.7 Worked numerical example — sub-tick dust accumulation
+
+Floor rounding (`Rounding::Floor` in `prorate_interest`,
+`math_utils.rs:244`) means very short time windows produce $\Delta I = 0$.
+However, the contract **advances** `last_accrual_ts` even on a zero-interest
+fold (provided $u > 0$ and $t_{\text{now}} > t_{\text{last}}$,
+`accrual.rs` design). This means fractional "dust" is not accumulated
+indefinitely — the contract trades sub-tick precision for gas efficiency.
+
+Example: 1 000 000 XLM at 500 bps (5.00 % APR).
+
+| Δt | $\Delta I$ formula | $\Delta I$ (stroops) | Note |
+|---|---|---|---|
+| 1 s | $10^{13} \cdot 500 \cdot 1 / (10^4 \cdot 3.15576 \cdot 10^7)$ | 0 | Sub-tick: rounds to 0 |
+| 3 600 s (1 hr) | $10^{13} \cdot 500 \cdot 3\,600 / (10^4 \cdot 3.15576 \cdot 10^7)$ | 57 035 | ~0.00057 % of principal |
+| 86 400 s (1 day) | $10^{13} \cdot 500 \cdot 86\,400 / (10^4 \cdot 3.15576 \cdot 10^7)$ | 1 368 847 | ~0.0137 % of principal |
+| 604 800 s (1 wk) | $10^{13} \cdot 500 \cdot 604\,800 / (10^4 \cdot 3.15576 \cdot 10^7)$ | 9 581 932 | ~0.096 % of principal |
+| 31 557 600 s (1 yr) | $10^{13} \cdot 500 \cdot 31\,557\,600 / (10^4 \cdot 3.15576 \cdot 10^7)$ | 500 000 000 | Exactly 5.00 % |
+
+A 1-second accrual on any realistic principal produces $\Delta I = 0$. This
+is **not a bug** — it is the consequence of integer arithmetic with a
+$Y = 31\,557\,600$-second denominator. The contract compensates by
+advancing `last_accrual_ts` unconditionally (when $u > 0$), so the lost
+dust is at most one second's worth of interest, never more. Over the
+lifetime of a 1 000 000 XLM line at 5.00 %, the maximum dust lost is:
+
+$$
+\text{max\_dust} = \left\lfloor \frac{10^{13} \cdot 500 \cdot 1}{10^4 \cdot 3.15576 \cdot 10^7} \right\rfloor
+= 0 \text{ stroops}
+$$
+
+...but only if the line is touched every second, which is impractical.
+In practice, real-world usage patterns produce $\Delta I > 0$ on every
+meaningful touch.
+
+Tested in `tests/accrual_overflow_audit.rs` and
+`contracts/credit/src/accrual_tests.rs:173-190`.
+
 ---
 
 ## 5. Repayment Allocation
@@ -463,13 +620,18 @@ active in the live `place_bid` path; tracked as a known gap.
 ### 6.3 Dutch auction
 
 `AuctionMode::Dutch` with init params `dutch_start_price = p_0`,
-`dutch_floor_price = p_f`. The price curve is **linear decay**
-(implementation `compute_dutch_price`,
-`gateway-contract/.../lib.rs`):
+`dutch_floor_price = p_f`, plus optional `dutch_decay` and
+`dutch_step_count`.
+
+- `dutch_decay = Linear` (or omitted) keeps the original linear decay:
 
 $$
 p(t) = p_0 - (p_0 - p_f) \cdot \frac{\min(t, T)}{T}, \quad T = \text{end\_time} - \text{start\_time}
 $$
+
+- `dutch_decay = Stepped` splits the same total drop into
+  `dutch_step_count` equal time buckets and reprices only at bucket
+  boundaries. `dutch_step_count` is required and must be greater than zero.
 
 A bid $a$ qualifies if $a \geq p(t) \land a \geq \text{min\_bid}$. The first
 qualifying bid atomically flips the auction to `Closed` and records the
@@ -533,6 +695,92 @@ $\sum \text{recovered\_amount}$ is the sum over all
 `("credit","liq_setl")` events for that borrower. The scorer should feed
 this back into future $f(k, h, a, \alpha)$ computations.
 
+### 6.6 Worked numerical example — settlement allocation
+
+A borrower defaults with the following state (`lifecycle.rs:450`):
+
+- Principal drawn: 4 500 XLM
+- Accrued interest: 500 XLM
+- Utilized at default: $u = 5\,000$ XLM
+- $I_{\text{accrued}} = 500$ XLM
+
+The Dutch auction resolves with a winning bid of **3 000 XLM**. Admin calls
+`settle_default_liquidation` (`lib.rs:953`). The settlement math
+(§6.4) gives:
+
+$$
+\begin{aligned}
+\text{interest\_settled} &= \min(3\,000, 500) = 500\ \text{XLM} \\
+\text{principal\_settled} &= 3\,000 - 500 = 2\,500\ \text{XLM} \\
+u' &= 5\,000 - 3\,000 = 2\,000\ \text{XLM} \\
+I_{\text{accrued}}' &= 500 - 500 = 0\ \text{XLM}
+\end{aligned}
+$$
+
+Post-settlement state:
+
+| Field | Before | After |
+|---|---|---|
+| `utilized_amount` | 5 000 XLM | 2 000 XLM |
+| `accrued_interest` | 500 XLM | 0 XLM |
+| Status | Defaulted | Defaulted (still outstanding) |
+
+Since $u' > 0$, the line remains `Defaulted` and may be re-auctioned for
+the remaining 2 000 XLM. The `DefaultLiquidationSettledEvent` records:
+`recovered_amount = 3 000`, `interest_settled = 500`,
+`principal_settled = 2 500`, `remaining = 2 000`.
+
+**Partial recovery scenario:** If the auction recovers **6 000 XLM** (above
+the full debt):
+
+$$
+\begin{aligned}
+\text{interest\_settled} &= \min(6\,000, 500) = 500 \\
+\text{principal\_settled} &= 6\,000 - 500 = 5\,500 \\
+u' &= 5\,000 - 6\,000 = \max(5\,000 - 6\,000, 0) = 0
+\end{aligned}
+$$
+
+The surplus 500 XLM is *not* refunded to the defaulting borrower — the
+recovery auction is an enforced liquidation, not a voluntary sale. The
+contract caps the recovered amount at `utilized_amount` during settlement
+validation. Status transitions to `Closed` and the repayment schedule is
+cleared.
+
+Tested in `tests/credit_auction_e2e.rs` and
+`tests/default_liquidation_settled_event.rs`.
+
+### 6.7 Worked numerical example — recovery rate accounting
+
+The empirical recovery rate $\eta$ (§6.5) aggregates across a borrower's
+default-settlement events.
+
+Borrower Alice has:
+
+| Default event | $u$ at default | Settlement events | $\sum \text{recovered}$ | $\eta$ |
+|---|---|---|---|---|
+| 2026-01-15 | 5 000 XLM | 3 000 XLM (Jan), 1 500 XLM (Feb) | 4 500 XLM | $4\,500 / 5\,000 = 90.0\,\%$ |
+| 2026-06-01 | 2 000 XLM | 800 XLM (Jun) | 800 XLM | $800 / 2\,000 = 40.0\,\%$ |
+| **Lifetime** | **7 000 XLM** | **5 300 XLM** | **5 300 XLM** | **$5\,300 / 7\,000 = 75.7\,\%$** |
+
+The protocol's aggregate $\eta$ is computed across **all** borrowers:
+
+$$
+\eta_{\text{protocol}} = \frac{\sum_{\text{all borrowers}} \sum \text{recovered\_amount}}
+{\sum_{\text{all borrowers}} \text{utilized\_amount at default}}
+$$
+
+This ratio feeds back into the off-chain multiplier
+$f(k, h, a, \alpha)$ — higher $\eta$ implies tighter future limits
+for the same risk score, because the protocol prices in expected loss.
+
+Every settlement emits `("credit","liq_setl")` with the full breakdown
+(`events.rs:236`), making $\eta$ computable from emitted events alone.
+An indexer can maintain a materialized view without querying past ledger
+state.
+
+Tested in `tests/default_liquidation_settled_event.rs`.
+
 ---
 
 ## 7. Anti-Snipe Semantics (Spec, Tracked as Open)
@@ -590,19 +838,24 @@ Key differences:
 |---|---|
 | `compute_rate_from_score` clamp | `contracts/credit/src/risk_formula_tests.rs` (inline tests) |
 | Saturating arithmetic on rate | `risk_formula_tests.rs` |
-| Per-borrower floor override | `contracts/credit/tests/borrower_rate_floor.rs` |
-| Rate-change cap (magnitude) | `tests/state_transition_invariants.rs` |
-| Rate-change cap (cadence) | `tests/monotonic_timestamps.rs` |
+| Per-borrower rate floor override | `contracts/credit/tests/borrower_rate_floor.rs` |
+| Per-borrower rate ceiling interaction | `contracts/credit/tests/borrower_rate_ceiling.rs` |
+| Rate-change cap (magnitude) | `tests/state_transition_invariants.rs`, worked example §2.5 |
+| Rate-change cap (cadence) | `tests/monotonic_timestamps.rs`, worked example §2.6 |
 | Floor-rounded accrual | `tests/accrual_overflow_audit.rs`, inline `accrual_tests.rs` |
+| Sub-tick dust rounding | inline `accrual_tests.rs`, worked example §4.7 |
+| Multi-year simple-interest accumulation | inline `accrual_tests.rs`, worked example §4.6 |
 | Overflow safety | `tests/accrual_overflow_audit.rs` |
 | Penalty surcharge entry/exit | `tests/penalty_surcharge.rs` |
-| Grace waiver (FullWaiver vs ReducedRate) | `tests/grace_waiver.rs` |
+| Grace waiver (FullWaiver vs ReducedRate) | `tests/grace_waiver.rs`, worked example §4.5 |
+| Grace + ReducedRate split-window | inline `accrual_tests.rs`, worked example §4.5 |
 | Restricted-on-limit-decrease | `tests/restricted_status.rs` |
 | Interest-first repay allocation | `tests/protocol_fee.rs` |
 | Fee accounting (protocol fee) | `tests/protocol_fee.rs` |
-| Default → auction → settle flow | `tests/credit_auction_e2e.rs` |
+| Default → auction → settle flow | `tests/credit_auction_e2e.rs`, worked example §6.6 |
 | Settlement replay protection | `tests/default_liquidation_settled_event.rs` |
-| Dutch auction curve | `gateway-contract/.../test.rs` |
+| Recovery rate accounting | worked example §6.7, computable from events |
+| Dutch auction curve | `gateway-contract/.../test.rs`, worked example §6.3.1 |
 | Anti-snipe (open gap) | not currently tested in live path |
 
 ---

@@ -185,8 +185,8 @@ sequenceDiagram
     Credit-->>Indexer: emit ("credit","liq_req") = (borrower, utilized_amount)
     Indexer-->>Orchestrator: notify of liq_req
 
-    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?)
-    Auction->>Auction: validate start<end, min_inc<=10000, Dutch invariants
+    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?, dutch_decay?, dutch_steps?)
+    Auction->>Auction: validate start<end, min_inc<=10000, Dutch invariants + stepped config
     Auction-->>Indexer: (init events)
 
     loop English mode: ascending bids until close
@@ -206,7 +206,7 @@ sequenceDiagram
         Auction->>Auction: status := Closed
         Auction-->>Indexer: emit AUC_CLOSE
     else Dutch mode: first qualifying bid auto-closes
-        Bidder->>Auction: place_bid (qualifies vs compute_dutch_price)
+        Bidder->>Auction: place_bid (qualifies vs compute_dutch_price using linear or stepped decay)
         Auction->>Auction: status := Closed (atomic with bid record)
         Auction-->>Indexer: emit AUC_CLOSE
     end
@@ -334,7 +334,7 @@ flowchart TB
         P3["LastDrawTs(Address)"]
         P4["BlockedBorrower(Address)"]
         P5["UtilizationCapBps(Address)"]
-        P6["RateFloorBps(Address)"]
+        P6["RateFloorBps(Address) / RateCeilingBps(Address)"]
         P7["RepaymentSchedule(Address)"]
         P8["CollateralBalance(Address)"]
         P9["DrawAudit(Address,u64) / DrawReversedAmount(Address,u64)"]
@@ -376,10 +376,10 @@ The credit contract's outward edges:
 | Out | `LiquidityToken` (SAC) | `balance(addr)` | Read reserve balance for the pre-transfer check | `lib.rs:261-424` step 19 |
 | Out | `LiquidityToken` (SAC) | `transfer(contract, treasury, amount)` | Drain fee accumulator | `lib.rs:770` |
 | Out | `LiquidityToken` (SAC) | `transfer(borrower, contract, amount)` | Collateral deposit | `collateral.rs:34` |
-| Out | `LiquidityToken` (SAC) | `transfer(contract, borrower, amount)` | Collateral withdraw | `collateral.rs:69` |
+| Out | `LiquidityToken` (SAC) | `transfer(contract, borrower, amount)` | Collateral withdraw / partial release | `collateral.rs:69,partial_release_collateral` |
 | Out | `AuctionContract` | `settle_default_liquidation(auction_id, credit, borrower) -> i128` | Cross-contract settlement | `lib.rs:953` |
 | In  | Admin | All `set_*`, `open_credit_line`, `update_risk_parameters`, etc. | Admin operations | `auth.rs`, all `lib.rs` admin entrypoints |
-| In  | Borrower | `draw_credit`, `repay_credit`, `deposit_collateral`, `withdraw_collateral`, `self_suspend_credit_line`, `close_credit_line` (if utilized=0) | Borrower flows | per file |
+| In  | Borrower | `draw_credit`, `repay_credit`, `deposit_collateral`, `withdraw_collateral`, `partial_release_collateral`, `self_suspend_credit_line`, `close_credit_line` (if utilized=0) | Borrower flows | per file |
 | In  | Keeper / indexer | `accrue_batch` (no auth), all read-only queries | Maintenance | `lib.rs:1133` |
 
 Auction contract's outward edges:

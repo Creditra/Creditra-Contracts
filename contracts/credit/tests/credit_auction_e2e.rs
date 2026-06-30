@@ -10,7 +10,7 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use gateway_auction::{Auction, AuctionClient};
+use gateway_auction::{Auction, AuctionClient, AuctionMode};
 use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, TryIntoVal};
 
@@ -92,7 +92,18 @@ fn run_auction_to_settlement(
     let start_time = env.ledger().timestamp();
     let end_time = start_time + AUCTION_DURATION;
 
-    auction.init_auction(settlement_id, &start_time, &end_time, &MIN_BID);
+    auction.init_auction(
+        settlement_id,
+        &AuctionMode::English,
+        &start_time,
+        &end_time,
+        &MIN_BID,
+        &0_u32,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     auction.place_bid(settlement_id, &bidder, &first_bid);
     auction.place_bid(settlement_id, &winner, &recovered_amount);
 
@@ -214,7 +225,18 @@ fn e2e_atomic_settlement_with_configured_auction() {
     let start_time = env.ledger().timestamp();
     let end_time = start_time + AUCTION_DURATION;
 
-    auction.init_auction(&settlement_id, &start_time, &end_time, &MIN_BID);
+    auction.init_auction(
+        &settlement_id,
+        &AuctionMode::English,
+        &start_time,
+        &end_time,
+        &MIN_BID,
+        &0_u32,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     auction.place_bid(
         &settlement_id,
         &Address::generate(&env),

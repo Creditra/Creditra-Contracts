@@ -17,11 +17,11 @@
 //!
 //! The delinquent path may additionally emit `PenaltyRateExited` if the
 //! line exits delinquency mid-accrual (unlikely in a single step), and
-//! `GraceWaiverApplied` for suspended lines straddling the grace boundary.
+//! `GraceWaiverReceipt` for suspended lines straddling the grace boundary.
 //! The per-draw cap `MAX_EVENTS_PER_DRAW = 4` accommodates all legitimate
 //! combinations while remaining tight enough for indexers.
 //!
-//! See [`docs/events-schema.md`](../../docs/events-schema.md) for the
+//! See [`docs/EVENTS_CATALOG.md`](../../docs/EVENTS_CATALOG.md) for the
 //! canonical event catalog.
 
 use creditra_credit::types::CreditStatus;
@@ -35,7 +35,7 @@ use soroban_sdk::{token, Address, Env};
 ///
 /// Chosen to cover the worst legitimate case:
 ///   `InterestAccrued` + `PenaltyRateEntered` + `Drawn` + 1 spare
-///   (e.g. `GraceWaiverApplied` when straddling the grace boundary).
+///   (e.g. `GraceWaiverReceipt` when straddling the grace boundary).
 /// If a code change pushes `draw_credit` past this bound the test will
 /// catch the regression immediately.
 const MAX_EVENTS_PER_DRAW: usize = 4;

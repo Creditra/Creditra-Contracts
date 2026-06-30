@@ -4,26 +4,18 @@ Cargo.lock
 .env
 /coverage
 test_snapshots/
+*.proptest-regressions
 *.profraw
-# Coverage tooling occasionally drops profiles in nested workspaces.
 **/*.profraw
-
-# Local workflow artifacts (plans, session notes)
 /docs/superpowers/
 /.remember/
-
-# Editor / IDE artifacts
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
-
-# Windows rustup bootstrap artifacts accidentally committed in the past
 rustup-init.exe
 verify_preservation_baseline.exe
 verify_preservation_baseline.pdb
-
-# Compiled WASM artifacts (built into target/, but also possible at workspace root)
 *.wasm
 .aider*

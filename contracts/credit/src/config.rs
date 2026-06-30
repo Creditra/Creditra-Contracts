@@ -48,7 +48,6 @@ use soroban_sdk::{Address, Env};
 
 /// Initialize the contract exactly once.
 pub fn init(env: Env, admin: Address) {
-    // Guard: prevent re-initialization and admin takeover.
     if env.storage().instance().has(&admin_key(&env)) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
@@ -67,6 +66,9 @@ pub fn init(env: Env, admin: Address) {
     set_schema_version(&env, crate::SCHEMA_VERSION);
     // Set default minimum collateral ratio to 150% (15000 bps)
     crate::storage::set_min_collateral_ratio_bps(&env, 15000);
+    // Set default protocol fee bounds: 0 – 1000 bps (10%)
+    crate::storage::set_min_protocol_fee_bps(&env, 0);
+    crate::storage::set_max_protocol_fee_bps(&env, 1000);
 }
 
 /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.

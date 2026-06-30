@@ -15,7 +15,17 @@ Run all workspace tests:
 cargo test --workspace
 ```
 
-Run only auction invariant/fuzz tests:
+Run the exhaustive `AuctionStatus` transition matrix:
+
+```bash
+cargo test -p gateway-auction --test status_transitions
+```
+
+Run `env.panic_with_error` regression tests (Issue #609):
+
+```bash
+cargo test -p gateway-auction --test panic_with_error
+```
 
 ```bash
 cargo test --manifest-path gateway-contract/contracts/auction_contract/Cargo.toml fuzz_
@@ -23,6 +33,25 @@ cargo test --manifest-path gateway-contract/contracts/auction_contract/Cargo.tom
 ```
 
 The fuzz tests use fixed seeds and bounded iteration counts to keep CI runtime deterministic.
+
+## AuctionStatus state machine
+
+`AuctionStatus` follows a strict three-state lifecycle defined in `src/types.rs`:
+
+```text
+Open ──close_auction / Dutch place_bid──► Closed ──claim_auction──► Claimed
+  │                                          │
+  └── place_bid (English) stays Open       └── terminal after claim
+```
+
+| From    | `place_bid`              | `close_auction` | `claim_auction` |
+|---------|--------------------------|-----------------|-----------------|
+| Open    | ✓ (English: stays Open; Dutch: → Closed) | ✓ → Closed | ✗ `AuctionNotClosed` (9) |
+| Closed  | ✗ `AuctionNotOpen` (8)   | ✗ `AuctionNotOpen` (8) | ✓ → Claimed |
+| Claimed | ✗ `AuctionNotOpen` (8)   | ✗ `AlreadyClaimed` (2) | ✗ `AuctionNotClosed` (9) |
+
+Each mode has three legal and six illegal status × entrypoint pairs. Integration coverage lives in
+`tests/transition_matrix.rs` (`cargo test -p gateway-auction --test transition_matrix`).
 
 ## Public Entry Points
 
@@ -147,7 +176,8 @@ If bid floor/outbid check fails, function aborts with `AuctionError::BidTooLow`.
 #### Errors
 
 - `AuctionError::AuctionNotOpen` when auction time window is closed.
-- `AuctionError::BidTooLow` when bid is below min or not strictly above current highest.
+- `AuctionError::BidTooLow` when bid is below min, not strictly above current highest, or non-positive.
+- `AuctionError::NotFound` when `auction_id` was never initialized.
 - Host auth failure if `bidder` does not authorize.
 - Token transfer failure if token contract transfer preconditions are not met.
 
@@ -347,6 +377,24 @@ Function aborts with:
 - **No bids**: highest bidder is `None`; all claim attempts fail with `NotWinner`.
 - **Double claim**: second successful claimant attempt is blocked by `AlreadyClaimed`.
 
+## Error Propagation (Issue #609)
+
+All contract-defined failure paths in `src/lib.rs` use `env.panic_with_error(AuctionError::…)`
+so Soroban preserves the ABI-stable discriminant. Do **not** use `panic!(AuctionError::…)` or
+string panics (`panic!("auction not found")`, etc.) on paths that should return an `AuctionError`.
+
+| Entrypoint | Condition | `AuctionError` |
+|------------|-----------|----------------|
+| `close_auction` | unknown `auction_id` | `NotFound` (12) |
+| `close_auction` | status not `Open` / already `Claimed` | `AuctionNotOpen` (8) / `AlreadyClaimed` (2) |
+| `place_bid` | unknown `auction_id` | `NotFound` (12) |
+| `place_bid` | `now >= end_time` | `AuctionNotOpen` (8) |
+| `place_bid` | `amount <= 0` or below floor | `BidTooLow` (7) |
+| `claim_auction` | unknown id / wrong status / no winner | `NotFound` / `AuctionNotClosed` / `NoWinner` |
+| `settle_default_liquidation` | factory unset / replay / wrong state | `NoFactoryContract` / `AlreadySettled` / `NotClosed` |
+
+Integration coverage: `tests/panic_with_error.rs`.
+
 ## Error Variants (Contract-Wide)
 
 Defined in `errors.rs`:
@@ -360,8 +408,14 @@ Defined in `errors.rs`:
 - `BidTooLow`
 - `AuctionNotOpen`
 - `AuctionNotClosed`
+- `Reentrancy`
+- `NoWinner`
+- `NotFound`
+- `AlreadySettled`
 
-Note: `Unauthorized` and `InvalidState` are defined but not currently emitted by the public entry points above; authorization failures are enforced primarily through host-level `require_auth`.
+Note: `Unauthorized` is emitted by `settle_default_liquidation` when `credit_contract` does not
+match the registered factory. `InvalidState` is reserved for future use; init-time config
+validation still uses host string panics (deploy-time only).
 
 ## Event Types (Contract-Wide)
 

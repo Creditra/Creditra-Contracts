@@ -1,0 +1,30 @@
+---
+source: contracts/credit/tests/snap_prorate.rs
+expression: rate_cases
+---
+[
+    (
+        1,
+        1,
+    ),
+    (
+        100,
+        100,
+    ),
+    (
+        300,
+        300,
+    ),
+    (
+        500,
+        500,
+    ),
+    (
+        1000,
+        1000,
+    ),
+    (
+        10000,
+        10000,
+    ),
+]

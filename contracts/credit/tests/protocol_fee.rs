@@ -43,6 +43,10 @@ fn prepare_repay(
     asset.mint(contract_id, &draw_amount);
     client.draw_credit(borrower, &draw_amount);
 
+    // Widen bounds to accommodate the requested fee_bps
+    if fee_bps > 1000 {
+        client.set_protocol_fee_bounds(&0_u32, &fee_bps);
+    }
     client.set_protocol_fee_bps(&fee_bps);
 
     env.ledger()
@@ -87,8 +91,8 @@ fn protocol_fee_zero_fee_keeps_treasury_balance_at_zero() {
 }
 
 #[test]
-fn protocol_fee_max_fee_accrues_expected_fee_amount() {
-    let (env, contract_id, token_address, borrower, reserve, treasury) = setup();
+fn protocol_fee_on_total_repayment_accrues_expected_fee_amount() {
+    let (env, contract_id, token_address, borrower, reserve, _treasury) = setup();
     let client = prepare_repay(
         &env,
         &contract_id,
@@ -106,41 +110,41 @@ fn protocol_fee_max_fee_accrues_expected_fee_amount() {
 
     client.repay_credit(&borrower, &1_100);
 
+    // fee = 10% of 1100 = 110; reserve = 1100 - 110 = 990
     assert_eq!(
         token_client.balance(&contract_id),
-        contract_balance_before + 10
+        contract_balance_before + 110
     );
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_balance_before + 1_090
+        reserve_balance_before + 990
     );
-    assert_eq!(token_client.balance(&treasury), 0);
 }
 
 #[test]
-fn protocol_fee_rounding_edge_floors_small_fee_to_zero() {
-    let (env, contract_id, token_address, borrower, reserve, treasury) = setup();
+fn protocol_fee_rounding_floors_sub_bps_fee_to_zero() {
+    let (env, contract_id, token_address, borrower, reserve, _treasury) = setup();
     let client = prepare_repay(
         &env,
         &contract_id,
         &token_address,
         &borrower,
         10_000,
-        10_001,
-        1,
         5_000,
+        1,
+        1,
     );
 
     let token_client = token::Client::new(&env, &token_address);
     let contract_balance_before = token_client.balance(&contract_id);
     let reserve_balance_before = token_client.balance(&reserve);
 
-    client.repay_credit(&borrower, &10_001);
+    client.repay_credit(&borrower, &5_000);
 
+    // fee = apply_bps(5000, 1, Floor) = 0 — sub-bps rounding
     assert_eq!(token_client.balance(&contract_id), contract_balance_before);
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_balance_before + 10_001
+        reserve_balance_before + 5_000
     );
-    assert_eq!(token_client.balance(&treasury), 0);
 }

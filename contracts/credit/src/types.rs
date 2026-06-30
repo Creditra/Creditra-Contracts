@@ -8,12 +8,11 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 38-variant `#[repr(u32)]` error enum (discriminants
-//!   pinned by `tests/error_discriminants.rs`). See
-//!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
-//!   flat code table and
-//!   [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md) for the
-//!   categorized reference with recovery hints.
+//! - [`ContractError`] — 45-variant `#[repr(u32)]` error enum (discriminants
+//!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
+//!   [`ContractErrorCategory`] via [`ContractError::category`]. See
+//!   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md) for the
+//!   categorized reference with codes and recovery hints.
 //! - [`CreditStatus`] — 5-variant state-machine label (Active=0,
 //!   Suspended=1, Defaulted=2, Closed=3, Restricted=4). See
 //!   [`docs/state-machine.md`](../../../docs/state-machine.md) for the
@@ -50,7 +49,7 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Symbol};
 
 /// Status of a borrower's credit line.
 ///
@@ -67,6 +66,17 @@ use soroban_sdk::{contracttype, Address};
 ///   the borrower repays under the reduced ceiling.
 /// - `Suspended` and `Defaulted` both block draws and allow repayments.
 /// - `Closed` is terminal — no draws, no repayments.
+/// Structured reason for freezing draws on a credit line.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    LiquidityReserve = 0,
+    Compliance = 1,
+    RiskInvestigation = 2,
+    OperationalMaintenance = 3,
+    BorrowerRequest = 4,
+}
+
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CreditStatus {
@@ -89,6 +99,12 @@ pub enum CreditStatus {
 /// These discriminants are **permanent**. Never reorder or renumber existing
 /// variants — doing so would break deployed SDK clients. New variants must be
 /// appended at the end with the next available integer.
+///
+/// # Category
+/// Use [`ContractError::category`] to map any error to its
+/// [`ContractErrorCategory`] for client-side grouping. See
+/// [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md) for the
+/// categorized reference with recovery actions.
 ///
 /// # Discriminant table (source of truth)
 /// | Code | Variant                        | Description |
@@ -133,6 +149,14 @@ pub enum CreditStatus {
 /// | 38   | `OraclePriceDeviation`        | Oracle price deviation exceeds the configured maximum |
 /// | 39   | `InsufficientCollateralBalance` | Borrower collateral balance cannot cover withdrawal |
 /// | 40   | `BorrowerFrozen`               | Borrower's draws are temporarily frozen until expiry |
+/// | 41   | `BountyNotSet`                 | Bounty pool address is not configured |
+/// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
+/// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
+/// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `CloseFactorAboveMax`          | The supplied close_factor_bps exceeds the protocol maximum |
+/// | 46   | `CreditLineFrozen`             | Credit line draws are frozen by admin (compliance hold) |
+/// | 47   | `DrawReversalWindowExpired`    | Draw reversal attempted after the allowed window expired |
+/// | 48   | `OriginalDrawNotFound`         | Original draw record not found for reversal |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -217,6 +241,24 @@ pub enum ContractError {
     InsufficientCollateralBalance = 39,
     /// Borrower's draws are temporarily frozen until the specified expiry timestamp.
     BorrowerFrozen = 40,
+    /// Bounty pool address is not configured when attempting a bounty withdrawal.
+    BountyNotSet = 41,
+    /// No pending treasury withdrawal proposal exists when attempting execution.
+    NoPendingTreasuryWithdrawal = 42,
+    /// The 24-hour treasury withdrawal timelock has not yet elapsed.
+    TreasuryTimelockActive = 43,
+    /// A treasury withdrawal proposal already exists; cancel or execute it first.
+    TreasuryProposalExists = 44,
+    /// The supplied close_factor_bps exceeds the protocol-configured maximum.
+    CloseFactorAboveMax = 45,
+    /// Credit line draws are frozen by admin (compliance or investigation hold).
+    CreditLineFrozen = 46,
+    /// Draw reversal attempted after the allowed reversal window has expired.
+    DrawReversalWindowExpired = 47,
+    /// Original draw audit record not found when attempting a reversal.
+    OriginalDrawNotFound = 48,
+    /// No attestation batch has been committed for the specified borrower.
+    AttestationBatchNotFound = 49,
 }
 
 /// Stored credit line data for a borrower.
@@ -342,6 +384,33 @@ pub struct OracleConfig {
     pub max_age_seconds: u64,
 }
 
+/// Multi-oracle quorum configuration.
+///
+/// When set, `submit_oracle_prices` runs the quorum-of-K algorithm over the
+/// supplied prices before storing the resolved canonical price. Settlement via
+/// `settle_default_liquidation` then only validates that this stored price is
+/// still within `max_age_seconds`; the per-call deviation check is replaced by
+/// the quorum consensus established at submission time.
+///
+/// # Invariants
+/// - `min_quorum_k` must be ≥ 2 (a single feed is not a quorum).
+/// - `max_deviation_bps` must be in `0..=10_000` (0 = exact match required).
+/// - `max_age_seconds` must be > 0.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of submitted prices that must agree within
+    /// `max_deviation_bps` to form a valid quorum.
+    pub min_quorum_k: u32,
+    /// Maximum allowed price deviation between the highest and lowest prices
+    /// in the qualifying quorum window, in basis points.
+    /// E.g. 500 = 5%.
+    pub max_deviation_bps: u32,
+    /// Maximum age of the stored quorum price in seconds before it is
+    /// considered stale for settlement purposes.
+    pub max_age_seconds: u64,
+}
+
 /// Event emitted when the rate formula config is set or cleared.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -385,6 +454,8 @@ pub struct ProtocolSummary {
     pub total_collateral: i128,
     /// Accumulated protocol fees awaiting treasury withdrawal.
     pub treasury_balance: i128,
+    /// Accumulated bounty pool fees awaiting bounty withdrawal.
+    pub bounty_balance: i128,
 }
 
 /// Protocol summary returned by the specific query view for GrantFox campaign.
@@ -397,4 +468,73 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Proof-of-reserve view for the protocol treasury.
+///
+/// Exposes the accumulated reserves held by the protocol in a single
+/// read-only call. Indexers and dashboards can use this to verify that
+/// the protocol's accounting balances are consistent.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees held in the contract (treasury share).
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees held in the contract.
+    pub bounty_balance: i128,
+}
+
+
+/// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
+///
+/// Exactly one proposal can exist at a time. It must be executed (or superseded
+/// only after a successful `execute_treasury_withdrawal` clears it) no sooner
+/// than 24 hours after it was proposed.
+///
+/// # Timelock
+/// `execute_after` is set to `proposal_ts + 86_400` (24 hours in seconds) at
+/// proposal time. The execution entrypoint rejects calls when
+/// `env.ledger().timestamp() < execute_after`.
+///
+/// # Storage
+/// Stored in instance storage under [`crate::storage::DataKey::PendingTreasuryWithdrawal`].
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalProposal {
+    /// The treasury address that will receive the funds.
+    pub recipient: Address,
+    /// Amount to transfer (snapshot of `TreasuryBalance` at proposal time).
+    pub amount: i128,
+    /// Address of the admin who submitted the proposal.
+    pub proposer: Address,
+    /// Ledger timestamp at which the proposal was created.
+    pub proposed_at: u64,
+    /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
+    pub execute_after: u64,
+}
+
+/// Reason for protocol pause (escape-hatch audit trail).
+///
+/// Stored alongside the pause flag in instance storage when the admin invokes
+/// `set_protocol_paused_with_reason`. Intended for governance transparency and
+/// off-chain monitoring.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable reason for pausing (e.g., "oracle-outage", "token-migration").
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp when the pause was activated.
+    pub timestamp: u64,
+    /// Admin address that invoked the pause.
+    pub actor: soroban_sdk::Address,
+}
+
+/// Global draw-freeze state stored under [`crate::storage::DataKey::DrawsFrozen`].
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen contract-wide.
+    pub frozen: bool,
+    /// Structured reason recorded when the freeze was last activated.
+    pub reason: FreezeReason,
 }
