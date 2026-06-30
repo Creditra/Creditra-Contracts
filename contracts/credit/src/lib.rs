@@ -1170,9 +1170,10 @@ impl Credit {
     ///
     /// # How
     ///
-    /// `start_after` is an inclusive cursor over the stable numeric id
-    /// returned in the previous page. Pass `None` (or `Some(0)`-style origin)
-    /// to begin iteration from the very first credit line.
+    /// `start_after` is the **exclusive** cursor: pass `Some(last_returned_id)`
+    /// to skip everything up to and including that id. Pass `None` to begin
+    /// iteration at id `0`. (`Some(0)` is therefore **not** equivalent to
+    /// `None` — it skips id 0. Always pass `None` to start at the beginning.)
     ///
     /// `limit` is **capped** at [`MAX_ENUMERATION_LIMIT`] (100) so callers can
     /// safely pass any `u32` without exceeding per-call resource budgets.
@@ -1191,6 +1192,7 @@ impl Credit {
     ///   as `start_after` to continue iteration. It is `Some(last_returned_id)`
     ///   when more pages may exist, and `None` when iteration is exhausted
     ///   (no more rows, or the final page did not fill the requested limit).
+    ///   Pass the returned `Some(_)` back as `start_after` for the next call.
     ///
     /// # Cost
     ///
