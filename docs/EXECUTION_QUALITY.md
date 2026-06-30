@@ -3,7 +3,7 @@
 This document is the answer to "is this codebase serious?". It catalogs the
 concrete artifacts of execution quality — test count, coverage, CI surface,
 PR cadence, deployment checklist — that a reviewer can verify in a few
-minutes by running the commands at the bottom of each section.
+
 
 Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 `TEST_COVERAGE_REPORT.md` (workspace-level coverage report at v1.0 cutoff),
