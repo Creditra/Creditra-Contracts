@@ -18,7 +18,7 @@ fn setup(env: &Env) -> (CreditClient<'_>, Address) {
 }
 
 fn credit_line_id_for(client: &CreditClient<'_>, borrower: &Address) -> u32 {
-    let lines = client.enumerate_credit_lines(&None, &10);
+    let (lines, _cursor) = client.enumerate_credit_lines(&None, &10, &false);
 
     for index in 0..lines.len() {
         let (id, line) = lines.get(index).unwrap();

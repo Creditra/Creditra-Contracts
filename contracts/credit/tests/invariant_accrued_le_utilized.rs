@@ -128,10 +128,11 @@ fn setup_env() -> (Env, CreditClient<'static>, Address, Vec<Address>) {
 fn assert_accrued_le_utilized(client: &CreditClient<'_>, step_label: &str) {
     let mut cursor = None;
     loop {
-        let page = client.enumerate_credit_lines(&cursor, &8);
+        let (page, next_cursor) = client.enumerate_credit_lines(&cursor, &8, &false);
         if page.is_empty() {
             break;
         }
+        let mut last_id = 0_u32;
         for item in page.iter() {
             let (id, line) = item;
             assert!(
@@ -147,7 +148,11 @@ fn assert_accrued_le_utilized(client: &CreditClient<'_>, step_label: &str) {
                 line.utilized_amount,
                 line.borrower,
             );
-            cursor = Some(id);
+            last_id = id;
+        }
+        match next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
         }
     }
 }
