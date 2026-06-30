@@ -11,13 +11,15 @@ pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
-use crate::storage::{clear_reentrancy_guard, get_factory_contract, set_reentrancy_guard};
+use crate::storage::{
+    bump_auction_state_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
+    get_factory_contract, set_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
+};
 use crate::types::*;
 use events::{
     publish_auction_closed_event, publish_bid_refunded_event,
     publish_default_liquidation_settlement_event,
 };
-use storage::{bump_auction_state_ttl, bump_settlement_marker_ttl};
 
 /// Returns the minimum bid amount that satisfies the `min_increment_bps`
 /// requirement over `highest_bid`.
@@ -395,6 +397,138 @@ impl Auction {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
+    }
+
+    /// Register the factory contract address.
+    ///
+    /// The caller must authenticate as the address being set as factory.
+    /// Once set, the factory can perform admin operations (init, close,
+    /// settle, configure).
+    pub fn set_factory_contract(env: Env, factory: Address) {
+        factory.require_auth();
+        set_factory_contract(&env, &factory);
+    }
+
+    /// Initialise a new auction in `Open` status.
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    /// Panics with [`AuctionError::NoFactoryContract`] if no factory has
+    /// been configured.
+    pub fn init_auction(
+        env: Env,
+        auction_id: Symbol,
+        mode: AuctionMode,
+        start_time: u64,
+        end_time: u64,
+        min_bid: i128,
+        min_increment_bps: u32,
+        dutch_start_price: Option<i128>,
+        dutch_floor_price: Option<i128>,
+        dutch_decay: DutchAuctionDecay,
+        dutch_step_count: Option<u32>,
+    ) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+
+        if min_increment_bps > 10_000 {
+            env.panic_with_error(AuctionError::InvalidState);
+        }
+
+        if matches!(dutch_decay, DutchAuctionDecay::Stepped) {
+            if dutch_step_count.is_none() || dutch_step_count == Some(0) {
+                env.panic_with_error(AuctionError::InvalidState);
+            }
+        }
+
+        let config = AuctionConfig {
+            mode,
+            username_hash: BytesN::from_array(&env, &[0u8; 32]),
+            start_time,
+            end_time,
+            min_bid,
+            min_increment_bps,
+            dutch_start_price,
+            dutch_floor_price,
+            dutch_decay,
+            dutch_step_count,
+        };
+
+        let state = AuctionState {
+            config,
+            status: AuctionStatus::Open,
+            highest_bidder: None,
+            highest_bid: 0,
+        };
+
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+    }
+
+    /// Close an auction (transition `Open` → `Closed`).
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    ///
+    /// # Panics
+    /// * [`AuctionError::NotFound`] — `auction_id` does not exist.
+    /// * [`AuctionError::AuctionNotOpen`] — auction is already `Closed`.
+    /// * [`AuctionError::AlreadyClaimed`] — auction has already been claimed.
+    pub fn close_auction(env: Env, auction_id: Symbol) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+
+        let mut state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
+        bump_auction_state_ttl(&env, &auction_id);
+
+        match state.status {
+            AuctionStatus::Open => {
+                state.status = AuctionStatus::Closed;
+            }
+            AuctionStatus::Closed => {
+                env.panic_with_error(AuctionError::AuctionNotOpen);
+            }
+            AuctionStatus::Claimed => {
+                env.panic_with_error(AuctionError::AlreadyClaimed);
+            }
+        }
+
+        publish_auction_closed_event(
+            &env,
+            auction_id.clone(),
+            state.highest_bidder.clone(),
+            state.highest_bid,
+        );
+
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+    }
+
+    /// Set the liquidation grace window (in seconds) for newly created auctions.
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    ///
+    /// Return the configured liquidation grace window in seconds.
+    ///
+    /// Returns `0` if never configured (no grace period enforced).
+    pub fn get_liquidation_grace_window(env: Env) -> u64 {
+        storage::get_liquidation_grace_window(&env)
+    }
+
+    /// When non-zero, bidders cannot place bids before
+    /// `auction.start_time + grace_window` has elapsed.
+    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+        set_liquidation_grace_window(&env, seconds);
     }
 }
 

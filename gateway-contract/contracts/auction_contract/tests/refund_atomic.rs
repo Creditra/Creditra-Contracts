@@ -31,6 +31,7 @@ use gateway_auction::{
     Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent,
 };
 use soroban_sdk::testutils::{Address as _, Events as _};
+use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
 
 const BID_RFDN: &str = "BID_RFDN";
@@ -59,6 +60,8 @@ fn register(env: &Env) -> Address {
 
 /// Initialise a long-lived English auction (min_bid = 1, no increment requirement).
 fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
+    let factory = Address::generate(&client.env);
+    client.set_factory_contract(&factory);
     client.init_auction(
         id,
         &AuctionMode::English,
@@ -71,6 +74,22 @@ fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
         &gateway_auction::DutchAuctionDecay::None,
         &None,
     );
+}
+
+/// Register a Stellar asset contract and set it as the `bid_token` so that
+/// `place_bid` emits refund events. Mint `contract_balance` to the auction
+/// contract to cover refunds.
+fn enable_refunds(env: &Env, contract_id: &Address, contract_balance: i128) {
+    let token_admin = Address::generate(env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let bid_token = token_id.address();
+    let sac = StellarAssetClient::new(env, &bid_token);
+    sac.mint(contract_id, &contract_balance);
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .set(&Symbol::new(env, "bid_token"), &bid_token);
+    });
 }
 
 /// Count events whose first topic matches `topic` in the most-recent call.
@@ -158,6 +177,7 @@ fn each_outbid_emits_exactly_one_refund_event() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_peroutbid");
     open_english(&client, &aid);
+    enable_refunds(&env, &id, 100_000);
 
     let bidders: [Address; 5] = [
         Address::generate(&env),
@@ -231,6 +251,7 @@ fn refund_event_names_correct_prev_bidder_and_amount() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_evtcorrect");
     open_english(&client, &aid);
+    enable_refunds(&env, &id, 100_000);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
@@ -298,6 +319,7 @@ fn round_robin_refund_per_outbid_step() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_roundrbn");
     open_english(&client, &aid);
+    enable_refunds(&env, &id, 100_000);
 
     let a = Address::generate(&env);
     let b = Address::generate(&env);

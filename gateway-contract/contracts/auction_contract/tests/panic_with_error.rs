@@ -15,7 +15,13 @@ use gateway_auction::{Auction, AuctionClient, AuctionError, AuctionMode};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env, Symbol};
 
-fn init_open_auction(client: &AuctionClient<'_>, auction_id: &Symbol, end_time: u64) {
+fn init_open_auction(
+    client: &AuctionClient<'_>,
+    auction_id: &Symbol,
+    end_time: u64,
+) -> Address {
+    let factory = Address::generate(&client.env);
+    client.set_factory_contract(&factory);
     client.init_auction(
         auction_id,
         &AuctionMode::English,
@@ -28,6 +34,7 @@ fn init_open_auction(client: &AuctionClient<'_>, auction_id: &Symbol, end_time: 
         &gateway_auction::DutchAuctionDecay::None,
         &None,
     );
+    factory
 }
 
 #[test]
@@ -37,6 +44,10 @@ fn close_auction_missing_id_returns_not_found() {
     let contract_id = env.register(Auction, ());
     let client = AuctionClient::new(&env, &contract_id);
     let missing = Symbol::new(&env, "missing_close");
+
+    // Register a factory so close_auction reaches the ID check.
+    let factory = Address::generate(&env);
+    client.set_factory_contract(&factory);
 
     let err = client.try_close_auction(&missing).unwrap_err().unwrap();
     assert_eq!(
