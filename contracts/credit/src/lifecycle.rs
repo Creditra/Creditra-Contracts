@@ -183,10 +183,10 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     );
 }
 
-/// Reinstate a defaulted credit line to Active (admin only).
+/// Reinstate a defaulted credit line to Active or Suspended (admin only).
 ///
-/// Allowed only when status is Defaulted. Transition: Defaulted → Active.
-pub fn reinstate_credit_line(env: Env, borrower: Address) {
+/// Allowed only when status is Defaulted. Transition: Defaulted → Active or Suspended.
+pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
     require_admin_auth(&env);
 
     let mut credit_line: CreditLineData = env
@@ -199,7 +199,11 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         panic!("credit line is not defaulted");
     }
 
-    credit_line.status = CreditStatus::Active;
+    if target_status != CreditStatus::Active && target_status != CreditStatus::Suspended {
+        panic!("target_status must be Active or Suspended");
+    }
+
+    credit_line.status = target_status;
     env.storage().persistent().set(&borrower, &credit_line);
 
     publish_credit_line_event(
@@ -208,7 +212,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address) {
         CreditLineEvent {
             event_type: symbol_short!("reinstate"),
             borrower: borrower.clone(),
-            status: CreditStatus::Active,
+            status: target_status,
             credit_limit: credit_line.credit_limit,
             interest_rate_bps: credit_line.interest_rate_bps,
             risk_score: credit_line.risk_score,

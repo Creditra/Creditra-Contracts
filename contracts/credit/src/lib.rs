@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #![no_std]
 #![allow(clippy::unused_unit)]
+#![allow(dead_code)]
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
 //!
@@ -11,31 +12,27 @@
 //! would revert.
 
 mod auth;
+mod borrow;
 mod config;
 mod events;
 mod lifecycle;
+mod oracles;
 mod query;
 mod risk;
 mod storage;
 pub mod types;
-mod auth;
-mod storage;
-mod borrow;
-mod config;
-mod lifecycle;
-mod risk;
-mod query;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
 };
 
 use events::{
     publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
-    RiskParametersUpdatedEvent,
+    CreditLineEvent, DrawnEvent, RepaymentEvent,
 };
 use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
+use auth::require_admin_auth;
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -43,22 +40,10 @@ const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 const MAX_RISK_SCORE: u32 = 100;
 
-/// Instance storage key for reentrancy guard.
-fn reentrancy_key(env: &Env) -> Symbol {
-    Symbol::new(env, "reentrancy")
-}
-
 /// Instance storage key for admin.
 fn admin_key(env: &Env) -> Symbol {
     Symbol::new(env, "admin")
 }
-
-pub mod types;
-
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
-use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
-use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
 
 #[contract]
 pub struct Credit;
@@ -457,8 +442,8 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        lifecycle::reinstate_credit_line(env, borrower)
+    pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+        lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
 
     /// Get credit line data for a borrower (view function).
@@ -466,31 +451,40 @@ impl Credit {
         env.storage().persistent().get(&borrower)
     }
 
-    /// Reinstate a defaulted credit line to Active (admin only).
-    pub fn reinstate_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
-        if credit_line.status != CreditStatus::Defaulted {
-            panic!("credit line is not defaulted");
-        }
-        credit_line.status = CreditStatus::Active;
-        env.storage().persistent().set(&borrower, &credit_line);
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), symbol_short!("reinstate")),
-            CreditLineEvent {
-                event_type: symbol_short!("reinstate"),
-                borrower: borrower.clone(),
-                status: CreditStatus::Active,
-                credit_limit: credit_line.credit_limit,
-                interest_rate_bps: credit_line.interest_rate_bps,
-                risk_score: credit_line.risk_score,
-            },
-        );
+    /// Adds or updates an oracle's weight in the registry.
+    /// Admin only.
+    pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
+        oracles::add_oracle(env, oracle, weight)
+    }
+
+    /// Removes an oracle from the registry.
+    /// Admin only.
+    pub fn remove_oracle(env: Env, oracle: Address) {
+        oracles::remove_oracle(env, oracle)
+    }
+
+    /// Sets the quorum threshold weight.
+    /// Admin only.
+    pub fn set_quorum_threshold(env: Env, threshold: u32) {
+        oracles::set_quorum_threshold(env, threshold)
+    }
+
+    /// Sets the reporting freshness window in seconds.
+    /// Admin only.
+    pub fn set_reporting_window(env: Env, window_seconds: u64) {
+        oracles::set_reporting_window(env, window_seconds)
+    }
+
+    /// Oracles report their observed value.
+    /// Requires reporting oracle's auth.
+    pub fn report_value(env: Env, oracle: Address, value: u128) {
+        oracles::report_value(env, oracle, value)
+    }
+
+    /// Computes the weighted median of the latest fresh reports from approved oracles.
+    /// Returns error if quorum threshold is not met.
+    pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
+        oracles::get_median_value(env)
     }
 }
 
@@ -513,9 +507,6 @@ mod test {
     ) -> (CreditClient<'a>, Address, Address, Address) {
         let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
-        let token_admin = Address::generate(env);
-        let token_id = env.register_stellar_asset_contract_v2(token_admin);
-        let token_address = token_id.address();
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
@@ -530,7 +521,24 @@ mod test {
         }
         (client, token_address, contract_id, admin)
     }
-}
+
+    fn setup_contract_with_credit_line<'a>(
+        env: &'a Env,
+        borrower: &'a Address,
+        credit_limit: i128,
+        utilized_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+        if utilized_amount > 0 {
+            client.draw_credit(borrower, &utilized_amount);
+        }
+        (client, contract_id, admin)
+    }
 
     fn approve(env: &Env, token: &Address, from: &Address, spender: &Address, amount: i128) {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
@@ -1151,7 +1159,7 @@ mod test {
         assert_eq!(line.utilized_amount, 0);
         assert_utilization_invariants(&line);
 
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         let line = client.get_credit_line(&borrower).unwrap();
         assert_eq!(line.status, CreditStatus::Active);
         assert_utilization_invariants(&line);
@@ -1231,14 +1239,13 @@ mod test_smoke_coverage {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.suspend_credit_line(&Address::generate(&env));
     }
 
     #[test]
-    #[should_panic(expected = "risk_score must be between 0 and 100")]
+    #[should_panic(expected = "Error(Contract, #9)")]
     fn open_credit_line_rejects_score_too_high() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1270,12 +1277,11 @@ mod test_smoke_coverage {
         env.mock_all_auths();
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
-        let borrower_two = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.default_credit_line(&borrower);
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().status,
             CreditStatus::Active
@@ -1438,24 +1444,6 @@ mod test_coverage_gaps {
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
 
-    fn setup_contract_with_credit_line<'a>(
-        env: &'a Env,
-        borrower: &'a Address,
-        credit_limit: i128,
-        utilized_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        if utilized_amount > 0 {
-            client.draw_credit(borrower, &utilized_amount);
-        }
-        (client, contract_id, admin)
-    }
-
     fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
         env.mock_all_auths();
         let admin = Address::generate(env);
@@ -1465,30 +1453,6 @@ mod test_coverage_gaps {
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         (client, admin, borrower)
-    }
-
-    fn setup_contract_with_credit_line<'a>(
-        env: &'a Env,
-        borrower: &Address,
-        credit_limit: i128,
-        draw_amount: i128,
-    ) -> (CreditClient<'a>, Address, Address) {
-        env.mock_all_auths();
-        let admin = Address::generate(env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(env, &contract_id);
-        client.init(&admin);
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-        let token_address = token_id.address();
-        client.set_liquidity_token(&token_address);
-        if draw_amount > 0 {
-            StellarAssetClient::new(env, &token_address).mint(&contract_id, &draw_amount);
-        }
-        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
-        if draw_amount > 0 {
-            client.draw_credit(borrower, &draw_amount);
-        }
-        (client, token_address, admin)
     }
 
     // ── update_risk_parameters: negative credit_limit ────────────────────────
@@ -1819,6 +1783,7 @@ mod test_coverage_gaps {
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
+        let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin);
         let token_admin_client = StellarAssetClient::new(&env, &token.address());
         client.set_liquidity_token(&token.address());
@@ -1859,29 +1824,29 @@ mod test_coverage_gaps {
         client.draw_credit(&borrower, &100_i128);
     }
 
-    /// CreditError::from converts each variant to a contract error code.
+    /// ContractError::from converts each variant to a contract error code.
     #[test]
     fn test_credit_error_from_conversion() {
-        let err: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::CreditLineNotFound);
+        let err: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::Unauthorized);
         assert_eq!(err, soroban_sdk::Error::from_contract_error(1));
 
-        let err2: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidCreditStatus);
+        let err2: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::NotAdmin);
         assert_eq!(err2, soroban_sdk::Error::from_contract_error(2));
 
-        let err3: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::InvalidAmount);
+        let err3: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::CreditLineNotFound);
         assert_eq!(err3, soroban_sdk::Error::from_contract_error(3));
 
         let err4: soroban_sdk::Error =
-            soroban_sdk::Error::from(CreditError::InsufficientUtilization);
+            soroban_sdk::Error::from(ContractError::CreditLineClosed);
         assert_eq!(err4, soroban_sdk::Error::from_contract_error(4));
 
-        let err5: soroban_sdk::Error = soroban_sdk::Error::from(CreditError::Unauthorized);
+        let err5: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::InvalidAmount);
         assert_eq!(err5, soroban_sdk::Error::from_contract_error(5));
     }
 
     /// draw_credit panics with "overflow" when utilized_amount + amount overflows i128.
     #[test]
-    #[should_panic(expected = "overflow")]
+    #[should_panic(expected = "Error(Contract, #12)")]
     fn test_draw_credit_overflow_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1910,8 +1875,9 @@ mod test_coverage_gaps {
         client.draw_credit(&borrower, &1_i128);
     }
 
-    /// draw_credit succeeds on a Defaulted credit line (only Closed is blocked).
+    /// draw_credit fails on a Defaulted credit line.
     #[test]
+    #[should_panic(expected = "credit line is defaulted")]
     fn test_draw_credit_allowed_on_defaulted_line() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1925,12 +1891,8 @@ mod test_coverage_gaps {
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
-        // Draw should succeed because draw_credit only blocks Closed status.
+        // Draw should panic because credit line is defaulted.
         client.draw_credit(&borrower, &100_i128);
-
-        let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line.utilized_amount, 100);
-        assert_eq!(line.status, CreditStatus::Defaulted);
     }
 
     /// repay_credit succeeds on a Defaulted credit line.
