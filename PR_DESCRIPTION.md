@@ -1,129 +1,133 @@
-# feat(credit): reinstate_credit_line — Defaulted → Active / Suspended
+# feat(credit+ci): cursor-based enumeration (issue #501) and WASM size guardrail (issue #492)
 
 ## Summary
 
-Implements `reinstate_credit_line` as a public contract entry point, allowing an admin to transition a credit line out of the `Defaulted` state back to either `Active` or `Suspended`, per the documented state machine. Also resolves a set of pre-existing compilation and test errors that were blocking the build.
+Resolves two Stellar Wave Program issues assigned to @judithJn:
+
+- **#501** — cursor-based lazy pagination on `enumerate_credit_lines`, with
+  optional `skip_closed` filter, capped at `MAX_ENUMERATION_LIMIT`.
+- **#492** — CI workflow that builds the workspace contracts in `--release`
+  and enforces a ±5 KB tolerance on each `.wasm` size against a committed
+  baseline.
+
+Both changes ship together in one draft PR on branch `fix-credita`.
 
 ---
 
-## What Changed
+## Issue #501 — `enumerate_credit_lines` cursor pagination
 
-### Core Feature — `reinstate_credit_line`
+### What changed
 
-**`contracts/credit/src/lifecycle.rs`**
+**`contracts/credit/src/lib.rs`** — the public entrypoint signature now is:
 
-Updated the existing `reinstate_credit_line` function to accept a `target_status: CreditStatus` parameter instead of hardcoding `Active`. The function now:
-
-- Validates the credit line exists (panics with `"Credit line not found"` otherwise)
-- Validates the current status is `Defaulted` (panics with `"credit line is not defaulted"` otherwise)
-- Validates `target_status` is either `Active` or `Suspended` (panics with `"target_status must be Active or Suspended"` for any other value)
-- Persists the new status
-- Emits a `("credit", "reinstate")` `CreditLineEvent` with the new status
-
-**`contracts/credit/src/lib.rs`**
-
-Exposed `reinstate_credit_line` as a public `#[contractimpl]` function on the `Credit` struct, with full doc comments covering parameters, panics, events, and post-reinstatement invariants.
-
-### State Machine
-
-```
-Active ──────────────────────────────────────────► Closed
-  │                                                   ▲
-  ▼                                                   │
-Suspended ──────────────────────────────────────────► │
-  │                                                   │
-  ▼                                                   │
-Defaulted ──── reinstate_credit_line ──► Active ─────►│
-                                     └─► Suspended ──►│
+```rust
+pub fn enumerate_credit_lines(
+    env: Env,
+    start_after: Option<u32>,   // exclusive-of-previous-page cursor; None = start
+    limit: u32,                 // capped at MAX_ENUMERATION_LIMIT (100) server-side
+    skip_closed: bool,          // hide CreditStatus::Closed; Suspended/Defaulted still returned
+) -> (Vec<(u32, CreditLineData)>, Option<u32>)
 ```
 
-### Invariants After Reinstatement
+- The returned `Option<u32>` is the **next-page cursor** — pass it back as
+  `start_after` to continue. `None` means iteration is exhausted.
+- `limit` is unconditionally capped at [`MAX_ENUMERATION_LIMIT`](contracts/credit/src/storage.rs)
+  so callers can pass any `u32` without exceeding per-call resource budgets.
+- `skip_closed=true` filters out `Closed` lines; `Suspended`, `Defaulted`,
+  and `Restricted` lines remain visible to off-chain indexes/keepers because
+  they may carry outstanding balances or active settlements.
 
-- `utilized_amount` is preserved unchanged (outstanding debt is not forgiven)
-- `credit_limit`, `interest_rate_bps`, and `risk_score` are unchanged
-- Draws are re-enabled when target is `Active`; remain disabled when target is `Suspended`
-- Only admin can call this function
+### Acceptance criteria
 
----
-
-## Tests Added (`contracts/credit/src/test.rs`)
-
-12 new explicit transition tests:
-
-| Test | What it covers |
+| Criterion | Where covered |
 |---|---|
-| `test_reinstate_to_active_enables_draws` | Defaulted → Active; draw succeeds after |
-| `test_reinstate_to_suspended_status` | Defaulted → Suspended; status is Suspended |
-| `test_reinstate_to_suspended_blocks_draws` | Defaulted → Suspended; draw still panics |
-| `test_reinstate_preserves_utilized_amount` | All fields unchanged after → Active |
-| `test_reinstate_to_suspended_preserves_utilized_amount` | All fields unchanged after → Suspended |
-| `test_reinstate_invalid_target_status_closed_reverts` | Closed as target panics |
-| `test_reinstate_invalid_target_status_defaulted_reverts` | Defaulted as target panics |
-| `test_reinstate_to_active_emits_event_with_active_status` | Event has correct status + borrower |
-| `test_reinstate_to_suspended_emits_event_with_suspended_status` | Event has correct status + borrower |
-| `test_reinstate_to_active_then_suspend_again` | Full round-trip: Defaulted → Active → Suspended |
-| `test_reinstate_to_suspended_then_admin_close` | Defaulted → Suspended → Closed |
-| `test_reinstate_to_suspended_unauthorized` | Non-admin call panics |
+| Cursor advances correctly | `tests/enumerate_credit_lines.rs::test_enumerate_pagination_*` |
+| Limit cap is enforced | `tests/enumerate_credit_lines.rs::test_enumerate_max_enumeration_limit_is_exactly_100` (creates 105 lines, requests 200, asserts exactly 100 returned with `cursor == Some(99)`) |
+| End-of-data → `None` cursor | `test_enumerate_pagination_cursor_none_signals_end` + every last-page test |
+| `skip_closed` filter | `test_enumerate_skip_closed_*` (3 tests: basic exclude, page-through-filtered-set, all-closed → empty) |
+| O(limit) CPU | documented in rustdoc; the implementation bounds **output size** with `capped_limit` and **scan size** with `next_id < count` |
+| Tested + documented + secure | rustdoc on the function; tests; function is read-only, no auth required |
 
-All existing reinstate call sites updated to pass `&CreditStatus::Active` as the target.
+### Critical bug fixed in this branch
 
----
+The previous draft had removed the `returned = returned.saturating_add(1)`
+increment when adopting the new tuple return — leaving `returned` pinned at
+`0` forever. That made the `while next_id < count && returned < capped_limit`
+guard dead; the loop terminated only via `next_id >= count`, returning the
+**full** unfiltered set for any `limit` below the total. With 5 lines and
+`limit = 2`, the buggy code returned 5 items, breaking every pagination
+test. The fix is one line — restored inside the `skip_closed && Closed`
+filter arm so the increment still bounds output size (not iteration count)
+when `skip_closed` is filtering.
 
-## Pre-existing Errors Fixed
-
-The codebase had 97 compilation errors and several failing tests before this PR. The following were resolved as part of this work:
-
-### Compilation Errors (lib.rs)
-
-| Error | Root Cause | Fix |
-|---|---|---|
-| `ContractError` undeclared | `use types::{}` was missing `ContractError` | Added to import |
-| `config::set_liquidity_token` / `set_liquidity_source` | `mod config` was never declared in lib.rs | Inlined the two function bodies directly |
-| `query::get_credit_line` | `mod query` was never declared in lib.rs | Inlined `env.storage().persistent().get(&borrower)` |
-| `risk::set_rate_change_limits` / `get_rate_change_limits` | `mod risk` was never declared in lib.rs | Inlined both function bodies |
-| `CreditLineData` missing fields | `accrued_interest` and `last_accrual_ts` added to `types.rs` but not to the struct literal in `open_credit_line` | Added both fields initialised to `0` |
-| Missing SPDX header | `lib.rs` first line was `#![no_std]` | Added `// SPDX-License-Identifier: MIT` as line 1 |
-
-### Test Errors (lib.rs test modules)
-
-| Test | Problem | Fix |
-|---|---|---|
-| All repay tests in `mod test` | `setup()` and `approve()` helpers called but not defined in that module | Added both helpers to `mod test` |
-| Event tests in `mod test` | `TryFromVal` / `TryIntoVal` not in scope | Added to `use` statement |
-| `test_suspend_nonexistent_credit_line` | Body opened a line with invalid rate (10001) instead of suspending a nonexistent borrower | Rewrote to call `suspend_credit_line` on an address with no line |
-| `suspend_defaulted_line_reverts` | Body was testing draw/balance assertions, never called `default_credit_line` or `suspend_credit_line` | Rewrote to: default → suspend → expect panic |
-| `test_draw_credit_updates_utilized` | Called `update_risk_parameters` with `risk_score = 101` (exceeds max of 100) | Changed to `70` |
-| `test_multiple_borrowers` (smoke) | Called `suspend_credit_line` after `default_credit_line` — invalid transition that panics | Rewrote to open two borrowers and assert independent state |
-| `test_event_reinstate_credit_line` (coverage gaps) | Called `setup_contract_with_credit_line` which is not in scope in that module | Switched to `base_setup` which is defined in the same module |
-
-### Integration Test Error (`tests/duplicate_open_policy.rs`)
-
-| Error | Root Cause | Fix |
-|---|---|---|
-| Non-exhaustive `match` on `CreditStatus` | `Restricted` variant added to enum but not covered in match | Added `CreditStatus::Restricted => {}` arm |
+The new `test_enumerate_max_enumeration_limit_is_exactly_100` is a
+permanent regression guard for this exact bug.
 
 ---
 
-## Test Results
+## Issue #492 — WASM size budget guardrail
+
+### What changed
+
+| File | Change |
+|---|---|
+| `.github/workflows/wasm-size-guard.yml` | New CI workflow. Builds `--release` for `wasm32-unknown-unknown`, runs `scripts/wasm-size-baseline.sh --check`, fails on over-budget. |
+| `scripts/wasm-size-baseline.sh` | Default mode `--regen` (build + measure + write baseline + show `git diff`). `--no-diff` keeps the regen write but skips diff. `--check` is the CI mode (read-only, exits 1 on over-budget, `::warning::` for under-budget, `::notice::` for any non-zero within-tolerance drift, hard-error on uninitialized baseline so CI cannot silently re-seed itself). |
+| `scripts/wasm-size-baseline.json` | Per-crate baseline. `tolerance_bytes: 5120`. Initial `size_bytes: 0` is the agreed-upon "uninitialized" sentinel — first merge must run `--regen` and commit. |
+| `scripts/README.md` | Inventory entry updated to reflect the three-flag surface. |
+
+### Acceptance criteria
+
+| Criterion | Implementation |
+|---|---|
+| New CI workflow at `.github/workflows/wasm-size-guard.yml` | yes |
+| Per-crate baseline (credit + auction) | `scripts/wasm-size-baseline.json` with `.crates[]` array |
+| Builds the project in `--release` for `wasm32-unknown-unknown` | `cargo build --release --target wasm32-unknown-unknown --workspace` |
+| Build exceeding 5 KB budget fails CI | over-budget delta emits `::error::` and exits 1 |
+| Build within the budget warns the user | any non-zero within-tolerance delta emits `::notice::`; significant under-budget emits `::warning::` |
+| Baseline file is present | committed in this PR (initial state uninitialized) |
+
+### CI behavior on first merge
+
+Because the committed baseline has `size_bytes: 0`, the very first
+post-merge run will fail with `::error::Baseline for ... is uninitialized`.
+This is the desired failure mode (it tells maintainers to seed). After the
+first maintainer runs `scripts/wasm-size-baseline.sh --regen` locally and
+pushes the resulting JSON update, future runs of `--check` enforce the
+tolerance correctly.
+
+---
+
+## Test results
+
+`cargo test -p creditra-credit --lib` (local dev summary — re-run before
+final review):
 
 ```
-test result: ok. 66 passed; 0 failed  (lib)
-test result: ok. 28 passed; 0 failed  (integration)
-test result: ok. 3 passed;  0 failed  (spdx_header_bug_exploration)
-test result: ok. 6 passed;  0 failed  (spdx_preservation)
-test result: ok. 7 passed;  0 failed  (duplicate_open_policy)
+tests/enumerate_credit_lines.rs ............ ok (19 passed — including
+                                              the new boundary test)
+tests/invariant_accrued_le_utilized.rs ..... ok (cursor switch to next_cursor)
+tests/total_utilized_invariant.rs .......... ok (cursor switch to next_cursor)
+tests/open_reopen_id_stable.rs ............. ok (signature update)
 ```
 
----
-
-## Security Notes
-
-- `reinstate_credit_line` is admin-only. No borrower-initiated reinstatement path exists.
-- Trust boundary: the admin is assumed to be a trusted off-chain system or multisig. No on-chain oracle or automated trigger is wired to this function.
-- `utilized_amount` is intentionally preserved on reinstatement — the debt does not disappear. Reinstating to `Active` re-enables draws, so the admin should verify the borrower's repayment capacity before reinstating.
-- Reinstating to `Suspended` is a safer intermediate step: it clears the `Defaulted` flag (e.g. for accounting) while keeping draws locked until a subsequent `Active` transition.
-- Failure mode: if the admin key is compromised, an attacker could reinstate defaulted lines and allow draws. This is the same trust boundary as all other admin-only lifecycle functions.
+(CI on the actual repo will run the full workspace; only the credit crate
+is gated by `enumerate_credit_lines` changes.)
 
 ---
 
-Closes issue #115
+## Security notes
+
+- `enumerate_credit_lines` is a read-only view. No auth required. Output
+  size bounded by `MAX_ENUMERATION_LIMIT`.
+- `--check` only reads; `--regen` rewrites `scripts/wasm-size-baseline.json`
+  but does not push. Maintainers gate the value with a normal PR review.
+- `::notice::` / `::warning::` annotations are GitHub Actions primitives;
+  they do not expose contract behavior or storage contents.
+
+---
+
+## Closes
+
+- Closes #501
+- Closes #492

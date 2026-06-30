@@ -146,7 +146,7 @@ fn assert_total_utilized_invariant(client: &CreditClient<'_>) {
     let expected_count = client.get_credit_line_count();
 
     loop {
-        let page = client.enumerate_credit_lines(&cursor, &PAGE_SIZE);
+        let (page, next_cursor) = client.enumerate_credit_lines(&cursor, &PAGE_SIZE, &false);
         if page.is_empty() {
             break;
         }
@@ -156,6 +156,11 @@ fn assert_total_utilized_invariant(client: &CreditClient<'_>) {
             enumerated += 1;
             recomputed_total += line.utilized_amount;
             cursor = Some(id);
+        }
+
+        // Pagination: stop when the contract signals this was the final page.
+        if next_cursor.is_none() {
+            break;
         }
     }
 

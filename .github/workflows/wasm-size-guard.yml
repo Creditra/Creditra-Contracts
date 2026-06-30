@@ -1,0 +1,86 @@
+name: WASM Size Guard
+
+# Issue #492: WASM size budget guardrail.
+#
+# This workflow builds the workspace contract crate `.wasm` artifacts in
+# `--release` mode and asserts that each crate's emitted size is within
+# ±5 KB (5120 bytes) of the per-crate baseline in
+# `scripts/wasm-size-baseline.json`. Differences larger than the tolerance
+# cause the workflow to fail (over-budget = regression marker); differences
+# smaller than -tolerance emit a warning (under-budget = a feature may
+# have been unintentionally dropped).
+#
+# The hard ceiling (50 KB) is still enforced in `build-wasm.yml` and
+# `ci.yml`. This workflow is complementary: it tracks regressions against
+# a known-good baseline, while the hard ceiling enforces Soroban's
+# per-contract bytecode limit.
+#
+# Regenerate the baseline (after a legitimate size change) with:
+#   ./scripts/wasm-size-baseline.sh
+# then commit the updated `scripts/wasm-size-baseline.json`.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: wasm-size-guard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm-size-guard:
+    name: Enforce ±5 KB WASM size tolerance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust + WASM target
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-size-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-size-
+
+      - name: Install jq
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq jq >/dev/null
+          fi
+          jq --version
+
+      - name: Verify baseline file exists
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/wasm-size-baseline.json ]; then
+            echo "::error::scripts/wasm-size-baseline.json is missing."
+            echo "Generate it locally with: scripts/wasm-size-baseline.sh"
+            exit 1
+          fi
+          jq -e '.crates | length > 0' scripts/wasm-size-baseline.json >/dev/null
+
+      - name: Enforce ±5 KB tolerance against baseline
+        run: bash scripts/wasm-size-baseline.sh --check

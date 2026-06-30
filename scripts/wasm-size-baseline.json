@@ -1,0 +1,20 @@
+{
+  "tolerance_bytes": 5120,
+  "tolerance_note": "5 KB. Above this delta, --check fails the CI; below this delta, --check warns. See scripts/wasm-size-baseline.sh for details.",
+  "crates": [
+    {
+      "name": "creditra_credit",
+      "wasm_path": "target/wasm32-unknown-unknown/release/creditra_credit.wasm",
+      "size_bytes": 0,
+      "regen_command": "cargo build --release --target wasm32-unknown-unknown --workspace",
+      "last_updated": "uninitialized — populate via scripts/wasm-size-baseline.sh and commit."
+    },
+    {
+      "name": "gateway_auction",
+      "wasm_path": "target/wasm32-unknown-unknown/release/gateway_auction.wasm",
+      "size_bytes": 0,
+      "regen_command": "cargo build --release --target wasm32-unknown-unknown --workspace",
+      "last_updated": "uninitialized — populate via scripts/wasm-size-baseline.sh and commit."
+    }
+  ]
+}

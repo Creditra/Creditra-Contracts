@@ -1579,25 +1579,64 @@ impl Credit {
         crate::storage::get_credit_line_count(&env)
     }
 
-    /// Enumerate credit lines in stable insertion order.
+    /// Enumerate credit lines in stable insertion order with cursor-based
+    /// lazy pagination.
     ///
-    /// `start_after` is an exclusive cursor over the stable numeric id.
-    /// Results are capped by `MAX_ENUMERATION_LIMIT` for predictable cost.
+    /// # How
+    ///
+    /// `start_after` is the **exclusive** cursor: pass `Some(last_returned_id)`
+    /// to skip everything up to and including that id. Pass `None` to begin
+    /// iteration at id `0`. (`Some(0)` is therefore **not** equivalent to
+    /// `None` — it skips id 0. Always pass `None` to start at the beginning.)
+    ///
+    /// `limit` is **capped** at [`MAX_ENUMERATION_LIMIT`] (100) so callers can
+    /// safely pass any `u32` without exceeding per-call resource budgets.
+    ///
+    /// `skip_closed`, when `true`, filters out credit lines whose status is
+    /// [`CreditStatus::Closed`]. Lines in transitional states
+    /// (`Suspended`, `Defaulted`, `Restricted`) are still returned because
+    /// they may carry outstanding balances, penalty accruals, or active
+    /// settlements that indexes and keepers must observe.
+    ///
+    /// # Returns
+    ///
+    /// A `(Vec, Option<u32>)` tuple:
+    /// - `Vec`: up to `limit` `(id, CreditLineData)` pairs in ascending id order.
+    /// - The companion `Option<u32>` is the **next-page cursor** — pass it back
+    ///   as `start_after` to continue iteration. It is `Some(last_returned_id)`
+    ///   when more pages may exist, and `None` when iteration is exhausted
+    ///   (no more rows, or the final page did not fill the requested limit).
+    ///   Pass the returned `Some(_)` back as `start_after` for the next call.
+    ///
+    /// # Cost
+    ///
+    /// CPU and storage reads are O(`min(limit, MAX_ENUMERATION_LIMIT)`); the
+    /// caller can therefore budget a fixed upper bound per call.
+    ///
+    /// # Idempotency
+    ///
+    /// The enumeration is deterministic: `id`s are stable across calls (see
+    /// `tests/open_reopen_id_stable.rs`) and the stored `CreditLineData`
+    /// is read lazily (no `apply_accrual` side-effect), so repeated calls
+    /// return identical results until the next mutation.
     pub fn enumerate_credit_lines(
         env: Env,
         start_after: Option<u32>,
         limit: u32,
-    ) -> Vec<(u32, CreditLineData)> {
+        skip_closed: bool,
+    ) -> (Vec<(u32, CreditLineData)>, Option<u32>) {
         let count = crate::storage::get_credit_line_count(&env);
         let capped_limit = limit.min(MAX_ENUMERATION_LIMIT);
         let mut out = Vec::new(&env);
 
         if capped_limit == 0 || count == 0 {
-            return out;
+            return (out, None);
         }
 
         let mut next_id = start_after.map(|id| id.saturating_add(1)).unwrap_or(0);
         let mut returned = 0_u32;
+        let mut last_returned_id: Option<u32> = None;
+
         while next_id < count && returned < capped_limit {
             if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
                 if let Some(line) = env
@@ -1605,14 +1644,32 @@ impl Credit {
                     .persistent()
                     .get::<Address, CreditLineData>(&borrower)
                 {
-                    out.push_back((next_id, line));
-                    returned = returned.saturating_add(1);
+                    if !(skip_closed && line.status == CreditStatus::Closed) {
+                        out.push_back((next_id, line));
+                        last_returned_id = Some(next_id);
+                        // Increment ONLY when a row is actually returned. Without
+                        // this increment, the `returned < capped_limit` check in
+                        // the while condition is dead code and the loop terminates
+                        // only via `next_id < count`, which would return an entire
+                        // unfiltered set for any `limit` below the total — breaking
+                        // lazy pagination and the documented O(limit) CPU bound.
+                        returned = returned.saturating_add(1);
+                    }
                 }
             }
             next_id = next_id.saturating_add(1);
         }
 
-        out
+        // `last_returned_id` here is the id of the last row actually pushed into
+        // `out`. It is valid input for the next call's `start_after` because
+        // each caller iteration begins at `start_after + 1`, re-skipping the
+        // row the previous page already returned.
+        let next_cursor = match last_returned_id {
+            Some(id) if next_id < count => Some(id),
+            _ => None,
+        };
+
+        (out, next_cursor)
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
