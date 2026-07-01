@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
+#![allow(dead_code)]
 
 //! # Creditra credit contract
 //!
@@ -114,6 +115,7 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod oracles;
 mod limits;
 mod math_utils;
 mod penalties;
@@ -129,6 +131,18 @@ pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
+
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
+};
+
+use events::{
+    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
+    CreditLineEvent, DrawnEvent, RepaymentEvent,
+};
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
+use auth::require_admin_auth;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cross_chain;
 
@@ -203,6 +217,11 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
+
+/// Instance storage key for admin.
+fn admin_key(env: &Env) -> Symbol {
+    Symbol::new(env, "admin")
+}
 
 #[allow(dead_code)]
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -727,6 +746,8 @@ impl Credit {
         risk::get_penalty_surcharge_bps(env)
     }
 
+    pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+        lifecycle::reinstate_credit_line(env, borrower, target_status)
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         risk::get_rate_change_limits(env)
     }
@@ -760,6 +781,40 @@ impl Credit {
         risk::set_borrower_rate_ceiling(env, borrower, ceiling_bps)
     }
 
+    /// Adds or updates an oracle's weight in the registry.
+    /// Admin only.
+    pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
+        oracles::add_oracle(env, oracle, weight)
+    }
+
+    /// Removes an oracle from the registry.
+    /// Admin only.
+    pub fn remove_oracle(env: Env, oracle: Address) {
+        oracles::remove_oracle(env, oracle)
+    }
+
+    /// Sets the quorum threshold weight.
+    /// Admin only.
+    pub fn set_quorum_threshold(env: Env, threshold: u32) {
+        oracles::set_quorum_threshold(env, threshold)
+    }
+
+    /// Sets the reporting freshness window in seconds.
+    /// Admin only.
+    pub fn set_reporting_window(env: Env, window_seconds: u64) {
+        oracles::set_reporting_window(env, window_seconds)
+    }
+
+    /// Oracles report their observed value.
+    /// Requires reporting oracle's auth.
+    pub fn report_value(env: Env, oracle: Address, value: u128) {
+        oracles::report_value(env, oracle, value)
+    }
+
+    /// Computes the weighted median of the latest fresh reports from approved oracles.
+    /// Returns error if quorum threshold is not met.
+    pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
+        oracles::get_median_value(env)
     /// Get the per-borrower interest rate ceiling, if set.
     pub fn get_borrower_rate_ceiling(env: Env, borrower: Address) -> Option<u32> {
         crate::storage::get_borrower_rate_ceiling(&env, &borrower)
@@ -3656,6 +3711,24 @@ mod test_mock_liquidity_token {
         (client, admin, borrower)
     }
 
+    fn setup_contract_with_credit_line<'a>(
+        env: &'a Env,
+        borrower: &'a Address,
+        credit_limit: i128,
+        utilized_amount: i128,
+    ) -> (CreditClient<'a>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
+        if utilized_amount > 0 {
+            client.draw_credit(borrower, &utilized_amount);
+        }
+        (client, contract_id, admin)
+    }
+
     // ── update_risk_parameters: negative credit_limit ────────────────────────
 
     #[test]
@@ -5456,6 +5529,10 @@ mod test_mock_liquidity_token {
 
             client_a.freeze_draws();
 
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Active);
+        assert_utilization_invariants(&line);
             assert!(client_a.is_draws_frozen());
             assert!(!client_b.is_draws_frozen());
         }
@@ -5524,6 +5601,15 @@ mod test_mock_liquidity_token {
             assert_eq!(client.get_borrower_frozen_until(&borrower), None);
         }
 
+    #[test]
+    #[should_panic(expected = "Credit line not found")]
+    fn test_suspend_nonexistent_credit_line() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let client = CreditClient::new(&env, &env.register(Credit, ()));
+        client.init(&admin);
+        client.suspend_credit_line(&Address::generate(&env));
         /// Event is emitted on freeze with correct topic and payload.
         #[test]
         fn freeze_emits_borrower_frozen_event() {
@@ -5570,6 +5656,8 @@ mod test_mock_liquidity_token {
     // ── update_risk_parameters: rate change interval passes ──────────────────
 
     #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn open_credit_line_rejects_score_too_high() {
     fn rate_change_after_interval_succeeds() {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
@@ -5607,6 +5695,11 @@ mod test_mock_liquidity_token {
 
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
+        let client = CreditClient::new(&env, &env.register(Credit, ()));
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
+        client.default_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
@@ -5805,6 +5898,48 @@ mod test_mock_liquidity_token {
     fn test_close_credit_line_defaulted_admin_force_close() {
         let env = Env::default();
         env.mock_all_auths();
+        let admin = Address::generate(&env);
+
+        // Deploy two separate contract instances and verify both default to their own address.
+        let contract_id_a = env.register(Credit, ());
+        let contract_id_b = env.register(Credit, ());
+
+        let client_a = CreditClient::new(&env, &contract_id_a);
+        let client_b = CreditClient::new(&env, &contract_id_b);
+
+        client_a.init(&admin);
+        client_b.init(&admin);
+
+        // Both contracts initialized independently — admin-gated calls work on both.
+        let borrower_a = Address::generate(&env);
+        let borrower_b = Address::generate(&env);
+        client_a.open_credit_line(&borrower_a, &100_i128, &100_u32, &10_u32);
+        client_b.open_credit_line(&borrower_b, &200_i128, &200_u32, &20_u32);
+
+        assert!(client_a.get_credit_line(&borrower_a).is_some());
+        assert!(client_b.get_credit_line(&borrower_b).is_some());
+    }
+}
+#[cfg(test)]
+mod test_coverage_gaps {
+    use super::*;
+    use crate::events::CreditLineEvent;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::StellarAssetClient;
+    use soroban_sdk::{symbol_short, Symbol, TryFromVal, TryIntoVal};
+
+    fn base_setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
+        (client, admin, borrower)
+    }
+
+    // ── update_risk_parameters: negative credit_limit ────────────────────────
 
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
@@ -6118,6 +6253,13 @@ mod test_draw_freeze {
         assert_eq!(line.utilized_amount, 300);
     }
 
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin);
+        let token_admin_client = StellarAssetClient::new(&env, &token.address());
+        client.set_liquidity_token(&token.address());
+        token_admin_client.mint(&contract_id, &500_i128);
+        client.close_credit_line(&borrower, &admin);
+        client.close_credit_line(&borrower, &admin);
     // ── unfreeze_draws ────────────────────────────────────────────────────────
 
     /// unfreeze_draws clears the flag.
@@ -6195,6 +6337,24 @@ mod test_draw_freeze {
         assert_eq!(event.reason, FreezeReason::LiquidityReserve);
     }
 
+    /// ContractError::from converts each variant to a contract error code.
+    #[test]
+    fn test_credit_error_from_conversion() {
+        let err: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::Unauthorized);
+        assert_eq!(err, soroban_sdk::Error::from_contract_error(1));
+
+        let err2: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::NotAdmin);
+        assert_eq!(err2, soroban_sdk::Error::from_contract_error(2));
+
+        let err3: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::CreditLineNotFound);
+        assert_eq!(err3, soroban_sdk::Error::from_contract_error(3));
+
+        let err4: soroban_sdk::Error =
+            soroban_sdk::Error::from(ContractError::CreditLineClosed);
+        assert_eq!(err4, soroban_sdk::Error::from_contract_error(4));
+
+        let err5: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::InvalidAmount);
+        assert_eq!(err5, soroban_sdk::Error::from_contract_error(5));
     /// unfreeze_draws emits a DrawsFrozenEvent with frozen=false.
     #[test]
     fn unfreeze_draws_emits_event_frozen_false() {
@@ -6219,6 +6379,8 @@ mod test_draw_freeze {
 
     /// Freeze blocks draws for ALL borrowers, not just one.
     #[test]
+    #[should_panic(expected = "Error(Contract, #12)")]
+    fn test_draw_credit_overflow_panics() {
     fn freeze_blocks_all_borrowers() {
         let env = Env::default();
         env.mock_all_auths();
@@ -6236,6 +6398,10 @@ mod test_draw_freeze {
         assert!(client.is_draws_frozen());
     }
 
+    /// draw_credit fails on a Defaulted credit line.
+    #[test]
+    #[should_panic(expected = "credit line is defaulted")]
+    fn test_draw_credit_allowed_on_defaulted_line() {
     /// Freeze on one contract does not affect another contract instance.
     #[test]
     fn freeze_is_per_contract_instance() {
@@ -6249,6 +6415,8 @@ mod test_draw_freeze {
         let client_a = CreditClient::new(&env, &contract_a);
         let client_b = CreditClient::new(&env, &contract_b);
 
+        // Draw should panic because credit line is defaulted.
+        client.draw_credit(&borrower, &100_i128);
         client_a.init(&admin);
         client_b.init(&admin);
         client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);

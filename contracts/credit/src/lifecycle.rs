@@ -718,6 +718,10 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
+/// Reinstate a defaulted credit line to Active or Suspended (admin only).
+///
+/// Allowed only when status is Defaulted. Transition: Defaulted → Active or Suspended.
+pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
 ///
 /// This hook is accounting-only and intentionally performs no token transfer.
@@ -765,6 +769,12 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
+    if target_status != CreditStatus::Active && target_status != CreditStatus::Suspended {
+        panic!("target_status must be Active or Suspended");
+    }
+
+    credit_line.status = target_status;
+    env.storage().persistent().set(&borrower, &credit_line);
     // Compute the maximum recoverable amount for this settlement
     let target_recovery = credit_line
         .utilized_amount
