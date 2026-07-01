@@ -1,0 +1,49 @@
+name: Gas Regression
+
+on:
+  push:
+    branches: [main, master, develop, "feature/**"]
+  pull_request:
+    branches: [main, master, develop]
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: gas-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  budget-regression:
+    name: Budget regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-gas-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-gas-
+
+      - name: Copy committed baseline to test_snapshots
+        run: |
+          mkdir -p contracts/credit/test_snapshots
+          cp contracts/.gas-baseline.json contracts/credit/test_snapshots/budget.json
+
+      - name: Run budget-regression tests
+        run: |
+          cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test instrument -- --nocapture
+          cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test budget_regression -- --nocapture

@@ -26,6 +26,16 @@ Stored in persistent storage keyed by the borrower's address.
 | `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
 | `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
 
+### `RepaymentSchedule`
+
+Optional per-borrower installment schedule stored in persistent storage under the borrower address.
+
+| Field | Type | Description |
+|---|---|---|
+| `amount_per_period` | `i128` | Required principal amount for each installment; interest-only repayment does not advance the schedule |
+| `period_seconds` | `u64` | Installment interval in seconds |
+| `next_due_ts` | `u64` | Timestamp for the next installment due date |
+
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
 
@@ -39,26 +49,51 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | Variant    | Value | Description |
 |------------|-------|-----------|
 | `Active`   | 0     | Credit line is open and available |
-| `Suspended`| 1     | Credit line is temporarily suspended |
+| `Suspended`| 1     | Credit line is temporarily suspended; draws are blocked and repayments remain allowed |
 | `Defaulted`| 2     | Borrower has defaulted; draw disabled, repay allowed |
 | `Closed`   | 3     | Credit line has been permanently closed |
 | `Restricted` | 4   | Limit is below utilization; additional draws are blocked until cured |
 
 ### Status transitions
 
-| From       | To         | Trigger |
-|------------|------------|---------|
-| Active     | Suspended  | Admin calls `suspend_credit_line` |
-| Active     | Defaulted  | Admin calls `default_credit_line` |
-| Suspended  | Defaulted  | Admin calls `default_credit_line` |
-| Defaulted  | Active     | Admin calls `reinstate_credit_line` |
-| Defaulted  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
-| Active     | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
-| Suspended  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+The table below is the authoritative source of truth for all valid state machine transitions.
+`close_credit_line` can originate from any non-Closed status and is therefore listed three times.
 
-When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
+| From       | To         | Trigger                                                       | Authorization                        |
+|------------|------------|---------------------------------------------------------------|--------------------------------------|
+| Active     | Suspended  | Admin calls `suspend_credit_line`                             | Admin only                           |
+| Active     | Defaulted  | Admin calls `default_credit_line`                             | Admin only                           |
+| Active     | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Suspended  | Defaulted  | Admin calls `default_credit_line`                             | Admin only                           |
+| Suspended  | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Defaulted  | Active     | Admin calls `reinstate_credit_line`                           | Admin only                           |
+| Defaulted  | Closed     | `close_credit_line` called                                    | Admin (any time) or Borrower (`utilized_amount == 0`) |
+| Closed     | Active     | Admin calls `open_credit_line` for the same borrower address  | Admin (opens a fresh line)           |
 
----
+**Terminal state**: `Closed` is permanent for that credit line record. A new `open_credit_line`
+call for the same borrower address starts a fresh record and resets all fields.
+
+**Draw and repay availability by status**:
+
+| Status     | `draw_credit` | `repay_credit` |
+|------------|---------------|----------------|
+| Active     | ✅ Allowed     | ✅ Allowed      |
+| Suspended  | ❌ Blocked     | ✅ Allowed      |
+| Defaulted  | ❌ Blocked     | ✅ Allowed      |
+| Closed     | ❌ Blocked     | ❌ Blocked      |
+| Restricted | ❌ Blocked     | ✅ Allowed      |
+
+## Soroban Atomicity Guarantees
+
+The Credit contract relies on Soroban's transaction atomicity guarantees for state consistency:
+
+- **Atomic execution**: All operations within a single contract call either succeed completely or fail completely. Partial state changes are impossible.
+- **Token transfer safety**: External token contract calls (e.g., `transfer`, `transfer_from`) are integrated into the atomic transaction. If a token transfer fails, all storage updates are rolled back.
+- **Reentrancy protection**: A reentrancy guard is set at the start of `draw_credit` and `repay_credit` and cleared at the end. If the transaction fails (e.g., due to token transfer failure), the guard is automatically rolled back, preventing stuck guards.
+- **Ordering**: Token transfers occur before storage updates in both `draw_credit` and `repay_credit`. This ensures that failed transfers do not leave inconsistent utilization state.
+- **No inconsistent states**: Failures never result in updated `utilized_amount` without corresponding token movement, or vice versa.
+
+These guarantees ensure that the contract maintains invariants even under adversarial token contract behavior or unexpected failures.
 
 ## Methods
 
@@ -67,6 +102,7 @@ Initializes the contract with an admin address. Must be called exactly once.
 
 - Stores `admin` in instance storage under the `"admin"` key.
 - Sets `LiquiditySource` to the contract's own address as a deterministic default.
+- Sets `DataKey::SchemaVersion` to `1` in instance storage.
 - Reverts with `ContractError::AlreadyInitialized` (14) if called a second time, preventing admin takeover via re-initialization.
 
 #### Parameters
@@ -82,8 +118,24 @@ Initializes the contract with an admin address. Must be called exactly once.
 #### Security notes
 - Must be called by the deployer immediately after deployment.
 - The guard checks for the presence of the `"admin"` key before writing; no storage is mutated on a rejected second call.
-- The admin address is immutable after initialization. See the Admin Rotation Proposal section for a safe rotation design.
+- Admin rotation is two-step (`propose_admin` then `accept_admin`) with an optional delay.
 - `LiquiditySource` defaults to the contract address and can be updated post-init via `set_liquidity_source` (admin only).
+
+### `propose_admin(env, new_admin, delay_seconds)`
+Creates or overwrites a pending admin proposal (admin only).
+
+- Stores `new_admin` under `"proposed_admin"` and acceptance timestamp under `"proposed_at"`.
+- `delay_seconds = 0` allows immediate acceptance.
+- A second proposal **overwrites** the previous pending proposal and its delay window.
+- Emits `("credit", "admin_prop")` with `AdminRotationProposedEvent`.
+
+### `accept_admin(env)`
+Accepts a pending admin proposal (proposed admin only).
+
+- Caller must be exactly the currently proposed admin.
+- Reverts with `ContractError::AdminAcceptTooEarly` (15) if called before `"proposed_at"`.
+- On success, updates `"admin"` and clears `"proposed_admin"`/`"proposed_at"`.
+- Emits `("credit", "admin_acc")` with `AdminRotationAcceptedEvent`.
 
 ### `set_liquidity_token(env, token_address)`
 Sets the Stellar Asset Contract token used for draws and repayments (admin only).
@@ -98,33 +150,62 @@ Sets the address that holds liquidity for draws and receives repayments (default
 ### `open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 Opens a new credit line for a borrower. Called by the backend or risk engine.
 
+- Creating a brand-new line preserves the existing backend/risk-engine trust boundary.
+- Re-opening any existing non-`Active` line requires admin auth so a borrower cannot self-suspend and then reactivate themselves on-chain.
+- On reopen, `utilized_amount`, `accrued_interest`, `last_rate_update_ts`, and `suspension_ts` are reset to `0`.
+
 | Parameter | Type | Description |
 |---|---|---|
 | `borrower` | `Address` | Borrower's address |
 | `credit_limit` | `i128` | Maximum drawable amount (must be > 0) |
-| `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000) |
-| `risk_score` | `u32` | Risk score from the risk engine (0–100) |
+| `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000); matches `MAX_INTEREST_RATE_BPS` |
+| `risk_score` | `u32` | Risk score from the risk engine (0–100); matches `MAX_RISK_SCORE` |
 
-`last_rate_update_ts`, `accrued_interest`, and `last_accrual_ts` are initialized to `0`.
+`last_rate_update_ts`, `accrued_interest`, `last_accrual_ts`, and `suspension_ts` are initialized to `0`.
 
 #### Errors
 | Condition | Error |
 |---|---|
-| `credit_limit <= 0` | `ContractError::InvalidAmount` |
-| `interest_rate_bps > 10000` | `ContractError::RateTooHigh` |
-| `risk_score > 100` | `ContractError::ScoreTooHigh` |
-| Borrower already has an Active line | `ContractError::Unauthorized` |
+| `credit_limit <= 0` | panics: `"credit_limit must be greater than zero"` |
+| `interest_rate_bps > 10000` | `ContractError::RateTooHigh` (8) |
+| `risk_score > 100` | `ContractError::ScoreTooHigh` (9) |
+| Borrower already has an `Active` line | panics: `"borrower already has an active credit line"` |
+| Re-opening non-Active line by non-admin | auth error |
+| Protocol is paused | `ContractError::Paused` (18) |
 
-Emits: `("credit", "opened")` event with a `CreditLineEvent` payload.
+#### Events
+Emits `("credit", "opened")` with `CreditLineEvent { event_type, borrower, status: Active, credit_limit, interest_rate_bps, risk_score }`.
+
+#### Security notes
+- Admin auth is required to reopen a non-Active line, preventing borrowers from self-reinstating via self-suspend + reopen.
+- No auth is required for a brand-new line (no existing record); the backend/risk engine is the trusted caller.
+- Validation runs before any storage write — failed calls leave existing state unchanged.
 
 ### `draw_credit(env, borrower, amount)`
-Draw funds from an **Active** credit line. Caller must be the borrower.
+Draw funds from an **Active** credit line. Only the borrower is authorized to call this function.
 
-- Reverts if line is Closed, Suspended, Defaulted, or does not exist.
-- Reverts if draw would exceed `credit_limit`.
-- Transfers tokens from liquidity source → borrower.
+- Reverts with `ContractError::Unauthorized` (1) if caller is not the borrower.
+- Reverts with `ContractError::CreditLineNotFound` (3) if no line exists.
+- Reverts with `ContractError::CreditLineSuspended` (20), `ContractError::CreditLineDefaulted` (21), or `ContractError::CreditLineClosed` (4) based on status.
+- Reverts with `ContractError::InvalidAmount` (5) if `amount <= 0`.
+- Reverts with `ContractError::Overflow` (12) on arithmetic overflow.
+- Reverts with `ContractError::DrawCooldownActive` (29) when a borrower attempts to draw again before the configured cooldown interval has elapsed.
+- Reverts with `ContractError::OverLimit` (6) if draw exceeds `credit_limit`.
+- Reverts with `ContractError::InsufficientLiquidityReserve` (24) if the configured reserve balance is lower than the requested draw amount.
+- Transfers tokens from liquidity source → borrower **before** updating storage. If the transfer fails, the call reverts with no state change due to Soroban transaction atomicity.
+- Updates `utilized_amount` and sets draw timestamp after successful transfer.
 
 Emits: `("credit", "drawn")` event.
+
+### `reverse_draw(env, borrower, amount, original_ts, reason_code)`
+Admin-only bounded reversal for erroneous draws.
+
+- Reversal is allowed only when `ledger_timestamp - original_ts <= 3600` seconds.
+- Reversal is validated against borrower-scoped draw audit data keyed by `(borrower, original_ts)`.
+- Supports partial reversal; total reversed amount cannot exceed the original drawn amount at that timestamp.
+- **Accounting-only behavior**: this call updates debt accounting (`utilized_amount`) and emits an audit event, but does not move tokens from borrower back to reserve.
+
+Emits: `("credit", "draw_rev")` event with `DrawReversedEvent` payload containing borrower, amount, original draw timestamp, reason code, actor, and post-reversal utilization.
 
 ### `repay_credit(env, borrower, amount)`
 Repay outstanding drawn funds.
@@ -132,12 +213,48 @@ Repay outstanding drawn funds.
 **Allowed on**: Active, Suspended, or Defaulted credit lines.  
 **Not allowed on**: Closed credit lines.
 
+**Repayment allocation policy** (applied after pending interest accrual):
+1. **Accrue pending interest** — `apply_pending_accrual` capitalizes any elapsed interest into `utilized_amount` and `accrued_interest` before repayment is applied. This prevents interest evasion through frequent repayments.
+2. **Cap overpayment** — `effective_repay = min(amount, utilized_amount)`. Overpayments beyond total owed are ignored (no refund).
+3. **Interest first** — `interest_repaid = min(effective_repay, accrued_interest)`.
+4. **Principal second** — `principal_repaid = effective_repay - interest_repaid`.
+5. **Update state** — `accrued_interest` and `utilized_amount` are reduced accordingly.
+
 - The borrower must have approved the contract to pull tokens via `transfer_from`.
-- Effective repayment = `min(amount, utilized_amount)` (over-payments are safe).
-- Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change.
+- Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change due to Soroban transaction atomicity.
+- Repayment failures due to insufficient allowance or balance do not alter `utilized_amount`, `accrued_interest`, or the credit line record.
 - Works even when no liquidity token is configured (state-only update).
 
-Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing the effective amount transferred and new `utilized_amount`.
+Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing:
+- `amount` — effective amount repaid (capped at total owed)
+- `interest_repaid` — portion applied to accrued interest
+- `principal_repaid` — portion applied to principal
+- `new_utilized_amount` — total outstanding debt after repayment
+- `new_accrued_interest` — remaining interest debt after repayment
+
+### `set_repayment_schedule(env, borrower, amount_per_period, period_seconds, first_due_ts)`
+Sets or replaces the installment schedule for a borrower credit line. Admin only.
+
+- `amount_per_period` must be positive.
+- `period_seconds` must be positive.
+- The schedule is cleared automatically when the line is reopened or closed.
+
+### `set_borrower_exposure_cap(env, borrower, amount)`
+Set the maximum outstanding exposure permitted for a borrower across all active credit lines. Admin only.
+
+- `amount = 0` removes the cap.
+- Negative values revert with `ContractError::InvalidAmount`.
+- The cap is checked during `draw_credit` against the borrower's post-draw utilized balance.
+
+### `get_borrower_exposure_cap(env, borrower) -> Option<i128>`
+Returns the configured borrower exposure cap, if any.
+
+### `is_delinquent(env, borrower)`
+Returns `true` when a borrower has a repayment schedule, still has debt, and the current time is past `next_due_ts + grace_period_seconds`.
+
+Integrators can reconcile balances using:
+- `principal_owed = new_utilized_amount - new_accrued_interest`
+- `total_owed = new_utilized_amount`
 
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 Update credit limit, interest rate, and risk score (admin only).
@@ -145,40 +262,69 @@ Update credit limit, interest rate, and risk score (admin only).
 When `RateChangeConfig` is set, rate changes are subject to:
 - Maximum delta ≤ `max_rate_change_bps`
 - Minimum time interval ≥ `rate_change_min_interval`
+- The interval is enforced only when the effective rate actually changes.
+- On a successful rate change, `last_rate_update_ts` is refreshed to the current ledger timestamp.
 
-Emits: `("credit", "risk_updated")` event.
+If `RateChangeConfig` is absent, `update_risk_parameters` retains the previous
+backward-compatible behavior and accepts any manual rate that stays within the
+global `MAX_INTEREST_RATE_BPS` cap.
+
+#### Credit Limit Decrease Behavior
+
+The credit contract implements a **state-transition policy** when a credit limit is decreased:
+
+**Case 1: Limit Decrease Below Utilization**
+- **Trigger**: `new_credit_limit < current_utilized_amount`
+- **Action**: Credit line status transitions to **Restricted**
+- **Effect on draws**: All `draw_credit` calls are rejected (same as Suspended)
+- **Effect on repayment**: `repay_credit` remains fully allowed
+- **Rationale**: This avoids forced liquidation and gives the borrower a grace period to reduce their balance
+
+**Case 2: Limit Remains Above Utilization**
+- **Trigger**: `new_credit_limit >= current_utilized_amount`
+- **Action**: No status change; line remains **Active**
+- **Effect**: Normal operation continues
+
+**Case 3: Recovery from Restricted (Auto-Cure)**
+- **Trigger**: Line is in **Restricted** status AND admin updates `credit_limit >= current_utilized_amount`
+- **Action**: Status automatically transitions back to **Active**
+- **Effect**: Borrower can resume drawing
+
+**Boundary Condition**
+- When `new_credit_limit == current_utilized_amount`, the line is **Active** (equality is safe)
+
+#### Interest and Rate Updates During Restriction
+
+Interest rate, risk score, and accrued interest are updated normally during Restricted status. If conditions improve (borrower repays until `utilized_amount` drops below the new limit), the admin can re-enable the line via another `update_risk_parameters` call.
+
+Emits: `("credit", "risk_updated")` event with the new parameters.
 
 ### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
 Configure rate-change limits (admin only).
 
 ### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
 Returns the current rate-change configuration (or `None` if not set).
-### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 
-Update the risk parameters for an existing credit line. Admin-only.
+### Security notes for `update_risk_parameters`
+- Admin auth is required before any mutation.
+- The borrower record must already exist; missing lines fail with `CreditLineNotFound`.
+- Rate-change limits are optional and only affect successful rate changes.
+- Calls that fail validation leave the credit line unchanged, including `last_rate_update_ts`.
 
-| Parameter           | Type      | Description                                            |
-| ------------------- | --------- | ------------------------------------------------------ |
-| `borrower`          | `Address` | Borrower whose credit line to update                   |
-| `credit_limit`      | `i128`    | New credit limit (must be ≥ current `utilized_amount`) |
-| `interest_rate_bps` | `u32`     | New interest rate in basis points (0–10000)            |
-| `risk_score`        | `u32`     | New risk score (0–100)                                 |
+### `get_schema_version(env) -> Option<u32>`
+Returns the stored storage schema version from instance storage.
 
-#### Credit Limit Decrease Behavior
+- After successful `init`, this returns `Some(1)`.
+- Before initialization, this returns `None`.
 
-When `credit_limit` is decreased below the current `utilized_amount`:
+### Storage schema versioning and migrations
 
-- The credit line status changes to **Restricted**
-- `utilized_amount` remains unchanged (borrower must repay excess)
-- `draw_credit` is disabled until excess is repaid or limit is increased
-- A `("credit", "limit_dec")` event is emitted with details
+The credit contract stores an explicit schema marker under `DataKey::SchemaVersion`.
 
-When `credit_limit` is decreased but remains ≥ `utilized_amount`:
-
-- The credit line remains **Active**
-- Normal operation continues
-
-When `credit_limit` is increased or unchanged:
+- Current schema version: `1`
+- Existing key/value layouts are unchanged; the version key is additive metadata.
+- For immutable deployments, the version still gives off-chain tooling a deterministic way to detect schema expectations.
+- For future contract deployments, bump the schema version when storage semantics change and document migration requirements in release notes and deployment playbooks.
 
 - Normal behavior applies
 - If currently Restricted, increasing limit above `utilized_amount` reactivates to **Active**
@@ -238,11 +384,33 @@ Suspend an Active credit line (admin only).
 
 Emits: `("credit", "suspend")` event.
 
+### `self_suspend_credit_line(env, borrower)`
+Allow a borrower to suspend their own Active credit line as a safety control.
+
+- Requires borrower auth.
+- Reverts if the line does not exist.
+- Reverts unless the current status is `Active`.
+- Blocks future draws but continues to allow `repay_credit`.
+- Does not give the borrower any reinstatement path; reactivation still requires an admin-controlled workflow.
+
+Emits: `("credit", "suspend")` event.
+
 ### Interest accrual
 
-Interest accrual fields exist in storage, but scheduled/lazy accrual logic is not yet active in the contract.
+Interest accrual is implemented with lazy evaluation that applies interest when credit lines are touched. The implementation uses simple interest with floor rounding to favor borrowers.
 
-The intended implementation design is documented separately in [`docs/interest-accrual.md`](interest-accrual.md).
+**Key Features:**
+- Simple interest calculation based on annual rate in basis points
+- Lazy accrual triggered on state-changing operations
+- Grace period support for suspended credit lines
+- Comprehensive event logging for audit trails
+- Backward compatible with existing credit lines
+
+**Documentation:**
+- Implementation details: [`docs/interest-accrual.md`](interest-accrual.md)
+- Design specification: [`docs/interest-accrual-design.md`](interest-accrual-design.md)
+
+**Current Status:** ✅ Implemented and active
 
 ### `close_credit_line(env, borrower, closer)`
 Close a credit line.
@@ -255,15 +423,144 @@ Emits: `("credit", "closed")` event.
 ### `default_credit_line(env, borrower)`
 Mark credit line as Defaulted (admin only).
 
-Emits: `("credit", "default")` event.
+Emits:
+- `("credit", "default")` lifecycle event.
+- `("credit", "liq_req")` liquidation request event for auction orchestration.
+
+### `settle_default_liquidation(env, borrower, recovered_amount, settlement_id)`
+Apply auction liquidation proceeds to a defaulted line (admin only).
+
+- Accounting-only operation (no token transfer in this method).
+- Requires `status == Defaulted`.
+- Requires positive `recovered_amount` and `recovered_amount <= utilized_amount`.
+- Enforces one-time settlement per `(borrower, settlement_id)` to prevent replay.
+- If remaining `utilized_amount == 0`, status transitions to `Closed`.
+
+Emits: `("credit", "liq_setl")` event. When fully settled, also emits `("credit", "closed")`.
 
 ### `reinstate_credit_line(env, borrower)`
-Reinstate a Defaulted credit line to Active (admin only).
+Reinstate a Defaulted credit line to Active. Admin only.
+
+- Requires `status == Defaulted`.
+- Self-suspended lines are not borrower-reinstatable. Any return to `Active` after borrower self-suspension must come from an admin-approved reopen workflow.
 
 Emits: `("credit", "reinstate")` event.
 
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
-View function — returns credit line data or `None`.
+View function — returns the full [`CreditLineData`] for `borrower`, or `None` if no credit line exists.
+
+#### Authentication
+No authentication required. Any caller — indexer, client SDK, or another contract — may call this freely.
+
+#### Stable serialization
+The returned struct is stable for integrators. Fields are serialized in declaration order (see `types.rs`). New fields will only ever be appended; existing field positions will not change.
+
+#### Accrual note
+Interest accrual is lazy. `accrued_interest` and `utilized_amount` reflect the last mutating call (draw, repay, suspend, etc.). Pending interest since the last checkpoint is **not** applied by this query. To get the current accrued value, trigger a mutating call first or compute it off-chain using `last_accrual_ts` and `interest_rate_bps`.
+
+#### Key fields for indexers
+
+| Field | Description |
+|---|---|
+| `last_rate_update_ts` | Ledger timestamp of the last rate change; `0` means the rate has never been updated |
+| `last_accrual_ts` | Ledger timestamp of the last interest checkpoint; `0` means no accrual has run yet |
+| `accrued_interest` | Capitalized interest included in `utilized_amount` |
+| `status` | Current lifecycle state (`Active`, `Suspended`, `Defaulted`, `Closed`, `Restricted`) |
+
+#### Security notes
+- Pure read — no storage is mutated, no auth is checked, no events are emitted.
+- Safe to call from untrusted contexts; the worst outcome is a stale accrual snapshot (see accrual note above).
+- Returns `None` for addresses that have never had a credit line; callers must handle this case.
+
+### `get_credit_line_count(env) -> u64`
+View function — returns the total number of credit lines that have been opened.
+
+### `enumerate_credit_lines(env, start_after, limit) -> Vec<(u64, CreditLineData)>`
+View function — returns a paginated list of credit lines in insertion order.
+
+#### Parameters
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start_after` | `Option<u64>` | Credit line ID to start after (exclusive). Pass `None` to start from the beginning. |
+| `limit` | `u32` | Number of entries to return (capped at 100). |
+
+#### Example
+```rust
+// Get first 10 credit lines
+let page1 = client.enumerate_credit_lines(&None, &10);
+
+// Get next page using last ID
+if let Some((last_id, _)) = page1.last() {
+    let page2 = client.enumerate_credit_lines(&Some(*last_id), &10);
+}
+```
+
+- **Access**: Public (no authorization required).
+- **Ordering**: Insertion order (sequential IDs assigned at creation).
+- **Gas limit**: `limit` is capped at 100 to prevent gas exhaustion.
+
+### `freeze_draws(env, reason)`
+Freeze all `draw_credit` calls contract-wide (admin only).
+
+- Sets `DataKey::DrawsFrozen` to [`DrawsFreezeState { frozen: true, reason }`] in instance storage.
+- `reason` must be a [`FreezeReason`] variant for structured audit/indexer classification.
+- Does **not** mutate any borrower's `CreditStatus`; lines remain Active, Defaulted, etc.
+- Repayments are never blocked by this flag.
+
+Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, reason }`.
+
+### `unfreeze_draws(env)`
+Re-enable `draw_credit` after a global freeze (admin only).
+
+- Sets `DrawsFreezeState.frozen` to `false` while preserving the last recorded reason.
+- Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, reason }`.
+
+### `get_draws_freeze_reason(env) -> Option<FreezeReason>`
+Returns the structured reason for the active global draw freeze. Returns `None` when draws are not frozen. No auth required.
+
+### `freeze_credit_line(env, borrower, reason)`
+Freeze draws for a single credit line (admin only).
+
+- Records `reason` under `DataKey::CreditLineFreeze(Address)` in persistent storage.
+- Does **not** change `CreditStatus`; distinct from `suspend_credit_line`.
+- Repayments remain available.
+- Reverts with `CreditLineNotFound` when no line exists.
+
+Emits: `("credit", "line_frz")` with `CreditLineFreezeEvent { borrower, reason, frozen: true, ledger }`.
+
+### `unfreeze_credit_line(env, borrower)`
+Lift a per-credit-line draw freeze (admin only). No-op when not frozen.
+
+Emits: `("credit", "line_frz")` with `frozen: false` when a freeze record existed.
+
+### `is_credit_line_frozen(env, borrower) -> bool`
+Returns `true` when the borrower's credit line has an active admin freeze. No auth required.
+
+### `get_credit_line_freeze_reason(env, borrower) -> Option<FreezeReason>`
+Returns the structured freeze reason for a credit line, if frozen. No auth required.
+
+#### `FreezeReason` taxonomy
+
+| Variant | Value | Intended use |
+|---------|-------|--------------|
+| `LiquidityReserve` | 0 | Scheduled reserve / treasury operations |
+| `Compliance` | 1 | Regulatory or compliance-mandated pause |
+| `RiskInvestigation` | 2 | Active risk investigation or off-chain signal |
+| `OperationalMaintenance` | 3 | Planned maintenance window |
+| `BorrowerRequest` | 4 | Borrower-initiated voluntary draw pause |
+
+### `is_draws_frozen(env) -> bool`
+Set the per-borrower draw cooldown interval in seconds (admin only).
+
+- `seconds > 0` enforces a minimum interval between successful draws for every borrower.
+- `seconds = 0` disables the per-borrower cooldown.
+- This setting is optional and defaults to disabled when unset.
+- It affects only `draw_credit`; `repay_credit` remains available regardless of the cooldown.
+
+### `is_draws_frozen(env) -> bool`
+Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
+
+**Note for contributors**: On a freshly initialized contract (before any `freeze_draws` call), `is_draws_frozen` returns `false` by default. This is a safe default that allows draws immediately after deployment. Importantly, the freeze flag only affects `draw_credit` calls — `repay_credit` is never blocked by this flag, ensuring borrowers can always repay their debt even during emergency liquidity operations.
 
 ---
 
@@ -272,7 +569,8 @@ View function — returns credit line data or `None`.
 Arithmetic paths that affect credit limit and utilization stay in integer-only arithmetic.
 
 - `draw_credit`: utilization update uses `checked_add`; arithmetic overflow reverts with `ContractError::Overflow` (`12`).
-- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies an integer floor at zero with `saturating_sub`. This keeps utilization non-negative even for over-repayments.
+- `repay_credit`: inputs must be positive integers; the contract computes `effective_repay = min(amount, utilized_amount)` and then applies the allocation policy (interest first, then principal) using `saturating_sub` and `max(0)` to keep both `accrued_interest` and `utilized_amount` non-negative. Over-repayments are capped at total owed.
+- `apply_pending_accrual`: interest calculation uses checked multiplication and division; overflow reverts with `ContractError::Overflow` (`12`).
 - `update_risk_parameters`: limit/risk bounds are validated before state updates; rate delta uses `abs_diff` for overflow-safe unsigned distance checks.
 
 ### Integer arithmetic assumptions
@@ -302,24 +600,98 @@ These tests validate behavior near `i128::MAX` and confirm overflow handling rem
 
 The `Credit` contract uses standard `u32` discriminants for standardized error handling across the Rust and TypeScript SDK clients. Integrator clients can match these error codes to understand failure reasons.
 
-| Error Code | Variant              | Description                                                                 |
-| ---------- | -------------------- | --------------------------------------------------------------------------- |
-| `1`        | `Unauthorized`       | Caller is not authorized to perform this action.                            |
-| `2`        | `NotAdmin`           | Caller does not have admin privileges.                                      |
-| `3`        | `CreditLineNotFound` | The specified credit line was not found.                                    |
-| `4`        | `CreditLineClosed`   | Action cannot be performed because the credit line is closed.               |
-| `5`        | `InvalidAmount`      | The requested amount is invalid (e.g., zero or negative).                   |
-| `6`        | `OverLimit`          | The requested draw exceeds the available credit limit.                      |
-| `7`        | `NegativeLimit`      | The credit limit cannot be negative.                                        |
-| `8`        | `RateTooHigh`        | The interest rate change exceeds the maximum allowed delta.                 |
-| `9`        | `ScoreTooHigh`       | The risk score is above the acceptable maximum threshold.                   |
-| `10`       | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
-| `11`       | `Reentrancy`         | Reentrancy detected during cross-contract calls.                            |
-| `12`       | `Overflow`           | Math overflow occurred during calculation.                                  |
-| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount. |
-| `14`       | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once.      |
+> [!IMPORTANT]
+> Discriminants are **permanent**. Never reorder or renumber existing variants. New variants must be appended at the end with the next available integer.
+
+| Error Code | Variant                          | Description                                                                   |
+| ---------- | -------------------------------- | ----------------------------------------------------------------------------- |
+| `1`        | `Unauthorized`                   | Caller is not authorized to perform this action.                              |
+| `2`        | `NotAdmin`                       | Caller does not have admin privileges.                                        |
+| `3`        | `CreditLineNotFound`             | The specified credit line was not found.                                      |
+| `4`        | `CreditLineClosed`               | Action cannot be performed because the credit line is closed.                 |
+| `5`        | `InvalidAmount`                  | The requested amount is invalid (zero, negative, or otherwise out of range).  |
+| `6`        | `OverLimit`                      | The requested draw exceeds the available credit limit.                        |
+| `7`        | `NegativeLimit`                  | The credit limit cannot be negative.                                          |
+| `8`        | `RateTooHigh`                    | The interest rate change exceeds the maximum allowed delta.                   |
+| `9`        | `ScoreTooHigh`                   | The risk score is above the acceptable maximum threshold.                     |
+| `10`       | `UtilizationNotZero`             | Action cannot be performed because the credit line utilization is not zero.   |
+| `11`       | `Reentrancy`                     | Reentrancy detected during cross-contract calls.                              |
+| `12`       | `Overflow`                       | Math overflow occurred during calculation.                                    |
+| `13`       | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount.          |
+| `14`       | `AlreadyInitialized`             | Contract has already been initialized; `init` may only be called once.        |
+| `15`       | `AdminAcceptTooEarly`            | Admin acceptance attempted before the delay window has elapsed.               |
+| `16`       | `BorrowerBlocked`                | Borrower is blocked from drawing credit.                                      |
+| `17`       | `DrawExceedsMaxAmount`           | The requested draw exceeds the configured per-transaction maximum.            |
+| `18`       | `Paused`                         | Protocol is paused by the emergency circuit breaker.                          |
+| `19`       | `DrawsFrozen`                    | All draws are globally frozen by admin for liquidity reserve operations.      |
+| `20`       | `CreditLineSuspended`            | Action cannot be performed because the credit line is suspended.              |
+| `21`       | `CreditLineDefaulted`            | Action cannot be performed because the credit line is defaulted.              |
+| `22`       | `MissingLiquidityToken`          | Liquidity token has not been configured.                                      |
+| `23`       | `MissingLiquiditySource`         | Liquidity source has not been configured.                                     |
+| `24`       | `InsufficientLiquidityReserve`   | Liquidity reserve balance is below the requested draw amount.                 |
+| `25`       | `LiquidityTokenCallFailed`       | Liquidity token call failed where the contract can observe it.                |
+| `26`       | `InsufficientRepaymentAllowance` | Borrower's token allowance is below the effective repayment amount.           |
+| `27`       | `InsufficientRepaymentBalance`   | Borrower's token balance is below the effective repayment amount.             |
+| `28`       | `RepayExceedsMaxAmount`          | The requested repay exceeds the configured per-transaction maximum.           |
+| `29`       | `DrawCooldownActive`             | Borrower attempted to draw again before the cooldown interval elapsed.        |
 
 ---
+
+## Amount Validation Matrix (Issue #236)
+
+All three entrypoints that accept an amount or limit parameter enforce a strict
+positive-only policy at the contract boundary, before any state mutation or
+token transfer occurs.
+
+### Rejection table
+
+| Entrypoint          | Parameter      | Rejected values              | Error                          |
+| ------------------- | -------------- | ----------------------------- | ------------------------------ |
+| `draw_credit`       | `amount`       | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+| `repay_credit`      | `amount`       | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+| `open_credit_line`  | `credit_limit` | `0`, `-1`, any negative       | `ContractError::InvalidAmount` (5) |
+
+### Minimal positive values (accepted)
+
+| Entrypoint          | Minimal accepted value | Notes                                    |
+| ------------------- | ---------------------- | ---------------------------------------- |
+| `draw_credit`       | `1`                    | Still subject to limit and liquidity checks |
+| `repay_credit`      | `1`                    | Capped at `utilized_amount` if overpaid  |
+| `open_credit_line`  | `1`                    | Still subject to rate/score bounds       |
+
+### Security notes
+
+- The zero-amount guard on `draw_credit` and `repay_credit` fires **before**
+  the reentrancy guard is cleared, so no partial state is observable.
+- `draw_credit` clears the reentrancy guard before panicking, ensuring no
+  guard leaks even when the amount check fails.
+- Negative `i128` amounts are representable in the type system but are always
+  rejected at the first guard in each entrypoint; they never reach token
+  transfer logic.
+- The `open_credit_line` guard fires before storage is written, so a rejected
+  call leaves no credit line record.
+
+### Test coverage
+
+The rejection matrix is covered by the `amount_validation_tests` module
+(`contracts/credit/src/amount_validation_tests.rs`):
+
+- `draw_credit_rejects_invalid_amounts` — zero, -1, -1 000 000, `i128::MIN`
+- `draw_credit_accepts_minimal_positive_amount` — regression guard for `amount=1`
+- `repay_credit_rejects_invalid_amounts` — zero, -1, -1 000 000, `i128::MIN`
+- `repay_credit_accepts_minimal_positive_amount` — regression guard for `amount=1`
+- `open_credit_line_rejects_invalid_credit_limits` — zero, -1, -1 000 000, `i128::MIN`
+- `open_credit_line_accepts_minimal_positive_limit` — regression guard for `credit_limit=1`
+- `invalid_amount_discriminant_is_5` — guards against accidental discriminant renumbering
+- `amount_rejection_matrix_all_entrypoints` — combined matrix, all entrypoints × all invalid amounts
+
+Run with:
+
+```bash
+cargo test -p creditra-credit amount_validation
+```
+
+
 
 ## Events
 
@@ -327,12 +699,18 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 |----------------------------|------------|-----------------------------|-----------|
 | `("credit", "opened")`     | `opened`   | `open_credit_line`          | New credit line created |
 | `("credit", "drawn")`      | `drawn`    | `draw_credit`               | Funds drawn |
-| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made |
+| `("credit", "draw_rev")`   | `draw_rev` | `reverse_draw`              | Admin accounting reversal for erroneous draw (audit trail with reason code) |
+| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made (includes interest/principal allocation) |
+| `("credit", "accrue")`     | `accrue`   | `apply_pending_accrual`     | Interest capitalized into debt |
 | `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
 | `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
+| `("credit", "liq_req")`    | `liq_req`  | `default_credit_line`       | Default liquidation requested |
+| `("credit", "liq_setl")`   | `liq_setl` | `settle_default_liquidation`| Auction settlement applied to debt accounting |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
+| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled (`frozen`, `reason`) |
+| `("credit", "line_frz")` | `CreditLineFreezeEvent` | `freeze_credit_line`, `unfreeze_credit_line` | Per-line draw freeze toggled (`borrower`, `reason`, `frozen`, `ledger`) |
 
 The contract also emits additive v2 event topics (for indexer analytics fields
 like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
@@ -347,24 +725,32 @@ like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
 | `init`                   | Deployer (once)       |
 | `open_credit_line`       | Backend / risk engine |
 | `draw_credit`            | Borrower              |
+| `reverse_draw`           | Admin                 |
 | `repay_credit`           | Borrower              |
 | `update_risk_parameters` | Admin / risk engine   |
 | `suspend_credit_line`    | Admin                 |
+| `self_suspend_credit_line` | Borrower            |
 | `close_credit_line`      | Admin or borrower     |
 | `default_credit_line`    | Admin                 |
+| `settle_default_liquidation` | Admin             |
 | `reinstate_credit_line`  | Admin                 |
 | `set_liquidity_token`    | Admin                 |
 | `set_liquidity_source`   | Admin                 |
 | `set_rate_change_limits` | Admin                 |
 | `get_rate_change_limits` | Anyone (view)         |
 | `get_credit_line`        | Anyone (view)         |
+| `freeze_draws`           | Admin                 |
+| `unfreeze_draws`         | Admin                 |
+| `is_draws_frozen`        | Anyone (view)         |
 
 > Note: `open_credit_line` requires admin authorization (`require_auth`). The admin key is the backend/risk engine signer — borrowers cannot open their own credit lines.
 
 ### Related Admin Workflows
 
 - Default lifecycle: `default_credit_line` → optional `suspend_credit_line` containment → `reinstate_credit_line` or `close_credit_line`.
+- Default liquidation lifecycle: `default_credit_line` emits `liq_req` → auction flow executes off-chain/on-chain as configured → admin applies proceeds via `settle_default_liquidation`.
 - Oracle-assisted default design: `docs/default-oracle.md`.
+- Auction hook architecture: `docs/default-liquidation-auction-hook.md`.
 
 ---
 
@@ -878,19 +1264,117 @@ cargo test -p creditra-credit
 
 ## Appendix: Storage Key Audit
 
+This appendix documents all storage keys used by the credit contract, their
+storage types (instance, persistent, or temporary), TTL implications, and
+security considerations.
+
+### Storage Type Definitions
+
+| Storage Type | TTL Behavior | Use Case |
+|--------------|--------------|----------|
+| **Instance** | Shared TTL across all instance keys. If the instance is archived, all instance keys are lost. | Global singleton configuration (admin, protocol settings) |
+| **Persistent** | Independent TTL per key. Each borrower's data can be archived separately. | Per-borrower credit line data |
+| **Temporary** | Lives only for the duration of a single invocation. | Short-lived state (not currently used) |
+
 ### Instance Storage
 
 Keys that share the contract instance TTL. If the instance is archived, all
 these keys are lost. Production deployments should call
-`env.storage().instance().extend_ttl()` periodically.
+`env.storage().instance().extend_ttl()` periodically to prevent archival.
 
-| Key | Rust type | Value type | Written by | Notes |
-|-----|-----------|------------|------------|-------|
-| `Symbol("admin")` | `Symbol` | `Address` | `init` | Contract admin. Written exactly once; second write reverts with `AlreadyInitialized`. |
+| Key | Rust type | Value type | Written by | TTL Notes |
+|-----|-----------|------------|------------|-----------|
+| `Symbol("admin")` | `Symbol` | `Address` | `init` | Written exactly once; second `init` reverts with `AlreadyInitialized`. Critical for access control — loss of instance storage means loss of admin. |
+| `Symbol("proposed_admin")` | `Symbol` | `Address` | `propose_admin` | Pending admin address during two-step rotation. Cleared on `accept_admin` or overwrite on new proposal. |
+| `Symbol("proposed_at")` | `Symbol` | `u64` | `propose_admin` | Ledger timestamp after which the proposed admin can accept. Cleared on `accept_admin`. |
+| `Symbol("reentrancy")` | `Symbol` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth reentrancy guard. Set on entry to `draw_credit`/`repay_credit`, cleared on every exit path (success and failure). |
+| `Symbol("rate_cfg")` | `Symbol` | `RateChangeConfig` | `set_rate_change_limits` | Optional rate-change governance config. Absent = no limits enforced. |
+| `Symbol("rate_form")` | `Symbol` | `RateFormulaConfig` | Internal (risk module) | Optional piecewise-linear rate formula config. Absent = manual rate mode. |
+| `Symbol("paused")` | `Symbol` | `bool` | `set_paused` | Circuit breaker pause flag. Absent = `false` (not paused). Blocks all mutating operations except `repay_credit`. |
+| `Symbol("grace_period")` | `Symbol` | `GracePeriodConfig` | `set_grace_period_config` | Optional grace period policy for suspended lines. |
+| `DataKey::LiquidityToken` | `DataKey` | `Option<Address>` | `set_liquidity_token` | Token contract address for draw/repay transfers. Optional — contract works without a token configured. |
+| `DataKey::LiquiditySource` | `DataKey` | `Address` | `init`, `set_liquidity_source` | Reserve address holding liquidity. Defaults to contract address on `init`. |
+| `DataKey::MaxDrawAmount` | `DataKey` | `i128` | `set_max_draw_amount` | Optional per-transaction draw cap. Absent = no limit. |
+| `DataKey::DrawsFrozen` | `DataKey` | `bool` | `freeze_draws`, `unfreeze_draws` | Global emergency draw freeze. Absent = `false` (draws allowed). Does not affect repayments. |
+| `DataKey::SchemaVersion` | `DataKey` | `u32` | `init` | Storage schema version marker. Current version: `1`. Used for migration detection. |
+| `DataKey::BlockedBorrower(Address)` | `DataKey` | `bool` | `set_borrower_blocked` | Per-borrower block flag stored in **persistent** storage (note: uses `DataKey` enum but stored via `env.storage().persistent()`). |
+
+**TTL Management Recommendations:**
+- Call `env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO)` in frequently-called functions like `draw_credit`, `repay_credit`, or a dedicated `bump_instance_ttl()` admin function.
+- Recommended thresholds: check/extend when TTL drops below 100 ledgers, extend to 10,000 ledgers.
+
+### Persistent Storage
+
+Per-borrower records with independent TTL per entry. These keys survive instance archival and have their own TTL lifecycle.
+
+| Key | Rust type | Value type | Written by | TTL Notes |
+|-----|-----------|------------|------------|-----------|
+| `borrower: Address` | `Address` | `CreditLineData` | `open_credit_line`, `draw_credit`, `repay_credit`, `update_risk_parameters`, lifecycle transitions | Long-lived borrower credit line data. TTL should be extended on each access to prevent archival of active lines. |
+| `DataKey::BlockedBorrower(Address)` | `DataKey` | `bool` | `set_borrower_blocked` | Per-borrower blocking flag. Independent TTL from credit line data. |
+| `(Symbol("liq_seen"), borrower: Address, settlement_id: Symbol)` | Tuple | `bool` | `settle_default_liquidation` | One-time settlement marker to prevent replay of liquidation settlements. |
+
+**Why Persistent?** Each borrower's credit line must survive beyond a single transaction and has an independent lifecycle. Persistent storage is correct because:
+1. Borrower data outlives any single invocation
+2. Each borrower's TTL is independent (one borrower's archival doesn't affect others)
+3. Per-entity storage scales better than instance storage for large numbers of borrowers
+
+**TTL Management Recommendations:**
+- Extend TTL on credit line access: `env.storage().persistent().extend_ttl(&borrower, TTL_THRESHOLD, TTL_EXTEND_TO)`
+- Consider a keeper service that periodically extends TTLs for active credit lines
+
+### Temporary Storage
+
+Not currently used in the contract. The reentrancy guard is stored in instance storage but is always cleared before the function returns, making it functionally equivalent to temporary storage.
+
+**Future Consideration:** The reentrancy guard (`Symbol("reentrancy")`) could theoretically be moved to temporary storage (`env.storage().temporary()`) since it only needs to survive within a single invocation. However, Soroban's temporary storage has different cost characteristics and the current instance storage approach works correctly because the guard is always cleared.
+
+### Audit Findings Summary
+
+| Component | Storage Type | Correct? | Notes |
+|-----------|--------------|----------|-------|
+| Admin address | Instance | ✅ Yes | Single global value, correct for singleton pattern |
+| Proposed admin / proposed_at | Instance | ✅ Yes | Temporary during rotation, shares instance TTL |
+| LiquidityToken | Instance | ✅ Yes | Global configuration, one per contract |
+| LiquiditySource | Instance | ✅ Yes | Global configuration, one per contract |
+| Reentrancy flag | Instance | ✅ Yes* | *Cleared every call; could use temporary storage but instance works |
+| Rate config (rate_cfg) | Instance | ✅ Yes | Global governance parameter |
+| Rate formula config | Instance | ✅ Yes | Global formula configuration |
+| Pause flag | Instance | ✅ Yes | Global circuit breaker |
+| MaxDrawAmount | Instance | ✅ Yes | Global per-transaction limit |
+| DrawsFrozen | Instance | ✅ Yes | Global emergency flag |
+| SchemaVersion | Instance | ✅ Yes | Global schema marker |
+| Borrower credit lines | Persistent | ✅ Yes | Per-entity data with independent lifecycle |
+| BlockedBorrower | Persistent | ✅ Yes | Per-borrower flag, independent of credit line data |
+| Liquidation settlement markers | Persistent | ✅ Yes | Per-(borrower, settlement_id) replay protection |
+
+### Security Notes
+
+1. **No borrower data on instance storage** — Verified. Per-borrower data correctly uses persistent storage, avoiding the shared TTL pitfall where one borrower's activity could affect another's data availability.
+
+2. **Instance TTL is critical** — All global configuration shares one TTL. If the instance is archived, the contract loses admin, liquidity config, and all protocol settings. Production deployments must implement TTL extension.
+
+3. **Reentrancy guard semantics** — While stored in instance storage, the guard is functionally temporary (set on entry, cleared on all exits). This is safe but relies on correct implementation at all exit paths.
+
+4. **BlockedBorrower uses DataKey enum but persistent storage** — The `DataKey::BlockedBorrower(Address)` variant is stored via `env.storage().persistent()`, not instance storage. This is correct as it's per-borrower data.
+
+5. **Trust boundaries** — Instance storage contains all admin-controlled configuration. Compromise of the admin key allows modification of all instance-stored values. Persistent storage contains borrower-specific data that is protected by different authorization rules (borrower auth for draws/repays, admin auth for lifecycle changes).
+
+6. **Failure modes** — If instance TTL expires:
+   - Admin cannot be retrieved → all admin operations fail
+   - Liquidity config is lost → draws/repays may fail
+   - Reentrancy guard defaults to `false` → no reentrancy protection
+   - All protocol flags reset to defaults
+
+   If persistent TTL expires for a borrower:
+   - That borrower's credit line data is lost
+   - Other borrowers are unaffected
+   - The borrower would need to re-establish their credit line
 | `DataKey::LiquidityToken` | `DataKey` | `Address` | `set_liquidity_token` | Token contract for reserve/draw transfers. |
 | `DataKey::LiquiditySource` | `DataKey` | `Address` | `init`, `set_liquidity_source` | Reserve address. Defaults to contract address. |
+| `DataKey::DrawMinIntervalSeconds` | `DataKey` | `u64` | `set_draw_min_interval` | Minimum per-borrower draw interval in seconds. Absent = disabled. |
 | `Symbol("reentrancy")` | `Symbol` | `bool` | `set_reentrancy_guard`, `clear_reentrancy_guard` | Defense-in-depth flag. Cleared on every code path. |
 | `Symbol("rate_cfg")` | `Symbol` | `RateChangeConfig` | `set_rate_change_limits` | Admin-configurable rate-change governance. |
+| `DataKey::DrawsFrozen` | `DataKey` | `bool` | `freeze_draws`, `unfreeze_draws` | Global emergency draw freeze. Absent = `false` (draws allowed). |
 
 **Why instance?** These are global singleton configuration values. There is
 exactly one admin, one liquidity token, one liquidity source, and one rate
@@ -928,6 +1412,9 @@ Instance storage works correctly today because it is always cleared.
 7. **TTL management** — not yet implemented. Recommend adding
    `extend_ttl()` calls on instance (in `init` or a dedicated `bump` endpoint)
    and on persistent (on credit line access) before production deployment.
+8. **DrawsFrozen** — correctly on instance. Global singleton flag; absent key
+   is treated as `false` (draws allowed). Shares instance TTL — extend alongside
+   other instance keys.
 
 You can also run all workspace tests from the repository root with `cargo test`.
 
@@ -954,6 +1441,9 @@ This section documents all contract errors and their exact error codes for consi
 | 11 | `Reentrancy` | Reentrancy detected during cross-contract calls | Reentrancy guard |
 | 12 | `Overflow` | Math overflow occurred during calculation | Arithmetic operations |
 | 13 | `LimitDecreaseRequiresRepayment` | Credit limit decrease requires immediate repayment of excess amount | Limit decrease validation |
+| 14 | `AlreadyInitialized` | Contract has already been initialized; `init` may only be called once | Second `init` call |
+| 15 | `DrawsFrozen` | All draws are globally frozen by admin for liquidity reserve operations | `draw_credit` when `DataKey::DrawsFrozen` is `true` |
+| 16 | `DrawExceedsMaxAmount` | The requested draw exceeds the configured per-transaction maximum | `draw_credit` when `DataKey::MaxDrawAmount` is set |
 
 ### Rate and Score Validation
 
@@ -984,3 +1474,60 @@ For detailed test implementation, see `boundary_tests.rs` in the source code.
 2. **Handle RateTooHigh/ScoreTooHigh specifically**: These errors indicate input validation failures
 3. **Distinguish between error types**: `RateTooHigh` (8) vs `ScoreTooHigh` (9) for precise validation feedback
 4. **Test boundary conditions**: Include tests for exact bounds and one-past bounds in all integrations
+
+---
+
+## Borrower Blocklist
+
+The borrower blocklist provides an emergency gating mechanism that allows the protocol admin to temporarily prevent specific borrowers from drawing credit without modifying their underlying `CreditStatus` or credit line data. This is useful during investigations, compliance reviews, or when suspicious activity is detected.
+
+### Methods
+
+#### `set_borrower_blocked(env, borrower, blocked)`
+- **Access**: Admin only
+- **Parameters**:
+  - `borrower`: Address to block or unblock
+  - `blocked`: `true` to block, `false` to unblock
+- **Behavior**: Stores the blocked flag in persistent storage keyed by borrower. Emits a `BorrowerBlockedEvent` with topic `("credit", "blocked")` or `("credit", "unblocked")`.
+- **Security**: Requires admin auth. Does not mutate `CreditLineData` or `CreditStatus`.
+
+#### `is_borrower_blocked(env, borrower) -> bool`
+- **Access**: View function (no auth required)
+- **Returns**: `true` if the borrower is currently blocked, `false` otherwise (including if no record exists).
+
+### Enforcement
+
+The blocklist is enforced exclusively in `draw_credit`. If a blocked borrower attempts to draw:
+- The transaction reverts with `ContractError::BorrowerBlocked` (code 15)
+- The reentrancy guard is cleared before reverting
+- Repayments via `repay_credit` remain fully operational regardless of block status
+
+### Operational Use Cases
+
+1. **Investigation Hold**: A borrower's account shows suspicious activity. Admin blocks draws while the investigation proceeds. The borrower's existing utilization and status remain unchanged, and they can still repay.
+2. **Compliance Freeze**: Regulatory requirement to pause new draws for a specific address. Blocking avoids the need to suspend or default the line, preserving the borrower's credit history.
+3. **Temporary Risk Mitigation**: Rapid response to an oracle or off-chain risk signal. The admin can block immediately and unblock once the signal resolves, without going through the `Suspended` -> `Active` state transition.
+
+### State Machine Independence
+
+The blocklist is intentionally decoupled from `CreditStatus`:
+
+| Aspect | Blocklist | `CreditStatus` |
+|---|---|---|
+| Scope | Per-address flag | Per-credit-line enum |
+| Admin action | `set_borrower_blocked` | `suspend_credit_line`, `default_credit_line`, etc. |
+| Affects draws | Yes | Yes (for Suspended, Defaulted, Closed) |
+| Affects repay | No | No (except Closed) |
+| Event topic | `("credit", "blocked")` / `("credit", "unblocked")` | `("credit", "suspend")` / `("credit", "default")` etc. |
+| Persistence | Persistent storage (`DataKey::BlockedBorrower`) | Persistent storage (`CreditLineData`) |
+
+This separation ensures that blocking is a lightweight, reversible operational action that does not interfere with lifecycle transitions or interest accrual logic.
+
+### Testing Requirements
+
+- Block and unblock round-trip
+- Blocked borrower cannot draw
+- Unblocked borrower can draw after being unblocked
+- Repayment remains allowed while blocked
+- Non-admin cannot block or unblock
+- Events emitted with correct topics and payloads

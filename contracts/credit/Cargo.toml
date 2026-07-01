@@ -3,13 +3,43 @@ name = "creditra-credit"
 version = "0.1.0"
 edition = "2021"
 description = "Creditra credit line Soroban contract"
+license = "MIT"
+keywords = ["soroban", "stellar", "credit", "defi", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "../../README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Host-side per-entrypoint budget instrumentation (tests, examples, CI gas regression).
+instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
+
 [dependencies]
 soroban-sdk = { workspace = true }
+serde = { version = "1.0", optional = true, default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", optional = true, default-features = false }
+
+[[example]]
+name = "budget_baseline"
+required-features = ["instrument"]
+
+[[test]]
+name = "budget_regression"
+path = "tests/budget_regression.rs"
+required-features = ["instrument"]
+
+[[test]]
+name = "instrument"
+path = "tests/instrument.rs"
+required-features = ["instrument"]
 
 [dev-dependencies]
+gateway-auction = { path = "../../gateway-contract/contracts/auction_contract" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 proptest = "1.4"
+# U256 reference arithmetic for the math_utils::mul_div property test.
+primitive-types = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+insta = "1.40"

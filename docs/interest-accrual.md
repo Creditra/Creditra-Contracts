@@ -1,6 +1,6 @@
   # Interest Accrual Design
 
-**Version: 2026-03-29**
+**Version: 2026-04-22 (Final Implementation)**
 
 This document captures the intended design for issue `#119`: introduce deterministic interest accrual for the `credit` contract without breaking existing storage or indexer assumptions.
 
@@ -133,6 +133,16 @@ Required tests for implementation:
 - Suspended and defaulted lines accrue according to the chosen policy.
 - Overflow paths revert deterministically.
 - `InterestAccruedEvent` payload matches stored results.
+- Repayments apply to interest first.
+
+## Interest-First Repayment
+
+The contract implements an "interest-first" repayment policy. When a borrower repays:
+1. The repayment amount is first compared against the `accrued_interest` balance.
+2. `accrued_interest` is reduced by `min(repayment_amount, accrued_interest)`.
+3. `utilized_amount` is reduced by the full repayment amount (clamped at zero).
+
+This ensures that capitalized interest is always settled before principal, which is a standard financial practice.
 
 ## Open decisions
 

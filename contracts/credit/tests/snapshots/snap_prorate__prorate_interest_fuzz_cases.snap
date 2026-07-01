@@ -1,0 +1,76 @@
+---
+source: contracts/credit/tests/snap_prorate.rs
+expression: test_cases
+---
+[
+    ProrateTestCase {
+        principal: 1,
+        rate_bps: 1,
+        time_delta: 1,
+        rounding: Floor,
+        result: 0,
+    },
+    ProrateTestCase {
+        principal: 100,
+        rate_bps: 50,
+        time_delta: 86400,
+        rounding: Floor,
+        result: 0,
+    },
+    ProrateTestCase {
+        principal: 1000,
+        rate_bps: 100,
+        time_delta: 3600,
+        rounding: Ceil,
+        result: 1,
+    },
+    ProrateTestCase {
+        principal: 10000,
+        rate_bps: 300,
+        time_delta: 604800,
+        rounding: Floor,
+        result: 5,
+    },
+    ProrateTestCase {
+        principal: 100000,
+        rate_bps: 500,
+        time_delta: 2592000,
+        rounding: Ceil,
+        result: 411,
+    },
+    ProrateTestCase {
+        principal: 1000000,
+        rate_bps: 1000,
+        time_delta: 31557600,
+        rounding: Floor,
+        result: 1000000,
+    },
+    ProrateTestCase {
+        principal: 10000000,
+        rate_bps: 2000,
+        time_delta: 63115200,
+        rounding: Ceil,
+        result: 40000000,
+    },
+    ProrateTestCase {
+        principal: 100000000,
+        rate_bps: 5000,
+        time_delta: 7889400,
+        rounding: Floor,
+        result: 1250000,
+    },
+    ProrateTestCase {
+        principal: 1000000000,
+        rate_bps: 7500,
+        time_delta: 2592000,
+        rounding: Ceil,
+        result: 616522,
+    },
+    ProrateTestCase {
+        principal: 10000000000,
+        rate_bps: 10000,
+        time_delta: 31536000,
+        rounding: Floor,
+        result: 10000000000,
+    },
+]
