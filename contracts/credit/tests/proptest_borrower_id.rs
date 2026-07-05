@@ -81,9 +81,7 @@ proptest! {
 
         // ── Right-inverse: get_borrower_by_id(ensure_id(addr)) == Some(addr) ──
         for (addr, &id) in addrs.iter().zip(ids.iter()) {
-            let recovered: Option<Address> = env.as_contract(&contract_id, || {
-                get_borrower_by_credit_line_id(&env, id)
-            });
+            let recovered: Option<Address> = env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
             prop_assert_eq!(
                 &recovered,
                 &Some(addr.clone()),
@@ -94,9 +92,7 @@ proptest! {
 
         // ── Left-inverse: get_id(get_borrower_by_id(id)) == Some(id) ─────────
         for &id in &ids {
-            let recovered: Option<Address> = env.as_contract(&contract_id, || {
-                get_borrower_by_credit_line_id(&env, id)
-            });
+            let recovered: Option<Address> = env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
             let restored_id: Option<u32> = env.as_contract(&contract_id, || {
                 recovered
                     .as_ref()
@@ -207,9 +203,7 @@ mod edge_cases {
         let contract_id = env.register(creditra_credit::Credit, ());
         let addr = Address::generate(&env);
 
-        let id = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &addr)
-        });
+        let id = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
 
         // Right-inverse
         let recovered = env.as_contract(&contract_id, || {
@@ -226,12 +220,8 @@ mod edge_cases {
         let a = Address::generate(&env);
         let b = Address::generate(&env);
 
-        let id_a = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &a)
-        });
-        let id_b = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &b)
-        });
+        let id_a = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &a));
+        let id_b = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &b));
 
         assert_ne!(id_a, id_b, "Two borrowers must get distinct IDs");
         assert_eq!(id_a, 0, "First borrower must get ID 0");
@@ -245,15 +235,9 @@ mod edge_cases {
         let contract_id = env.register(creditra_credit::Credit, ());
         let addr = Address::generate(&env);
 
-        let id1 = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &addr)
-        });
-        let id2 = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &addr)
-        });
-        let id3 = env.as_contract(&contract_id, || {
-            ensure_credit_line_id(&env, &addr)
-        });
+        let id1 = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
+        let id2 = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
+        let id3 = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
 
         assert_eq!(id1, id2, "Second call must return same ID");
         assert_eq!(id2, id3, "Third call must return same ID");
@@ -272,17 +256,13 @@ mod edge_cases {
         for _ in 0..count {
             let addr = Address::generate(&env);
             addrs.push(addr.clone());
-            let id = env.as_contract(&contract_id, || {
-                ensure_credit_line_id(&env, &addr)
-            });
+            let id = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
             ids.push(id);
         }
 
         // All roundtrips succeed
         for (addr, &id) in addrs.iter().zip(ids.iter()) {
-            let recovered = env.as_contract(&contract_id, || {
-                get_borrower_by_credit_line_id(&env, id)
-            });
+            let recovered = env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
             assert_eq!(recovered, Some(addr.clone()));
 
             let restored_id = env.as_contract(&contract_id, || {

@@ -12,8 +12,8 @@
 
 use soroban_sdk::{symbol_short, Address, BytesN, Env, Symbol, TryFromVal};
 
-use creditra_credit::{FreezeReason, types::CreditStatus, types::GraceWaiverMode};
 use creditra_credit::events::*;
+use creditra_credit::{types::CreditStatus, types::GraceWaiverMode, FreezeReason};
 use gateway_auction::events::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -524,12 +524,7 @@ fn auction_bid_refunded_shape() {
 fn auction_closed_shape() {
     let (env, _borrower, admin) = env_and_addresses();
 
-    publish_auction_closed_event(
-        &env,
-        Symbol::new(&env, "auc-1"),
-        Some(admin.clone()),
-        5_000,
-    );
+    publish_auction_closed_event(&env, Symbol::new(&env, "auc-1"), Some(admin.clone()), 5_000);
 
     assert_eq!(
         first_topic(&env, 0),

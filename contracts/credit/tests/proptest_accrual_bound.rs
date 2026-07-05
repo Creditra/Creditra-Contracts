@@ -5,18 +5,23 @@ use soroban_sdk::{testutils::Ledger, Env};
 use creditra_credit::{calculate_accrued_interest, CreditContractClient};
 
 /// NatSpec-style Documentation
-/// 
+///
 /// # Invariant Test
-/// Asserts that for any valid borrower configuration, the accrued interest 
+/// Asserts that for any valid borrower configuration, the accrued interest
 /// never exceeds the total utilized principal amount.
-fn check_accrual_invariant(utilized_amount: i128, interest_rate_bps: u32, elapsed_time: u64) -> bool {
+fn check_accrual_invariant(
+    utilized_amount: i128,
+    interest_rate_bps: u32,
+    elapsed_time: u64,
+) -> bool {
     let env = Env::default();
-    
+
     env.ledger().with_mut(|ledger| {
         ledger.timestamp = elapsed_time;
     });
 
-    let accrued_interest = calculate_accrued_interest(&env, utilized_amount, interest_rate_bps, elapsed_time);
+    let accrued_interest =
+        calculate_accrued_interest(&env, utilized_amount, interest_rate_bps, elapsed_time);
 
     accrued_interest <= utilized_amount
 }

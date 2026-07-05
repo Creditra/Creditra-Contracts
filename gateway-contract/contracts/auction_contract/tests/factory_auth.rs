@@ -13,9 +13,7 @@
 //!
 //! [`Address::require_auth`]: soroban_sdk::Address::require_auth
 
-use gateway_auction::{
-    Auction, AuctionClient, AuctionMode, DutchAuctionDecay,
-};
+use gateway_auction::{Auction, AuctionClient, AuctionMode, DutchAuctionDecay};
 use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
 use soroban_sdk::{Address, Env, IntoVal, Symbol};
 
@@ -105,7 +103,10 @@ fn set_factory_contract_succeeds_with_claimed_auth() {
         }])
         .try_set_factory_contract(&factory);
 
-    assert!(result.is_ok(), "claimed address must be able to set itself as factory");
+    assert!(
+        result.is_ok(),
+        "claimed address must be able to set itself as factory"
+    );
 }
 
 // ── init_auction ─────────────────────────────────────────────────────────────
@@ -131,7 +132,10 @@ fn init_auction_reverts_when_factory_unset() {
         &None,
     );
 
-    assert!(result.is_err(), "init_auction must fail when no factory is configured");
+    assert!(
+        result.is_err(),
+        "init_auction must fail when no factory is configured"
+    );
 }
 
 #[test]
@@ -235,7 +239,10 @@ fn init_auction_succeeds_with_factory_auth() {
             &None,
         );
 
-    assert!(result.is_ok(), "factory-authorized init_auction must succeed");
+    assert!(
+        result.is_ok(),
+        "factory-authorized init_auction must succeed"
+    );
 }
 
 // ── close_auction ────────────────────────────────────────────────────────────
@@ -250,7 +257,10 @@ fn close_auction_reverts_when_factory_unset() {
 
     let result = client.try_close_auction(&auction_id);
 
-    assert!(result.is_err(), "close_auction must fail when no factory is configured");
+    assert!(
+        result.is_err(),
+        "close_auction must fail when no factory is configured"
+    );
 }
 
 #[test]
@@ -333,7 +343,10 @@ fn close_auction_succeeds_with_factory_auth() {
         }])
         .try_close_auction(&auction_id);
 
-    assert!(result.is_ok(), "factory-authorized close_auction must succeed");
+    assert!(
+        result.is_ok(),
+        "factory-authorized close_auction must succeed"
+    );
 }
 
 // ── set_liquidation_grace_window ─────────────────────────────────────────────
@@ -426,12 +439,7 @@ fn settle_liquidation_rejects_non_factory_invoker() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
@@ -454,12 +462,7 @@ fn settle_liquidation_succeeds_with_factory_invoker() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "settle_default_liquidation",
-                args: (
-                    auction_id.clone(),
-                    factory.clone(),
-                    borrower.clone(),
-                )
-                    .into_val(&env),
+                args: (auction_id.clone(), factory.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])

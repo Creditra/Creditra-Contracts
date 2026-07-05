@@ -223,5 +223,8 @@ fn test_multi_token_deposit_does_not_affect_legacy_collateral_balance() {
 
     // Each balance is independent
     assert_eq!(client.get_collateral(&borrower), 3_000);
-    assert_eq!(client.get_collateral_for_token(&borrower, &col_token), 2_000);
+    assert_eq!(
+        client.get_collateral_for_token(&borrower, &col_token),
+        2_000
+    );
 }

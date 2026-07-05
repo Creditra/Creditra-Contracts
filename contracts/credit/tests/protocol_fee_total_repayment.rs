@@ -67,7 +67,12 @@ fn prepare_repay(
     client.set_protocol_fee_bps(&fee_bps);
 
     asset.mint(borrower, &repay_amount);
-    token::Client::new(env, token_address).approve(borrower, &client.contract_id, &repay_amount, &u32::MAX);
+    token::Client::new(env, token_address).approve(
+        borrower,
+        &client.contract_id,
+        &repay_amount,
+        &u32::MAX,
+    );
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -82,10 +87,10 @@ fn fee_on_principal_only_repayment() {
         &client,
         &borrower,
         &token_address,
-        1_000_i128,  // draw
-        500_i128,    // repay
-        500_u32,     // interest rate bps (5% APR, but no time elapsed)
-        500_u32,     // fee bps (5%)
+        1_000_i128, // draw
+        500_i128,   // repay
+        500_u32,    // interest rate bps (5% APR, but no time elapsed)
+        500_u32,    // fee bps (5%)
     );
 
     let token_client = token::Client::new(&env, &token_address);
@@ -143,14 +148,8 @@ fn fee_on_mixed_principal_and_interest() {
     let total = contract_delta + reserve_delta;
 
     assert_eq!(total, 10_999, "total tokens transferred = effective_repay");
-    assert_eq!(
-        contract_delta, 1_099,
-        "fee = 10% of 10999 = 1099"
-    );
-    assert_eq!(
-        reserve_delta, 9_900,
-        "reserve = 10999 - 1099 = 9900"
-    );
+    assert_eq!(contract_delta, 1_099, "fee = 10% of 10999 = 1099");
+    assert_eq!(reserve_delta, 9_900, "reserve = 10999 - 1099 = 9900");
 }
 
 /// Fee via `repay_and_release_collateral` path.
@@ -175,8 +174,12 @@ fn fee_with_repay_and_release_collateral() {
     client.set_protocol_fee_bps(&300_u32); // 3% fee
 
     let repay = 1_000_i128;
-    token::Client::new(&env, &token_address)
-        .approve(&borrower, &client.contract_id, &repay, &u32::MAX);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &client.contract_id,
+        &repay,
+        &u32::MAX,
+    );
 
     let token_client = token::Client::new(&env, &token_address);
     let contract_before = token_client.balance(&client.contract_id);

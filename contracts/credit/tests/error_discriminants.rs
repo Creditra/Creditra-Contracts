@@ -949,13 +949,7 @@ mod error_path_tests {
         let settlement_id = soroban_sdk::Symbol::new(&env, "test_replay");
 
         // First settlement should succeed
-        client.settle_default_liquidation(
-            &borrower,
-            &500_i128,
-            &settlement_id,
-            &10_000_u32,
-            &None,
-        );
+        client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
 
         // Replay with the same settlement_id must fail with AlreadySettled
         let result = client.try_settle_default_liquidation(

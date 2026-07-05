@@ -115,10 +115,7 @@ fn protocol_fee_on_total_repayment_accrues_expected_fee_amount() {
         token_client.balance(&contract_id),
         contract_balance_before + 110
     );
-    assert_eq!(
-        token_client.balance(&reserve),
-        reserve_balance_before + 990
-    );
+    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 990);
 }
 
 #[test]

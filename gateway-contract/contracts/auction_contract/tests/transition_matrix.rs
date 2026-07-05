@@ -27,12 +27,12 @@
 //! cargo test -p gateway-auction --test transition_matrix
 //! ```
 
-use soroban_sdk::testutils::Ledger as _;
 use gateway_auction::{
     Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus,
     DutchAuctionDecay,
 };
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{Address, Env, Symbol};
 /// Entrypoints that can attempt an `AuctionStatus` transition.
@@ -180,10 +180,10 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &1_i128,
                 &0_u32,
                 &None,
-        &None,
-        &gateway_auction::DutchAuctionDecay::None,
-        &None,
-);
+                &None,
+                &gateway_auction::DutchAuctionDecay::None,
+                &None,
+            );
         }
         AuctionMode::Dutch => {
             client.init_auction(

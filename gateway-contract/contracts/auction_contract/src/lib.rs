@@ -73,10 +73,10 @@ pub fn compute_dutch_price(
         DutchAuctionDecay::None | DutchAuctionDecay::Linear => {
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
-            
+
             let q = p_u128 / d_u128;
             let r = p_u128 % d_u128;
-            
+
             let drop = (q * e_u128) + ((r * e_u128) / d_u128);
             drop as i128
         }
@@ -87,14 +87,14 @@ pub fn compute_dutch_price(
                 Some(_) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
                 None => panic!("dutch_step_count required for stepped Dutch auctions"),
             };
-            
+
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
             let elapsed_steps = (e_u128 * steps) / d_u128;
-            
+
             let q = p_u128 / steps;
             let r = p_u128 % steps;
-            
+
             let drop = (q * elapsed_steps) + ((r * elapsed_steps) / steps);
             drop as i128
         }
@@ -108,7 +108,7 @@ pub fn compute_dutch_price(
             let drop_factor = 10_000 - factor;
             let q = p_u128 / 10_000;
             let r = p_u128 % 10_000;
-            
+
             let drop = (q * drop_factor) + ((r * drop_factor) / 10_000);
             drop as i128
         }

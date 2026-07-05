@@ -717,7 +717,10 @@ mod tests {
 
         let result =
             client.try_settle_default_liquidation(&auction_id, &credit_contract, &borrower);
-        assert!(result.is_err(), "should fail when credit_contract != factory");
+        assert!(
+            result.is_err(),
+            "should fail when credit_contract != factory"
+        );
         assert_eq!(
             result.unwrap_err().unwrap(),
             AuctionError::Unauthorized.into(),
@@ -1482,7 +1485,12 @@ mod tests {
         // start_price.checked_sub(floor_price) to overflow (i128 underflow).
         let result = catch_unwind(AssertUnwindSafe(|| {
             super::super::compute_dutch_price(
-                i128::MIN, 1, 50, 100, &DutchAuctionDecay::Linear, None,
+                i128::MIN,
+                1,
+                50,
+                100,
+                &DutchAuctionDecay::Linear,
+                None,
             );
         }));
         assert!(result.is_err());
@@ -1509,7 +1517,12 @@ mod tests {
         // start_price.checked_sub(floor_price) to overflow (i128 underflow).
         let result = catch_unwind(AssertUnwindSafe(|| {
             super::super::compute_dutch_price(
-                i128::MIN, 1, 2, 100, &DutchAuctionDecay::Linear, None,
+                i128::MIN,
+                1,
+                2,
+                100,
+                &DutchAuctionDecay::Linear,
+                None,
             );
         }));
         assert!(result.is_err());
@@ -1839,8 +1852,7 @@ mod tests {
 #[cfg(test)]
 mod reentrancy_exploration {
     extern crate std;
-    
-    
+
     use crate::{Auction, AuctionClient, AuctionMode, DutchAuctionDecay};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
@@ -2031,7 +2043,7 @@ mod reentrancy_exploration {
 #[cfg(test)]
 mod reentrancy_preservation {
     extern crate std;
-    
+
     use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};
     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::{Address, Env, Symbol, TryFromVal};

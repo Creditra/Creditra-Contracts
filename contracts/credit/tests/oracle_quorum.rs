@@ -161,13 +161,7 @@ fn submit_two_of_three_quorum_stores_median() {
 
     // Verify via settlement — quorum price should allow settlement without oracle_price
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "settle1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "settle1"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed
@@ -290,13 +284,7 @@ fn settlement_fails_when_no_quorum_price_submitted() {
     client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
 }
 
 #[test]
@@ -316,13 +304,7 @@ fn settlement_fails_on_stale_quorum_price() {
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
 }
 
 #[test]
@@ -338,13 +320,7 @@ fn settlement_at_exact_max_age_succeeds() {
     // age == max_age_seconds exactly — should be accepted (> check, not >=)
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600);
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed
@@ -370,13 +346,7 @@ fn quorum_mode_takes_precedence_over_single_oracle_config() {
 
     // Settlement with oracle_price=None should succeed via quorum mode
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed
@@ -440,23 +410,17 @@ fn multiple_settlements_reuse_same_quorum_price() {
 
     // First settlement
     let b1 = open_and_default(&client, &env, &contract_id, 300);
-    client.settle_default_liquidation(
-        &b1,
-        &300_i128,
-        &sid(&env, "s1"),
-        &10_000_u32,
-        &None,
+    client.settle_default_liquidation(&b1, &300_i128, &sid(&env, "s1"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b1).unwrap().status,
+        CreditStatus::Closed
     );
-    assert_eq!(client.get_credit_line(&b1).unwrap().status, CreditStatus::Closed);
 
     // Second settlement reuses the stored quorum price without re-submitting
     let b2 = open_and_default(&client, &env, &contract_id, 400);
-    client.settle_default_liquidation(
-        &b2,
-        &400_i128,
-        &sid(&env, "s2"),
-        &10_000_u32,
-        &None,
+    client.settle_default_liquidation(&b2, &400_i128, &sid(&env, "s2"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b2).unwrap().status,
+        CreditStatus::Closed
     );
-    assert_eq!(client.get_credit_line(&b2).unwrap().status, CreditStatus::Closed);
 }

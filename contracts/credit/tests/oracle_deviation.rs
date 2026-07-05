@@ -348,11 +348,5 @@ fn settle_missing_price_when_config_set_panics() {
     client.set_oracle_config(&500_u32, &3600_u64);
     let borrower = open_and_default(&client, &env, &contract_id, 200);
     // oracle_price is None but config is set — must panic.
-    client.settle_default_liquidation(
-        &borrower,
-        &200_i128,
-        &sid(&env, "s1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &200_i128, &sid(&env, "s1"), &10_000_u32, &None);
 }
