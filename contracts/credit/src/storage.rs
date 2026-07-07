@@ -187,6 +187,10 @@ pub enum DataKey {
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
+    /// Per-borrower maximum total exposure cap (absolute i128 amount).
+    /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
+    /// Pass 0 to remove the cap for this borrower.
+    MaxBorrowerExposure(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -702,6 +706,32 @@ pub fn get_utilization_cap_bps(env: &Env, borrower: &Address) -> Option<u32> {
     env.storage()
         .persistent()
         .get(&DataKey::UtilizationCapBps(borrower.clone()))
+}
+
+/// Return the per-borrower maximum exposure cap, if set.
+///
+/// When `None`, no per-borrower exposure cap is enforced for this borrower.
+/// Configured via `set_max_borrower_exposure`.
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
+}
+
+/// Set or remove the per-borrower maximum exposure cap (admin only, enforced by caller).
+///
+/// Passing `0` removes the cap entirely for this borrower.
+/// A non-zero value caps the borrower's total `utilized_amount` in `draw_credit`.
+pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
+    if cap == 0 {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
+    } else {
+        env.storage()
+            .persistent()
+            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+    }
 }
 
 /// Clear the installment schedule for a borrower.
