@@ -1,4 +1,4 @@
-use cosmwasm_std::{Deps, StdResult, Uint128};
+use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
 
 use crate::error::ContractError;
 use crate::msg::{BorrowerHealthFactorResponse, CreditLineHealthResponse, DrawAuditTrailResponse};
@@ -104,7 +104,7 @@ pub fn query_borrower_health_factor(
                 for did in 0..draw_count {
                     let draw = DRAWS.load(deps.storage, (id, did))?;
                     if !draw.repaid {
-                        utilized_amount = utilized_amount.checked_add(draw.amount)?;
+                        utilized_amount = utilized_amount.checked_add(draw.amount).map_err(StdError::from)?;
                     }
                 }
 
@@ -114,8 +114,8 @@ pub fn query_borrower_health_factor(
                 } else if cl.collateral_amount.is_zero() || cl.credit_amount.is_zero() {
                     0
                 } else {
-                    let numerator = cl.credit_amount.checked_mul(Uint128::from(10_000u32))?;
-                    let result = numerator.checked_div(utilized_amount)?;
+                    let numerator = cl.credit_amount.checked_mul(Uint128::from(10_000u32)).map_err(StdError::from)?;
+                    let result = numerator.checked_div(utilized_amount).map_err(StdError::from)?;
                     u32::try_from(result.u128()).unwrap_or(u32::MAX)
                 };
 
@@ -421,8 +421,9 @@ mod tests {
             let mut deps = mock_dependencies();
             setup_contract(&mut deps);
 
-            let resp = query_health(&deps, "borrower");
-            assert_eq!(resp.borrower, "borrower");
+            let borrower_str = borrower(&deps).to_string();
+            let resp = query_health(&deps, &borrower_str);
+            assert_eq!(resp.borrower, borrower_str);
             assert!(resp.credit_lines.is_empty());
         }
 
