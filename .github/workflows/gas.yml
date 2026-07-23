@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   budget-regression:
-    name: Budget regression
+    name: Budget regression (≤5% drift)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,12 +38,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-gas-
 
-      - name: Copy committed baseline to test_snapshots
+      - name: Stage committed baseline as snapshot
         run: |
           mkdir -p contracts/credit/test_snapshots
           cp contracts/.gas-baseline.json contracts/credit/test_snapshots/budget.json
+          echo "=== Committed baseline entries ==="
+          cat contracts/credit/test_snapshots/budget.json | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)
+          print(f'Entries: {len(data)}')
+          for b in data:
+              print(f'  {b[\"entrypoint\"]:32s}  cpu={b[\"cpu_instructions\"]:>8}  mem={b[\"memory_bytes\"]:>8}  (tol ±{b.get(\"tolerance_pct\",5.0)}%)')
+          "
 
-      - name: Run budget-regression tests
+      - name: Run instrument validation
         run: |
           cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test instrument -- --nocapture
+
+      - name: Run budget regression gate (fail on >5% drift)
+        run: |
           cargo test --manifest-path contracts/credit/Cargo.toml --features instrument --test budget_regression -- --nocapture
