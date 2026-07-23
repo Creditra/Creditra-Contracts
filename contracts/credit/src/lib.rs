@@ -81,8 +81,9 @@
 //   `ContractError::TimestampRegression = 33`.
 // - `(borrower, settlement_id)` is the dedup key for cross-contract
 //   settlement replay safety.
-// - 38 `ContractError` discriminants are ABI-stable; CI test
-//   `tests/error_discriminants.rs` reverts on reorder.
+// - 52 `ContractError` discriminants are ABI-stable; CI test
+//   `tests/error_discriminants.rs` reverts on reorder (pins every discriminant
+//   and every category mapping).
 // - 25+ event topics under the `credit` namespace are stability-pinned by
 //   `tests/event_topic_stability.rs`.
 //

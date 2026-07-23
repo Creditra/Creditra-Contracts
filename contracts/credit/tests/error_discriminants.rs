@@ -59,12 +59,17 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
-    assert_eq!(ContractError::OracleQuorumNotMet as u32, 45);
+    assert_eq!(ContractError::CloseFactorAboveMax as u32, 45);
+    assert_eq!(ContractError::CreditLineFrozen as u32, 46);
+    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 47);
+    assert_eq!(ContractError::OriginalDrawNotFound as u32, 48);
+    assert_eq!(ContractError::AttestationBatchNotFound as u32, 49);
+    assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
+    assert_eq!(ContractError::AlreadySettled as u32, 51);
+    assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
 }
 
 /// Verify no two variants share the same discriminant.
-/// This is a compile-time guarantee via `#[repr(u32)]`, but we make it
-/// explicit here so the intent is documented and visible in test output.
 #[test]
 fn no_duplicate_discriminants() {
     use std::collections::HashSet;
@@ -114,7 +119,14 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
         ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -126,11 +138,9 @@ fn no_duplicate_discriminants() {
 }
 
 /// Verify the total variant count matches expectations.
-/// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 45 variants as of this writing (added 45 for oracle quorum in #630).
-    const EXPECTED_VARIANT_COUNT: usize = 45;
+    const EXPECTED_VARIANT_COUNT: usize = 52;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -177,7 +187,14 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
         ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
     ];
 
     assert_eq!(
@@ -195,9 +212,16 @@ fn variant_count_is_known() {
 #[test]
 fn category_discriminants_are_stable() {
     assert_eq!(ContractErrorCategory::Auth as u32, 1);
-    assert_eq!(ContractErrorCategory::Math as u32, 2);
-    assert_eq!(ContractErrorCategory::State as u32, 3);
-    assert_eq!(ContractErrorCategory::Oracle as u32, 4);
+    assert_eq!(ContractErrorCategory::Lifecycle as u32, 2);
+    assert_eq!(ContractErrorCategory::Numeric as u32, 3);
+    assert_eq!(ContractErrorCategory::Limit as u32, 4);
+    assert_eq!(ContractErrorCategory::Liquidity as u32, 5);
+    assert_eq!(ContractErrorCategory::Risk as u32, 6);
+    assert_eq!(ContractErrorCategory::Oracle as u32, 7);
+    assert_eq!(ContractErrorCategory::Collateral as u32, 8);
+    assert_eq!(ContractErrorCategory::Block as u32, 9);
+    assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
+    assert_eq!(ContractErrorCategory::Misc as u32, 11);
 }
 
 /// Verify no two `ContractErrorCategory` variants share a discriminant.
@@ -207,9 +231,16 @@ fn no_duplicate_category_discriminants() {
 
     let codes: Vec<u32> = vec![
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Math as u32,
-        ContractErrorCategory::State as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
         ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -223,13 +254,20 @@ fn no_duplicate_category_discriminants() {
 /// Verify the total variant count for `ContractErrorCategory`.
 #[test]
 fn category_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 4;
+    const EXPECTED_VARIANT_COUNT: usize = 11;
 
     let codes = [
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Math as u32,
-        ContractErrorCategory::State as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
         ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
     ];
 
     assert_eq!(
@@ -272,6 +310,10 @@ fn category_mappings_are_stable() {
         ContractError::CreditLineDefaulted.category(),
         ContractErrorCategory::Lifecycle
     );
+    assert_eq!(
+        ContractError::AlreadySettled.category(),
+        ContractErrorCategory::Lifecycle
+    );
     // Numeric
     assert_eq!(
         ContractError::InvalidAmount.category(),
@@ -293,6 +335,10 @@ fn category_mappings_are_stable() {
         ContractError::LimitOutOfBounds.category(),
         ContractErrorCategory::Numeric
     );
+    assert_eq!(
+        ContractError::InvalidRiskWeight.category(),
+        ContractErrorCategory::Numeric
+    );
     // Limit
     assert_eq!(
         ContractError::OverLimit.category(),
@@ -312,6 +358,14 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::RepayExceedsMaxAmount.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::CloseFactorAboveMax.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::DrawReversalWindowExpired.category(),
         ContractErrorCategory::Limit
     );
     // Liquidity
@@ -347,6 +401,10 @@ fn category_mappings_are_stable() {
         ContractError::ExposureCapExceeded.category(),
         ContractErrorCategory::Liquidity
     );
+    assert_eq!(
+        ContractError::BountyNotSet.category(),
+        ContractErrorCategory::Liquidity
+    );
     // Risk
     assert_eq!(
         ContractError::RateTooHigh.category(),
@@ -377,6 +435,10 @@ fn category_mappings_are_stable() {
         ContractError::OraclePriceDeviation.category(),
         ContractErrorCategory::Oracle
     );
+    assert_eq!(
+        ContractError::OracleQuorumNotMet.category(),
+        ContractErrorCategory::Oracle
+    );
     // Collateral
     assert_eq!(
         ContractError::CollateralRatioBelowMinimum.category(),
@@ -399,6 +461,10 @@ fn category_mappings_are_stable() {
         ContractError::BorrowerFrozen.category(),
         ContractErrorCategory::Block
     );
+    assert_eq!(
+        ContractError::CreditLineFrozen.category(),
+        ContractErrorCategory::Block
+    );
     // Reentrancy
     assert_eq!(
         ContractError::Reentrancy.category(),
@@ -413,10 +479,30 @@ fn category_mappings_are_stable() {
         ContractError::AdminAcceptTooEarly.category(),
         ContractErrorCategory::Misc
     );
+    assert_eq!(
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryTimelockActive.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryProposalExists.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::OriginalDrawNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::AttestationBatchNotFound.category(),
+        ContractErrorCategory::Misc
+    );
 }
 
-/// Verify every ContractError variant's category matches its discriminant table.
-/// This catches accidental miscategorization when new variants are added.
+/// Verify every ContractError variant has a known category and that all 11
+/// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
     use std::collections::HashSet;
@@ -466,7 +552,14 @@ fn every_variant_has_known_category() {
         ContractError::NoPendingTreasuryWithdrawal.category(),
         ContractError::TreasuryTimelockActive.category(),
         ContractError::TreasuryProposalExists.category(),
+        ContractError::CloseFactorAboveMax.category(),
+        ContractError::CreditLineFrozen.category(),
+        ContractError::DrawReversalWindowExpired.category(),
+        ContractError::OriginalDrawNotFound.category(),
+        ContractError::AttestationBatchNotFound.category(),
+        ContractError::OracleQuorumNotMet.category(),
         ContractError::AlreadySettled.category(),
+        ContractError::InvalidRiskWeight.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -475,7 +568,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+    assert_eq!(all_variants.len(), 52, "Expected 52 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
