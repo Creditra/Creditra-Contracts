@@ -103,7 +103,84 @@ env.storage().instance().bump(INSTANCE_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
 ---
 
+## Concrete Storage Keys Matrix
+
+### 🏦 Creditra Core Contract (`contracts/credit/src/storage.rs`)
+
+| Data Key | Type | Tier | Rationale / Usage |
+|----------|------|------|-------------------|
+| `LiquidityToken` | `Address` | **Instance** | Configured liquidity pool token address; read frequently |
+| `LiquiditySource` | `Address` | **Instance** | Reserve pool address; read frequently |
+| `DrawsFrozen` | `bool` | **Instance** | Global circuit-breaker to halt all credit draws |
+| `SchemaVersion` | `u32` | **Instance** | Storage schema layout version for tracking migrations |
+| `CreditLineCount` | `u32` | **Instance** | Total count of credit lines recorded in protocol |
+| `ActiveLineCount` | `u32` | **Instance** | Total count of active (unclosed) credit lines |
+| `CreditLineIdByBorrower(Address)` | `u32` | **Persistent** | Maps borrower address to unique sequence ID |
+| `CreditLineBorrowerById(u32)` | `Address` | **Persistent** | Maps sequence ID back to borrower address |
+| `TotalUtilized` | `i128` | **Instance** | Protocol-wide total utilized credit across all lines |
+| `MaxDrawAmount` | `i128` | **Instance** | Global cap on a single draw transaction |
+| `MaxRepayAmount` | `i128` | **Instance** | Global cap on a single repay transaction |
+| `DrawMinIntervalSeconds` | `u64` | **Instance** | Minimum wait time required between draws |
+| `LastDrawTs(Address)` | `u64` | **Persistent** | Timestamp of last draw for delinquency/cooldown checks |
+| `BlockedBorrower(Address)` | `bool` | **Persistent** | Permanent administrative block flag per borrower |
+| `FrozenBorrower(Address)` | `u64` | **Persistent** | Temporary freeze expiration timestamp per borrower |
+| `CreditLineFreeze(Address)` | `FreezeInfo` | **Persistent** | Detailed administrative freeze information |
+| `UtilizationCapBps(Address)` | `u32` | **Persistent** | Custom credit utilization cap (basis points) |
+| `RateFloorBps(Address)` | `u32` | **Persistent** | Custom interest rate floor (basis points) |
+| `RateCeilingBps(Address)` | `u32` | **Persistent** | Custom interest rate ceiling (basis points) |
+| `RepaymentSchedule(Address)` | `Schedule` | **Persistent** | Delinquency-tracking installment schedule |
+| `VrfCommitment(Address)` | `BytesN<32>` | **Persistent** | VRF hash commitment for credit score derivation |
+| `MinCreditLimit` | `i128` | **Instance** | Minimum permitted credit limit |
+| `MaxCreditLimit` | `i128` | **Instance** | Maximum permitted credit limit |
+| `CloseFactorBps` | `u32` | **Instance** | Global liquidation close factor |
+| `PenaltySurchargeBps` | `u32` | **Instance** | Late fee penalty APR surcharge |
+| `LateFeeFlat` | `i128` | **Instance** | Flat fee charged per missed installment |
+| `LateFeeConfig` | `LateFeeCfg` | **Instance** | Structured late fee rule configuration |
+| `AuctionContract` | `Address` | **Instance** | Default-liquidation settlement hook target |
+| `MaxTotalExposure` | `i128` | **Instance** | Maximum total exposure cap across all lines |
+| `ProtocolFeeBps` | `u32` | **Instance** | Global protocol fee percentage |
+| `MinProtocolFeeBps` | `u32` | **Instance** | Configured lower boundary for fees |
+| `MaxProtocolFeeBps` | `u32` | **Instance** | Configured upper boundary for fees |
+| `TreasuryFeeShareBps` | `u32` | **Instance** | Portion of fee directed to treasury |
+| `TreasuryAddress` | `Address` | **Instance** | Target address for treasury fees |
+| `TreasuryBalance` | `i128` | **Instance** | Accumulated unwithdrawn treasury fees |
+| `BountyAddress` | `Address` | **Instance** | Target address for liquidation/reporting bounties |
+| `BountyBalance` | `i128` | **Instance** | Accumulated bounty pool balance |
+| `AttestationBatch(Address)` | `Batch` | **Persistent** | Merkle-root attestation batch for KYC/cross-chain proof |
+| `CollateralBalance(Address)` | `i128` | **Persistent** | Collateral escrowed in the protocol |
+| `MinCollateralRatioBps` | `u32` | **Instance** | Protocol-wide minimum collateral ratio |
+| `CollateralRiskWeightBps(Address)` | `u32` | **Persistent** | Collateral asset valuation haircut weight |
+| `DrawAudit(Address, u64)` | `i128` | **Persistent** | Audit trail recording (borrower, ts) -> principal |
+| `DrawReversedAmount(Address, u64)` | `i128` | **Persistent** | Tracked reversal amount against a specific draw |
+| `OracleConfig` | `OracleCfg` | **Instance** | Collateral asset pricing oracle address/settings |
+| `OracleQuorumConfig` | `QuorumCfg` | **Instance** | Quorum configuration for multi-oracle consensus |
+| `OracleLastPrice` | `i128` | **Instance** | Last recorded pricing feed value |
+| `OracleLastPriceTs` | `u64` | **Instance** | Timestamp of last price update |
+| `TotalCollateral` | `i128` | **Instance** | Sum of all collateral across the protocol |
+| `PendingTreasuryWithdrawal` | `Proposal` | **Instance** | Multi-sig withdrawal proposal state |
+| `PauseReason` | `Bytes` | **Instance** | Reason string recorded upon emergency pause |
+
+### 🔨 Auction Contract (`gateway-contract/contracts/auction_contract`)
+
+| Data Key | Type | Tier | Rationale / Usage |
+|----------|------|------|-------------------|
+| `DataKey::Status` | `AuctionStatus` | **Instance** | Status of the primary single-auction state |
+| `DataKey::HighestBidder` | `Address` | **Instance** | Address of the current highest bidder |
+| `DataKey::HighestBid` | `i128` | **Instance** | Value of the current highest bid |
+| `DataKey::EndTime` | `u64` | **Instance** | End timestamp of the auction |
+| `DataKey::FactoryContract` | `Address` | **Instance** | Parent factory/governance address |
+| `DataKey::LiquidationGraceWindow` | `u64` | **Instance** | Grace period window before bidding can start |
+| `AuctionKey::Closed(Symbol)` | `bool` | **Persistent** | Closed status marker for multi-auction deployments |
+| `AuctionKey::LiquidationSettled(Symbol)` | `bool` | **Persistent** | Single-shot default settlement replay-protection marker |
+
+---
+
 ## Decision Rules (when to pick each tier)
+
+1. **Instance Storage**: Use for global configuration parameters, protocol metrics, and toggles that are needed by almost every transaction. Keep total size small (< 1KB) to avoid elevated invocation fees.
+2. **Persistent Storage**: Use for individual user/borrower states, records, balances, or audits. These must have their TTL proactively bumped on each write/read to prevent state archival.
+3. **Temporary Storage**: Use for transient flags, replay guards, nonces, or auction bids that have a known, short lifetime and do not contain assets that require restoration if expired.
+
 ---
 
 ## Security Considerations
