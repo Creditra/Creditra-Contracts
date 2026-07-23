@@ -24,19 +24,6 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
 
-/// Map a credit-line status to the draw-time error, if any.
-///
-/// Restricted is intentionally allowed to reach the numeric limit check in
-/// `draw_credit`; that keeps the status distinct from terminal states while
-/// still preventing fresh borrowing until the line is cured.
-pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active | CreditStatus::Restricted => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-    }
-
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
     let reserve_address: Address = env
         .storage()
@@ -105,9 +92,11 @@ pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
     credit_line.utilized_amount = updated_utilized;
     env.storage().persistent().set(&borrower, &credit_line);
     // Bump TTL: every draw is an interaction that resets the expiry window.
-    env.storage()
-        .persistent()
-        .extend_ttl(&borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &borrower,
+        CREDIT_LINE_TTL_THRESHOLD,
+        CREDIT_LINE_TTL_EXTEND_TO,
+    );
 
     publish_drawn_event(
         &env,
@@ -158,7 +147,13 @@ pub(crate) fn repay_credit_internal(
         .max(0);
     credit_line.utilized_amount = new_utilized;
 
-    persist_credit_line(env, borrower, credit_line, previous_utilized, Some(previous_status));
+    persist_credit_line(
+        env,
+        borrower,
+        credit_line,
+        previous_utilized,
+        Some(previous_status),
+    );
     lifecycle::advance_repayment_schedule_after_repay(
         env,
         borrower,
@@ -346,26 +341,16 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
             }
 
             // Compute protocol fee on the total repayment amount.
-            let fee_bps: u32 =
-                crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
             let mut fee: i128 = 0;
             if fee_bps > 0 && effective_repay > 0 {
-                fee = apply_bps(
-                    effective_repay as u128,
-                    fee_bps,
-                    Rounding::Floor,
-                ) as i128;
+                fee = apply_bps(effective_repay as u128, fee_bps, Rounding::Floor) as i128;
             }
 
             // Transfer fee portion into contract (treasury accumulator), then
             // transfer remaining amount into the reserve.
             if fee > 0 {
-                token_client.transfer_from(
-                    &contract_address,
-                    &borrower,
-                    &contract_address,
-                    &fee,
-                );
+                token_client.transfer_from(&contract_address, &borrower, &contract_address, &fee);
                 crate::fees::accrue_protocol_fee(&env, &borrower, fee);
             }
 
@@ -414,17 +399,4 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     );
 
     clear_reentrancy_guard(&env);
-}
-
-/// Return a `ContractError` if `status` should block draws, otherwise `None`.
-///
-/// Called by `draw_credit` to centralize status → error mapping.
-pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-        CreditStatus::Restricted => None,
-    }
 }
