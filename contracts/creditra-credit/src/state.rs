@@ -38,6 +38,8 @@ pub enum DrawAction {
     Repaid,
     Liquidated,
     MemoAdded,
+    /// Grace period was waived by an authorised operator.
+    GraceWaived,
 }
 
 /// An audit entry recording an action performed on a draw.
