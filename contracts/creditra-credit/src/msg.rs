@@ -1,6 +1,7 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Timestamp};
 
+use crate::handshake::ProtocolVersion;
 use crate::state::DrawAuditEvent;
 
 #[cw_serde]
@@ -31,6 +32,10 @@ pub enum ExecuteMsg {
         draw_id: u64,
         memo: String,
     },
+    UpdateProtocolVersion {
+        major: u32,
+        minor: u32,
+    },
 }
 
 #[cw_serde]
@@ -41,6 +46,8 @@ pub enum QueryMsg {
         credit_line_id: u64,
         draw_id: Option<u64>,
     },
+    #[returns(ProtocolVersion)]
+    ProtocolVersion {},
 }
 
 #[cw_serde]

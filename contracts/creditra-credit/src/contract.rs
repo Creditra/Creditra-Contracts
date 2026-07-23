@@ -4,6 +4,7 @@ use cosmwasm_std::{
 };
 
 use crate::error::ContractError;
+use crate::handshake::{self, ProtocolVersion};
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, CONFIG, CREDIT_LINE_COUNT, CREDIT_LINES,
@@ -22,6 +23,7 @@ pub fn instantiate(
     let config = Config { owner };
     CONFIG.save(deps.storage, &config)?;
     CREDIT_LINE_COUNT.save(deps.storage, &0)?;
+    handshake::initialize_version(deps.storage)?;
     Ok(Response::default())
 }
 
@@ -63,6 +65,9 @@ pub fn execute(
             draw_id,
             memo,
         } => execute_add_audit_memo(deps, env, info, credit_line_id, draw_id, memo),
+        ExecuteMsg::UpdateProtocolVersion { major, minor } => {
+            execute_update_protocol_version(deps, info, major, minor)
+        }
     }
 }
 
@@ -215,6 +220,24 @@ pub fn execute_add_audit_memo(
         .add_attribute("draw_id", draw_id.to_string()))
 }
 
+pub fn execute_update_protocol_version(
+    deps: DepsMut,
+    info: MessageInfo,
+    major: u32,
+    minor: u32,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let version = ProtocolVersion { major, minor };
+    handshake::set_protocol_version(deps, version)?;
+    Ok(Response::default()
+        .add_attribute("action", "update_protocol_version")
+        .add_attribute("major", major.to_string())
+        .add_attribute("minor", minor.to_string()))
+}
+
 fn append_audit_entry(
     deps: DepsMut,
     env: Env,
@@ -255,6 +278,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let resp = views::query_draw_audit_trail(deps, credit_line_id, draw_id)
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
             to_json_binary(&resp)
+        }
+        QueryMsg::ProtocolVersion {} => {
+            let version = handshake::query_protocol_version(deps)?;
+            to_json_binary(&version)
         }
     }
 }
