@@ -31,6 +31,15 @@ pub enum ExecuteMsg {
         draw_id: u64,
         memo: String,
     },
+    /// Waive the grace period on a specific draw.
+    ///
+    /// Only the contract owner may call this.
+    WaiveGracePeriod {
+        credit_line_id: u64,
+        draw_id: u64,
+        /// Optional human-readable reason recorded in the audit trail.
+        memo: String,
+    },
 }
 
 #[cw_serde]
