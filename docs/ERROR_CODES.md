@@ -94,6 +94,7 @@ errors.
 | 34   | `LimitOutOfBounds`                | Limit outside min/max bounds               | `open_credit_line` with limit < min or > max |
 | 35   | `CollateralRatioBelowMinimum`     | Collateral ratio too low                   | `draw_credit`, collateral withdrawal |
 | 39   | `InsufficientCollateralBalance`   | Collateral balance too low                 | Collateral withdrawal |
+| 50   | `CollateralInsufficient`          | Collateral insufficient for the operation  | Operations requiring posted collateral |
 | 40   | `BorrowerFrozen`                  | Borrower draws frozen until expiry         | `draw_credit` when per-borrower freeze active |
 | 41   | `BountyNotSet`                    | Bounty address not configured              | `withdraw_bounty` without bounty set |
 | 42   | `NoPendingTreasuryWithdrawal`     | No pending withdrawal proposal             | `execute_treasury_withdrawal` without proposal |

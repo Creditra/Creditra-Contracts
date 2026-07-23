@@ -172,18 +172,21 @@ where the contract can observe it. |
 
 ---
 
-## Collateral (codes 35, 39)
+## Collateral (codes 35, 39, 50)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 35   | `CollateralRatioBelowMinimum` | Collateral withdraw would leave the ratio below `MinCollateralRatioBps`. |
 | 39   | `InsufficientCollateralBalance` | Withdrawal amount exceeds the borrower's deposited collateral balance. |
+| 50   | `CollateralInsufficient` | Collateral is insufficient for the requested operation (general semantic). |
 
 **Recovery action:** For code 35, reduce the withdrawal amount so that
 `(post_collateral * MinCollateralRatioBps) / 10_000 >= utilized`. Query the
 minimum collateral ratio via `get_protocol_config()` and compute the maximum
 safe withdrawal client-side. For code 39, query `get_collateral_balance` and
-ensure the requested amount does not exceed it.
+ensure the requested amount does not exceed it. For code 50, deposit additional
+collateral or reduce the requested operation size until collateral coverage is
+adequate.
 
 ---
 
@@ -247,8 +250,8 @@ ensure it does not re-enter the credit contract during `transfer` /
 | Liquidity | 22, 23, 24, 25, 26, 27, 30, 31, 41 | 9 | Replenish allowance / wait for reserve |
 | Risk | 8, 9, 18, 29 | 4 | Clamp inputs / wait for cooldown or unpause |
 | Oracle | 36, 37, 38 | 3 | Await valid price feed |
-| Collateral | 35, 39 | 2 | Reduce withdrawal amount |
+| Collateral | 35, 39, 50 | 3 | Reduce withdrawal / add collateral |
 | Block | 16, 19, 40 | 3 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
 | Misc | 3, 15, 42, 43, 44 | 5 | Create line first / wait for delay |
-| **Total** | 1–45 | **45** | — |
+| **Total** | 1–50 | **50** | — |
