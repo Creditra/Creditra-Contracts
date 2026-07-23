@@ -1,9 +1,10 @@
 use cosmwasm_std::{
-    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult,
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response,
+    StdError, StdResult,
 };
 
 use crate::error::ContractError;
+use crate::events::GracePeriodWaivedEvent;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, CONFIG, CREDIT_LINE_COUNT, CREDIT_LINES,
@@ -63,6 +64,11 @@ pub fn execute(
             draw_id,
             memo,
         } => execute_add_audit_memo(deps, env, info, credit_line_id, draw_id, memo),
+        ExecuteMsg::WaiveGracePeriod {
+            credit_line_id,
+            draw_id,
+            memo,
+        } => execute_waive_grace_period(deps, env, info, credit_line_id, draw_id, memo),
     }
 }
 
@@ -211,6 +217,71 @@ pub fn execute_add_audit_memo(
 
     Ok(Response::default()
         .add_attribute("action", "add_audit_memo")
+        .add_attribute("credit_line_id", credit_line_id.to_string())
+        .add_attribute("draw_id", draw_id.to_string()))
+}
+
+/// Waive the grace period on a specific draw.
+///
+/// # Access control
+///
+/// Only the contract owner (set at instantiation) may call this endpoint.
+///
+/// # Events
+///
+/// Emits a `"grace_period_waived"` event with the following attributes:
+///
+/// | key              | value                                   |
+/// |------------------|-----------------------------------------|
+/// | `credit_line_id` | the credit line identifier              |
+/// | `draw_id`        | the draw identifier                     |
+/// | `waived_by`      | address of the operator                 |
+/// | `block_height`   | chain height at execution               |
+/// | `memo`           | human-readable reason (may be empty)    |
+///
+/// # Errors
+///
+/// * [`ContractError::Unauthorized`]    — caller is not the contract owner.
+/// * [`ContractError::DrawNotFound`]    — `draw_id` does not exist on `credit_line_id`.
+pub fn execute_waive_grace_period(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    credit_line_id: u64,
+    draw_id: u64,
+    memo: String,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+
+    DRAWS
+        .may_load(deps.storage, (credit_line_id, draw_id))?
+        .ok_or(ContractError::DrawNotFound(draw_id, credit_line_id))?;
+
+    let waived_event = GracePeriodWaivedEvent {
+        credit_line_id,
+        draw_id,
+        waived_by: info.sender.clone(),
+        timestamp: env.block.time,
+        block_height: env.block.height,
+        memo: memo.clone(),
+    };
+
+    append_audit_entry(
+        deps,
+        env,
+        info,
+        credit_line_id,
+        draw_id,
+        DrawAction::GraceWaived,
+        memo,
+    )?;
+
+    Ok(Response::default()
+        .add_event(Event::new("grace_period_waived").add_attributes(waived_event.into_attributes()))
+        .add_attribute("action", "waive_grace_period")
         .add_attribute("credit_line_id", credit_line_id.to_string())
         .add_attribute("draw_id", draw_id.to_string()))
 }
