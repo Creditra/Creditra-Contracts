@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Timestamp};
+use cosmwasm_std::{Addr, Timestamp, Uint128};
 
 use crate::state::DrawAuditEvent;
 
@@ -41,6 +41,10 @@ pub enum QueryMsg {
         credit_line_id: u64,
         draw_id: Option<u64>,
     },
+    #[returns(ProofOfReserveResponse)]
+    ProofOfReserve {
+        denom: Option<String>,
+    },
 }
 
 #[cw_serde]
@@ -56,4 +60,27 @@ pub struct DrawAuditTrailResponse {
 }
 
 #[cw_serde]
+pub struct ProofOfReserveResponse {
+    pub total_credit_lines: u64,
+    pub active_credit_lines: u64,
+    pub total_collateral: Uint128,
+    pub total_credit_limit: Uint128,
+    pub total_drawn: Uint128,
+    pub total_repaid: Uint128,
+    pub net_outstanding: Uint128,
+    pub reserves_by_denom: Vec<DenomReserve>,
+}
+
+#[cw_serde]
+pub struct DenomReserve {
+    pub denom: String,
+    pub collateral_amount: Uint128,
+    pub credit_limit: Uint128,
+    pub drawn_amount: Uint128,
+    pub repaid_amount: Uint128,
+    pub net_outstanding: Uint128,
+}
+
+#[cw_serde]
 pub struct MigrateMsg {}
+

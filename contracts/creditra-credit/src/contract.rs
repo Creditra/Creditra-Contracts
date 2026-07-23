@@ -256,6 +256,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
             to_json_binary(&resp)
         }
+        QueryMsg::ProofOfReserve { denom } => {
+            let resp = views::query_proof_of_reserve(deps, denom)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            to_json_binary(&resp)
+        }
     }
 }
 
