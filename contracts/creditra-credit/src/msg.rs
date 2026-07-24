@@ -2,6 +2,7 @@ use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Timestamp, Uint128};
 
 use crate::state::DrawAuditEvent;
+use crate::state::OracleQuorumConfig;
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -35,6 +36,16 @@ pub enum ExecuteMsg {
         major: u32,
         minor: u32,
     },
+    /// Configure the multi-oracle quorum parameters (admin only).
+    SetOracleQuorumConfig {
+        min_quorum_k: u32,
+        max_deviation_bps: u32,
+        max_age_seconds: u64,
+    },
+    /// Submit N oracle prices and resolve a quorum canonical price (admin only).
+    SubmitOraclePrices {
+        prices: Vec<i128>,
+    },
 }
 
 #[cw_serde]
@@ -49,6 +60,10 @@ pub enum QueryMsg {
     ProofOfReserve { denom: Option<String> },
     #[returns(BorrowerHealthFactorResponse)]
     BorrowerHealthFactor { borrower: String },
+    #[returns(OracleQuorumConfigResponse)]
+    GetOracleQuorumConfig {},
+    #[returns(OraclePriceResponse)]
+    GetOraclePrice {},
 }
 
 #[cw_serde]
@@ -104,3 +119,16 @@ pub struct CreditLineHealthResponse {
 
 #[cw_serde]
 pub struct MigrateMsg {}
+
+/// Response for oracle quorum configuration query.
+#[cw_serde]
+pub struct OracleQuorumConfigResponse {
+    pub config: Option<OracleQuorumConfig>,
+}
+
+/// Response for oracle price query.
+#[cw_serde]
+pub struct OraclePriceResponse {
+    pub price: Option<i128>,
+    pub timestamp: Option<u64>,
+}
