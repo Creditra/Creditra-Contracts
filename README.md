@@ -210,7 +210,7 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 `Auction` (`#[contract]`,
 `gateway-contract/contracts/auction_contract/src/lib.rs`):
 
-- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price)`
+- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price, dutch_decay, dutch_step_count)`
 - `set_factory_contract(factory)`
 - `place_bid(auction_id, bidder, amount)` — English ascending or Dutch
   descending mode, with anti-grief minimum increment and reentrancy-guarded

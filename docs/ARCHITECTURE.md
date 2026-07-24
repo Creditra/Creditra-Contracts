@@ -185,7 +185,7 @@ sequenceDiagram
     Credit-->>Indexer: emit ("credit","liq_req") = (borrower, utilized_amount)
     Indexer-->>Orchestrator: notify of liq_req
 
-    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?, dutch_decay?, dutch_steps?)
+    Orchestrator->>Auction: init_auction(auction_id, mode, start, end, min_bid, min_inc_bps, dutch_start?, dutch_floor?, dutch_decay?, dutch_step_count?)
     Auction->>Auction: validate start<end, min_inc<=10000, Dutch invariants + stepped config
     Auction-->>Indexer: (init events)
 
