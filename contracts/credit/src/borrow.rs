@@ -23,7 +23,6 @@ pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
-
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
     let reserve_address: Address = env
         .storage()

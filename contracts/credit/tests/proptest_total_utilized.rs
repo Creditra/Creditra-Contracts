@@ -96,11 +96,16 @@ fn setup() -> TestCtx {
 
 fn raw_steps_strategy() -> impl Strategy<Value = std::vec::Vec<RawStep>> {
     proptest_vec(
-        (0usize..BORROWER_COUNT, any::<bool>(), 1_i128..=MAX_REQUEST_AMOUNT),
+        (
+            0usize..BORROWER_COUNT,
+            any::<bool>(),
+            1_i128..=MAX_REQUEST_AMOUNT,
+        ),
         1..=MAX_STEPS,
     )
     .prop_map(|steps| {
-        steps.into_iter()
+        steps
+            .into_iter()
             .map(|(borrower_index, wants_draw, requested_amount)| RawStep {
                 borrower_index,
                 wants_draw,
@@ -165,7 +170,10 @@ fn apply_valid_step(ctx: &TestCtx, modeled: &mut [i128], step: &RawStep) -> Test
 
     let (action, amount) = if step.wants_draw {
         if remaining_before > 0 {
-            (AppliedAction::Draw, step.requested_amount.min(remaining_before))
+            (
+                AppliedAction::Draw,
+                step.requested_amount.min(remaining_before),
+            )
         } else {
             (
                 AppliedAction::Repay,

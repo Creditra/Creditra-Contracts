@@ -11,13 +11,15 @@ pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
-use crate::storage::{clear_reentrancy_guard, get_factory_contract, set_reentrancy_guard};
+use crate::storage::{
+    bump_auction_state_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
+    get_factory_contract, set_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
+};
 use crate::types::*;
 use events::{
     publish_auction_closed_event, publish_bid_refunded_event,
     publish_default_liquidation_settlement_event,
 };
-use storage::{bump_auction_state_ttl, bump_settlement_marker_ttl};
 
 /// Returns the minimum bid amount that satisfies the `min_increment_bps`
 /// requirement over `highest_bid`.
@@ -71,10 +73,10 @@ pub fn compute_dutch_price(
         DutchAuctionDecay::None | DutchAuctionDecay::Linear => {
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
-            
+
             let q = p_u128 / d_u128;
             let r = p_u128 % d_u128;
-            
+
             let drop = (q * e_u128) + ((r * e_u128) / d_u128);
             drop as i128
         }
@@ -85,14 +87,14 @@ pub fn compute_dutch_price(
                 Some(_) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
                 None => panic!("dutch_step_count required for stepped Dutch auctions"),
             };
-            
+
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
             let elapsed_steps = (e_u128 * steps) / d_u128;
-            
+
             let q = p_u128 / steps;
             let r = p_u128 % steps;
-            
+
             let drop = (q * elapsed_steps) + ((r * elapsed_steps) / steps);
             drop as i128
         }
@@ -106,7 +108,7 @@ pub fn compute_dutch_price(
             let drop_factor = 10_000 - factor;
             let q = p_u128 / 10_000;
             let r = p_u128 % 10_000;
-            
+
             let drop = (q * drop_factor) + ((r * drop_factor) / 10_000);
             drop as i128
         }
@@ -131,48 +133,109 @@ pub enum AuctionKey {
 
 #[contractimpl]
 impl Auction {
-    /// Place a bid in an English ascending-price auction.
-    ///
-    /// # Parameters
-    ///
-    /// * `env` — The Soroban contract environment.
-    /// * `auction_id` — Symbol identifying the auction. Multiple auctions may coexist in persistent storage.
-    /// * `bidder` — Address of the bidder. Must authorize this invocation; unauthorized calls panic.
-    /// * `amount` — Bid amount in the auction's token denomination. Must be strictly positive and strictly greater than the current highest bid (if any).
-    ///
-    /// # Panics
-    ///
-    /// * If `amount <= 0` — bids must be positive.
-    /// * If `amount <= previous_highest_bid.amount` — bids must strictly increase.
-    ///
-    /// # Behavior
-    ///
-    /// 1. **Authorization check**: `bidder.require_auth()` — panics if caller is not the bidder.
-    /// 2. **Load previous highest bid** from persistent storage keyed by `auction_id`.
-    /// 3. **If a previous bid exists**:
-    ///    - Validate new bid is strictly higher (panics otherwise).
-    ///    - **Emit** `BID_RFDN` event (via `publish_bid_refunded_event`) *before* transfer — ensures event ordering even if transfer fails.
-    ///    - **Refund** previous bidder: if a `bid_token` address is stored in instance storage, transfers `prev.amount` from contract to `prev.bidder`. If no token is configured, refund is skipped (useful for test mocks).
-    /// 4. **Store new highest bid**: overwrites `auction_id` key with `AuctionState { bidder, amount }`.
-    ///
-    /// # Refund Safety
-    ///
-    /// Event emission precedes the token transfer. If the transfer fails (e.g., insufficient contract balance, token panic), the event is already recorded, enabling off-chain reconciliation.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Alice bids 100 on auction "rare_nft"
-    /// place_bid(env.clone(), symbol_short!("rare_nft"), alice_addr.clone(), 100);
-    /// // State: { bidder: alice_addr, amount: 100 } stored under "rare_nft"
-    ///
-    /// // Bob bids 150 — Alice receives refund of 100, BID_RFDN event emitted
-    /// place_bid(env.clone(), symbol_short!("rare_nft"), bob_addr.clone(), 150);
-    /// // State: { bidder: bob_addr, amount: 150 }
-    ///
-    /// // Charlie attempts to bid 120 — panics (120 <= 150)
-    /// // place_bid(env, symbol_short!("rare_nft"), charlie_addr, 120); // ❌ panic
-    /// ```
+    pub fn init_auction(
+        env: Env,
+        auction_id: Symbol,
+        mode: AuctionMode,
+        start_time: u64,
+        end_time: u64,
+        min_bid: i128,
+        min_increment_bps: u32,
+        dutch_start_price: Option<i128>,
+        dutch_floor_price: Option<i128>,
+        dutch_decay: Option<DutchAuctionDecay>,
+        dutch_step_count: Option<u32>,
+    ) {
+        if start_time >= end_time {
+            panic!("invalid times");
+        }
+        if min_increment_bps > 10_000 {
+            panic!("min_increment_bps exceeds maximum of 10000 (100%)");
+        }
+
+        if mode == AuctionMode::Dutch {
+            let start = dutch_start_price.expect("dutch_start_price required for Dutch mode");
+            let floor = dutch_floor_price.expect("dutch_floor_price required for Dutch mode");
+            if start < floor {
+                panic!("dutch_start_price must be >= dutch_floor_price");
+            }
+            if start < min_bid {
+                panic!("dutch_start_price must be >= min_bid");
+            }
+
+            match dutch_decay.as_ref().unwrap_or(&DutchAuctionDecay::Linear) {
+                DutchAuctionDecay::None | DutchAuctionDecay::Linear => {}
+                DutchAuctionDecay::Stepped => match dutch_step_count {
+                    Some(0) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
+                    Some(_) => {}
+                    None => panic!("dutch_step_count required for stepped Dutch auctions"),
+                },
+                DutchAuctionDecay::Exponential => {}
+            }
+        }
+
+        let config = AuctionConfig {
+            mode,
+            username_hash: BytesN::from_array(&env, &[0; 32]),
+            start_time,
+            end_time,
+            min_bid,
+            min_increment_bps,
+            dutch_start_price,
+            dutch_floor_price,
+            dutch_decay: dutch_decay.unwrap_or(DutchAuctionDecay::None),
+            dutch_step_count,
+        };
+        let state = AuctionState {
+            config,
+            status: AuctionStatus::Open,
+            highest_bidder: None,
+            highest_bid: 0,
+        };
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+    }
+
+    pub fn set_factory_contract(env: Env, factory: Address) {
+        factory.require_auth();
+        storage::set_factory_contract(&env, &factory);
+    }
+
+    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+        storage::set_liquidation_grace_window(&env, seconds);
+    }
+
+    pub fn get_liquidation_grace_window(env: Env) -> u64 {
+        storage::get_liquidation_grace_window(&env)
+    }
+
+    pub fn close_auction(env: Env, auction_id: Symbol) {
+        let mut state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
+        bump_auction_state_ttl(&env, &auction_id);
+        if state.status == AuctionStatus::Claimed {
+            env.panic_with_error(AuctionError::AlreadyClaimed);
+        }
+        if state.status != AuctionStatus::Open {
+            env.panic_with_error(AuctionError::AuctionNotOpen);
+        }
+        state.status = AuctionStatus::Closed;
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+        publish_auction_closed_event(
+            &env,
+            auction_id,
+            state.highest_bidder.clone(),
+            state.highest_bid,
+        );
+    }
+
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
@@ -196,7 +259,6 @@ impl Auction {
             env.panic_with_error(AuctionError::AuctionNotOpen);
         }
 
-        // Enforce liquidation grace window: no bids until start_time + grace_window.
         let grace_window = storage::get_liquidation_grace_window(&env);
         if grace_window > 0 {
             let earliest_start = state.config.start_time.saturating_add(grace_window);
@@ -207,9 +269,6 @@ impl Auction {
 
         match state.config.mode {
             AuctionMode::English => {
-                // When no bid has been placed yet, enforce the configured min_bid.
-                // Once a bid exists, enforce min_increment_bps over the current
-                // highest bid (≥ 1-stroop forward progress even at 0 bps).
                 let threshold = if state.highest_bid > 0 {
                     min_next_bid(&env, state.highest_bid, state.config.min_increment_bps)
                         .max(state.config.min_bid)
@@ -224,6 +283,13 @@ impl Auction {
                     .storage()
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
+
+                if let Some(ref tkn) = token_addr {
+                    set_reentrancy_guard(&env);
+                    let token_client = token::Client::new(&env, tkn);
+                    token_client.transfer(&bidder, &env.current_contract_address(), &amount);
+                    clear_reentrancy_guard(&env);
+                }
 
                 if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
                     let refund_amount = state.highest_bid;
@@ -278,6 +344,18 @@ impl Auction {
                 }
                 if amount < state.config.min_bid {
                     env.panic_with_error(AuctionError::BidTooLow);
+                }
+
+                let token_addr: Option<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&Symbol::new(&env, "bid_token"));
+
+                if let Some(ref tkn) = token_addr {
+                    set_reentrancy_guard(&env);
+                    let token_client = token::Client::new(&env, tkn);
+                    token_client.transfer(&bidder, &env.current_contract_address(), &amount);
+                    clear_reentrancy_guard(&env);
                 }
 
                 state.highest_bidder = Some(bidder);
@@ -339,23 +417,32 @@ impl Auction {
         publish_default_liquidation_settlement_event(
             &env,
             auction_id,
-            credit_contract,
+            credit_contract.clone(),
             borrower,
             winner,
             state.highest_bid,
         );
 
+        let token_addr: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "bid_token"));
+        if let Some(tkn) = token_addr {
+            if state.highest_bid > 0 {
+                set_reentrancy_guard(&env);
+                let token_client = token::Client::new(&env, &tkn);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &credit_contract,
+                    &state.highest_bid,
+                );
+                clear_reentrancy_guard(&env);
+            }
+        }
+
         state.highest_bid
     }
 
-    /// Claim the escrowed auction proceeds, transferring `highest_bid` to the winner.
-    ///
-    /// # Authorization
-    /// Requires auth from the configured winning bidder (stored as `highest_bidder`).
-    ///
-    /// # Panics
-    /// Panics with one of the [`AuctionError`] variants when the auction is not
-    /// in `Closed` state, already claimed, or has no winner.
     pub fn claim_auction(env: Env, auction_id: Symbol) {
         let state: AuctionState = env
             .storage()
@@ -366,6 +453,16 @@ impl Auction {
 
         if state.status != AuctionStatus::Closed {
             env.panic_with_error(AuctionError::AuctionNotClosed);
+        }
+
+        let settlement_key = AuctionKey::LiquidationSettled(auction_id.clone());
+        let already_settled = env
+            .storage()
+            .persistent()
+            .get::<AuctionKey, bool>(&settlement_key)
+            .unwrap_or(false);
+        if already_settled {
+            env.panic_with_error(AuctionError::AlreadySettled);
         }
 
         let winner = state
@@ -395,6 +492,138 @@ impl Auction {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
+    }
+
+    /// Register the factory contract address.
+    ///
+    /// The caller must authenticate as the address being set as factory.
+    /// Once set, the factory can perform admin operations (init, close,
+    /// settle, configure).
+    pub fn set_factory_contract(env: Env, factory: Address) {
+        factory.require_auth();
+        set_factory_contract(&env, &factory);
+    }
+
+    /// Initialise a new auction in `Open` status.
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    /// Panics with [`AuctionError::NoFactoryContract`] if no factory has
+    /// been configured.
+    pub fn init_auction(
+        env: Env,
+        auction_id: Symbol,
+        mode: AuctionMode,
+        start_time: u64,
+        end_time: u64,
+        min_bid: i128,
+        min_increment_bps: u32,
+        dutch_start_price: Option<i128>,
+        dutch_floor_price: Option<i128>,
+        dutch_decay: DutchAuctionDecay,
+        dutch_step_count: Option<u32>,
+    ) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+
+        if min_increment_bps > 10_000 {
+            env.panic_with_error(AuctionError::InvalidState);
+        }
+
+        if matches!(dutch_decay, DutchAuctionDecay::Stepped) {
+            if dutch_step_count.is_none() || dutch_step_count == Some(0) {
+                env.panic_with_error(AuctionError::InvalidState);
+            }
+        }
+
+        let config = AuctionConfig {
+            mode,
+            username_hash: BytesN::from_array(&env, &[0u8; 32]),
+            start_time,
+            end_time,
+            min_bid,
+            min_increment_bps,
+            dutch_start_price,
+            dutch_floor_price,
+            dutch_decay,
+            dutch_step_count,
+        };
+
+        let state = AuctionState {
+            config,
+            status: AuctionStatus::Open,
+            highest_bidder: None,
+            highest_bid: 0,
+        };
+
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+    }
+
+    /// Close an auction (transition `Open` → `Closed`).
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    ///
+    /// # Panics
+    /// * [`AuctionError::NotFound`] — `auction_id` does not exist.
+    /// * [`AuctionError::AuctionNotOpen`] — auction is already `Closed`.
+    /// * [`AuctionError::AlreadyClaimed`] — auction has already been claimed.
+    pub fn close_auction(env: Env, auction_id: Symbol) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+
+        let mut state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
+        bump_auction_state_ttl(&env, &auction_id);
+
+        match state.status {
+            AuctionStatus::Open => {
+                state.status = AuctionStatus::Closed;
+            }
+            AuctionStatus::Closed => {
+                env.panic_with_error(AuctionError::AuctionNotOpen);
+            }
+            AuctionStatus::Claimed => {
+                env.panic_with_error(AuctionError::AlreadyClaimed);
+            }
+        }
+
+        publish_auction_closed_event(
+            &env,
+            auction_id.clone(),
+            state.highest_bidder.clone(),
+            state.highest_bid,
+        );
+
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+    }
+
+    /// Set the liquidation grace window (in seconds) for newly created auctions.
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
+    ///
+    /// Return the configured liquidation grace window in seconds.
+    ///
+    /// Returns `0` if never configured (no grace period enforced).
+    pub fn get_liquidation_grace_window(env: Env) -> u64 {
+        storage::get_liquidation_grace_window(&env)
+    }
+
+    /// When non-zero, bidders cannot place bids before
+    /// `auction.start_time + grace_window` has elapsed.
+    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+        set_liquidation_grace_window(&env, seconds);
     }
 }
 

@@ -32,12 +32,7 @@ fn test_snapshot_fuzz_dutch_price_boundaries() {
 
                     for (decay, step_count) in decays {
                         let price = compute_dutch_price(
-                            start,
-                            floor,
-                            elapsed,
-                            duration,
-                            &decay,
-                            step_count,
+                            start, floor, elapsed, duration, &decay, step_count,
                         );
 
                         writeln!(

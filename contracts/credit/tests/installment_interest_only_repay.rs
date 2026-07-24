@@ -179,7 +179,7 @@ fn interest_only_does_not_advance() {
     let interest_only = accrued_interest(DRAW_AMOUNT, elapsed);
     assert!(interest_only > 0, "sanity: some interest must have accrued");
 
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &interest_only,
@@ -214,7 +214,7 @@ fn interest_plus_installment_advances_one_period() {
     let interest = accrued_interest(DRAW_AMOUNT, PERIOD);
     let repay_amount = interest + AMOUNT_PER_PERIOD;
 
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -250,7 +250,7 @@ fn partial_principal_does_not_advance() {
     // One stroops below the installment threshold.
     let repay_amount = interest + AMOUNT_PER_PERIOD - 1;
 
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -285,7 +285,7 @@ fn double_principal_advances_only_one_period() {
     // Two installments of principal.
     let repay_amount = interest + 2 * AMOUNT_PER_PERIOD;
 
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -355,7 +355,7 @@ fn sequential_interest_only_then_full_repay() {
     ctx.env.ledger().with_mut(|l| l.timestamp = T0 + midpoint);
 
     let interest_mid = accrued_interest(DRAW_AMOUNT, midpoint);
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &interest_mid,
@@ -381,7 +381,7 @@ fn sequential_interest_only_then_full_repay() {
     let interest_remaining = accrued_interest(DRAW_AMOUNT, PERIOD - midpoint);
     let repay_step2 = interest_remaining + AMOUNT_PER_PERIOD;
 
-    ctx.soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_step2,

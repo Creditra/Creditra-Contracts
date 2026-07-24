@@ -431,6 +431,19 @@ This error protects the protocol from extreme concentration risk by enforcing ad
 
 ---
 
+### 50. CollateralInsufficient (Code: 50)
+**Description:** Collateral is insufficient for the requested operation.
+
+**Trigger Conditions:**
+- An operation requires more collateral than is available or posted
+- A general collateral shortfall where a more specific code
+  (`CollateralRatioBelowMinimum` / `InsufficientCollateralBalance`) does not apply
+
+**Recovery:** Deposit additional collateral or reduce the size of the requested
+operation until collateral coverage is adequate.
+
+---
+
 ## Error Handling Best Practices
 
 ### For SDK Clients

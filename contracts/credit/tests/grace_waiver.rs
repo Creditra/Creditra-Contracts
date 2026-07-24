@@ -116,7 +116,11 @@ fn full_waiver_in_window_emits_event_with_correct_payload() {
         .expect("GraceWaiverReceiptEvent must be emitted for branch 1 FullWaiver");
 
     assert_eq!(evt.borrower, borrower, "borrower address must match");
-    assert_eq!(evt.mode, GraceWaiverMode::FullWaiver, "mode must be FullWaiver");
+    assert_eq!(
+        evt.mode,
+        GraceWaiverMode::FullWaiver,
+        "mode must be FullWaiver"
+    );
     assert_eq!(
         evt.waived_amount, 10_000,
         "waived_amount must equal the full-rate interest for the elapsed period"
@@ -458,7 +462,8 @@ fn event_topic_is_stable() {
         .collect();
 
     assert_eq!(
-        grace_events.len(), 1,
+        grace_events.len(),
+        1,
         "exactly one grace waiver event per accrual window; topics must be (credit, grace_wv)"
     );
 }

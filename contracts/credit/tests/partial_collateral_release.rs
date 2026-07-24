@@ -193,7 +193,10 @@ fn test_partial_release_does_not_affect_utilized_amount() {
     client.partial_release_collateral(&borrower, &1_000);
 
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.utilized_amount, 1_000, "utilized_amount must not change");
+    assert_eq!(
+        line.utilized_amount, 1_000,
+        "utilized_amount must not change"
+    );
 }
 
 // ─── HF computation tests ─────────────────────────────────────────────────────
@@ -462,7 +465,8 @@ fn test_partial_release_rejects_when_accrual_already_increased_utilized() {
 
     // Advance time and trigger accrual so utilized_amount grows past 1_000.
     // At 500 bps APR over 1 Julian year: Δ ≈ 1_000 * 500 / 10_000 * 1 ≈ 50.
-    env.ledger().with_mut(|li| li.timestamp = 1_000 + 31_557_600);
+    env.ledger()
+        .with_mut(|li| li.timestamp = 1_000 + 31_557_600);
     use soroban_sdk::Vec;
     let mut batch = Vec::new(&env);
     batch.push_back(borrower.clone());

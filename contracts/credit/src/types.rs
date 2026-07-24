@@ -8,8 +8,8 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 45-variant `#[repr(u32)]` error enum (discriminants
-//!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
+//! - [`ContractError`] — `#[repr(u32)]` error enum (discriminants pinned by
+//!   `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. See
 //!   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md) for the
 //!   categorized reference with codes and recovery hints.
@@ -157,6 +157,8 @@ pub enum CreditStatus {
 /// | 46   | `CreditLineFrozen`             | Credit line draws are frozen by admin (compliance hold) |
 /// | 47   | `DrawReversalWindowExpired`    | Draw reversal attempted after the allowed window expired |
 /// | 48   | `OriginalDrawNotFound`         | Original draw record not found for reversal |
+/// | 49   | `AttestationBatchNotFound`     | No attestation batch has been committed for the borrower |
+/// | 50   | `CollateralInsufficient`       | Collateral is insufficient for the requested operation |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -189,6 +191,12 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
+    /// Quorum threshold was not met for oracle median calculation.
+    QuorumNotMet = 15,
+    /// The oracle is not approved or was not found in the registry.
+    OracleNotFound = 16,
+    /// The oracle is already approved in the registry.
+    OracleAlreadyExists = 17,
     /// Admin acceptance attempted before the delay window has elapsed.
     AdminAcceptTooEarly = 15,
     /// Borrower is blocked from drawing credit.
@@ -259,6 +267,13 @@ pub enum ContractError {
     OriginalDrawNotFound = 48,
     /// No attestation batch has been committed for the specified borrower.
     AttestationBatchNotFound = 49,
+    /// Collateral is insufficient for the requested operation.
+    ///
+    /// Semantic counterpart to balance- and ratio-specific collateral errors
+    /// ([`Self::InsufficientCollateralBalance`], [`Self::CollateralRatioBelowMinimum`]).
+    /// Use when an operation requires more collateral than is available or posted
+    /// without needing a more specific failure mode.
+    CollateralInsufficient = 50,
 }
 
 /// Stored credit line data for a borrower.

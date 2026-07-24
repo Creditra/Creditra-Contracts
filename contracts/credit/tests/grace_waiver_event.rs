@@ -67,8 +67,7 @@ fn find_grace_waiver(env: &Env) -> Option<GraceWaiverReceiptEvent> {
 ///   full_rate_interest = 10_000, actual = 0 → waived = 10_000.
 #[test]
 fn full_waiver_event_payload_is_correct() {
-    let (env, contract_id, borrower) =
-        setup_full_waiver(GraceWaiverMode::FullWaiver, 0);
+    let (env, contract_id, borrower) = setup_full_waiver(GraceWaiverMode::FullWaiver, 0);
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all(); // clear setup events
@@ -79,7 +78,11 @@ fn full_waiver_event_payload_is_correct() {
         .expect("GraceWaiverReceiptEvent must be emitted for FullWaiver inside grace window");
 
     assert_eq!(evt.borrower, borrower, "borrower field must match");
-    assert_eq!(evt.mode, GraceWaiverMode::FullWaiver, "mode must be FullWaiver");
+    assert_eq!(
+        evt.mode,
+        GraceWaiverMode::FullWaiver,
+        "mode must be FullWaiver"
+    );
     assert_eq!(
         evt.waived_amount, 10_000,
         "waived_amount must equal full-rate interest (10_000)"
@@ -96,8 +99,7 @@ fn full_waiver_event_payload_is_correct() {
 ///   waived_amount         =  8_000
 #[test]
 fn reduced_rate_event_payload_is_correct() {
-    let (env, contract_id, borrower) =
-        setup_full_waiver(GraceWaiverMode::ReducedRate, 200);
+    let (env, contract_id, borrower) = setup_full_waiver(GraceWaiverMode::ReducedRate, 200);
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all();
@@ -108,7 +110,11 @@ fn reduced_rate_event_payload_is_correct() {
         .expect("GraceWaiverReceiptEvent must be emitted for ReducedRate inside grace window");
 
     assert_eq!(evt.borrower, borrower, "borrower field must match");
-    assert_eq!(evt.mode, GraceWaiverMode::ReducedRate, "mode must be ReducedRate");
+    assert_eq!(
+        evt.mode,
+        GraceWaiverMode::ReducedRate,
+        "mode must be ReducedRate"
+    );
     assert_eq!(
         evt.waived_amount, 8_000,
         "waived_amount must equal full_rate_interest - reduced_rate_interest (8_000)"
@@ -121,8 +127,7 @@ fn reduced_rate_event_payload_is_correct() {
 /// This guards against accidental topic renames breaking downstream indexers.
 #[test]
 fn event_topics_are_credit_grace_wv() {
-    let (env, contract_id, borrower) =
-        setup_full_waiver(GraceWaiverMode::FullWaiver, 0);
+    let (env, contract_id, borrower) = setup_full_waiver(GraceWaiverMode::FullWaiver, 0);
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all();

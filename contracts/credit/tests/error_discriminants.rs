@@ -59,7 +59,12 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
-    assert_eq!(ContractError::OracleQuorumNotMet as u32, 45);
+    assert_eq!(ContractError::CloseFactorAboveMax as u32, 45);
+    assert_eq!(ContractError::CreditLineFrozen as u32, 46);
+    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 47);
+    assert_eq!(ContractError::OriginalDrawNotFound as u32, 48);
+    assert_eq!(ContractError::AttestationBatchNotFound as u32, 49);
+    assert_eq!(ContractError::CollateralInsufficient as u32, 50);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -114,7 +119,12 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
-        ContractError::OracleQuorumNotMet as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
+        ContractError::CollateralInsufficient as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -129,8 +139,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 45 variants as of this writing (added 45 for oracle quorum in #630).
-    const EXPECTED_VARIANT_COUNT: usize = 45;
+    // 50 variants as of #740 (CollateralInsufficient = 50).
+    const EXPECTED_VARIANT_COUNT: usize = 50;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -177,7 +187,12 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
-        ContractError::OracleQuorumNotMet as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
+        ContractError::CollateralInsufficient as u32,
     ];
 
     assert_eq!(
@@ -949,13 +964,7 @@ mod error_path_tests {
         let settlement_id = soroban_sdk::Symbol::new(&env, "test_replay");
 
         // First settlement should succeed
-        client.settle_default_liquidation(
-            &borrower,
-            &500_i128,
-            &settlement_id,
-            &10_000_u32,
-            &None,
-        );
+        client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
 
         // Replay with the same settlement_id must fail with AlreadySettled
         let result = client.try_settle_default_liquidation(
