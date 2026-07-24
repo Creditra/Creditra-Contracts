@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Credit line management contract with draw audit trail"
 
+# Standalone package; not a member of the Soroban root workspace.
+[workspace]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

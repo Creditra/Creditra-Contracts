@@ -1,5 +1,6 @@
 pub mod contract;
 pub mod error;
+pub mod errors;
 pub mod msg;
 pub mod state;
 pub mod views;

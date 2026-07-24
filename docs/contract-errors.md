@@ -67,6 +67,7 @@ See the [category enum reference](#contracterrorcategory) below.
 | 43 | `TreasuryTimelockActive` | Misc | The 24-hour treasury withdrawal timelock has not elapsed. |
 | 44 | `TreasuryProposalExists` | Misc | A treasury withdrawal proposal already exists. |
 | 45 | `AlreadySettled` | Lifecycle | The liquidation for this (borrower, settlement_id) pair has already been settled. |
+| 50 | `CollateralInsufficient` | Collateral | Collateral is insufficient for the requested operation. |
 
 ## `ContractErrorCategory`
 
@@ -83,7 +84,7 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 | 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
 | 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive` |
 | 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation` |
-| 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance` |
+| 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance`, `CollateralInsufficient` |
 | 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen` |
 | 10 | Reentrancy | `Reentrancy` |
 | 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists` |
@@ -91,6 +92,6 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 ## Taxonomy
 
 See [`docs/error-taxonomy.md`](./error-taxonomy.md) for the authoritative
-grouping of all 45 variants into **named categories** (Auth, Lifecycle,
+grouping of all 50 variants into **named categories** (Auth, Lifecycle,
 Numeric, Limit, Liquidity, Risk, Oracle, Collateral, Block, Reentrancy, Misc)
 with **SDK-side recovery actions** per category.
