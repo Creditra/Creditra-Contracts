@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Status:** Authoritative for `main` at the time of writing  
 **Scope:** `creditra-credit` (`contracts/credit/`) and `gateway-auction` (`gateway-contract/contracts/auction_contract/`)  
-**Last updated:** 2026-06-28
+**Last updated:** 2026-07-24
 
 ---
 
@@ -86,6 +86,7 @@ noted. Publishers live in `contracts/credit/src/events.rs`.
 | `"drawn"` | `DrawnEvent` | 1. `borrower: Address`, 2. `amount: i128`, 3. `new_utilized_amount: i128` | 1.0.0 | Stable |
 | `"drawn_v2"` | `DrawnEventV2` | 1. `borrower: Address`, 2. `recipient: Address`, 3. `reserve_source: Address`, 4. `amount: i128`, 5. `new_utilized_amount: i128`, 6. `timestamp: u64` | 1.0.0 | Stable |
 | `"repay"` | `RepaymentEvent` | 1. `borrower: Address`, 2. `amount: i128`, 3. `new_utilized_amount: i128` | 1.0.0 | Stable |
+| `"draw_rev"` | `DrawReversedEvent` | 1. `borrower: Address`, 2. `amount: i128`, 3. `original_ts: u64`, 4. `reason_code: u32`, 5. `new_utilized_amount: i128`, 6. `timestamp: u64`, 7. `admin: Address`, 8. `accounting_only: bool` | 1.0.0 | Stable |
 
 ### 4.3 Accrual and fee events
 
@@ -105,7 +106,7 @@ noted. Publishers live in `contracts/credit/src/events.rs`.
 | `"br_freeze"` | `BorrowerFrozenEvent` | 1. `borrower: Address`, 2. `frozen_until: u64`, 3. `ledger: u32` | 1.0.0 | Stable |
 | `"pen_enter"` | `PenaltyRateEnteredEvent` | 1. `borrower: Address`, 2. `base_rate_bps: u32`, 3. `penalty_surcharge_bps: u32`, 4. `effective_rate_bps: u32` | 1.0.0 | Stable |
 | `"pen_exit"` | `PenaltyRateExitedEvent` | 1. `borrower: Address`, 2. `previous_rate_bps: u32`, 3. `new_rate_bps: u32` | 1.0.0 | Stable |
-| `"grace_wv"` | `GraceWaiverAppliedEvent` | 1. `borrower: Address`, 2. `waived_amount: i128`, 3. `mode: GraceWaiverMode` | 1.0.0 | Stable |
+| `"grace_wv"` | `GraceWaiverReceiptEvent` | 1. `borrower: Address`, 2. `waived_amount: i128`, 3. `mode: GraceWaiverMode` | 1.0.0 | Stable |
 
 ### 4.5 Admin and governance events
 
@@ -131,6 +132,7 @@ noted. Publishers live in `contracts/credit/src/events.rs`.
 | Second topic | Payload struct | Field order & types | Version added | Stability |
 |---|---|---|---|---|
 | `"col_dep"` | `CollateralDepositedEvent` | 1. `borrower: Address`, 2. `amount: i128`, 3. `new_balance: i128` | 1.0.0 | Stable |
+| `"col_prel"` | `CollateralPartialReleasedEvent` | 1. `borrower: Address`, 2. `amount_released: i128`, 3. `new_balance: i128`, 4. `health_factor_bps: u32` | 1.0.0 | Stable |
 | `"col_wit"` | `CollateralWithdrawnEvent` | 1. `borrower: Address`, 2. `amount: i128`, 3. `new_balance: i128` | 1.0.0 | Stable |
 
 ### 4.8 Default liquidation events
@@ -163,6 +165,8 @@ noted. Publishers live in `contracts/credit/src/events.rs`.
 | `"fee_bnd"` | `(u32, u32)` | 1. `min_bps: u32`, 2. `max_bps: u32` | 1.0.0 | Stable |
 | `"clsfctr"` | `u32` | Close factor in basis points | 1.0.0 | Stable |
 | `"orc_cfg"` | `(u32, u64)` | 1. `max_deviation_bps: u32`, 2. `max_age_seconds: u64` | 1.0.0 | Stable |
+| `"orc_qcfg"` | `(u32, u32, u64)` | 1. `min_quorum_k: u32`, 2. `max_deviation_bps: u32`, 3. `max_age_seconds: u64` | 1.0.0 | Stable |
+| `"orc_qprc"` | `(i128, u32, u64)` | 1. `price: i128`, 2. `quorum_k: u32`, 3. `timestamp: u64` | 1.0.0 | Stable |
 | `"orc_price"` | `(i128, u64)` | 1. `price: i128`, 2. `timestamp: u64` | 1.0.0 | Stable |
 
 ---
@@ -199,6 +203,7 @@ All topics are published under the `gateway-auction` contract. Publishers live i
 | `("credit","opened")` through `("credit","reinstate")` | 1.0.0 | No | — | Lifecycle lifecycle events share `CreditLineEvent` shape |
 | `("credit","drawn")` | 1.0.0 | No | — | Use `drawn_v2` for richer traceability |
 | `("credit","drawn_v2")` | 1.0.0 | No | — | New default draw event |
+| `("credit","draw_rev")` | 1.0.0 | No | — | Draw reversal event |
 | `("credit","repay")` | 1.0.0 | No | — | |
 | `("credit","accrue")` | 1.0.0 | No | — | |
 | `("credit","fee_accrd")` | 1.1.0 | No | — | Extended with fee split fields in 1.1.0 |
@@ -218,6 +223,7 @@ All topics are published under the `gateway-auction` contract. Publishers live i
 | `("credit","liq_req")` | 1.0.0 | No | — | Raw tuple payload |
 | `("credit","liq_setl")` | 1.0.0 | No | — | |
 | `("credit","col_dep")` | 1.0.0 | No | — | |
+| `("credit","col_prel")` | 1.0.0 | No | — | Partial collateral release (health-factor gated) |
 | `("credit","col_wit")` | 1.0.0 | No | — | |
 | `("credit","tok_resc")` | 1.0.0 | No | — | |
 | `("credit","atst_bat")` | 1.0.0 | No | — | |
@@ -229,6 +235,8 @@ All topics are published under the `gateway-auction` contract. Publishers live i
 | `("credit","clsfctr")` | 1.0.0 | No | — | Raw `u32` payload |
 | `("credit","orc_cfg")` | 1.0.0 | No | — | Raw tuple payload |
 | `("credit","orc_price")` | 1.0.0 | No | — | Raw tuple payload |
+| `("credit","orc_qcfg")` | 1.0.0 | No | — | Oracle quorum config raw tuple payload |
+| `("credit","orc_qprc")` | 1.0.0 | No | — | Oracle quorum resolved price raw tuple payload |
 | `("blk_chg",)` | 1.0.0 | No | — | Single-element topic tuple |
 | `("BID_RFDN","auction")` | 1.0.0 | No | — | |
 | `("AUC_CLOSE","auction")` | 1.0.0 | No | — | |
@@ -274,7 +282,7 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | `publish_borrower_frozen_event` | `("br_freeze",)` |
 | `publish_penalty_rate_entered_event` | `("credit", "pen_enter")` |
 | `publish_penalty_rate_exited_event` | `("credit", "pen_exit")` |
-| `publish_grace_waiver_applied_event` | `("credit", "grace_wv")` |
+| `publish_grace_waiver_receipt_event` | `("credit", "grace_wv")` |
 | `publish_admin_rotation_proposed` | `("credit", "admin_prop")` |
 | `publish_admin_rotation_accepted` | `("credit", "admin_acc")` |
 | `publish_treasury_withdrawal_proposed` | `("credit", "tre_prop")` |
@@ -284,6 +292,7 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | `publish_default_liquidation_settled_event` | `("credit", "liq_setl")` |
 | `publish_borrower_blocked_event` | `("blk_chg",)` |
 | `publish_collateral_deposited_event` | `("credit", "col_dep")` |
+| `publish_collateral_partial_released_event` | `("credit", "col_prel")` |
 | `publish_collateral_withdrawn_event` | `("credit", "col_wit")` |
 | `publish_token_rescued_event` | `("credit", "tok_resc")` |
 | `publish_attestation_batch_committed` | `("credit", "atst_bat")` |
@@ -293,6 +302,8 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | `publish_protocol_fee_bounds_set_event` | `("credit", "fee_bnd")` |
 | `publish_close_factor_bps_set_event` | `("credit", "clsfctr")` |
 | `publish_oracle_config_set_event` | `("credit", "orc_cfg")` |
+| `publish_oracle_quorum_config_set_event` | `("credit", "orc_qcfg")` |
+| `publish_oracle_quorum_price_set_event` | `("credit", "orc_qprc")` |
 | `publish_oracle_price_accepted_event` | `("credit", "orc_price")` |
 | `publish_risk_parameters_updated` | `("credit", "risk_upd")` |
 | `publish_bid_refunded_event` | `("BID_RFDN", "auction")` |
@@ -308,6 +319,7 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | 2026-06-28 | Created `docs/EVENTS_CATALOG.md` | Replaces `docs/events-schema.md` as the single authoritative catalog. `events-schema.md` retained for backward-compatible linking but no longer updated. |
 | 2026-06-28 | Added `AttestationBatchCommittedEvent` and `publish_attestation_batch_committed` to `contracts/credit/src/events.rs` | Fixed broken import in `contracts/credit/src/attestation.rs`. No contract ABI change; event was already emitted by `commit_attestation_batch` but the struct and publisher were missing. |
 | 2026-06-28 | Added `contracts/credit/tests/events_catalog.rs` | New integration test verifying every cataloged event is emitted with the correct topic and payload shape. |
+| 2026-07-24 | Added `DrawReversedEvent`, `CollateralPartialReleasedEvent`, oracle quorum events (`orc_qcfg`, `orc_qprc`) to catalog | Catalog was missing 4 events present in `contracts/credit/src/events.rs`. Fixed `GraceWaiverAppliedEvent` → `GraceWaiverReceiptEvent` naming to match code. Added corresponding tests. |
 
 ---
 
