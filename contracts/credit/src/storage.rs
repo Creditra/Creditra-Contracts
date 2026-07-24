@@ -215,6 +215,13 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
+    /// Admin freeze cooldown duration in seconds.
+    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
+    /// by a minimum interval between successive calls.
+    FreezeCooldownSeconds,
+    /// Ledger timestamp of the last admin freeze or unfreeze action.
+    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
+    LastFreezeTimestamp,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -1359,4 +1366,68 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Addre
 /// Return `true` when `token` is in the collateral allowlist.
 pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
+}
+
+// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+
+/// Get the configured freeze cooldown duration in seconds.
+///
+/// Returns `None` when not configured, meaning no cooldown is enforced.
+/// A value of `0` also means the cooldown is disabled.
+pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::FreezeCooldownSeconds)
+        .filter(|&secs: &u64| secs > 0)
+}
+
+/// Set the freeze cooldown duration in seconds.
+///
+/// Pass `0` or `None`-equivalent behaviour: remove the key entirely,
+/// effectively disabling the cooldown.
+pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FreezeCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+    }
+}
+
+/// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastFreezeTimestamp)
+}
+
+/// Record a freeze/unfreeze action timestamp, but only when a cooldown is
+/// configured. When no cooldown is set, this is a no-op so that timestamps
+/// recorded before cooldown was enabled never retroactively block actions.
+pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
+    if get_freeze_cooldown_seconds(env).is_some() {
+        set_last_freeze_timestamp(env, env.ledger().timestamp());
+    }
+}
+
+/// Check and enforce the admin freeze cooldown.
+///
+/// If a cooldown is configured and the last freeze action was less than
+/// `cooldown_seconds` ago, this function reverts with
+/// [`crate::types::ContractError::FreezeCooldownActive`].
+///
+/// Call this at the start of every admin freeze/unfreeze entrypoint.
+pub fn enforce_freeze_cooldown(env: &Env) {
+    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+        return;
+    };
+    if let Some(last_ts) = get_last_freeze_timestamp(env) {
+        let now = env.ledger().timestamp();
+        if now < last_ts.saturating_add(cooldown_secs) {
+            env.panic_with_error(crate::types::ContractError::FreezeCooldownActive);
+        }
+    }
 }
