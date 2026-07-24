@@ -1169,6 +1169,52 @@ mod tests {
         assert!(result.is_err(), "zero-bid claim should fail");
     }
 
+    #[test]
+    fn claim_auction_transfers_tokens_to_winner() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let winner = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let _factory = setup_factory(&env, &client);
+        let (bid_token, sac) = setup_token(&env, &contract_id, 1000, &[winner.clone()], 0);
+
+        let auction_id = Symbol::new(&env, "claim_transfer");
+
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &u64::MAX,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+        client.place_bid(&auction_id, &winner, &420_i128);
+        client.close_auction(&auction_id);
+
+        let balance_before = sac.balance(&winner);
+        client.claim_auction(&auction_id);
+        let balance_after = sac.balance(&winner);
+
+        assert_eq!(
+            balance_after - balance_before,
+            420_i128,
+            "winner must receive the bid amount after claim"
+        );
+
+        let contract_balance = sac.balance(&contract_id);
+        assert_eq!(
+            contract_balance, 580_i128,
+            "contract balance must decrease by the bid amount"
+        );
+    }
+
     // === Dutch Auction Tests ===
 
     #[test]

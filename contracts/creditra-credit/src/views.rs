@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use crate::error::ContractError;
 use crate::msg::{DenomReserve, DrawAuditTrailResponse, ProofOfReserveResponse};
 use crate::state::{
-    Draw, DrawAuditEntry, CREDIT_LINE_COUNT, CREDIT_LINES, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, DRAWS,
+    BorrowerHealthFactorResponse, CreditLineHealthResponse, Draw, DrawAuditEntry,
+    CREDIT_LINE_COUNT, CREDIT_LINES, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, DRAWS,
 };
 
 /// Returns the full audit trail for one or all draws on a given credit line.
