@@ -24,6 +24,10 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
 
+    if amount <= 0 {
+        clear_reentrancy_guard(&env);
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
 
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
     let reserve_address: Address = env
@@ -46,24 +50,9 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         panic!("Borrower mismatch for credit line");
     }
 
-    if credit_line.status == CreditStatus::Closed {
+    if let Some(status_error) = draw_status_error(credit_line.status) {
         clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
-    if credit_line.status == CreditStatus::Suspended {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is suspended");
-    }
-
-    if credit_line.status == CreditStatus::Defaulted {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is defaulted");
-    }
-
-    if credit_line.status != CreditStatus::Active {
-        clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::InvalidAmount);
+        env.panic_with_error(status_error);
     }
 
     let updated_utilized = credit_line
@@ -401,3 +390,4 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
 
     clear_reentrancy_guard(&env);
 }
+
