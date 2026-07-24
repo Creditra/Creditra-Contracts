@@ -106,7 +106,7 @@ mod oracles;
 mod amount_validation_tests;
 mod attestation;
 mod auth;
-mod borrow;
+pub mod borrow;
 mod collateral;
 mod config;
 pub mod events;
