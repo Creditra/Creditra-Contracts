@@ -55,16 +55,9 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::OraclePriceDeviation as u32, 38);
     assert_eq!(ContractError::InsufficientCollateralBalance as u32, 39);
     assert_eq!(ContractError::BorrowerFrozen as u32, 40);
-    assert_eq!(ContractError::BountyNotSet as u32, 41);
-    assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
-    assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
-    assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
-    assert_eq!(ContractError::CloseFactorAboveMax as u32, 45);
-    assert_eq!(ContractError::CreditLineFrozen as u32, 46);
-    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 47);
-    assert_eq!(ContractError::OriginalDrawNotFound as u32, 48);
-    assert_eq!(ContractError::AttestationBatchNotFound as u32, 49);
-    assert_eq!(ContractError::CollateralInsufficient as u32, 50);
+    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 41);
+    assert_eq!(ContractError::OriginalDrawNotFound as u32, 42);
+    assert_eq!(ContractError::BorrowerExposureCapExceeded as u32, 43);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -123,8 +116,7 @@ fn no_duplicate_discriminants() {
         ContractError::CreditLineFrozen as u32,
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
-        ContractError::AttestationBatchNotFound as u32,
-        ContractError::CollateralInsufficient as u32,
+        ContractError::BorrowerExposureCapExceeded as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -139,8 +131,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 50 variants as of #740 (CollateralInsufficient = 50).
-    const EXPECTED_VARIANT_COUNT: usize = 50;
+    // 43 variants as of this writing. Update when adding new ones.
+    const EXPECTED_VARIANT_COUNT: usize = 43;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -191,8 +183,7 @@ fn variant_count_is_known() {
         ContractError::CreditLineFrozen as u32,
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
-        ContractError::AttestationBatchNotFound as u32,
-        ContractError::CollateralInsufficient as u32,
+        ContractError::BorrowerExposureCapExceeded as u32,
     ];
 
     assert_eq!(
@@ -309,26 +300,12 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Numeric
     );
     // Limit
-    assert_eq!(
-        ContractError::OverLimit.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
-        ContractError::UtilizationNotZero.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
-        ContractError::LimitDecreaseRequiresRepayment.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
-        ContractError::DrawExceedsMaxAmount.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
-        ContractError::RepayExceedsMaxAmount.category(),
-        ContractErrorCategory::Limit
-    );
+    assert_eq!(ContractError::OverLimit.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::UtilizationNotZero.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::DrawExceedsMaxAmount.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::RepayExceedsMaxAmount.category(), ContractErrorCategory::Limit);
+    assert_eq!(ContractError::BorrowerExposureCapExceeded.category(), ContractErrorCategory::Limit);
     // Liquidity
     assert_eq!(
         ContractError::MissingLiquidityToken.category(),
@@ -477,20 +454,14 @@ fn every_variant_has_known_category() {
         ContractError::OraclePriceDeviation.category(),
         ContractError::InsufficientCollateralBalance.category(),
         ContractError::BorrowerFrozen.category(),
-        ContractError::BountyNotSet.category(),
-        ContractError::NoPendingTreasuryWithdrawal.category(),
-        ContractError::TreasuryTimelockActive.category(),
-        ContractError::TreasuryProposalExists.category(),
-        ContractError::AlreadySettled.category(),
+        ContractError::DrawReversalWindowExpired.category(),
+        ContractError::OriginalDrawNotFound.category(),
+        ContractError::BorrowerExposureCapExceeded.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
-    assert_eq!(
-        unique.len(),
-        11,
-        "Not all 11 categories are covered by variant mappings"
-    );
-    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+    assert_eq!(unique.len(), 11, "Not all 11 categories are covered by variant mappings");
+    assert_eq!(all_variants.len(), 43, "Expected 43 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

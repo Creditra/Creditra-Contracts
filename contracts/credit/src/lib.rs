@@ -122,6 +122,7 @@ mod penalties;
 #[cfg(test)]
 mod penalties_tests;
 mod query;
+pub mod limits;
 mod risk;
 mod views;
 pub use crate::risk::compute_rate_from_score;
@@ -481,10 +482,11 @@ impl Credit {
             }
         }
 
-        // Enforce the borrower's maximum outstanding exposure across all lines.
-        if !limits::enforce_borrower_exposure_cap(&env, &borrower, updated_utilized) {
+        // Per-borrower exposure cap: block draws that would push this
+        // borrower's utilization above the configured absolute maximum.
+        if let Err(e) = limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized) {
             clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::OverLimit);
+            env.panic_with_error(e);
         }
 
         // Global protocol exposure cap: block draws that would push total
@@ -843,16 +845,35 @@ impl Credit {
         storage_get_utilization_cap_bps(&env, &borrower)
     }
 
-    /// Set the maximum outstanding exposure for a borrower across all credit lines.
+    /// Set a per-borrower maximum exposure cap (admin only).
     ///
-    /// This cap is enforced on every draw. Passing `0` removes the cap.
-    pub fn set_borrower_exposure_cap(env: Env, borrower: Address, amount: i128) {
-        limits::set_borrower_exposure_cap(&env, &borrower, amount);
+    /// When set, `draw_credit` rejects any draw where `utilized_amount` would
+    /// exceed this absolute cap, regardless of the borrower's credit limit.
+    /// This complements the per-borrower utilization ratio cap and the global
+    /// exposure cap by providing a hard ceiling on concentration risk.
+    ///
+    /// # Parameters
+    /// - `borrower`: The borrower whose cap to configure.
+    /// - `cap`: Maximum total borrowed amount allowed. Pass `0` to remove the cap.
+    ///
+    /// # Authorization
+    /// Requires admin privileges.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::InvalidAmount`] if `cap` is negative.
+    pub fn set_borrower_exposure_cap(env: Env, borrower: Address, cap: i128) {
+        require_admin_auth(&env);
+        if cap < 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        crate::storage::set_max_borrower_exposure(&env, &borrower, cap);
     }
 
-    /// Get the configured borrower exposure cap, if any.
+    /// Get the per-borrower maximum exposure cap, if set.
+    ///
+    /// Returns `Some(cap)` when a cap is configured, `None` when uncapped.
     pub fn get_borrower_exposure_cap(env: Env, borrower: Address) -> Option<i128> {
-        limits::get_borrower_exposure_cap(&env, &borrower)
+        crate::storage::get_max_borrower_exposure(&env, &borrower)
     }
 
     /// Commit to a VRF output for a borrower's credit score derivation (admin only).
