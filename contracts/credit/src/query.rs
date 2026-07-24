@@ -1,6 +1,5 @@
 use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
 use crate::types::{CreditLineData, ProtocolSummary, RepaymentSchedule, CreditStatus, GracePeriodConfig};
-use crate::storage::{grace_period_key};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -171,8 +170,7 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     };
 
-    let grace_cfg: Option<GracePeriodConfig> =
-        env.storage().instance().get(&grace_period_key(&env));
+    let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
     let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
