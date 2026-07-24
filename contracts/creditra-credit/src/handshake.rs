@@ -93,10 +93,7 @@ pub fn set_protocol_version(deps: DepsMut, version: ProtocolVersion) -> StdResul
 ///
 /// Each version must be wire-compatible with the other
 /// (same major version in both directions).
-pub fn verify_peer_version(
-    our_version: &ProtocolVersion,
-    peer_version: &ProtocolVersion,
-) -> bool {
+pub fn verify_peer_version(our_version: &ProtocolVersion, peer_version: &ProtocolVersion) -> bool {
     our_version.is_compatible_with(peer_version) && peer_version.is_compatible_with(our_version)
 }
 
@@ -248,7 +245,9 @@ mod tests {
             initialize_version(deps.as_mut().storage).unwrap();
 
             let custom = v(2, 0);
-            PROTOCOL_VERSION.save(deps.as_mut().storage, &custom).unwrap();
+            PROTOCOL_VERSION
+                .save(deps.as_mut().storage, &custom)
+                .unwrap();
 
             initialize_version(deps.as_mut().storage).unwrap();
             let stored = PROTOCOL_VERSION.load(deps.as_ref().storage).unwrap();

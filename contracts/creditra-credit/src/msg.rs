@@ -1,7 +1,6 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Timestamp, Uint128};
 
-use crate::handshake::ProtocolVersion;
 use crate::state::DrawAuditEvent;
 
 #[cw_serde]
@@ -47,9 +46,9 @@ pub enum QueryMsg {
         draw_id: Option<u64>,
     },
     #[returns(ProofOfReserveResponse)]
-    ProofOfReserve {
-        denom: Option<String>,
-    },
+    ProofOfReserve { denom: Option<String> },
+    #[returns(BorrowerHealthFactorResponse)]
+    BorrowerHealthFactor { borrower: String },
 }
 
 #[cw_serde]
@@ -87,5 +86,21 @@ pub struct DenomReserve {
 }
 
 #[cw_serde]
-pub struct MigrateMsg {}
+pub struct BorrowerHealthFactorResponse {
+    pub borrower: String,
+    pub credit_lines: Vec<CreditLineHealthResponse>,
+}
 
+#[cw_serde]
+pub struct CreditLineHealthResponse {
+    pub credit_line_id: u64,
+    pub collateral_denom: String,
+    pub collateral_amount: Uint128,
+    pub credit_denom: String,
+    pub credit_amount: Uint128,
+    pub utilized_amount: Uint128,
+    pub health_factor_bps: u32,
+}
+
+#[cw_serde]
+pub struct MigrateMsg {}
