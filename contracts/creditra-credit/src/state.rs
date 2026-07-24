@@ -93,3 +93,38 @@ pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
 /// creates a unique id; subsequent look-ups are O(1) with no collision risk
 /// because each `Addr` serialises to a distinct canonical bech32 byte string.
 pub const BORROWER_TO_ID: Map<Addr, u64> = Map::new("bid");
+
+/// Multi-oracle quorum configuration for redundancy median resolution.
+#[cw_serde]
+pub struct OracleQuorumConfig {
+    /// Minimum number of submitted prices that must agree within
+    /// `max_deviation_bps` to form a valid quorum.
+    pub min_quorum_k: u32,
+    /// Maximum allowed price deviation between the highest and lowest prices
+    /// in the qualifying quorum window, in basis points (e.g. 500 = 5%).
+    pub max_deviation_bps: u32,
+    /// Maximum age of the stored quorum price in seconds before it is
+    /// considered stale for settlement purposes.
+    pub max_age_seconds: u64,
+}
+
+/// Stored quorum-resolved canonical price and its ledger timestamp.
+#[cw_serde]
+pub struct OraclePriceRecord {
+    /// The resolved canonical price from the last quorum computation.
+    pub price: i128,
+    /// Ledger timestamp (seconds) when the price was resolved.
+    pub timestamp: u64,
+}
+
+/// Maximum number of oracle price feeds accepted per `resolve_quorum_price` call.
+///
+/// Limits gas consumption and keeps the stack buffer within WASM limits.
+/// Adjust after gas profiling if the protocol sources more feeds.
+pub const MAX_ORACLE_FEEDS: usize = 20;
+
+/// Storage key for the oracle quorum configuration.
+pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg");
+
+/// Storage key for the last resolved oracle price record.
+pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");

@@ -6,9 +6,11 @@ use cosmwasm_std::{
 use crate::error::ContractError;
 use crate::handshake::{self, ProtocolVersion};
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use crate::oracles;
 use crate::state::{
-    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, BORROWER_TO_ID, CONFIG, CREDIT_LINES,
-    CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
+    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
+    CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
+    ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
 
@@ -67,6 +69,14 @@ pub fn execute(
         } => execute_add_audit_memo(deps, env, info, credit_line_id, draw_id, memo),
         ExecuteMsg::UpdateProtocolVersion { major, minor } => {
             execute_update_protocol_version(deps, info, major, minor)
+        }
+        ExecuteMsg::SetOracleQuorumConfig {
+            min_quorum_k,
+            max_deviation_bps,
+            max_age_seconds,
+        } => execute_set_oracle_quorum_config(deps, info, min_quorum_k, max_deviation_bps, max_age_seconds),
+        ExecuteMsg::SubmitOraclePrices { prices } => {
+            execute_submit_oracle_prices(deps, env, info, prices)
         }
     }
 }
@@ -266,6 +276,79 @@ pub fn execute_update_protocol_version(
         .add_attribute("minor", minor.to_string()))
 }
 
+/// Configure the multi-oracle quorum parameters (admin only).
+pub fn execute_set_oracle_quorum_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+
+    if min_quorum_k < 2 {
+        return Err(ContractError::InvalidAmount);
+    }
+    if max_deviation_bps > 10_000 {
+        return Err(ContractError::InvalidAmount);
+    }
+    if max_age_seconds == 0 {
+        return Err(ContractError::InvalidAmount);
+    }
+
+    let qcfg = crate::state::OracleQuorumConfig {
+        min_quorum_k,
+        max_deviation_bps,
+        max_age_seconds,
+    };
+    ORACLE_QUORUM_CONFIG.save(deps.storage, &qcfg)?;
+
+    Ok(Response::default()
+        .add_attribute("action", "set_oracle_quorum_config")
+        .add_attribute("min_quorum_k", min_quorum_k.to_string())
+        .add_attribute("max_deviation_bps", max_deviation_bps.to_string())
+        .add_attribute("max_age_seconds", max_age_seconds.to_string()))
+}
+
+/// Submit N oracle prices and resolve a quorum canonical price (admin only).
+pub fn execute_submit_oracle_prices(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    prices: Vec<i128>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+
+    let qcfg = ORACLE_QUORUM_CONFIG
+        .may_load(deps.storage)?
+        .ok_or(ContractError::OraclePriceInvalid)?;
+
+    if prices.len() > crate::state::MAX_ORACLE_FEEDS {
+        return Err(ContractError::OraclePriceInvalid);
+    }
+
+    let canonical_price = oracles::resolve_quorum_price(&prices, &qcfg)?;
+    let now = env.block.time.seconds();
+
+    let record = OraclePriceRecord {
+        price: canonical_price,
+        timestamp: now,
+    };
+    ORACLE_PRICE_RECORD.save(deps.storage, &record)?;
+
+    Ok(Response::default()
+        .add_attribute("action", "submit_oracle_prices")
+        .add_attribute("canonical_price", canonical_price.to_string())
+        .add_attribute("min_quorum_k", qcfg.min_quorum_k.to_string())
+        .add_attribute("timestamp", now.to_string()))
+}
+
 fn append_audit_entry(
     deps: DepsMut,
     env: Env,
@@ -315,6 +398,23 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::BorrowerHealthFactor { borrower } => {
             let resp = views::query_borrower_health_factor(deps, borrower)
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetOracleQuorumConfig {} => {
+            let config = ORACLE_QUORUM_CONFIG
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::OracleQuorumConfigResponse { config };
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetOraclePrice {} => {
+            let record = ORACLE_PRICE_RECORD
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::OraclePriceResponse {
+                price: record.as_ref().map(|r| r.price),
+                timestamp: record.as_ref().map(|r| r.timestamp),
+            };
             to_json_binary(&resp)
         }
     }
