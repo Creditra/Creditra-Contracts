@@ -189,6 +189,12 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
+    /// Quorum threshold was not met for oracle median calculation.
+    QuorumNotMet = 15,
+    /// The oracle is not approved or was not found in the registry.
+    OracleNotFound = 16,
+    /// The oracle is already approved in the registry.
+    OracleAlreadyExists = 17,
     /// Admin acceptance attempted before the delay window has elapsed.
     AdminAcceptTooEarly = 15,
     /// Borrower is blocked from drawing credit.
