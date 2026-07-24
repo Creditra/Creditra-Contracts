@@ -24,6 +24,15 @@ pub enum ContractError {
     #[error("CollateralInsufficient")]
     CollateralInsufficient,
 
+    /// Borrower's collateral balance is below the requested withdrawal amount.
+    ///
+    /// Raised when a borrower attempts to withdraw more collateral than their
+    /// current deposited balance. Distinct from `CollateralInsufficient` (which
+    /// covers general insufficiency) and `CollateralRatioBelowMinimum` (which
+    /// covers health-factor constraints).
+    #[error("InsufficientCollateralBalance")]
+    InsufficientCollateralBalance,
+
     /// The requested amount is invalid (e.g., zero or negative where positive is expected).
     #[error("InvalidAmount")]
     InvalidAmount,
@@ -87,5 +96,22 @@ mod tests {
         assert_eq!(err.to_string(), "InvalidAmount");
         assert_eq!(err, ContractError::InvalidAmount);
         assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn insufficient_collateral_balance_display_and_equality() {
+        let err = ContractError::InsufficientCollateralBalance;
+        assert_eq!(err.to_string(), "InsufficientCollateralBalance");
+        assert_eq!(err, ContractError::InsufficientCollateralBalance);
+        assert_ne!(err, ContractError::CollateralInsufficient);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn insufficient_collateral_balance_is_distinct_from_collateral_insufficient() {
+        let balance_err = ContractError::InsufficientCollateralBalance;
+        let insufficient_err = ContractError::CollateralInsufficient;
+        assert_ne!(balance_err, insufficient_err);
+        assert_ne!(balance_err.to_string(), insufficient_err.to_string());
     }
 }
