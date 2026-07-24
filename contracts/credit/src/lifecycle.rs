@@ -718,15 +718,6 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
-/// Reinstate a defaulted credit line to Active or Suspended (admin only).
-///
-/// Allowed only when status is Defaulted. Transition: Defaulted → Active or Suspended.
-pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
-/// Apply auction liquidation proceeds to a defaulted credit line (admin only).
-///
-/// This hook is accounting-only and intentionally performs no token transfer.
-/// Off-chain orchestration is responsible for ensuring auction proceeds are settled
-/// into protocol custody before this function is called.
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
@@ -769,12 +760,6 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
-    if target_status != CreditStatus::Active && target_status != CreditStatus::Suspended {
-        panic!("target_status must be Active or Suspended");
-    }
-
-    credit_line.status = target_status;
-    env.storage().persistent().set(&borrower, &credit_line);
     // Compute the maximum recoverable amount for this settlement
     let target_recovery = credit_line
         .utilized_amount
@@ -782,13 +767,11 @@ pub fn settle_default_liquidation(
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
         / 10_000;
 
-    if recovered_amount > target_recovery {
-        env.panic_with_error(ContractError::OverLimit);
-    }
+    let actual_recovery = recovered_amount.min(target_recovery);
 
     credit_line.utilized_amount = credit_line
         .utilized_amount
-        .checked_sub(recovered_amount)
+        .checked_sub(actual_recovery)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
     let previous_status = credit_line.status;
@@ -821,7 +804,7 @@ pub fn settle_default_liquidation(
         DefaultLiquidationSettledEvent {
             borrower,
             settlement_id,
-            recovered_amount,
+            recovered_amount: actual_recovery,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
             close_factor_bps,
