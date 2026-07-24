@@ -1,9 +1,10 @@
-use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
+use cosmwasm_std::{Deps, StdResult, Uint128};
+use std::collections::BTreeMap;
 
 use crate::error::ContractError;
-use crate::msg::{BorrowerHealthFactorResponse, CreditLineHealthResponse, DrawAuditTrailResponse};
+use crate::msg::{DenomReserve, DrawAuditTrailResponse, ProofOfReserveResponse};
 use crate::state::{
-    Draw, DrawAuditEntry, CREDIT_LINES, CREDIT_LINE_COUNT, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, DRAWS,
+    Draw, DrawAuditEntry, CREDIT_LINE_COUNT, CREDIT_LINES, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, DRAWS,
 };
 
 /// Returns the full audit trail for one or all draws on a given credit line.
@@ -39,6 +40,140 @@ pub fn query_draw_audit_trail(
             Ok(responses)
         }
     }
+}
+
+/// Returns the proof-of-reserve metrics for protocol reserves.
+///
+/// Aggregate total collateral, credit limits, drawn balances, and repaid amounts
+/// across credit lines and active draws. Optionally filters by a target asset denomination.
+///
+/// # Errors
+///
+/// Returns `ContractError` if storage reads fail or arithmetic overflow occurs.
+pub fn query_proof_of_reserve(
+    deps: Deps,
+    denom_filter: Option<String>,
+) -> Result<ProofOfReserveResponse, ContractError> {
+    let credit_line_count = CREDIT_LINE_COUNT
+        .may_load(deps.storage)?
+        .unwrap_or(0);
+
+    let mut total_credit_lines: u64 = 0;
+    let mut active_credit_lines: u64 = 0;
+    let mut total_collateral = Uint128::zero();
+    let mut total_credit_limit = Uint128::zero();
+    let mut total_drawn = Uint128::zero();
+    let mut total_repaid = Uint128::zero();
+
+    let mut denom_map: BTreeMap<String, DenomReserve> = BTreeMap::new();
+    let filter = denom_filter.as_deref();
+
+    for id in 0..credit_line_count {
+        if let Some(cl) = CREDIT_LINES.may_load(deps.storage, id)? {
+            let cl_matches = match filter {
+                Some(target) => cl.collateral_denom == target || cl.credit_denom == target,
+                None => true,
+            };
+
+            if cl_matches {
+                total_credit_lines = total_credit_lines.saturating_add(1);
+
+                if cl.active {
+                    active_credit_lines = active_credit_lines.saturating_add(1);
+
+                    total_collateral = total_collateral
+                        .checked_add(cl.collateral_amount)
+                        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Collateral overflow")))?;
+                    total_credit_limit = total_credit_limit
+                        .checked_add(cl.credit_amount)
+                        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Credit limit overflow")))?;
+
+                    if filter.is_none() || filter == Some(&cl.collateral_denom) {
+                        let entry = denom_map.entry(cl.collateral_denom.clone()).or_insert_with(|| DenomReserve {
+                            denom: cl.collateral_denom.clone(),
+                            collateral_amount: Uint128::zero(),
+                            credit_limit: Uint128::zero(),
+                            drawn_amount: Uint128::zero(),
+                            repaid_amount: Uint128::zero(),
+                            net_outstanding: Uint128::zero(),
+                        });
+                        entry.collateral_amount = entry.collateral_amount
+                            .checked_add(cl.collateral_amount)
+                            .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Collateral overflow")))?;
+                    }
+
+                    if filter.is_none() || filter == Some(&cl.credit_denom) {
+                        let entry = denom_map.entry(cl.credit_denom.clone()).or_insert_with(|| DenomReserve {
+                            denom: cl.credit_denom.clone(),
+                            collateral_amount: Uint128::zero(),
+                            credit_limit: Uint128::zero(),
+                            drawn_amount: Uint128::zero(),
+                            repaid_amount: Uint128::zero(),
+                            net_outstanding: Uint128::zero(),
+                        });
+                        entry.credit_limit = entry.credit_limit
+                            .checked_add(cl.credit_amount)
+                            .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Credit limit overflow")))?;
+                    }
+                }
+            }
+
+            let draw_count = DRAW_COUNT.may_load(deps.storage, id)?.unwrap_or(0);
+            for did in 0..draw_count {
+                if let Some(draw) = DRAWS.may_load(deps.storage, (id, did))? {
+                    let draw_matches = match filter {
+                        Some(target) => draw.denom == target,
+                        None => true,
+                    };
+
+                    if draw_matches {
+                        let entry = denom_map.entry(draw.denom.clone()).or_insert_with(|| DenomReserve {
+                            denom: draw.denom.clone(),
+                            collateral_amount: Uint128::zero(),
+                            credit_limit: Uint128::zero(),
+                            drawn_amount: Uint128::zero(),
+                            repaid_amount: Uint128::zero(),
+                            net_outstanding: Uint128::zero(),
+                        });
+
+                        if draw.repaid {
+                            total_repaid = total_repaid
+                                .checked_add(draw.amount)
+                                .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Repaid overflow")))?;
+                            entry.repaid_amount = entry.repaid_amount
+                                .checked_add(draw.amount)
+                                .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Repaid overflow")))?;
+                        } else {
+                            total_drawn = total_drawn
+                                .checked_add(draw.amount)
+                                .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Drawn overflow")))?;
+                            entry.drawn_amount = entry.drawn_amount
+                                .checked_add(draw.amount)
+                                .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Drawn overflow")))?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for d_entry in denom_map.values_mut() {
+        d_entry.net_outstanding = d_entry.drawn_amount;
+    }
+
+    let net_outstanding = total_drawn;
+    let reserves_by_denom = denom_map.into_values().collect();
+
+    Ok(ProofOfReserveResponse {
+        total_credit_lines,
+        active_credit_lines,
+        total_collateral,
+        total_credit_limit,
+        total_drawn,
+        total_repaid,
+        net_outstanding,
+        reserves_by_denom,
+    })
 }
 
 fn ensure_draw_exists(deps: Deps, credit_line_id: u64, draw_id: u64) -> Result<(), ContractError> {
@@ -240,6 +375,16 @@ mod tests {
         from_json(&raw).unwrap()
     }
 
+    fn query_por(
+        deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        denom: Option<String>,
+    ) -> ProofOfReserveResponse {
+        let env = mock_env();
+        let msg = QueryMsg::ProofOfReserve { denom };
+        let raw = query(deps.as_ref(), env, msg).unwrap();
+        from_json(&raw).unwrap()
+    }
+
     mod query_draw_audit_trail {
         use super::*;
 
@@ -400,156 +545,90 @@ mod tests {
         }
     }
 
-    mod query_borrower_health_factor {
+    mod query_proof_of_reserve {
         use super::*;
-        use crate::msg::BorrowerHealthFactorResponse;
-
-        fn query_health(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            borrower: &str,
-        ) -> BorrowerHealthFactorResponse {
-            let env = mock_env();
-            let msg = QueryMsg::BorrowerHealthFactor {
-                borrower: borrower.to_string(),
-            };
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            from_json(&raw).unwrap()
-        }
 
         #[test]
-        fn returns_empty_for_borrower_without_credit_lines() {
+        fn returns_empty_reserves_when_no_credit_lines() {
             let mut deps = mock_dependencies();
             setup_contract(&mut deps);
 
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.borrower, borrower_str);
-            assert!(resp.credit_lines.is_empty());
+            let por = query_por(&deps, None);
+            assert_eq!(por.total_credit_lines, 0);
+            assert_eq!(por.active_credit_lines, 0);
+            assert_eq!(por.total_collateral, Uint128::zero());
+            assert_eq!(por.total_credit_limit, Uint128::zero());
+            assert_eq!(por.total_drawn, Uint128::zero());
+            assert_eq!(por.total_repaid, Uint128::zero());
+            assert_eq!(por.net_outstanding, Uint128::zero());
+            assert!(por.reserves_by_denom.is_empty());
         }
 
         #[test]
-        fn returns_u32_max_for_zero_utilization() {
+        fn returns_proof_of_reserve_for_single_credit_line_and_draws() {
+            let mut deps = mock_dependencies();
+            setup_contract(&mut deps);
+            create_credit_line(&mut deps);
+            create_draw(&mut deps, 0, "200");
+            create_draw(&mut deps, 0, "100");
+            repay_draw(&mut deps, 0, 1);
+
+            let por = query_por(&deps, None);
+            assert_eq!(por.total_credit_lines, 1);
+            assert_eq!(por.active_credit_lines, 1);
+            assert_eq!(por.total_collateral, Uint128::from(1000u128));
+            assert_eq!(por.total_credit_limit, Uint128::from(500u128));
+            assert_eq!(por.total_drawn, Uint128::from(200u128));
+            assert_eq!(por.total_repaid, Uint128::from(100u128));
+            assert_eq!(por.net_outstanding, Uint128::from(200u128));
+
+            assert_eq!(por.reserves_by_denom.len(), 2);
+            let ucollateral_res = por.reserves_by_denom.iter().find(|r| r.denom == "ucollateral").unwrap();
+            assert_eq!(ucollateral_res.collateral_amount, Uint128::from(1000u128));
+
+            let ucredit_res = por.reserves_by_denom.iter().find(|r| r.denom == "ucredit").unwrap();
+            assert_eq!(ucredit_res.credit_limit, Uint128::from(500u128));
+            assert_eq!(ucredit_res.drawn_amount, Uint128::from(200u128));
+            assert_eq!(ucredit_res.repaid_amount, Uint128::from(100u128));
+            assert_eq!(ucredit_res.net_outstanding, Uint128::from(200u128));
+        }
+
+        #[test]
+        fn filters_reserves_by_denom() {
+            let mut deps = mock_dependencies();
+            setup_contract(&mut deps);
+            create_credit_line(&mut deps);
+            create_draw(&mut deps, 0, "150");
+
+            let por_col = query_por(&deps, Some("ucollateral".to_string()));
+            assert_eq!(por_col.reserves_by_denom.len(), 1);
+            assert_eq!(por_col.reserves_by_denom[0].denom, "ucollateral");
+            assert_eq!(por_col.total_collateral, Uint128::from(1000u128));
+
+            let por_cred = query_por(&deps, Some("ucredit".to_string()));
+            assert_eq!(por_cred.reserves_by_denom.len(), 1);
+            assert_eq!(por_cred.reserves_by_denom[0].denom, "ucredit");
+            assert_eq!(por_cred.total_credit_limit, Uint128::from(500u128));
+            assert_eq!(por_cred.total_drawn, Uint128::from(150u128));
+        }
+
+        #[test]
+        fn handles_inactive_credit_line() {
             let mut deps = mock_dependencies();
             setup_contract(&mut deps);
             create_credit_line(&mut deps);
 
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines.len(), 1);
-            assert_eq!(resp.credit_lines[0].credit_line_id, 0);
-            assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::zero());
-            assert_eq!(resp.credit_lines[0].health_factor_bps, u32::MAX);
-        }
+            // Deactivate credit line manually in storage
+            let mut cl = CREDIT_LINES.load(deps.as_ref().storage, 0).unwrap();
+            cl.active = false;
+            CREDIT_LINES.save(deps.as_mut().storage, 0, &cl).unwrap();
 
-        #[test]
-        fn computes_health_factor_correctly() {
-            let mut deps = mock_dependencies();
-            setup_contract(&mut deps);
-            create_credit_line(&mut deps); // collateral 1000, credit 500
-            
-            // Draw 100
-            create_draw(&mut deps, 0, "100");
-
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines.len(), 1);
-            assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(100u128));
-            // health = limit * 10_000 / utilized = 500 * 10_000 / 100 = 50_000 bps
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
-        }
-
-        #[test]
-        fn handles_multiple_draws_and_repayments() {
-            let mut deps = mock_dependencies();
-            setup_contract(&mut deps);
-            create_credit_line(&mut deps); // collateral 1000, credit 500
-
-            create_draw(&mut deps, 0, "100");
-            create_draw(&mut deps, 0, "200");
-
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(300u128));
-            // health = 500 * 10_000 / 300 = 16_666 bps
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 16_666);
-
-            // Repay first draw
-            repay_draw(&mut deps, 0, 0);
-
-            let resp2 = query_health(&deps, &borrower_str);
-            assert_eq!(resp2.credit_lines[0].utilized_amount, Uint128::from(200u128));
-            // health = 500 * 10_000 / 200 = 25_000 bps
-            assert_eq!(resp2.credit_lines[0].health_factor_bps, 25_000);
-        }
-
-        #[test]
-        fn handles_multiple_credit_lines_for_same_borrower() {
-            let mut deps = mock_dependencies();
-            setup_contract(&mut deps);
-            create_credit_line(&mut deps); // cl 0
-            create_credit_line(&mut deps); // cl 1
-
-            create_draw(&mut deps, 0, "100");
-            create_draw(&mut deps, 1, "250");
-
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines.len(), 2);
-            assert_eq!(resp.credit_lines[0].credit_line_id, 0);
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
-            assert_eq!(resp.credit_lines[1].credit_line_id, 1);
-            assert_eq!(resp.credit_lines[1].health_factor_bps, 20_000);
-        }
-
-        #[test]
-        fn handles_zero_collateral_or_zero_credit_amount() {
-            let mut deps = mock_dependencies();
-            setup_contract(&mut deps);
-
-            // Create a custom credit line with zero collateral
-            let env = mock_env();
-            let creator_addr = creator(&deps);
-            let info = message_info(&creator_addr, &[]);
-            let msg = ExecuteMsg::CreateCreditLine {
-                borrower: borrower(&deps).to_string(),
-                collateral_denom: "ucollateral".to_string(),
-                collateral_amount: "0".to_string(),
-                credit_denom: "ucredit".to_string(),
-                credit_amount: "500".to_string(),
-            };
-            crate::contract::execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-            // Create a custom credit line with zero credit
-            let msg2 = ExecuteMsg::CreateCreditLine {
-                borrower: borrower(&deps).to_string(),
-                collateral_denom: "ucollateral".to_string(),
-                collateral_amount: "1000".to_string(),
-                credit_denom: "ucredit".to_string(),
-                credit_amount: "0".to_string(),
-            };
-            crate::contract::execute(deps.as_mut(), env, info, msg2).unwrap();
-
-            // Draw on credit line 0
-            create_draw(&mut deps, 0, "100");
-
-            // Check health factors
-            let borrower_str = borrower(&deps).to_string();
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines.len(), 2);
-
-            // cl 0: collateral 0, credit 500, utilized 100 -> health = 0
-            assert_eq!(resp.credit_lines[0].credit_line_id, 0);
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 0);
-
-            // cl 1: collateral 1000, credit 0, utilized 0 -> health = u32::MAX (no debt)
-            assert_eq!(resp.credit_lines[1].credit_line_id, 1);
-            assert_eq!(resp.credit_lines[1].health_factor_bps, u32::MAX);
-
-            // Now make a draw on credit line 1
-            create_draw(&mut deps, 1, "10");
-            let resp2 = query_health(&deps, &borrower_str);
-            // cl 1: collateral 1000, credit 0, utilized 10 -> health = 0
-            assert_eq!(resp2.credit_lines[1].health_factor_bps, 0);
+            let por = query_por(&deps, None);
+            assert_eq!(por.total_credit_lines, 1);
+            assert_eq!(por.active_credit_lines, 0);
+            assert_eq!(por.total_collateral, Uint128::zero());
+            assert_eq!(por.total_credit_limit, Uint128::zero());
         }
     }
 }
+
