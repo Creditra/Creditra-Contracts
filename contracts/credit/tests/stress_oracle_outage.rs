@@ -6,8 +6,8 @@
 //! advances while the contract continues to accept the last known good price
 //! as long as the stored price remains within the configured freshness window.
 
-use creditra_credit::{Credit, CreditClient};
 use creditra_credit::types::{CreditStatus, OracleConfig};
+use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol};
 
@@ -62,7 +62,10 @@ fn oracle_outage_recovers_across_many_ledgers() {
 
     let first = open_and_default(&client, &env, &contract_id, 500);
     client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &Some(1_000_i128));
-    assert_eq!(client.get_credit_line(&first).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&first).unwrap().status,
+        CreditStatus::Closed
+    );
 
     let outage_cycles = 25;
     let step = 300;
@@ -76,7 +79,10 @@ fn oracle_outage_recovers_across_many_ledgers() {
             &sid(&env, &format!("s{}", cycle)),
             &Some(1_000_i128),
         );
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Closed
+        );
     }
 }
 

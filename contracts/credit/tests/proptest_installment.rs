@@ -332,8 +332,12 @@ mod edge_cases {
         ctx.env
             .ledger()
             .set_timestamp(INITIAL_TIMESTAMP + elapsed_seconds);
-        ctx.client()
-            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &100_i128,
+            &86_400_u64,
+            &INITIAL_NEXT_DUE,
+        );
 
         let interest = accrued_interest(DRAW_AMOUNT, elapsed_seconds);
         assert!(interest > 0);
@@ -352,8 +356,12 @@ mod edge_cases {
         ctx.env
             .ledger()
             .set_timestamp(INITIAL_TIMESTAMP + elapsed_seconds);
-        ctx.client()
-            .set_repayment_schedule(&ctx.borrower, &100_i128, &86_400_u64, &INITIAL_NEXT_DUE);
+        ctx.client().set_repayment_schedule(
+            &ctx.borrower,
+            &100_i128,
+            &86_400_u64,
+            &INITIAL_NEXT_DUE,
+        );
 
         let repay = accrued_interest(DRAW_AMOUNT, elapsed_seconds) + 100;
         fund_repayment(&ctx, repay);

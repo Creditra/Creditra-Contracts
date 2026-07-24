@@ -129,7 +129,8 @@ fn e2e_oracle_outage_stale_blocks_settlement() {
     );
 
     // Advance time beyond max_age — price is now stale.
-    env.ledger().with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
 
     let b2 = open_draw_default(&d, &env, 200);
     d.client.settle_default_liquidation(
@@ -190,7 +191,8 @@ fn e2e_oracle_stale_recovery_via_config_update() {
     );
 
     // Advance beyond max_age.
-    env.ledger().with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
 
     let b2 = open_draw_default(&d, &env, 300);
 
@@ -365,7 +367,8 @@ fn e2e_oracle_outage_does_not_affect_active_credit_lines() {
     );
 
     // Advance time beyond max_age — oracle is now stale.
-    env.ledger().with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp = 1_000 + ONE_HOUR + 1);
 
     // Active borrower can still draw and repay.
     d.client.draw_credit(&active, &100_i128);

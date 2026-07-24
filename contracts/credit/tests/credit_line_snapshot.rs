@@ -89,9 +89,7 @@ fn collateral_balance_zero_before_deposit() {
 
     client.open_credit_line(&borrower, &10_000_i128, &0_u32, &0_u32);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert_eq!(snap.collateral_balance, 0);
 }
@@ -109,9 +107,7 @@ fn collateral_balance_reflects_deposit() {
     client.deposit_collateral(&borrower, &3_000);
 
     let _ = contract_id; // used indirectly by client
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert_eq!(snap.collateral_balance, 3_000);
 }
@@ -124,9 +120,7 @@ fn health_factor_is_max_with_zero_utilization() {
 
     client.open_credit_line(&borrower, &10_000_i128, &0_u32, &0_u32);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert_eq!(snap.health_factor_bps, u32::MAX);
 }
@@ -147,9 +141,7 @@ fn health_factor_computed_with_debt_and_collateral() {
     // health_bps = 3_000 * 100_000_000 / (1_000 * 15_000) = 300_000_000 / 15_000_000 = 20
     client.draw_credit(&borrower, &1_000);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert_eq!(snap.line.utilized_amount, 1_000);
     assert_eq!(snap.collateral_balance, 3_000);
@@ -165,9 +157,7 @@ fn repayment_schedule_is_none_when_not_set() {
 
     client.open_credit_line(&borrower, &10_000_i128, &0_u32, &0_u32);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert!(snap.repayment_schedule.is_none());
 }
@@ -182,9 +172,7 @@ fn repayment_schedule_present_when_set() {
     // amount_per_period=500, period_seconds=86_400, first_due_ts=100_000
     client.set_repayment_schedule(&borrower, &500_i128, &86_400_u64, &100_000_u64);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
     let sched = snap.repayment_schedule.expect("schedule must be Some");
 
     assert_eq!(sched.amount_per_period, 500);
@@ -203,9 +191,7 @@ fn is_delinquent_false_without_schedule() {
     client.deposit_collateral(&borrower, &3_000);
     client.draw_credit(&borrower, &1_000);
 
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
     assert!(!snap.is_delinquent);
 }
@@ -227,9 +213,7 @@ fn is_delinquent_false_before_grace_window_expires() {
     client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &9_900_u64);
 
     // At ts=10_000, delinquent_after=10_020 → not yet delinquent
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
     assert!(!snap.is_delinquent);
 }
 
@@ -250,9 +234,7 @@ fn is_delinquent_true_past_grace_window() {
     client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &9_900_u64);
 
     // At ts=10_000 > 9_960 → delinquent
-    let snap = client
-        .get_credit_line_snapshot(&borrower)
-        .expect("Some");
+    let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
     assert!(snap.is_delinquent);
 }
 
