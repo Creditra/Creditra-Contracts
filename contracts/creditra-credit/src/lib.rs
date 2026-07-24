@@ -1,6 +1,6 @@
 pub mod contract;
 pub mod error;
-pub mod errors;
+pub mod handshake;
 pub mod msg;
 pub mod state;
 pub mod views;
