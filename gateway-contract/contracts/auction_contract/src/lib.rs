@@ -44,10 +44,80 @@ fn min_next_bid(env: &Env, highest_bid: i128, min_increment_bps: u32) -> i128 {
 
 /// Computes the current Dutch auction price based on elapsed time.
 ///
-/// - [`DutchAuctionDecay::None`] / [`DutchAuctionDecay::Linear`]: `p(t) = start - (start - floor) * t / T`
-/// - [`DutchAuctionDecay::Stepped`]: equal time buckets, discrete downward steps.
-/// - [`DutchAuctionDecay::Exponential`]: ~1% multiplicative decay per time unit,
-///   capped at 100 iterations for safety.
+/// # Overview
+///
+/// In a Dutch (descending) auction the price starts at `start_price` and
+/// decreases over time until it reaches `floor_price` at the end of the
+/// auction window.  This function returns the price that a qualifying bid
+/// must meet (or exceed) at a given point in time.
+///
+/// # Parameters
+///
+/// | Parameter      | Description |
+/// |----------------|-------------|
+/// | `start_price`  | Price at the beginning of the auction (`t = 0`). Must be ≥ `floor_price`. |
+/// | `floor_price`  | Minimum price the auction can reach. The returned price is clamped to this value. |
+/// | `elapsed_time` | Seconds elapsed since the auction started. |
+/// | `duration`     | Total auction duration in seconds. |
+/// | `decay`        | Shape of the price-decay curve (see [`DutchAuctionDecay`]). |
+/// | `step_count`   | Required only for [`DutchAuctionDecay::Stepped`]; ignored for all other decay kinds. |
+///
+/// # Decay curves
+///
+/// ## Linear (`DutchAuctionDecay::Linear` or `DutchAuctionDecay::None`)
+///
+/// ```text
+/// p(t) = start_price − ⌊(start_price − floor_price) × t / duration⌋
+/// ```
+///
+/// The price drops at a constant rate from `start_price` to `floor_price`.
+/// `DutchAuctionDecay::None` is treated identically to `Linear` (the
+/// default when no explicit decay is configured).
+///
+/// ## Stepped (`DutchAuctionDecay::Stepped`)
+///
+/// ```text
+/// p(t) = start_price − ⌊(start_price − floor_price) × ⌊t × steps / duration⌋ / steps⌋
+/// ```
+///
+/// The price decreases in `step_count` equal discrete buckets.  Within
+/// each bucket the price is constant; at the boundary it drops by one
+/// step.  `step_count` **must** be `Some(n)` where `n > 0`.
+///
+/// ## Exponential (`DutchAuctionDecay::Exponential`)
+///
+/// ```text
+/// factor(t)  = 0.99 ^ min(t, 100)
+/// drop(t)    = (start_price − floor_price) × (1 − factor(t))
+/// p(t)       = start_price − drop(t)
+/// ```
+///
+/// Approximately 1 % multiplicative decay per time unit.  The
+/// iteration count is capped at 100 to bound gas consumption.
+///
+/// # Return value
+///
+/// The current Dutch auction price, guaranteed to be ≥ `floor_price`.
+///
+/// # Edge cases
+///
+/// * `duration == 0` → returns `floor_price` immediately (avoids division by zero).
+/// * `elapsed_time >= duration` → returns `floor_price` (auction window expired).
+/// * If `start_price < floor_price`, the function **panics** — callers
+///   must validate parameters at auction creation time.
+///
+/// # Examples
+///
+/// ```
+/// use gateway_auction::DutchAuctionDecay;
+///
+/// // Linear: price at start
+/// assert_eq!(compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Linear, None), 1000);
+/// // Linear: price halfway
+/// assert_eq!(compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Linear, None), 750);
+/// // Linear: price at end
+/// assert_eq!(compute_dutch_price(1000, 500, 100, 100, &DutchAuctionDecay::Linear, None), 500);
+/// ```
 pub fn compute_dutch_price(
     start_price: i128,
     floor_price: i128,
