@@ -22,7 +22,7 @@
 //!
 //! # How
 //!
-//! All topic strings are encoded with `symbol_short!` (= 9 characters) so
+//! All topic strings are encoded with `symbol_short!` (≤ 9 characters) so
 //! the on-chain encoding is the cheap `SCV_SYMBOL` variant. Payload structs
 //! use plain Soroban host types (`Address`, `i128`, `u32`, `u64`,
 //! `CreditStatus`) so off-chain indexers can decode them with just the
@@ -584,7 +584,22 @@ pub fn publish_grace_waiver_receipt_event(
     );
 }
 
+/// Emitted when an attestation batch is committed for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    pub borrower: soroban_sdk::Address,
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    pub count: u32,
+}
 
+/// Publish an attestation batch committed event.
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "att_batch")),
+        event,
+    );
+}
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]
@@ -651,4 +666,3 @@ pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCom
         event,
     );
 }
-
