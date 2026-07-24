@@ -117,7 +117,7 @@ pub mod instrument;
 mod lifecycle;
 mod oracles;
 mod limits;
-mod math_utils;
+pub mod math_utils;
 mod penalties;
 #[cfg(test)]
 mod penalties_tests;
@@ -185,7 +185,7 @@ use crate::events::{
     InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
     TreasuryWithdrawalProposedEvent,
 };
-use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
+use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
     get_borrower_by_credit_line_id, get_borrower_frozen_until,
