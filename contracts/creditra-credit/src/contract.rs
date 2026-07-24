@@ -256,6 +256,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
             to_json_binary(&resp)
         }
+        QueryMsg::BorrowerHealthFactor { borrower } => {
+            let resp = views::query_borrower_health_factor(deps, borrower)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            to_json_binary(&resp)
+        }
     }
 }
 
