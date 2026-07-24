@@ -237,7 +237,7 @@ pub fn query_borrower_health_factor(
 
     for id in 0..count {
         if let Some(cl) = CREDIT_LINES.may_load(deps.storage, id)? {
-            if cl.borrower == borrower_addr {
+            if cl.active && cl.borrower == borrower_addr {
                 // Compute utilized amount (sum of all draws that are not repaid)
                 let draw_count = DRAW_COUNT.may_load(deps.storage, id)?.unwrap_or(0);
                 let mut utilized_amount = Uint128::zero();
@@ -806,6 +806,27 @@ mod tests {
             assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
             assert_eq!(resp.credit_lines[1].credit_line_id, 1);
             assert_eq!(resp.credit_lines[1].health_factor_bps, 20_000);
+        }
+
+        #[test]
+        fn excludes_inactive_credit_lines() {
+            let mut deps = mock_dependencies();
+            setup_contract(&mut deps);
+            create_credit_line(&mut deps); // cl 0
+            create_credit_line(&mut deps); // cl 1
+
+            create_draw(&mut deps, 0, "100");
+            create_draw(&mut deps, 1, "250");
+
+            let mut inactive = CREDIT_LINES.load(deps.as_ref().storage, 1).unwrap();
+            inactive.active = false;
+            CREDIT_LINES.save(deps.as_mut().storage, 1, &inactive).unwrap();
+
+            let borrower_str = borrower(&deps).to_string();
+            let resp = query_health(&deps, &borrower_str);
+            assert_eq!(resp.credit_lines.len(), 1);
+            assert_eq!(resp.credit_lines[0].credit_line_id, 0);
+            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
         }
 
         #[test]
