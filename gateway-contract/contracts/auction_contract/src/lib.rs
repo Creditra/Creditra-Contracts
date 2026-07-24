@@ -344,7 +344,7 @@ impl Auction {
                     min_next_bid(&env, state.highest_bid, state.config.min_increment_bps)
                         .max(state.config.min_bid)
                 } else {
-                    state.config.min_bid
+                    min_next_bid(&env, state.config.min_bid, state.config.min_increment_bps)
                 };
                 if amount < threshold {
                     env.panic_with_error(AuctionError::BidTooLow);

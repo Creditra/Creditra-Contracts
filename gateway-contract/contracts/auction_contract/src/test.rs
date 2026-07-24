@@ -187,6 +187,49 @@ mod tests {
     }
 
     #[test]
+    fn first_bid_below_min_bid_bps_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let _factory = setup_factory(&env, &client);
+
+        let auction_id = Symbol::new(&env, "min_bid_bps_test");
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &1000,
+            &100_i128,
+            &1000_u32, // 10% min_increment_bps
+            &None,
+            &None,
+            &DutchAuctionDecay::None,
+            &None,
+        );
+
+        // First bid must be at least min_bid + (min_bid * 10%) = 100 + 10 = 110.
+        // A bid of 109 should fail.
+        let result = client.try_place_bid(&auction_id, &alice, &109_i128);
+        assert!(result.is_err());
+        let contract_err = result.unwrap_err().unwrap();
+        assert_eq!(contract_err, AuctionError::BidTooLow.into());
+
+        // A bid of 110 should succeed.
+        setup_token(&env, &contract_id, 1000, &[alice.clone()], 1000);
+        client.place_bid(&auction_id, &alice, &110_i128);
+
+        let stored_after: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_after.highest_bidder.unwrap(), alice);
+        assert_eq!(stored_after.highest_bid, 110_i128);
+    }
+
+    #[test]
     fn fuzz_bid_sequence_invariants_deterministic() {
         let env = Env::default();
         env.mock_all_auths();
