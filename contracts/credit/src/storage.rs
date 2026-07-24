@@ -59,8 +59,8 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, GracePeriodConfig,
+    RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
@@ -729,6 +729,12 @@ pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
 }
 
+/// Return the configured grace-period policy and refresh instance TTL.
+pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
+    bump_instance_ttl(env);
+    env.storage().instance().get(&grace_period_key(env))
+}
+
 /// Persistent storage key that acts as a replay guard for a default liquidation settlement.
 ///
 /// A settlement is idempotent: the first call sets the key, subsequent calls
@@ -1158,6 +1164,7 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::PenaltySurchargeBps)

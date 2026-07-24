@@ -1039,9 +1039,7 @@ impl Credit {
     }
 
     pub fn get_grace_period_config(env: Env) -> Option<GracePeriodConfig> {
-        env.storage()
-            .instance()
-            .get(&crate::storage::grace_period_key(&env))
+        crate::storage::get_grace_period_config(&env)
     }
 
     /// Set the structured late-fee configuration (flat amount or APR-based).
