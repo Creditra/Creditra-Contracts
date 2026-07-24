@@ -49,7 +49,9 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
+
+pub use crate::penalties::LateFeeConfig;
 
 /// Status of a borrower's credit line.
 ///
@@ -537,4 +539,22 @@ pub struct DrawsFreezeState {
     pub frozen: bool,
     /// Structured reason recorded when the freeze was last activated.
     pub reason: FreezeReason,
+}
+
+/// A page of credit lines for enumeration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Credit lines on this page.
+    pub credit_lines: Vec<CreditLineData>,
+    /// Cursor for the next page, or `None` if this is the last page.
+    pub next_cursor: Option<u32>,
+}
+
+/// A snapshot of a credit line (pure read, no accrual).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineSnapshot {
+    /// The credit line data.
+    pub line: CreditLineData,
 }

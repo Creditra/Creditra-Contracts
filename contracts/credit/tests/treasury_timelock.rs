@@ -37,21 +37,22 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
     let token_address = token_id.address();
 
     client.set_liquidity_token(&token_address);
-    client.set_liquidity_source(&reserve);
     client.set_treasury(&admin, &treasury);
     client.set_protocol_fee_bps(&1_000); // 10 % fee so repayments build a balance
 
     // Open a line, draw, advance time so interest accrues, then repay with fee.
     client.open_credit_line(&borrower, &10_000_i128, &1_000_u32, &50_u32);
     let asset = token::StellarAssetClient::new(&env, &token_address);
-    asset.mint(&contract_id, &10_000_i128); // fund reserve
+    asset.mint(&contract_id, &10_000_i128); // fund contract (default liquidity source)
+    asset.mint(&borrower, &15_000_i128);    // fund borrower for collateral
+    client.deposit_collateral(&borrower, &15_000_i128);
     client.draw_credit(&borrower, &10_000_i128);
 
     env.ledger().with_mut(|l| l.timestamp = 31_536_000); // +1 year
 
     let repay = 11_000_i128;
     asset.mint(&borrower, &repay);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &u32::MAX);
+    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &env.ledger().sequence().checked_add(100_000).unwrap());
     client.repay_credit(&borrower, &repay);
 
     // Sanity: contract holds a treasury balance now.

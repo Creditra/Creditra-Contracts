@@ -96,7 +96,6 @@
 
 mod handshake;
 mod accrual;
-mod handshake;
 #[cfg(test)]
 mod accrual_tests;
 mod oracles;
@@ -110,7 +109,6 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
-mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
@@ -129,8 +127,6 @@ pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 
 
 #[cfg(test)]
@@ -151,22 +147,16 @@ mod prorate_interest_proofs;
 
 use crate::auth::require_admin_auth;
 use crate::attestation::AttestationBatch;
-use crate::events::publish_protocol_fee_bps_set_event;
-use crate::events::publish_protocol_fee_bounds_set_event;
-use crate::events::publish_close_factor_bps_set_event;
-use crate::events::publish_paused_event;
 use crate::types::ProofOfReserve;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event, publish_close_factor_bps_set_event,
     publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_drawn_event, publish_interest_accrued_event,     publish_oracle_config_set_event, publish_oracle_quorum_config_set_event,
+    publish_oracle_quorum_price_set_event, publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
     publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    publish_protocol_fee_bps_set_event, publish_protocol_fee_bounds_set_event,
-    publish_close_factor_bps_set_event, publish_paused_event,
     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
     TreasuryWithdrawalProposedEvent,
@@ -191,11 +181,12 @@ use crate::storage::{
     clear_pending_treasury_withdrawal, get_pending_treasury_withdrawal,
     set_pending_treasury_withdrawal,
 };
-use crate::storage::{get_oracle_config, set_oracle_config};
+use crate::penalties::LateFeeConfig;
 use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage, CreditStatus,
+    GracePeriodConfig, GraceWaiverMode, OracleConfig, OracleQuorumConfig, ProtocolConfig,
+    ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig,
+    TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -705,16 +696,6 @@ impl Credit {
         rate_change_min_interval: u64,
     ) {
         risk::set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)
-    }
-
-    /// Set a per-borrower interest rate floor (admin only).
-    pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u32>) {
-        risk::set_borrower_rate_floor(env, borrower, floor_bps)
-    }
-
-    /// Set a per-borrower interest rate ceiling (admin only).
-    pub fn set_borrower_rate_ceiling(env: Env, borrower: Address, ceiling_bps: Option<u32>) {
-        risk::set_borrower_rate_ceiling(env, borrower, ceiling_bps)
     }
 
     /// Set the penalty surcharge in basis points for delinquent lines (admin only).
@@ -1429,7 +1410,7 @@ impl Credit {
     pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
         require_admin_auth(&env);
         if weight_bps > 10_000 {
-            env.panic_with_error(ContractError::InvalidRiskWeight);
+            env.panic_with_error(ContractError::InvalidAmount);
         }
         crate::storage::set_collateral_risk_weight_bps(&env, &asset, weight_bps);
     }
@@ -2225,10 +2206,6 @@ impl Credit {
 
         crate::storage::set_paused(&env, paused);
         publish_paused_event(&env, paused);
-    }
-
-    pub fn set_late_fee_flat(env: Env, fee: i128) {
-        crate::storage::set_late_fee_flat(&env, fee)
     }
 
     pub fn freeze_draws(env: Env) {
@@ -7041,4 +7018,3 @@ mod test_max_draw_amount {
 
 #[cfg(test)]
 mod test_ttl;
-mod handshake;

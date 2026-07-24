@@ -93,8 +93,8 @@ use crate::events::{
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
-    liquidation_settlement_key, persist_credit_line,
+    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
+    get_repayment_schedule, persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
 };
@@ -154,98 +154,6 @@ pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
         }
     }
 }
-
-/// Open a new credit line for a borrower (admin only).
-///
-/// # Parameters
-/// - `env`: The Soroban environment.
-/// - `min`: Minimum allowed credit limit. Must be >= 0.
-/// - `max`: Maximum allowed credit limit. Must be >= min.
-///
-/// # Authorization
-/// Requires admin authorization via `require_admin_auth()`.
-///
-/// # Panics
-/// - `ContractError::InvalidAmount` if `min < 0`
-/// - `ContractError::LimitOutOfBounds` if `max < min`
-///
-/// # Storage
-/// - Writes `min` to instance storage under `DataKey::MinCreditLimit`
-/// - Writes `max` to instance storage under `DataKey::MaxCreditLimit`
-///
-/// # Example
-/// ```ignore
-/// set_credit_limit_bounds(env, 1_000, 1_000_000_000);
-/// // Now all credit lines must have limits between 1,000 and 1,000,000,000
-/// ```
-pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
-    assert_not_paused(&env);
-    require_admin_auth(&env);
-
-    // Validate minimum is non-negative
-    if min < 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    // Validate max >= min
-    if max < min {
-        env.panic_with_error(ContractError::LimitOutOfBounds);
-    }
-
-    // Store bounds in instance storage
-    set_min_credit_limit(&env, min);
-    set_max_credit_limit(&env, max);
-}
-
-/// Get the configured global credit limit bounds.
-///
-/// Returns the minimum and maximum allowed credit limits, if configured.
-///
-/// # Returns
-/// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
-///
-/// # Storage
-/// - Reads from instance storage keys `DataKey::MinCreditLimit` and `DataKey::MaxCreditLimit`
-pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
-    let min = get_min_credit_limit(&env);
-    let max = get_max_credit_limit(&env);
-    (min, max)
-}
-
-/// Validate that a credit limit falls within configured bounds.
-///
-/// # Parameters
-/// - `env`: The Soroban environment.
-/// - `credit_limit`: The credit limit to validate.
-///
-/// # Panics
-/// - `ContractError::LimitOutOfBounds` if the limit is outside configured bounds
-///
-/// # Behavior
-/// - If bounds are not configured, validation passes (no restrictions)
-/// - If only min is configured, validates `credit_limit >= min`
-/// - If only max is configured, validates `credit_limit <= max`
-/// - If both are configured, validates `min <= credit_limit <= max`
-pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
-    let min = get_min_credit_limit(env);
-    let max = get_max_credit_limit(env);
-
-    // Check minimum bound if configured
-    if let Some(min_limit) = min {
-        if credit_limit < min_limit {
-            env.panic_with_error(ContractError::LimitOutOfBounds);
-        }
-    }
-
-    // Check maximum bound if configured
-    if let Some(max_limit) = max {
-        if credit_limit > max_limit {
-            env.panic_with_error(ContractError::LimitOutOfBounds);
-        }
-    }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     let stored_line: CreditLineData = env
@@ -325,53 +233,6 @@ pub fn set_repayment_schedule(
     );
 }
 
-/// Advance the next due timestamp when a qualifying repayment covers one or more installments.
-/// Also charges a flat late fee per overdue installment when `LateFeeFlat` is configured.
-pub fn advance_repayment_schedule_after_repay(env: &Env, borrower: &Address, amount: i128) {
-    if amount <= 0 {
-        return;
-    }
-
-    let Some(mut schedule) = storage_get_repayment_schedule(env, borrower) else {
-        return;
-    };
-
-    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
-        return;
-    }
-
-    let installments_paid = (amount / schedule.amount_per_period) as u64;
-    if installments_paid == 0 {
-        return;
-    }
-
-    // ── Late-fee surcharge ──────────────────────────────────────────────────
-    let late_fee = storage_get_late_fee_flat(env);
-    if late_fee > 0 {
-        let now = env.ledger().timestamp();
-        for i in 0_u64..installments_paid {
-            let due_ts = schedule
-                .next_due_ts
-                .saturating_add(i.saturating_mul(schedule.period_seconds));
-            if now > due_ts {
-                storage_add_treasury_balance(env, late_fee);
-                publish_late_fee_charged_event(
-                    env,
-                    LateFeeChargedEvent {
-                        borrower: borrower.clone(),
-                        fee: late_fee,
-                        installment_index: i.saturating_add(1),
-                    },
-                );
-            }
-        }
-    }
-
-    let advance_seconds = schedule.period_seconds.saturating_mul(installments_paid);
-    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
-    storage_set_repayment_schedule(env, borrower, &schedule);
-}
-
 /// Set the flat late fee per missed installment (admin only).
 ///
 /// When non-zero, this fee is charged to `TreasuryBalance` for each
@@ -389,14 +250,14 @@ pub fn set_late_fee_flat(env: Env, fee: i128) {
     if fee < 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }
-    storage_set_late_fee_flat(&env, fee);
+    crate::storage::set_late_fee_flat(&env, fee);
 }
 
 /// Get the configured flat late fee per missed installment.
 ///
 /// Returns `0` if not configured (no flat late fee).
 pub fn get_late_fee_flat(env: Env) -> i128 {
-    storage_get_late_fee_flat(&env)
+    crate::storage::get_late_fee_flat(&env)
 }
 
 /// Open a new credit line.
@@ -582,7 +443,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let _previous_utilized = credit_line.utilized_amount;
+    let previous_utilized = credit_line.utilized_amount;
 
     // Idempotent: already closed → nothing to do.
     if credit_line.status == CreditStatus::Closed {
@@ -607,7 +468,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         panic!("unauthorized");
     }
 
-    let _previous_status = credit_line.status;
+    let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
     persist_credit_line(
         &env,
@@ -675,7 +536,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         .persistent()
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let _previous_utilized = stored_line.utilized_amount;
+    let previous_utilized = stored_line.utilized_amount;
 
     if stored_line.status == CreditStatus::Closed {
         env.panic_with_error(ContractError::CreditLineClosed);
@@ -693,7 +554,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    let _previous_status = credit_line.status;
+    let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
     persist_credit_line(
         &env,
@@ -745,9 +606,9 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
+    let settlement_key = crate::storage::DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
     if env.storage().persistent().has(&settlement_key) {
-        env.panic_with_error(ContractError::AlreadySettled);
+        env.panic_with_error(ContractError::AlreadyInitialized);
     }
 
     let stored_line: CreditLineData = env
@@ -877,52 +738,6 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
 // ── repayment schedule helpers ───────────────────────────────────────────────
 
-/// Set or replace a borrower's installment repayment schedule (admin only).
-///
-/// # Parameters
-/// - `borrower`: Borrower whose credit line schedule is being configured.
-/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
-/// - `period_seconds`: Duration of each installment period in seconds; must be positive.
-/// - `first_due_ts`: Timestamp at which the first installment is due.
-///
-/// # Panics
-/// - [`ContractError::InvalidAmount`] when `amount_per_period <= 0` or
-///   `period_seconds == 0`.
-/// - [`ContractError::CreditLineNotFound`] when `borrower` has no credit line.
-///
-/// # Authorization
-/// Requires admin authorization because the schedule controls delinquency and
-/// due-date state for the borrower.
-pub fn set_repayment_schedule(
-    env: &Env,
-    borrower: Address,
-    amount_per_period: i128,
-    period_seconds: u64,
-    first_due_ts: u64,
-) {
-    assert_not_paused(env);
-    require_admin_auth(env);
-
-    if amount_per_period <= 0 || period_seconds == 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    if !env.storage().persistent().has(&borrower) {
-        env.panic_with_error(ContractError::CreditLineNotFound);
-    }
-
-    let schedule = RepaymentSchedule {
-        amount_per_period,
-        period_seconds,
-        next_due_ts: first_due_ts,
-    };
-    storage_set_repayment_schedule(env, &borrower, &schedule);
-    // Setting a schedule is an interaction with the credit line, so keep the
-    // credit-line entry live as well (the schedule entry is bumped by the
-    // storage setter itself).
-    bump_credit_line_ttl(env, &borrower);
-}
-
 /// Advance a borrower's installment schedule after a repayment.
 ///
 /// `effective_repay` is the amount actually applied to the debt after capping
@@ -966,6 +781,29 @@ pub fn advance_repayment_schedule_after_repay(
     let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
     schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
     storage_set_repayment_schedule(env, borrower, &schedule);
+}
+
+/// Forgive a portion of a borrower's outstanding debt (admin only).
+pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    if amount <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+    let previous_utilized = credit_line.utilized_amount;
+    let previous_status = credit_line.status;
+    let forgiven = amount.min(credit_line.utilized_amount);
+    credit_line.utilized_amount = credit_line.utilized_amount.saturating_sub(forgiven);
+    if credit_line.accrued_interest > 0 {
+        let interest_relief = amount.saturating_sub(forgiven).min(credit_line.accrued_interest);
+        credit_line.accrued_interest = credit_line.accrued_interest.saturating_sub(interest_relief);
+    }
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(previous_status));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

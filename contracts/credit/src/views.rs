@@ -7,8 +7,8 @@
 //! storage layer when the persistent entry nears expiry.
 
 use crate::storage::{get_borrower_by_credit_line_id, get_credit_line, MAX_ENUMERATION_LIMIT};
-use crate::types::{CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
-use soroban_sdk::{Env, Vec};
+use crate::types::{CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
+use soroban_sdk::{Address, Env, Vec};
 
 // ── Protocol-level views ─────────────────────────────────────────────────────
 
@@ -135,4 +135,9 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         credit_lines,
         next_cursor,
     }
+}
+
+/// Return a snapshot of a borrower's credit line (pure read).
+pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<CreditLineSnapshot> {
+    crate::storage::get_credit_line(&env, &borrower).map(|line| CreditLineSnapshot { line })
 }

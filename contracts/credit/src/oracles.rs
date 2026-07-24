@@ -17,7 +17,7 @@
 //! 4. For each window, check whether the highest price deviates from the
 //!    lowest by no more than `max_deviation_bps` of the lowest.
 //! 5. Return the **lower-median** of the first qualifying window.
-//! 6. Panic with [`crate::types::ContractError::OracleQuorumNotMet`] if no
+//! 6. Panic with [`crate::types::ContractError::OraclePriceInvalid`] if no
 //!    window qualifies.
 //!
 //! ## Security properties
@@ -60,7 +60,7 @@ pub const MAX_ORACLE_FEEDS: u32 = 20;
 /// - The price list exceeds [`MAX_ORACLE_FEEDS`].
 /// - Any individual price is ≤ 0.
 ///
-/// Panics with [`ContractError::OracleQuorumNotMet`] when:
+/// Panics with [`ContractError::OraclePriceInvalid`] when:
 /// - `min_quorum_k < 2` (a single feed is not a meaningful quorum).
 /// - `min_quorum_k > n` (cannot form a window larger than the input).
 /// - No K-wide window in the sorted array satisfies the deviation bound.
@@ -73,7 +73,7 @@ pub fn resolve_quorum_price(env: &Env, prices: &Vec<i128>, cfg: &OracleQuorumCon
 
     let k = cfg.min_quorum_k;
     if k < 2 || k > n {
-        env.panic_with_error(ContractError::OracleQuorumNotMet);
+        env.panic_with_error(ContractError::OraclePriceInvalid);
     }
 
     // Copy prices into a fixed stack buffer and validate positivity.
@@ -117,7 +117,7 @@ pub fn resolve_quorum_price(env: &Env, prices: &Vec<i128>, cfg: &OracleQuorumCon
         }
     }
 
-    env.panic_with_error(ContractError::OracleQuorumNotMet)
+    env.panic_with_error(ContractError::OraclePriceInvalid)
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

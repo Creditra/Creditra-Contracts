@@ -210,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
 
     // Bump TTL on read.
     env.storage()

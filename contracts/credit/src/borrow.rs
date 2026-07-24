@@ -24,19 +24,6 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
 
-/// Map a credit-line status to the draw-time error, if any.
-///
-/// Restricted is intentionally allowed to reach the numeric limit check in
-/// `draw_credit`; that keeps the status distinct from terminal states while
-/// still preventing fresh borrowing until the line is cured.
-pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active | CreditStatus::Restricted => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-    }
-
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
     let reserve_address: Address = env
         .storage()
@@ -159,7 +146,7 @@ pub(crate) fn repay_credit_internal(
     credit_line.utilized_amount = new_utilized;
 
     persist_credit_line(env, borrower, credit_line, previous_utilized, Some(previous_status));
-    lifecycle::advance_repayment_schedule_after_repay(
+    crate::lifecycle::advance_repayment_schedule_after_repay(
         env,
         borrower,
         effective_repay,
@@ -416,15 +403,4 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     clear_reentrancy_guard(&env);
 }
 
-/// Return a `ContractError` if `status` should block draws, otherwise `None`.
-///
-/// Called by `draw_credit` to centralize status → error mapping.
-pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-        CreditStatus::Restricted => None,
-    }
-}
+

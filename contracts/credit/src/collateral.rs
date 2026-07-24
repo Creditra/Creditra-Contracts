@@ -54,8 +54,9 @@ use crate::events::{
     CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_risk_weight_bps, get_collateral_token,
-    get_credit_line, get_min_collateral_ratio_bps, set_collateral_balance,
+    get_collateral_balance, get_collateral_balance_for_token, get_collateral_risk_weight_bps,
+    get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
+    is_collateral_token_allowed, set_collateral_balance, set_collateral_balance_for_token,
 };
 use crate::types::ContractError;
 use soroban_sdk::{token, Address, Env};
