@@ -399,6 +399,14 @@ Integration coverage: `tests/panic_with_error.rs`.
 
 Defined in `errors.rs`:
 
+## DecayCurve helper
+
+The crate includes a small `src/curves.rs` helper exposing `DecayCurve` and
+`calculate_price`. A new `DutchStepped` variant is available which splits the
+total drop between `start_price` and `floor_price` across equal-duration
+buckets; see `tests/dutch_stepped_variant.rs` for examples and expected
+behaviour.
+
 - `NotWinner`
 - `AlreadyClaimed`
 - `NotClosed`

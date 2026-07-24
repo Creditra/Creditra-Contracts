@@ -8,7 +8,18 @@ pub enum DecayCurve {
 
     /// Stepped decay: price reduces every interval
     /// price = start_price - (steps * step_size)
+
     Stepped { step_size: u128, interval: u64 },
+
+    /// Dutch-style stepped decay that splits the total drop from
+    /// `start_price` down to `floor_price` across `steps` equal-duration
+    /// buckets. The price is constant within a bucket and only drops at
+    /// bucket boundaries.
+    ///
+    /// The variant stores the `floor_price` and `steps` (number of buckets).
+    /// `duration` is provided to `calculate_price` via the variant to allow
+    /// computing bucket indices safely inside the curve implementation.
+    DutchStepped { floor_price: u128, steps: u128, duration: u64 },
 
     /// Exponential decay using fixed-point factor
     /// price = start_price * factor^time (scaled)
@@ -57,6 +68,32 @@ pub fn calculate_price(
                 .ok_or(CurveError::Overflow)?;
 
             Ok(start_price.saturating_sub(decay))
+        }
+
+        DecayCurve::DutchStepped { floor_price, steps, duration } => {
+            if *duration == 0 || *steps == 0 {
+                return Err(CurveError::InvalidInput);
+            }
+
+            // total drop from start to floor
+            let total_drop = start_price.saturating_sub(*floor_price);
+
+            // elapsed steps = floor(elapsed * steps / duration)
+            let elapsed_steps = (elapsed as u128)
+                .checked_mul(*steps)
+                .ok_or(CurveError::Overflow)?
+                / (*duration as u128);
+
+            let q = total_drop / *steps;
+            let r = total_drop % *steps;
+
+            let drop = q
+                .checked_mul(elapsed_steps)
+                .ok_or(CurveError::Overflow)?
+                .checked_add((r.checked_mul(elapsed_steps).ok_or(CurveError::Overflow)? / *steps))
+                .ok_or(CurveError::Overflow)?;
+
+            Ok(start_price.saturating_sub(drop))
         }
 
         DecayCurve::Exponential { factor, scale } => {
