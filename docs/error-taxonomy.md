@@ -10,8 +10,8 @@ Categories are also available as a stable `#[repr(u32)]` enum —
 any error to its category at runtime.
 
 Source of truth: `contracts/credit/src/types.rs`.
-Cross-reference: [`docs/contract-errors.md`](./contract-errors.md) (flat code
-table).
+Cross-reference: [`docs/ERROR_CODES.md`](./ERROR_CODES.md) (categorized reference
+with recovery actions).
 
 ---
 
@@ -29,7 +29,7 @@ valid admin address before any admin-gated operation.
 
 ---
 
-## Lifecycle (codes 4, 14, 20, 21, 45)
+## Lifecycle (codes 4, 14, 20, 21, 51)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -37,7 +37,7 @@ valid admin address before any admin-gated operation.
 | 14   | `AlreadyInitialized` | `init()` called more than once. |
 | 20   | `CreditLineSuspended` | Draw or admin action on a suspended credit line. |
 | 21   | `CreditLineDefaulted` | Draw or admin action on a defaulted credit line. |
-| 45   | `AlreadySettled` | The liquidation for this (borrower, settlement_id) pair has already been processed. |
+| 51   | `AlreadySettled` | The liquidation for this (borrower, settlement_id) pair has already been processed. |
 
 **Recovery action:**
 - `CreditLineClosed`: No recovery — the line is terminal. Create a new credit
@@ -52,7 +52,7 @@ valid admin address before any admin-gated operation.
 
 ---
 
-## Numeric (codes 5, 7, 12, 33, 34)
+## Numeric (codes 5, 7, 12, 33, 34, 52)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -62,6 +62,7 @@ valid admin address before any admin-gated operation.
 calculation). |
 | 33   | `TimestampRegression` | Provided or ledger timestamp is not strictly greater than the stored value. |
 | 34   | `LimitOutOfBounds` | Credit limit falls outside the configured `[min_limit, max_limit]` range. |
+| 52   | `InvalidRiskWeight` | Collateral risk weight exceeds 10 000 bps (100 %). |
 
 **Recovery action:**
 - `InvalidAmount`: Re-validate inputs client-side — ensure draw/repay amounts
@@ -74,10 +75,11 @@ calculation). |
   ledger view and retry.
 - `LimitOutOfBounds`: Adjust the proposed limit to `[min_limit, max_limit]`
   using `get_protocol_config()`.
+- `InvalidRiskWeight`: Ensure risk weight is in `0..=10_000` bps.
 
 ---
 
-## Limit (codes 6, 10, 13, 17, 28)
+## Limit (codes 6, 10, 13, 17, 28, 45, 47)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -86,6 +88,8 @@ calculation). |
 | 13   | `LimitDecreaseRequiresRepayment` | Credit limit decrease below the currently utilized amount. |
 | 17   | `DrawExceedsMaxAmount` | Draw amount exceeds the per-transaction `max_draw_amount`. |
 | 28   | `RepayExceedsMaxAmount` | Repay amount exceeds the per-transaction `max_repay_amount`. |
+| 45   | `CloseFactorAboveMax` | Supplied `close_factor_bps` exceeds the protocol-configured maximum. |
+| 47   | `DrawReversalWindowExpired` | Draw reversal attempted after the allowed reversal window elapsed. |
 
 **Recovery action:**
 - `OverLimit`: Reduce the draw amount to ≤ `credit_limit - utilized`. Query
@@ -97,10 +101,12 @@ calculation). |
 - `DrawExceedsMaxAmount` / `RepayExceedsMaxAmount`: Split the transaction into
   smaller chunks or query `max_draw_amount` / `max_repay_amount` from
   protocol config and adjust the input.
+- `CloseFactorAboveMax`: Reduce `close_factor_bps` to ≤ the protocol max.
+- `DrawReversalWindowExpired`: Reversal no longer possible; the window has passed.
 
 ---
 
-## Liquidity (codes 22, 23, 24, 25, 26, 27, 30, 31)
+## Liquidity (codes 22, 23, 24, 25, 26, 27, 30, 31, 41)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -113,6 +119,7 @@ where the contract can observe it. |
 | 27   | `InsufficientRepaymentBalance` | Borrower's token balance is below the effective repayment amount. |
 | 30   | `TreasuryNotSet` | Treasury address is not configured when attempting a treasury withdrawal. |
 | 31   | `ExposureCapExceeded` | Draw would push global `TotalUtilized` above `MaxTotalExposure`. |
+| 41   | `BountyNotSet` | Bounty pool address is not configured. |
 
 **Recovery action:**
 - `MissingLiquidityToken` / `MissingLiquiditySource`: Inform the admin to
@@ -127,8 +134,8 @@ where the contract can observe it. |
   into their wallet.
 - `TreasuryNotSet`: Admin must call `set_treasury` before withdrawing.
 - `ExposureCapExceeded`: Reduce the draw amount or wait for other borrowers to
-  repay so the global cap frees headroom. Query `MaxTotalExposure` and current
-  `TotalUtilized` from protocol config.
+  repay so the global cap frees headroom.
+- `BountyNotSet`: Admin must call `set_bounty` before withdrawing.
 
 ---
 
@@ -153,22 +160,22 @@ where the contract can observe it. |
 
 ---
 
-## Oracle (codes 36, 37, 38)
+## Oracle (codes 36, 37, 38, 50)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 36   | `OraclePriceInvalid` | Oracle price is zero, negative, or malformed. |
 | 37   | `OraclePriceStale` | Oracle price exceeds `max_age_seconds` since last update. |
 | 38   | `OraclePriceDeviation` | Oracle price deviation exceeds `max_deviation_bps` relative to prior. |
+| 50   | `OracleQuorumNotMet` | Fewer than `min_quorum_k` prices agree within the deviation bound. |
 
 **Recovery action:**
 - `OraclePriceInvalid`: Ensure the oracle is returning a valid positive price.
-  May indicate a misconfigured oracle address.
 - `OraclePriceStale`: Wait for an oracle price update, or trigger one via the
-  oracle's push mechanism. Query `max_age_seconds` from `OracleConfig`.
-- `OraclePriceDeviation`: A market-moving event or oracle fault. The
-  circuit-breaker has tripped; await a new price within the deviation bound.
-  Do **not** retry with the same price.
+  oracle's push mechanism.
+- `OraclePriceDeviation`: Circuit-breaker tripped; await a new price within the
+  deviation bound. Do **not** retry with the same price.
+- `OracleQuorumNotMet`: Submit prices from more independent oracle feeds.
 
 ---
 
@@ -190,13 +197,14 @@ adequate.
 
 ---
 
-## Block (codes 16, 19, 40)
+## Block (codes 16, 19, 40, 46)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 16   | `BorrowerBlocked` | Borrower is on the admin-managed block list. |
 | 19   | `DrawsFrozen` | Global draw freeze is active (admin action for liquidity reserve ops). |
 | 40   | `BorrowerFrozen` | Borrower's draws are temporarily frozen until the specified expiry timestamp. |
+| 46   | `CreditLineFrozen` | Credit line draws are frozen by admin (compliance or investigation hold). |
 
 **Recovery action:**
 - `BorrowerBlocked`: The borrower is permanently blocked. No recovery from the
@@ -204,8 +212,8 @@ adequate.
 - `DrawsFrozen`: Inform the user that draws are temporarily frozen. Repayments
   remain open. Retry when the admin unfreezes.
 - `BorrowerFrozen`: Wait for the freeze to expire (or contact the admin to
-  unfreeze early). The freeze is time-bounded and auto-expires; check
-  `get_borrower_frozen_until()` for the remaining duration.
+  unfreeze early). The freeze is time-bounded and auto-expires.
+- `CreditLineFrozen`: Admin-compliance hold; wait for `unfreeze_credit_line`.
 
 ---
 
@@ -218,24 +226,30 @@ adequate.
 **Recovery action:** Do **not** retry the same transaction — the reentrancy
 guard prevents the contract from being called again during an ongoing
 operation. Wait for the current transaction to resolve and inspect the on-chain
-state before submitting a new call. If you are integrating a token contract,
-ensure it does not re-enter the credit contract during `transfer` /
-`transfer_from`.
+state before submitting a new call.
 
 ---
 
-## Misc (codes 3, 15)
+## Misc (codes 3, 15, 42, 43, 44, 48, 49)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 3    | `CreditLineNotFound` | The specified borrower has no credit line. |
 | 15   | `AdminAcceptTooEarly` | Admin acceptance attempted before the `propose_admin` delay elapsed. |
+| 42   | `NoPendingTreasuryWithdrawal` | No pending treasury withdrawal proposal exists. |
+| 43   | `TreasuryTimelockActive` | The 24-hour treasury timelock has not elapsed. |
+| 44   | `TreasuryProposalExists` | A treasury withdrawal proposal already exists. |
+| 48   | `OriginalDrawNotFound` | Original draw audit record not found for reversal. |
+| 49   | `AttestationBatchNotFound` | No attestation batch has been committed for this borrower. |
 
 **Recovery action:**
-- `CreditLineNotFound`: Direct the caller to create a credit line first via
-  `init_credit_line(borrower, limit, ...)`.
-- `AdminAcceptTooEarly`: Wait for the full delay window to elapse. Query
-  `get_pending_admin()` for the scheduled acceptance timestamp.
+- `CreditLineNotFound`: Create a credit line first via `open_credit_line`.
+- `AdminAcceptTooEarly`: Wait for the full delay window to elapse.
+- `NoPendingTreasuryWithdrawal`: Create a proposal via `propose_treasury_withdrawal`.
+- `TreasuryTimelockActive`: Wait for the 24-hour timelock.
+- `TreasuryProposalExists`: Execute or cancel the existing proposal first.
+- `OriginalDrawNotFound`: No reversal possible — no matching draw record.
+- `AttestationBatchNotFound`: Admin must commit a batch first.
 
 ---
 
@@ -244,14 +258,14 @@ ensure it does not re-enter the credit contract during `transfer` /
 | Category | Codes | Count | Dominant SDK recovery |
 | -------- | ----- | ----- | --------------------- |
 | Auth | 1, 2, 32 | 3 | Reconnect wallet / re-deploy with admin init |
-| Lifecycle | 4, 14, 20, 21, 45 | 5 | Await admin action or create new line |
-| Numeric | 5, 7, 12, 33, 34 | 5 | Validate inputs / re-sync ledger view |
-| Limit | 6, 10, 13, 17, 28 | 5 | Reduce amount or repay first |
+| Lifecycle | 4, 14, 20, 21, 51 | 5 | Await admin action or create new line |
+| Numeric | 5, 7, 12, 33, 34, 52 | 6 | Validate inputs / re-sync ledger view |
+| Limit | 6, 10, 13, 17, 28, 45, 47 | 7 | Reduce amount or repay first |
 | Liquidity | 22, 23, 24, 25, 26, 27, 30, 31, 41 | 9 | Replenish allowance / wait for reserve |
 | Risk | 8, 9, 18, 29 | 4 | Clamp inputs / wait for cooldown or unpause |
-| Oracle | 36, 37, 38 | 3 | Await valid price feed |
-| Collateral | 35, 39, 50 | 3 | Reduce withdrawal / add collateral |
-| Block | 16, 19, 40 | 3 | Contact admin or wait for unfreeze / expiry |
+| Oracle | 36, 37, 38, 50 | 4 | Await valid price feed |
+| Collateral | 35, 39 | 2 | Reduce withdrawal amount |
+| Block | 16, 19, 40, 46 | 4 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
-| Misc | 3, 15, 42, 43, 44 | 5 | Create line first / wait for delay |
-| **Total** | 1–50 | **50** | — |
+| Misc | 3, 15, 42, 43, 44, 48, 49 | 7 | Create line first / wait for delay |
+| **Total** | 1–52 | **52** | — |
