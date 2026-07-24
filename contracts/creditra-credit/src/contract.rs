@@ -7,8 +7,8 @@ use crate::error::ContractError;
 use crate::handshake::{self, ProtocolVersion};
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, CONFIG, CREDIT_LINE_COUNT, CREDIT_LINES,
-    DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, DRAWS,
+    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, BORROWER_TO_ID, CONFIG, CREDIT_LINES,
+    CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
 };
 use crate::views;
 
@@ -92,20 +92,28 @@ pub fn execute_create_credit_line(
 
     let credit_line = CreditLine {
         id: count,
-        borrower: borrower_addr,
+        borrower: borrower_addr.clone(),
         collateral_denom,
-        collateral_amount: collateral_amount.parse().map_err(|_| ContractError::Std(
-            cosmwasm_std::StdError::parse_err("Uint128", collateral_amount),
-        ))?,
+        collateral_amount: collateral_amount.parse().map_err(|_| {
+            ContractError::Std(cosmwasm_std::StdError::parse_err(
+                "Uint128",
+                collateral_amount,
+            ))
+        })?,
         credit_denom,
-        credit_amount: credit_amount.parse().map_err(|_| ContractError::Std(
-            cosmwasm_std::StdError::parse_err("Uint128", credit_amount),
-        ))?,
+        credit_amount: credit_amount.parse().map_err(|_| {
+            ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", credit_amount))
+        })?,
         active: true,
     };
 
     CREDIT_LINES.save(deps.storage, count, &credit_line)?;
     CREDIT_LINE_COUNT.save(deps.storage, &(count + 1))?;
+
+    // Store deterministic borrower → credit-line-id mapping for O(1) lookups.
+    // cw_storage_plus::Map serialises Addr via its canonical bech32 bytes,
+    // which guarantees deterministic + collision-free keys by construction.
+    BORROWER_TO_ID.save(deps.storage, borrower_addr.clone(), &count)?;
 
     Ok(Response::default()
         .add_attribute("action", "create_credit_line")
@@ -160,7 +168,11 @@ pub fn execute_create_draw(
         by: info.sender,
         memo: String::new(),
     };
-    DRAW_AUDIT.save(deps.storage, (credit_line_id, draw_count, audit_seq), &audit_entry)?;
+    DRAW_AUDIT.save(
+        deps.storage,
+        (credit_line_id, draw_count, audit_seq),
+        &audit_entry,
+    )?;
     DRAW_AUDIT_COUNT.save(deps.storage, (credit_line_id, draw_count), &1)?;
 
     Ok(Response::default()
@@ -187,7 +199,15 @@ pub fn execute_repay_draw(
     draw.repaid = true;
     DRAWS.save(deps.storage, (credit_line_id, draw_id), &draw)?;
 
-    append_audit_entry(deps, env, info, credit_line_id, draw_id, DrawAction::Repaid, String::new())?;
+    append_audit_entry(
+        deps,
+        env,
+        info,
+        credit_line_id,
+        draw_id,
+        DrawAction::Repaid,
+        String::new(),
+    )?;
 
     Ok(Response::default()
         .add_attribute("action", "repay_draw")
@@ -212,7 +232,15 @@ pub fn execute_add_audit_memo(
         .may_load(deps.storage, (credit_line_id, draw_id))?
         .ok_or(ContractError::DrawNotFound(draw_id, credit_line_id))?;
 
-    append_audit_entry(deps, env, info, credit_line_id, draw_id, DrawAction::MemoAdded, memo)?;
+    append_audit_entry(
+        deps,
+        env,
+        info,
+        credit_line_id,
+        draw_id,
+        DrawAction::MemoAdded,
+        memo,
+    )?;
 
     Ok(Response::default()
         .add_attribute("action", "add_audit_memo")
