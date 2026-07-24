@@ -98,7 +98,6 @@
 
 mod handshake;
 mod accrual;
-mod handshake;
 #[cfg(test)]
 mod accrual_tests;
 mod oracles;
@@ -112,7 +111,6 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
-mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
@@ -6420,10 +6418,6 @@ mod test_draw_freeze {
         assert!(client.is_draws_frozen());
     }
 
-    /// draw_credit fails on a Defaulted credit line.
-    #[test]
-    #[should_panic(expected = "credit line is defaulted")]
-    fn test_draw_credit_allowed_on_defaulted_line() {
     /// Freeze on one contract does not affect another contract instance.
     #[test]
     fn freeze_is_per_contract_instance() {
@@ -7231,4 +7225,3 @@ mod test_max_draw_amount {
 
 #[cfg(test)]
 mod test_ttl;
-mod handshake;
