@@ -7,8 +7,8 @@ use crate::msg::{
     ProofOfReserveResponse,
 };
 use crate::state::{
-    Draw, DrawAuditEntry, CREDIT_LINES, CREDIT_LINE_COUNT, DRAW_AUDIT, DRAW_AUDIT_COUNT,
-    DRAW_COUNT, DRAWS,
+    Draw, DrawAuditEntry, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT,
+    DRAW_COUNT,
 };
 
 /// Returns the full audit trail for one or all draws on a given credit line.
@@ -60,9 +60,7 @@ pub fn query_proof_of_reserve(
     deps: Deps,
     denom_filter: Option<String>,
 ) -> Result<ProofOfReserveResponse, ContractError> {
-    let credit_line_count = CREDIT_LINE_COUNT
-        .may_load(deps.storage)?
-        .unwrap_or(0);
+    let credit_line_count = CREDIT_LINE_COUNT.may_load(deps.storage)?.unwrap_or(0);
 
     let mut total_credit_lines: u64 = 0;
     let mut active_credit_lines: u64 = 0;
@@ -87,32 +85,35 @@ pub fn query_proof_of_reserve(
                 if cl.active {
                     active_credit_lines = active_credit_lines.saturating_add(1);
 
-                    total_collateral = total_collateral
-                        .checked_add(cl.collateral_amount)
-                        .map_err(|_| {
-                            ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                "Collateral overflow",
-                            ))
-                        })?;
-                    total_credit_limit = total_credit_limit
-                        .checked_add(cl.credit_amount)
-                        .map_err(|_| {
-                            ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                "Credit limit overflow",
-                            ))
-                        })?;
+                    total_collateral =
+                        total_collateral
+                            .checked_add(cl.collateral_amount)
+                            .map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Collateral overflow",
+                                ))
+                            })?;
+                    total_credit_limit =
+                        total_credit_limit
+                            .checked_add(cl.credit_amount)
+                            .map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Credit limit overflow",
+                                ))
+                            })?;
 
                     if filter.is_none() || filter == Some(&cl.collateral_denom) {
-                        let entry = denom_map
-                            .entry(cl.collateral_denom.clone())
-                            .or_insert_with(|| DenomReserve {
-                                denom: cl.collateral_denom.clone(),
-                                collateral_amount: Uint128::zero(),
-                                credit_limit: Uint128::zero(),
-                                drawn_amount: Uint128::zero(),
-                                repaid_amount: Uint128::zero(),
-                                net_outstanding: Uint128::zero(),
-                            });
+                        let entry =
+                            denom_map
+                                .entry(cl.collateral_denom.clone())
+                                .or_insert_with(|| DenomReserve {
+                                    denom: cl.collateral_denom.clone(),
+                                    collateral_amount: Uint128::zero(),
+                                    credit_limit: Uint128::zero(),
+                                    drawn_amount: Uint128::zero(),
+                                    repaid_amount: Uint128::zero(),
+                                    net_outstanding: Uint128::zero(),
+                                });
                         entry.collateral_amount = entry
                             .collateral_amount
                             .checked_add(cl.collateral_amount)
@@ -124,17 +125,16 @@ pub fn query_proof_of_reserve(
                     }
 
                     if filter.is_none() || filter == Some(&cl.credit_denom) {
-                        let entry =
-                            denom_map
-                                .entry(cl.credit_denom.clone())
-                                .or_insert_with(|| DenomReserve {
-                                    denom: cl.credit_denom.clone(),
-                                    collateral_amount: Uint128::zero(),
-                                    credit_limit: Uint128::zero(),
-                                    drawn_amount: Uint128::zero(),
-                                    repaid_amount: Uint128::zero(),
-                                    net_outstanding: Uint128::zero(),
-                                });
+                        let entry = denom_map.entry(cl.credit_denom.clone()).or_insert_with(|| {
+                            DenomReserve {
+                                denom: cl.credit_denom.clone(),
+                                collateral_amount: Uint128::zero(),
+                                credit_limit: Uint128::zero(),
+                                drawn_amount: Uint128::zero(),
+                                repaid_amount: Uint128::zero(),
+                                net_outstanding: Uint128::zero(),
+                            }
+                        });
                         entry.credit_limit = entry
                             .credit_limit
                             .checked_add(cl.credit_amount)
@@ -169,33 +169,25 @@ pub fn query_proof_of_reserve(
                                 });
 
                         if draw.repaid {
-                            total_repaid = total_repaid
-                                .checked_add(draw.amount)
-                                .map_err(|_| {
-                                    ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                        "Repaid overflow",
-                                    ))
-                                })?;
-                            entry.repaid_amount = entry
-                                .repaid_amount
-                                .checked_add(draw.amount)
-                                .map_err(|_| {
+                            total_repaid = total_repaid.checked_add(draw.amount).map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Repaid overflow",
+                                ))
+                            })?;
+                            entry.repaid_amount =
+                                entry.repaid_amount.checked_add(draw.amount).map_err(|_| {
                                     ContractError::Std(cosmwasm_std::StdError::generic_err(
                                         "Repaid overflow",
                                     ))
                                 })?;
                         } else {
-                            total_drawn = total_drawn
-                                .checked_add(draw.amount)
-                                .map_err(|_| {
-                                    ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                        "Drawn overflow",
-                                    ))
-                                })?;
-                            entry.drawn_amount = entry
-                                .drawn_amount
-                                .checked_add(draw.amount)
-                                .map_err(|_| {
+                            total_drawn = total_drawn.checked_add(draw.amount).map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Drawn overflow",
+                                ))
+                            })?;
+                            entry.drawn_amount =
+                                entry.drawn_amount.checked_add(draw.amount).map_err(|_| {
                                     ContractError::Std(cosmwasm_std::StdError::generic_err(
                                         "Drawn overflow",
                                     ))
@@ -674,10 +666,7 @@ mod tests {
                 .iter()
                 .find(|r| r.denom == "ucollateral")
                 .unwrap();
-            assert_eq!(
-                ucollateral_res.collateral_amount,
-                Uint128::from(1000u128)
-            );
+            assert_eq!(ucollateral_res.collateral_amount, Uint128::from(1000u128));
 
             let ucredit_res = por
                 .reserves_by_denom
@@ -768,10 +757,7 @@ mod tests {
             let borrower_str = borrower(&deps).to_string();
             let resp = query_health(&deps, &borrower_str);
             assert_eq!(resp.credit_lines.len(), 1);
-            assert_eq!(
-                resp.credit_lines[0].utilized_amount,
-                Uint128::from(100u128)
-            );
+            assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(100u128));
             // health = limit * 10_000 / utilized = 500 * 10_000 / 100 = 50_000 bps
             assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
         }
@@ -787,10 +773,7 @@ mod tests {
 
             let borrower_str = borrower(&deps).to_string();
             let resp = query_health(&deps, &borrower_str);
-            assert_eq!(
-                resp.credit_lines[0].utilized_amount,
-                Uint128::from(300u128)
-            );
+            assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(300u128));
             // health = 500 * 10_000 / 300 = 16_666 bps
             assert_eq!(resp.credit_lines[0].health_factor_bps, 16_666);
 

@@ -230,7 +230,7 @@ fn test_key_uniqueness_large_pool() {
 /// Addresses that differ by only one character must still map to different keys.
 #[test]
 fn test_key_uniqueness_similar_addresses() {
-    let deps = mock_dependencies();
+    let _deps = mock_dependencies();
 
     let addr_a = Addr::unchecked("cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpjnp7du");
     let addr_b = Addr::unchecked("cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpjnp7dv");
