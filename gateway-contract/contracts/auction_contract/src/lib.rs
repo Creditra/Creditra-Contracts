@@ -80,9 +80,10 @@ fn min_next_bid(env: &Env, highest_bid: i128, min_increment_bps: u32) -> i128 {
 /// p(t) = start_price − ⌊(start_price − floor_price) × ⌊t × steps / duration⌋ / steps⌋
 /// ```
 ///
-/// The price decreases in `step_count` equal discrete buckets.  Within
-/// each bucket the price is constant; at the boundary it drops by one
-/// step.  `step_count` **must** be `Some(n)` where `n > 0`.
+/// This is a step-down curve: the price remains constant within each of the
+/// `step_count` equal-duration buckets and only drops at bucket boundaries.
+/// The total drop from `start_price` to `floor_price` is split across those
+/// buckets.  `step_count` **must** be `Some(n)` where `n > 0`.
 ///
 /// ## Exponential (`DutchAuctionDecay::Exponential`)
 ///
@@ -562,73 +563,6 @@ impl Auction {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
-    }
-
-    /// Register the factory contract address.
-    ///
-    /// The caller must authenticate as the address being set as factory.
-    /// Once set, the factory can perform admin operations (init, close,
-    /// settle, configure).
-    pub fn set_factory_contract(env: Env, factory: Address) {
-        factory.require_auth();
-        set_factory_contract(&env, &factory);
-    }
-
-    /// Initialise a new auction in `Open` status.
-    ///
-    /// # Authorization
-    /// Requires [`require_auth`] from the registered factory contract.
-    /// Panics with [`AuctionError::NoFactoryContract`] if no factory has
-    /// been configured.
-    pub fn init_auction(
-        env: Env,
-        auction_id: Symbol,
-        mode: AuctionMode,
-        start_time: u64,
-        end_time: u64,
-        min_bid: i128,
-        min_increment_bps: u32,
-        dutch_start_price: Option<i128>,
-        dutch_floor_price: Option<i128>,
-        dutch_decay: DutchAuctionDecay,
-        dutch_step_count: Option<u32>,
-    ) {
-        let factory = get_factory_contract(&env)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
-        factory.require_auth();
-
-        if min_increment_bps > 10_000 {
-            env.panic_with_error(AuctionError::InvalidState);
-        }
-
-        if matches!(dutch_decay, DutchAuctionDecay::Stepped) {
-            if dutch_step_count.is_none() || dutch_step_count == Some(0) {
-                env.panic_with_error(AuctionError::InvalidState);
-            }
-        }
-
-        let config = AuctionConfig {
-            mode,
-            username_hash: BytesN::from_array(&env, &[0u8; 32]),
-            start_time,
-            end_time,
-            min_bid,
-            min_increment_bps,
-            dutch_start_price,
-            dutch_floor_price,
-            dutch_decay,
-            dutch_step_count,
-        };
-
-        let state = AuctionState {
-            config,
-            status: AuctionStatus::Open,
-            highest_bidder: None,
-            highest_bid: 0,
-        };
-
-        env.storage().persistent().set(&auction_id, &state);
-        bump_auction_state_ttl(&env, &auction_id);
     }
 
     /// Close an auction (transition `Open` → `Closed`).

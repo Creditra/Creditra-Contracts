@@ -964,7 +964,7 @@ impl Credit {
     /// `true` if the recomputed root matches the stored root; `false` otherwise.
     ///
     /// # Errors
-    /// - `ContractError::AttestationBatchNotFound` if no batch has been committed.
+    /// - `ContractError::InvalidAttestation` if no batch has been committed.
     pub fn verify_attestation_proof(
         env: Env,
         borrower: Address,
