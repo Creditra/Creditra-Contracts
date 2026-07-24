@@ -24,17 +24,9 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
 
-/// Map a credit-line status to the draw-time error, if any.
-///
-/// Restricted is intentionally allowed to reach the numeric limit check in
-/// `draw_credit`; that keeps the status distinct from terminal states while
-/// still preventing fresh borrowing until the line is cured.
-pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active | CreditStatus::Restricted => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
+    if amount <= 0 {
+        clear_reentrancy_guard(&env);
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
@@ -58,24 +50,9 @@ pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
         panic!("Borrower mismatch for credit line");
     }
 
-    if credit_line.status == CreditStatus::Closed {
+    if let Some(status_error) = draw_status_error(credit_line.status) {
         clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
-    if credit_line.status == CreditStatus::Suspended {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is suspended");
-    }
-
-    if credit_line.status == CreditStatus::Defaulted {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is defaulted");
-    }
-
-    if credit_line.status != CreditStatus::Active {
-        clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::InvalidAmount);
+        env.panic_with_error(status_error);
     }
 
     let updated_utilized = credit_line
@@ -416,15 +393,3 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     clear_reentrancy_guard(&env);
 }
 
-/// Return a `ContractError` if `status` should block draws, otherwise `None`.
-///
-/// Called by `draw_credit` to centralize status → error mapping.
-pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-        CreditStatus::Restricted => None,
-    }
-}
