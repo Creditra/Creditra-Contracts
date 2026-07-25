@@ -109,6 +109,8 @@ pub mod borrow;
 mod collateral;
 #[path = "../../collateral/src/admin.rs"]
 mod collateral_admin;
+#[path = "../../lifecycle/src/admin.rs"]
+mod lifecycle_admin;
 mod config;
 pub mod events;
 mod fees;
@@ -1085,7 +1087,7 @@ impl Credit {
         borrower: Address,
         grace_period_seconds: u64,
     ) {
-        lifecycle::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
+        lifecycle_admin::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
     }
 
     /// Return the per-borrower liquidation grace period in seconds for `borrower`.
@@ -1111,22 +1113,7 @@ impl Credit {
     /// - `AprBased` mode: `surcharge_bps` must be `<= 10_000`; values above
     ///   the cap revert with [`ContractError::RateTooHigh`].
     pub fn set_late_fee_config(env: Env, config: Option<LateFeeConfig>) {
-        require_admin_auth(&env);
-        if let Some(cfg) = config {
-            match cfg {
-                LateFeeConfig::Flat(crate::penalties::FlatFeeConfig { amount }) => {
-                    if amount < 0 {
-                        env.panic_with_error(ContractError::InvalidAmount);
-                    }
-                }
-                LateFeeConfig::AprBased(crate::penalties::AprFeeConfig { surcharge_bps }) => {
-                    if surcharge_bps > crate::risk::MAX_INTEREST_RATE_BPS {
-                        env.panic_with_error(ContractError::RateTooHigh);
-                    }
-                }
-            }
-        }
-        crate::storage::set_late_fee_config(&env, config);
+        lifecycle_admin::set_late_fee_config(&env, config);
     }
 
     /// Get the currently configured structured late-fee configuration.
@@ -1144,7 +1131,7 @@ impl Credit {
         period_seconds: u64,
         first_due_ts: u64,
     ) {
-        lifecycle::set_repayment_schedule(
+        lifecycle_admin::set_repayment_schedule(
             &env,
             borrower,
             amount_per_period,
@@ -1162,7 +1149,7 @@ impl Credit {
 
     /// Set the flat late fee per missed installment (admin only).
     pub fn set_late_fee_flat(env: Env, fee: i128) {
-        lifecycle::set_late_fee_flat(env, fee)
+        lifecycle_admin::set_late_fee_flat(&env, fee)
     }
 
     /// Get the configured flat late fee per missed installment.
@@ -1574,7 +1561,7 @@ impl Credit {
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
-    
+
     /// Set the risk weight for a collateral asset, in basis points (admin only).
     ///
     /// Risk weight scales how much a unit of this asset counts toward the
@@ -1622,6 +1609,23 @@ impl Credit {
     /// Query the ledger timestamp of the last critical collateral admin action.
     pub fn get_last_admin_collateral_critical_action_ts(env: Env) -> Option<u64> {
         collateral_admin::get_last_admin_collateral_critical_action_ts(&env)
+    }
+
+    /// Set the minimum interval between critical lifecycle admin actions (admin only).
+    ///
+    /// Pass `0` to disable the cool-off guard.
+    pub fn set_admin_lifecycle_cooldown_seconds(env: Env, seconds: u64) {
+        lifecycle_admin::set_admin_lifecycle_cooldown_seconds(&env, seconds);
+    }
+
+    /// Query the configured admin lifecycle cool-off interval, if set.
+    pub fn get_admin_lifecycle_cooldown_seconds(env: Env) -> Option<u64> {
+        lifecycle_admin::get_admin_lifecycle_cooldown_seconds(&env)
+    }
+
+    /// Query the ledger timestamp of the last critical lifecycle admin action.
+    pub fn get_last_admin_lifecycle_critical_action_ts(env: Env) -> Option<u64> {
+        lifecycle_admin::get_last_admin_lifecycle_critical_action_ts(&env)
     }
 
     /// Release a portion of collateral to the borrower while the credit line
@@ -1754,7 +1758,7 @@ impl Credit {
     /// // Now all credit lines must have limits between 1,000 and 1,000,000,000
     /// ```
     pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
-        lifecycle::set_credit_limit_bounds(env, min, max)
+        lifecycle_admin::set_credit_limit_bounds(&env, min, max)
     }
 
     /// Get the configured global credit limit bounds.
@@ -4246,7 +4250,7 @@ mod test_mock_liquidity_token {
         assert_eq!(cfg.max_rate_change_bps, 250);
         assert_eq!(cfg.rate_change_min_interval, 3600);
     }
-    
+
 // ── Collateral risk weight tests ─────────────────────────────────────────────
 
     #[test]
