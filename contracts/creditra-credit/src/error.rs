@@ -51,6 +51,14 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// `execute_withdrawal` or `cancel_withdrawal` called with no withdrawal proposed.
+    #[error("NoPendingWithdrawal")]
+    NoPendingWithdrawal,
+
+    /// `execute_withdrawal` called before the proposal's 24h timelock elapsed.
+    #[error("WithdrawalTimelockActive")]
+    WithdrawalTimelockActive,
 }
 
 #[cfg(test)]
