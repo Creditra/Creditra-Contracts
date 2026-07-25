@@ -5,13 +5,14 @@ use cosmwasm_std::{
 
 use crate::error::ContractError;
 use crate::handshake::{self, ProtocolVersion};
-use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, PendingWithdrawalResponse, QueryMsg};
 use crate::oracles;
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
     CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
     ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
+use crate::treasury::{self, PENDING_WITHDRAWAL};
 use crate::views;
 
 #[entry_point]
@@ -78,6 +79,11 @@ pub fn execute(
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
+        ExecuteMsg::ProposeWithdrawal { to, amount, denom } => {
+            treasury::execute_propose_withdrawal(deps, env, info, to, amount, denom)
+        }
+        ExecuteMsg::ExecuteWithdrawal {} => treasury::execute_execute_withdrawal(deps, env, info),
+        ExecuteMsg::CancelWithdrawal {} => treasury::execute_cancel_withdrawal(deps, env, info),
     }
 }
 
@@ -414,6 +420,19 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let resp = crate::msg::OraclePriceResponse {
                 price: record.as_ref().map(|r| r.price),
                 timestamp: record.as_ref().map(|r| r.timestamp),
+            };
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetPendingWithdrawal {} => {
+            let pending = PENDING_WITHDRAWAL
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = PendingWithdrawalResponse {
+                to: pending.as_ref().map(|p| p.to.clone()),
+                amount: pending.as_ref().map(|p| p.amount),
+                denom: pending.as_ref().map(|p| p.denom.clone()),
+                proposed_at: pending.as_ref().map(|p| p.proposed_at),
+                unlocks_at: pending.as_ref().map(|p| p.unlocks_at),
             };
             to_json_binary(&resp)
         }

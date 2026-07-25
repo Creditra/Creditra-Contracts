@@ -46,6 +46,18 @@ pub enum ExecuteMsg {
     SubmitOraclePrices {
         prices: Vec<i128>,
     },
+    /// Step 1 of a two-step treasury withdrawal: propose sending `amount` of
+    /// `denom` to `to`. Starts a 24h timelock; does not move funds. Owner only.
+    ProposeWithdrawal {
+        to: String,
+        amount: String,
+        denom: String,
+    },
+    /// Step 2: execute a previously proposed withdrawal once its timelock has
+    /// elapsed. Owner only.
+    ExecuteWithdrawal {},
+    /// Cancel a pending withdrawal proposal without sending funds. Owner only.
+    CancelWithdrawal {},
 }
 
 #[cw_serde]
@@ -64,6 +76,9 @@ pub enum QueryMsg {
     GetOracleQuorumConfig {},
     #[returns(OraclePriceResponse)]
     GetOraclePrice {},
+    /// The currently pending treasury withdrawal proposal, if any.
+    #[returns(PendingWithdrawalResponse)]
+    GetPendingWithdrawal {},
 }
 
 #[cw_serde]
@@ -131,4 +146,14 @@ pub struct OracleQuorumConfigResponse {
 pub struct OraclePriceResponse {
     pub price: Option<i128>,
     pub timestamp: Option<u64>,
+}
+
+/// Response for the pending treasury withdrawal query.
+#[cw_serde]
+pub struct PendingWithdrawalResponse {
+    pub to: Option<Addr>,
+    pub amount: Option<Uint128>,
+    pub denom: Option<String>,
+    pub proposed_at: Option<Timestamp>,
+    pub unlocks_at: Option<Timestamp>,
 }
