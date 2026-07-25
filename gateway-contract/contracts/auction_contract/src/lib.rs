@@ -272,41 +272,6 @@ impl Auction {
         storage::set_factory_contract(&env, &factory);
     }
 
-    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
-        let factory = get_factory_contract(&env)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
-        factory.require_auth();
-        storage::set_liquidation_grace_window(&env, seconds);
-    }
-
-    pub fn get_liquidation_grace_window(env: Env) -> u64 {
-        storage::get_liquidation_grace_window(&env)
-    }
-
-    pub fn close_auction(env: Env, auction_id: Symbol) {
-        let mut state: AuctionState = env
-            .storage()
-            .persistent()
-            .get(&auction_id)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
-        bump_auction_state_ttl(&env, &auction_id);
-        if state.status == AuctionStatus::Claimed {
-            env.panic_with_error(AuctionError::AlreadyClaimed);
-        }
-        if state.status != AuctionStatus::Open {
-            env.panic_with_error(AuctionError::AuctionNotOpen);
-        }
-        state.status = AuctionStatus::Closed;
-        env.storage().persistent().set(&auction_id, &state);
-        bump_auction_state_ttl(&env, &auction_id);
-        publish_auction_closed_event(
-            &env,
-            auction_id,
-            state.highest_bidder.clone(),
-            state.highest_bid,
-        );
-    }
-
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 

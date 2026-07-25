@@ -115,7 +115,13 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
         let _factory = setup_factory(&env, &client);
-        setup_token(&env, &contract_id, 1000, &[alice.clone(), bob.clone()], 1000);
+        setup_token(
+            &env,
+            &contract_id,
+            1000,
+            &[alice.clone(), bob.clone()],
+            1000,
+        );
 
         let auction_id = Symbol::new(&env, "auc1");
         client.init_auction(
