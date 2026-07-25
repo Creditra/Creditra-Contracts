@@ -1,0 +1,12 @@
+[package]
+name = "creditra-borrow"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+creditra-credit = { path = "../credit" }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
