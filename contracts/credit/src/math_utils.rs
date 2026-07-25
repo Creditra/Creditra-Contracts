@@ -9,7 +9,6 @@
 //! ## What
 //!
 //! - [`mul_div`] — checked `a * num / denom` with explicit [`Rounding`].
-//! - [`safe_mul_div`] — checked `a * num / denom` with explicit [`Rounding`], returning [`Option<u128>`].
 //! - [`apply_bps`] — apply a `bps` rate to a `u128` principal.
 //! - [`prorate_interest`] — the live accrual primitive:
 //!   `floor((u * r * Δt) / (10_000 * 31_557_600))`.
@@ -98,72 +97,8 @@ pub enum Rounding {
 
 // ─── Core fixed-point helpers ─────────────────────────────────────────────────
 
-/// Multiply `a` by `numerator` and divide by `denominator` with explicit `rounding`,
-/// returning `None` if `denominator == 0` or if intermediate multiplication or ceiling addition overflows [`u128::MAX`].
-///
-/// This is the non-panicking, [`Option`]-returning primitive for fixed-point fraction multiplication.
-///
-/// # Formula
-///
-/// ```text
-/// result = (a × numerator) / denominator   [± 1 ulp depending on Rounding]
-/// ```
-///
-/// # Semantics & Overflow Rules
-///
-/// 1. **Zero Denominator**: If `denominator == 0`, returns `None` (division by zero is undefined).
-/// 2. **Product Overflow**: Performs checked multiplication `a.checked_mul(numerator)`.
-///    If the intermediate product `a × numerator` exceeds [`u128::MAX`], returns `None`.
-/// 3. **Floor Rounding**: When `rounding` is [`Rounding::Floor`], the fractional remainder is discarded (truncated toward zero).
-/// 4. **Ceil Rounding**: When `rounding` is [`Rounding::Ceil`] and `(a × numerator) % denominator != 0`,
-///    1 is added to the integer quotient. If `quotient + 1` overflows [`u128::MAX`], returns `None`.
-/// 5. **Panic Safety**: This function never panics; all potential overflow vectors and zero division
-///    are safely caught and mapped to `None`.
-///
-/// # Examples
-///
-/// ```rust
-/// use creditra_credit::math_utils::{safe_mul_div, Rounding};
-///
-/// // Standard floor division: 1 000 × (3 / 10) = 300
-/// assert_eq!(safe_mul_div(1_000, 3, 10, Rounding::Floor), Some(300));
-///
-/// // Ceiling division with remainder: 1 001 × (3 / 10) = 300.3 → 301
-/// assert_eq!(safe_mul_div(1_001, 3, 10, Rounding::Ceil), Some(301));
-///
-/// // Division by zero returns None:
-/// assert_eq!(safe_mul_div(100, 5, 0, Rounding::Floor), None);
-///
-/// // Intermediate product overflow returns None:
-/// assert_eq!(safe_mul_div(u128::MAX, 2, 1, Rounding::Floor), None);
-/// ```
-pub fn safe_mul_div(
-    a: u128,
-    numerator: u128,
-    denominator: u128,
-    rounding: Rounding,
-) -> Option<u128> {
-    if denominator == 0 {
-        return None;
-    }
-    let product = a.checked_mul(numerator)?;
-    let quotient = product / denominator;
-    match rounding {
-        Rounding::Floor => Some(quotient),
-        Rounding::Ceil => {
-            if product % denominator != 0 {
-                quotient.checked_add(1)
-            } else {
-                Some(quotient)
-            }
-        }
-    }
-}
-
 /// Multiply `a` by `b` expressed as a fraction `(numerator / denominator)`,
 /// returning the result rounded according to `rounding`.
-///
-/// See [`safe_mul_div`] for the underlying non-panicking checked implementation.
 ///
 /// # Formula
 ///
@@ -173,8 +108,7 @@ pub fn safe_mul_div(
 ///
 /// # Panics
 ///
-/// Panics on division by zero (`"math_utils: division by zero"`), or on overflow
-/// if `a × numerator` exceeds `u128::MAX` (`"math_utils: mul overflow"`).
+/// Panics on overflow if `a × numerator` exceeds `u128::MAX`.
 ///
 /// # Examples
 ///
@@ -407,46 +341,6 @@ pub fn compute_deviation_bps(new_price: i128, last_price: i128) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── safe_mul_div ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn safe_mul_div_basic_floor_and_ceil() {
-        assert_eq!(safe_mul_div(1_000, 300, 10_000, Rounding::Floor), Some(30));
-        assert_eq!(safe_mul_div(1_001, 3, 10, Rounding::Floor), Some(300));
-        assert_eq!(safe_mul_div(1_001, 3, 10, Rounding::Ceil), Some(301));
-    }
-
-    #[test]
-    fn safe_mul_div_zero_denominator_returns_none() {
-        assert_eq!(safe_mul_div(100, 1, 0, Rounding::Floor), None);
-        assert_eq!(safe_mul_div(100, 1, 0, Rounding::Ceil), None);
-    }
-
-    #[test]
-    fn safe_mul_div_product_overflow_returns_none() {
-        assert_eq!(safe_mul_div(u128::MAX, 2, 1, Rounding::Floor), None);
-        assert_eq!(safe_mul_div(u128::MAX, 2, 1, Rounding::Ceil), None);
-    }
-
-    #[test]
-    fn safe_mul_div_ceil_exact_and_overflow() {
-        // u128::MAX * 1 / 1 = u128::MAX (exact, no remainder, no overflow)
-        assert_eq!(safe_mul_div(u128::MAX, 1, 1, Rounding::Ceil), Some(u128::MAX));
-    }
-
-    #[test]
-    fn safe_mul_div_zero_inputs() {
-        assert_eq!(safe_mul_div(0, 300, 10_000, Rounding::Floor), Some(0));
-        assert_eq!(safe_mul_div(1_000, 0, 10_000, Rounding::Floor), Some(0));
-        assert_eq!(safe_mul_div(0, 0, 10_000, Rounding::Floor), Some(0));
-    }
-
-    #[test]
-    fn safe_mul_div_max_boundary() {
-        assert_eq!(safe_mul_div(u128::MAX, 1, 1, Rounding::Floor), Some(u128::MAX));
-        assert_eq!(safe_mul_div(u128::MAX, 1, 2, Rounding::Floor), Some(u128::MAX / 2));
-    }
 
     // ── mul_div ──────────────────────────────────────────────────────────────
 
@@ -873,91 +767,5 @@ mod tests {
     #[test]
     fn deviation_negative_last_price_returns_none() {
         assert_eq!(compute_deviation_bps(100, -1), None);
-    }
-    // ── prorate_interest: monotonicity & overflow-safety properties ──────────
-    //
-    // These mirror the `cfg(kani)` harnesses in `proofs/prorate_interest.rs`
-    // so the same guarantees run under the normal `cargo test` suite (Kani
-    // runs only in CI). Inputs use the same overflow-safe envelope.
-    mod prorate_interest_properties {
-        use crate::math_utils::{prorate_interest, Rounding};
-        use proptest::prelude::*;
-
-        const PRINCIPAL_MAX: u128 = 1_000_000_000_000_000_000_000_000; // 10^24
-        const RATE_MAX: u32 = 10_000;
-        const TIME_MAX: u64 = 1_000_000_000; // 10^9 (~31.7 years)
-
-        #[test]
-        fn overflow_safe_at_envelope_corners() {
-            let _ = prorate_interest(PRINCIPAL_MAX, RATE_MAX, TIME_MAX, Rounding::Floor);
-            let _ = prorate_interest(PRINCIPAL_MAX, RATE_MAX, TIME_MAX, Rounding::Ceil);
-        }
-
-        #[test]
-        fn ceil_within_one_of_floor() {
-            for &(p, r, t) in &[
-                (10_000u128, 300u32, 86_400u64),
-                (1, 1, 1),
-                (PRINCIPAL_MAX, RATE_MAX, TIME_MAX),
-                (123_456_789, 777, 1_000_000),
-            ] {
-                let f = prorate_interest(p, r, t, Rounding::Floor);
-                let c = prorate_interest(p, r, t, Rounding::Ceil);
-                assert!(c >= f, "ceil < floor for ({p}, {r}, {t})");
-                assert!(c - f <= 1, "ceil - floor > 1 for ({p}, {r}, {t})");
-            }
-        }
-
-        proptest! {
-            #[test]
-            fn monotonic_in_principal(
-                principal in 0u128..PRINCIPAL_MAX,
-                rate_bps in 0u32..=RATE_MAX,
-                time_delta in 0u64..=TIME_MAX,
-            ) {
-                prop_assert!(
-                    prorate_interest(principal + 1, rate_bps, time_delta, Rounding::Floor)
-                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
-                );
-                prop_assert!(
-                    prorate_interest(principal + 1, rate_bps, time_delta, Rounding::Ceil)
-                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Ceil)
-                );
-            }
-
-            #[test]
-            fn monotonic_in_rate(
-                principal in 0u128..=PRINCIPAL_MAX,
-                rate_bps in 0u32..RATE_MAX,
-                time_delta in 0u64..=TIME_MAX,
-            ) {
-                prop_assert!(
-                    prorate_interest(principal, rate_bps + 1, time_delta, Rounding::Floor)
-                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
-                );
-            }
-
-            #[test]
-            fn monotonic_in_time(
-                principal in 0u128..=PRINCIPAL_MAX,
-                rate_bps in 0u32..=RATE_MAX,
-                time_delta in 0u64..TIME_MAX,
-            ) {
-                prop_assert!(
-                    prorate_interest(principal, rate_bps, time_delta + 1, Rounding::Floor)
-                        >= prorate_interest(principal, rate_bps, time_delta, Rounding::Floor)
-                );
-            }
-
-            #[test]
-            fn overflow_safe_envelope(
-                principal in 0u128..=PRINCIPAL_MAX,
-                rate_bps in 0u32..=RATE_MAX,
-                time_delta in 0u64..=TIME_MAX,
-            ) {
-                let _ = prorate_interest(principal, rate_bps, time_delta, Rounding::Floor);
-                let _ = prorate_interest(principal, rate_bps, time_delta, Rounding::Ceil);
-            }
-        }
     }
 }
