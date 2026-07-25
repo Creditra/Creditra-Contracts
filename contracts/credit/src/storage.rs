@@ -185,6 +185,10 @@ pub enum DataKey {
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
+    /// Minimum ledger seconds between critical collateral admin actions (v7).
+    AdminCollateralCooldownSeconds,
+    /// Ledger timestamp of the last critical collateral admin action (v7).
+    LastAdminCollateralCriticalActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
@@ -519,6 +523,34 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
     env.storage()
         .instance()
         .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+
+/// Get the configured admin collateral cool-off interval, if set.
+pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminCollateralCooldownSeconds)
+}
+
+/// Set the admin collateral cool-off interval (admin only, enforced by caller).
+pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCollateralCooldownSeconds, &seconds);
+}
+
+/// Get the ledger timestamp of the last critical collateral admin action, if any.
+pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+}
+
+/// Record the ledger timestamp of the last critical collateral admin action.
+pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this

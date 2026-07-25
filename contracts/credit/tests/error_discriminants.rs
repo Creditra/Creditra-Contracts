@@ -68,7 +68,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
     assert_eq!(ContractError::InvalidAttestation as u32, 53);
-    assert_eq!(ContractError::FreezeCooldownActive as u32, 54);
+    assert_eq!(ContractError::AdminCollateralCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -130,7 +130,7 @@ fn no_duplicate_discriminants() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
-        ContractError::FreezeCooldownActive as u32,
+        ContractError::AdminCollateralCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -200,7 +200,7 @@ fn variant_count_is_known() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
-        ContractError::FreezeCooldownActive as u32,
+        ContractError::AdminCollateralCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -428,6 +428,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawCooldownActive.category(),
         ContractErrorCategory::Risk
     );
+    assert_eq!(
+        ContractError::AdminCollateralCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
     // Oracle
     assert_eq!(
         ContractError::OraclePriceInvalid.category(),
@@ -552,6 +556,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
+        ContractError::AdminCollateralCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),

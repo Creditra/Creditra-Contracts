@@ -82,7 +82,7 @@
 //   `ContractError::TimestampRegression = 33`.
 // - `(borrower, settlement_id)` is the dedup key for cross-contract
 //   settlement replay safety.
-// - 52 `ContractError` discriminants are ABI-stable; CI test
+// - 54 `ContractError` discriminants are ABI-stable; CI test
 //   `tests/error_discriminants.rs` reverts on reorder (pins every discriminant
 //   and every category mapping).
 // - 25+ event topics under the `credit` namespace are stability-pinned by
@@ -107,6 +107,8 @@ mod attestation;
 mod auth;
 pub mod borrow;
 mod collateral;
+#[path = "../../collateral/src/admin.rs"]
+mod collateral_admin;
 mod config;
 pub mod events;
 mod fees;
@@ -1524,13 +1526,45 @@ impl Credit {
     ///
     /// # Errors
     /// - Reverts with [`ContractError::InvalidRiskWeight`] if `weight_bps > 10_000`.
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed since the last
+    ///   critical collateral admin action.
     /// - Reverts if caller is not the configured admin.
     pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
-        require_admin_auth(&env);
-        if weight_bps > 10_000 {
-            env.panic_with_error(ContractError::InvalidRiskWeight);
-        }
-        crate::storage::set_collateral_risk_weight_bps(&env, &asset, weight_bps);
+        collateral_admin::set_collateral_risk_weight(&env, &asset, weight_bps);
+    }
+
+    /// Set the protocol-wide minimum collateral ratio in basis points (admin only).
+    ///
+    /// Dial down to `0` to disable the ratio check on draws and withdrawals.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed.
+    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
+        collateral_admin::set_min_collateral_ratio_bps(&env, ratio_bps);
+    }
+
+    /// Query the configured minimum collateral ratio in basis points.
+    pub fn get_min_collateral_ratio_bps(env: Env) -> Option<u32> {
+        crate::storage::get_min_collateral_ratio_bps(&env)
+    }
+
+    /// Set the minimum interval between critical collateral admin actions (admin only).
+    ///
+    /// Pass `0` to disable the cool-off guard.
+    pub fn set_admin_collateral_cooldown_seconds(env: Env, seconds: u64) {
+        collateral_admin::set_admin_collateral_cooldown_seconds(&env, seconds);
+    }
+
+    /// Query the configured admin collateral cool-off interval, if set.
+    pub fn get_admin_collateral_cooldown_seconds(env: Env) -> Option<u64> {
+        collateral_admin::get_admin_collateral_cooldown_seconds(&env)
+    }
+
+    /// Query the ledger timestamp of the last critical collateral admin action.
+    pub fn get_last_admin_collateral_critical_action_ts(env: Env) -> Option<u64> {
+        collateral_admin::get_last_admin_collateral_critical_action_ts(&env)
     }
 
     /// Release a portion of collateral to the borrower while the credit line
@@ -1583,9 +1617,12 @@ impl Credit {
     /// The token must be a valid SAC-compatible contract address. Once listed
     /// borrowers can call [`deposit_collateral_token`] / [`withdraw_collateral_token`]
     /// using this token.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed.
     pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
-        require_admin_auth(&env);
-        crate::storage::set_collateral_token_allowlist(&env, &tokens);
+        collateral_admin::set_collateral_token_allowlist(&env, &tokens);
     }
 
     /// Query: return the current collateral token allowlist.
