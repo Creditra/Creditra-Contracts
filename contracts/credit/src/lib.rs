@@ -2384,6 +2384,9 @@ impl Credit {
     /// Emits `("credit", "paused")` with `true` or `("credit", "unpaused")` with `false`.
     pub fn set_protocol_paused(env: Env, paused: bool) {
         require_admin_auth(&env);
+        if paused {
+            crate::storage::remove_pause_reason(&env);
+        }
         crate::storage::set_paused(&env, paused);
         publish_paused_event(&env, paused);
     }
