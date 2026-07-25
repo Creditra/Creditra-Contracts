@@ -170,8 +170,13 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     };
 
-    let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
-    let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
+    let per_borrower_grace = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
+    let grace_seconds = if per_borrower_grace > 0 {
+        per_borrower_grace
+    } else {
+        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
+        grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0)
+    };
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
     env.ledger().timestamp() > delinquent_after

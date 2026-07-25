@@ -1074,6 +1074,25 @@ impl Credit {
         crate::storage::get_grace_period_config(&env)
     }
 
+    /// Set or update the per-borrower liquidation grace period in seconds (admin only).
+    ///
+    /// # Arguments
+    /// - `env`: Soroban environment.
+    /// - `borrower`: Borrower address to configure.
+    /// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
+    pub fn set_per_borrower_liquidation_grace(
+        env: Env,
+        borrower: Address,
+        grace_period_seconds: u64,
+    ) {
+        lifecycle::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
+    }
+
+    /// Return the per-borrower liquidation grace period in seconds for `borrower`.
+    pub fn get_per_borrower_liquidation_grace(env: Env, borrower: Address) -> u64 {
+        lifecycle::get_per_borrower_liquidation_grace(&env, borrower)
+    }
+
     /// Set the structured late-fee configuration (flat amount or APR-based).
     ///
     /// Pass `Some(LateFeeConfig::Flat(FlatFeeConfig { amount }))` to charge a

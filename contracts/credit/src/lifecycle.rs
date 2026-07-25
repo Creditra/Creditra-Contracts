@@ -289,6 +289,44 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     );
 }
 
+// ── per-borrower liquidation grace ──────────────────────────────────────────
+
+/// Set or update the per-borrower liquidation grace period in seconds (admin only).
+///
+/// # Arguments
+/// - `env`: Soroban environment.
+/// - `borrower`: Borrower address to configure.
+/// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
+///
+/// # Panics
+/// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
+/// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
+pub fn set_per_borrower_liquidation_grace(
+    env: &Env,
+    borrower: Address,
+    grace_period_seconds: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+    if stored_line.status == CreditStatus::Closed {
+        env.panic_with_error(ContractError::CreditLineClosed);
+    }
+
+    crate::storage::set_per_borrower_liquidation_grace(env, &borrower, grace_period_seconds);
+}
+
+/// Return the per-borrower liquidation grace period in seconds for `borrower`.
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
+    crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
+}
+
 /// Set or replace a borrower's installment repayment schedule.
 pub fn set_repayment_schedule(
     env: &Env,
@@ -691,6 +729,24 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     if credit_line.status == CreditStatus::Defaulted {
         // Idempotent: already defaulted, nothing to do.
         return;
+    }
+
+    let grace_seconds = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
+    if grace_seconds > 0 {
+        let now = env.ledger().timestamp();
+        let base_ts = if credit_line.suspension_ts > 0 {
+            credit_line.suspension_ts
+        } else if let Some(schedule) = get_repayment_schedule(&env, &borrower) {
+            schedule.next_due_ts
+        } else if credit_line.last_rate_update_ts > 0 {
+            credit_line.last_rate_update_ts
+        } else {
+            credit_line.last_accrual_ts
+        };
+
+        if now < base_ts.saturating_add(grace_seconds) {
+            env.panic_with_error(ContractError::LiquidationGraceActive);
+        }
     }
 
     let _previous_status = credit_line.status;
@@ -1315,5 +1371,97 @@ mod installment {
         let treasury_after = client.get_protocol_summary().treasury_balance;
         // Only 1 overdue installment × 30 = 30
         assert_eq!(treasury_after - treasury_before, 30);
+    }
+
+    // ── per-borrower liquidation grace tests ─────────────────────────────────
+
+    #[test]
+    fn per_borrower_liquidation_grace_roundtrip() {
+        let env = Env::default();
+        let (client, borrower) = setup_borrower(&env);
+
+        assert_eq!(client.get_per_borrower_liquidation_grace(&borrower), 0);
+
+        client.set_per_borrower_liquidation_grace(&borrower, &3600_u64);
+        assert_eq!(client.get_per_borrower_liquidation_grace(&borrower), 3600);
+
+        // Setting to 0 removes it
+        client.set_per_borrower_liquidation_grace(&borrower, &0_u64);
+        assert_eq!(client.get_per_borrower_liquidation_grace(&borrower), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #55)")]
+    fn per_borrower_liquidation_grace_blocks_default_within_grace() {
+        let env = Env::default();
+        let (client, borrower) = setup_borrower(&env);
+
+        setup_draw(&env, &client, &borrower, 500_000, 100);
+        client.suspend_credit_line(&borrower); // suspended at t=100
+
+        // Set grace period of 3600 seconds
+        client.set_per_borrower_liquidation_grace(&borrower, &3600_u64);
+
+        // Advance to t=1000 (inside grace window t=100..3700)
+        env.ledger().set_timestamp(1000);
+
+        // Attempt default — should panic with ContractError::LiquidationGraceActive (#55)
+        client.default_credit_line(&borrower);
+    }
+
+    #[test]
+    fn per_borrower_liquidation_grace_allows_default_after_grace() {
+        let env = Env::default();
+        let (client, borrower) = setup_borrower(&env);
+
+        setup_draw(&env, &client, &borrower, 500_000, 100);
+        client.suspend_credit_line(&borrower); // suspended at t=100
+
+        // Set grace period of 3600 seconds
+        client.set_per_borrower_liquidation_grace(&borrower, &3600_u64);
+
+        // Advance past grace window to t=3701
+        env.ledger().set_timestamp(3701);
+
+        // Default succeeds
+        client.default_credit_line(&borrower);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Defaulted);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn set_per_borrower_liquidation_grace_requires_admin_auth() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &1_000_000, &1000, &5000);
+
+        // Switch to non-admin client
+        let non_admin_client = CreditClient::new(&env, &contract_id);
+        // Non-admin call should fail with NotAdmin (#2)
+        non_admin_client.set_per_borrower_liquidation_grace(&borrower, &3600_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn set_per_borrower_liquidation_grace_reverts_for_missing_line() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let borrower = Address::generate(&env);
+        // Borrower line does not exist — should panic with CreditLineNotFound (#3)
+        client.set_per_borrower_liquidation_grace(&borrower, &3600_u64);
     }
 }

@@ -230,6 +230,9 @@ pub enum DataKey {
     /// Ledger timestamp of the last admin freeze or unfreeze action.
     /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
     LastFreezeTimestamp,
+    /// Per-borrower liquidation grace period in seconds.
+    /// Specifies a grace window before a credit line can be defaulted or liquidated.
+    LiquidationGracePeriod(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -786,6 +789,29 @@ pub fn grace_period_key(env: &Env) -> Symbol {
 pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
     bump_instance_ttl(env);
     env.storage().instance().get(&grace_period_key(env))
+}
+
+/// Return the per-borrower liquidation grace period in seconds (0 if not configured).
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> u64 {
+    bump_persistent_ttl(env, borrower);
+    env.storage()
+        .persistent()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+        .unwrap_or(0)
+}
+
+/// Set or remove (if 0) the per-borrower liquidation grace period in seconds.
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, seconds: u64) {
+    bump_persistent_ttl(env, borrower);
+    if seconds == 0 {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LiquidationGracePeriod(borrower.clone()));
+    } else {
+        env.storage()
+            .persistent()
+            .set(&DataKey::LiquidationGracePeriod(borrower.clone()), &seconds);
+    }
 }
 
 /// Persistent storage key that acts as a replay guard for a default liquidation settlement.
