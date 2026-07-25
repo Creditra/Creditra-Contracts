@@ -12,11 +12,11 @@ members = [
 soroban-sdk = "22"
 
 [profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
+opt-level = "z"          # Optimize for size
+overflow-checks = false  # Disable for smaller binary
+debug = 0               # No debug info
+strip = "symbols"       # Strip symbols
+debug-assertions = false # No debug assertions
+panic = "abort"         # Smaller than unwinding
+codegen-units = 1       # Better optimization
+lto = true             # Link time optimization
