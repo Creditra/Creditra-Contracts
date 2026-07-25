@@ -46,6 +46,22 @@ pub enum ExecuteMsg {
     SubmitOraclePrices {
         prices: Vec<i128>,
     },
+    /// Set the protocol-wide default per-borrower rate ceiling in basis points
+    /// (admin only). Must not exceed `limits::MAX_RATE_BPS`.
+    SetDefaultRateCeiling {
+        max_rate_bps: u32,
+    },
+    /// Set a per-borrower rate-ceiling override in basis points (admin only).
+    /// Must not exceed `limits::MAX_RATE_BPS`.
+    SetBorrowerRateCeiling {
+        borrower: String,
+        max_rate_bps: u32,
+    },
+    /// Remove a per-borrower rate-ceiling override, reverting that borrower to
+    /// the protocol-wide default (admin only).
+    ClearBorrowerRateCeiling {
+        borrower: String,
+    },
 }
 
 #[cw_serde]
@@ -64,6 +80,10 @@ pub enum QueryMsg {
     GetOracleQuorumConfig {},
     #[returns(OraclePriceResponse)]
     GetOraclePrice {},
+    /// Resolve the effective rate ceiling for a borrower, along with the
+    /// override and default it was derived from.
+    #[returns(BorrowerRateCeilingResponse)]
+    GetBorrowerRateCeiling { borrower: String },
 }
 
 #[cw_serde]
@@ -131,4 +151,18 @@ pub struct OracleQuorumConfigResponse {
 pub struct OraclePriceResponse {
     pub price: Option<i128>,
     pub timestamp: Option<u64>,
+}
+
+/// Response for the per-borrower rate-ceiling query.
+#[cw_serde]
+pub struct BorrowerRateCeilingResponse {
+    /// The borrower address the ceiling was resolved for.
+    pub borrower: String,
+    /// The effective ceiling in basis points: the override when set, otherwise
+    /// the default. `None` when neither has been configured.
+    pub effective_ceiling_bps: Option<u32>,
+    /// The per-borrower override in basis points, if one is set.
+    pub override_bps: Option<u32>,
+    /// The protocol-wide default in basis points, if one is set.
+    pub default_bps: Option<u32>,
 }

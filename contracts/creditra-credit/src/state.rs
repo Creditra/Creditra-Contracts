@@ -128,3 +128,19 @@ pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg")
 
 /// Storage key for the last resolved oracle price record.
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
+
+/// Protocol-wide default per-borrower interest-rate ceiling, in basis points.
+///
+/// Applies to every borrower that has no explicit override in
+/// [`BORROWER_RATE_CEILING_BPS`]. Absent until the owner sets it via
+/// `SetDefaultRateCeiling`. See [`crate::limits`] for the resolution and
+/// enforcement logic.
+pub const DEFAULT_RATE_CEILING_BPS: Item<u32> = Item::new("drc_bps");
+
+/// Per-borrower interest-rate ceiling overrides, in basis points, keyed by
+/// borrower address.
+///
+/// When present for a borrower, this value replaces the protocol-wide default
+/// for that borrower. Keys use the same canonical bech32 `Addr` serialisation
+/// as [`BORROWER_TO_ID`], guaranteeing deterministic, collision-free lookups.
+pub const BORROWER_RATE_CEILING_BPS: Map<Addr, u32> = Map::new("brc_bps");
