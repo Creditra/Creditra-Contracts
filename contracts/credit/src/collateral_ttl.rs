@@ -271,4 +271,63 @@ mod test {
         });
         assert_eq!(balance, 0_i128);
     }
+
+    #[test]
+    fn get_collateral_token_bumps_ttl_on_read() {
+        let env = Env::default();
+        let (contract_id, client) = setup(&env);
+        let token = Address::generate(&env);
+        client.set_liquidity_token(&token);
+
+        // Set low TTL
+        env.as_contract(&contract_id, || {
+            env.storage().instance().extend_ttl(1, 100);
+        });
+
+        // Verify TTL is bumped
+        let ttl_before = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::LiquidityToken)
+        });
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::get_collateral_token(&env);
+        });
+
+        let ttl_after = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::LiquidityToken)
+        });
+        
+        assert!(ttl_after > ttl_before);
+    }
+
+    #[test]
+    fn get_collateral_token_allowlist_bumps_ttl_on_read() {
+        let env = Env::default();
+        let (contract_id, _client) = setup(&env);
+        let token = Address::generate(&env);
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::set_collateral_token_allowlist(&env, &soroban_sdk::vec![&env, token.clone()]);
+        });
+
+        // Set low TTL
+        env.as_contract(&contract_id, || {
+            env.storage().instance().extend_ttl(1, 100);
+        });
+
+        // Verify TTL is bumped
+        let ttl_before = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::CollateralTokenAllowlist)
+        });
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::get_collateral_token_allowlist(&env);
+        });
+
+        let ttl_after = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::CollateralTokenAllowlist)
+        });
+        
+        assert!(ttl_after > ttl_before);
+    }
 }

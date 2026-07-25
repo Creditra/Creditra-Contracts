@@ -322,6 +322,7 @@ pub fn get_total_utilized(env: &Env) -> i128 {
 
 /// Return the global collateral accumulator.
 pub fn get_total_collateral(env: &Env) -> i128 {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::TotalCollateral)
@@ -525,11 +526,13 @@ pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
 /// The current contract uses the configured liquidity token for collateral
 /// transfers as well.
 pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    bump_instance_ttl(env);
     env.storage().instance().get(&DataKey::LiquidityToken)
 }
 
 /// Return the minimum collateral ratio in basis points, if configured.
 pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::MinCollateralRatioBps)
@@ -544,6 +547,7 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
 
 /// Get the configured admin collateral cool-off interval, if set.
 pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::AdminCollateralCooldownSeconds)
@@ -558,6 +562,7 @@ pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
 
 /// Get the ledger timestamp of the last critical collateral admin action, if any.
 pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::LastAdminCollateralCriticalActionTs)
@@ -573,6 +578,7 @@ pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
 /// if explicitly configured. `None` means no weight was ever set for this
 /// asset; callers should treat that as 10_000 bps (100%, full value).
 pub fn get_collateral_risk_weight_bps(env: &Env, asset: &Address) -> Option<u32> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::CollateralRiskWeightBps(asset.clone()))
@@ -1451,6 +1457,7 @@ pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 
 /// Return the allowlisted collateral token addresses, or an empty vec.
 pub fn get_collateral_token_allowlist(env: &Env) -> soroban_sdk::Vec<Address> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::CollateralTokenAllowlist)
