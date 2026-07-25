@@ -1,0 +1,43 @@
+name: WASM Size Budget
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/**
+
+concurrency:
+  group: wasm-size-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm-size-guard:
+    name: WASM size budget (±5 KB)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-budget-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-budget-
+
+      - name: Run baseline check tests
+        run: bash scripts/test_check_wasm_size.sh
+
+      - name: Build and verify WASM size budget
+        run: bash scripts/check-wasm-baseline.sh
