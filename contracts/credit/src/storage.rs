@@ -129,6 +129,10 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
+    /// Minimum interval in seconds between critical admin actions for one borrower.
+    BorrowAdminCooldownSeconds,
+    /// Last timestamp at which a critical admin action mutated a borrower.
+    LastBorrowAdminActionTs(Address),
     /// Per-borrower interest rate floor in basis points.
     /// When set, the effective interest rate must be >= floor.
     RateFloorBps(Address),
@@ -1018,6 +1022,34 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
     env.storage()
         .instance()
         .set(&DataKey::DrawMinIntervalSeconds, &seconds);
+}
+
+/// Get the configured per-borrower admin action cooldown, if set.
+pub fn get_borrow_admin_cooldown(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::BorrowAdminCooldownSeconds)
+}
+
+/// Set the per-borrower admin action cooldown. A zero value disables it.
+pub fn set_borrow_admin_cooldown(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::BorrowAdminCooldownSeconds, &seconds);
+}
+
+/// Return the last critical admin-action timestamp for a borrower, if any.
+pub fn get_last_borrow_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastBorrowAdminActionTs(borrower.clone()))
+}
+
+/// Store the last critical admin-action timestamp for a borrower.
+pub fn set_last_borrow_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
+    let key = DataKey::LastBorrowAdminActionTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Check if the protocol is paused.

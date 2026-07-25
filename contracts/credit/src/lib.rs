@@ -244,6 +244,29 @@ const DRAW_REVERSAL_WINDOW_SECS: u64 = 3600;
 /// Prevents unbounded gas consumption. Adjust after gas profiling.
 const BATCH_CLOSE_MAX: u32 = 50;
 
+/// Enforce and record the per-borrower cooldown for critical admin mutations.
+///
+/// The guard is disabled when no cooldown is configured or when the configured
+/// value is `0`. It records only successful preflight checks, so failed calls do
+/// not consume the borrower's next admin-action window.
+fn enforce_borrow_admin_cooldown(env: &Env, borrower: &Address) {
+    let Some(cooldown_seconds) = crate::storage::get_borrow_admin_cooldown(env) else {
+        return;
+    };
+    if cooldown_seconds == 0 {
+        return;
+    }
+
+    let now = env.ledger().timestamp();
+    if let Some(last_ts) = crate::storage::get_last_borrow_admin_action_ts(env, borrower) {
+        if now < last_ts.saturating_add(cooldown_seconds) {
+            env.panic_with_error(ContractError::AdminCooldownActive);
+        }
+    }
+
+    crate::storage::set_last_borrow_admin_action_ts(env, borrower, now);
+}
+
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
     fn settle_default_liquidation(
@@ -338,6 +361,8 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)
     }
 
@@ -716,6 +741,8 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         risk::update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)
     }
 
@@ -748,6 +775,8 @@ impl Credit {
     }
 
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
@@ -1187,6 +1216,19 @@ impl Credit {
     /// Get the configured minimum draw interval between borrower draws.
     pub fn get_draw_min_interval(env: Env) -> Option<u64> {
         crate::storage::get_draw_min_interval(&env)
+    }
+
+    /// Set the minimum interval between critical admin actions for one borrower.
+    /// Pass `0` to disable the per-borrower admin cooldown.
+    pub fn set_borrow_admin_cooldown(env: Env, seconds: u64) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        crate::storage::set_borrow_admin_cooldown(&env, seconds);
+    }
+
+    /// Get the configured critical admin-action cooldown.
+    pub fn get_borrow_admin_cooldown(env: Env) -> Option<u64> {
+        crate::storage::get_borrow_admin_cooldown(&env)
     }
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
@@ -1691,6 +1733,8 @@ impl Credit {
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::suspend_credit_line(env, borrower)
     }
 
@@ -1699,6 +1743,10 @@ impl Credit {
     }
 
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
+        closer.require_auth();
+        if closer == require_admin(&env) {
+            enforce_borrow_admin_cooldown(&env, &borrower);
+        }
         lifecycle::close_credit_line(env, borrower, closer)
     }
 
@@ -1711,19 +1759,29 @@ impl Credit {
         if borrowers.len() > BATCH_CLOSE_MAX {
             env.panic_with_error(ContractError::InvalidAmount);
         }
+        require_admin_auth(&env);
+        for borrower in borrowers.iter() {
+            enforce_borrow_admin_cooldown(&env, &borrower);
+        }
         lifecycle::close_credit_lines_batch(env, borrowers)
     }
 
     pub fn default_credit_line(env: Env, borrower: Address) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::default_credit_line(env, borrower)
     }
 
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
 
     /// Forgive outstanding debt without transferring tokens (admin only).
     pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         lifecycle::forgive_debt(env, borrower, amount)
     }
 
@@ -2335,6 +2393,8 @@ impl Credit {
     /// # Events
     /// Emits `CreditLineFreezeEvent` on `("credit", "line_frz")`.
     pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         freeze::freeze_credit_line(env, borrower, reason)
     }
 
@@ -2342,6 +2402,8 @@ impl Credit {
     ///
     /// No-op when the borrower was not frozen.
     pub fn unfreeze_credit_line(env: Env, borrower: Address) {
+        require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         freeze::unfreeze_credit_line(env, borrower)
     }
 
@@ -2379,6 +2441,7 @@ impl Credit {
     pub fn freeze_borrower_until(env: Env, admin: Address, borrower: Address, expiry_ts: u64) {
         admin.require_auth();
         require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
 
         let now = env.ledger().timestamp();
         if expiry_ts <= now {
@@ -2417,6 +2480,7 @@ impl Credit {
     pub fn unfreeze_borrower(env: Env, admin: Address, borrower: Address) {
         admin.require_auth();
         require_admin_auth(&env);
+        enforce_borrow_admin_cooldown(&env, &borrower);
         clear_borrower_frozen(&env, &borrower);
     }
 
