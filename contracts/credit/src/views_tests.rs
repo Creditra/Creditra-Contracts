@@ -125,8 +125,8 @@ fn test_credit_lines_paginated_empty() {
     client.set_liquidity_source(&source);
 
     // Empty result with no credit lines
-    let page = client.get_credit_lines_paginated(None, &10);
-    assert_eq!(page.credit_lines.len(), 0);
+    let page = client.get_credit_lines_paginated(&None, &10);
+    assert_eq!(page.lines.len(), 0);
     assert!(page.next_cursor.is_none());
 }
 
@@ -156,14 +156,14 @@ fn test_credit_lines_paginated_single_page() {
     client.open_credit_line(&b3, &3000, &700, &30);
 
     // Request all 3 in one page
-    let page = client.get_credit_lines_paginated(None, &10);
-    assert_eq!(page.credit_lines.len(), 3);
+    let page = client.get_credit_lines_paginated(&None, &10);
+    assert_eq!(page.lines.len(), 3);
     assert!(page.next_cursor.is_none());
 
     // Verify credit line data
-    assert_eq!(page.credit_lines.get(0).unwrap().credit_limit, 1000);
-    assert_eq!(page.credit_lines.get(1).unwrap().credit_limit, 2000);
-    assert_eq!(page.credit_lines.get(2).unwrap().credit_limit, 3000);
+    assert_eq!(page.lines.get(0).unwrap().credit_limit, 1000);
+    assert_eq!(page.lines.get(1).unwrap().credit_limit, 2000);
+    assert_eq!(page.lines.get(2).unwrap().credit_limit, 3000);
 }
 
 #[test]
@@ -189,20 +189,20 @@ fn test_credit_lines_paginated_multiple_pages() {
     }
 
     // First page with 2 items
-    let page1 = client.get_credit_lines_paginated(None, &2);
-    assert_eq!(page1.credit_lines.len(), 2);
+    let page1 = client.get_credit_lines_paginated(&None, &2);
+    assert_eq!(page1.lines.len(), 2);
     assert!(page1.next_cursor.is_some());
 
     // Second page with 2 items
     let cursor1 = page1.next_cursor.unwrap();
-    let page2 = client.get_credit_lines_paginated(Some(cursor1), &2);
-    assert_eq!(page2.credit_lines.len(), 2);
+    let page2 = client.get_credit_lines_paginated(&Some(cursor1), &2);
+    assert_eq!(page2.lines.len(), 2);
     assert!(page2.next_cursor.is_some());
 
     // Third page with 1 item (last page)
     let cursor2 = page2.next_cursor.unwrap();
-    let page3 = client.get_credit_lines_paginated(Some(cursor2), &2);
-    assert_eq!(page3.credit_lines.len(), 1);
+    let page3 = client.get_credit_lines_paginated(&Some(cursor2), &2);
+    assert_eq!(page3.lines.len(), 1);
     assert!(page3.next_cursor.is_none());
 }
 
@@ -229,8 +229,8 @@ fn test_credit_lines_paginated_limit_enforcement() {
     }
 
     // Request exactly 3 items
-    let page = client.get_credit_lines_paginated(None, &3);
-    assert_eq!(page.credit_lines.len(), 3);
+    let page = client.get_credit_lines_paginated(&None, &3);
+    assert_eq!(page.lines.len(), 3);
     assert!(page.next_cursor.is_some());
 }
 
@@ -252,7 +252,7 @@ fn test_credit_lines_paginated_limit_exceeds_max() {
 
     // Request limit > MAX_ENUMERATION_LIMIT (100) should panic
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.get_credit_lines_paginated(None, &101);
+        client.get_credit_lines_paginated(&None, &101);
     }));
     assert!(result.is_err());
 }
@@ -280,8 +280,8 @@ fn test_credit_lines_paginated_cursor_beyond_end() {
     client.open_credit_line(&b2, &2000, &600, &20);
 
     // Request with cursor beyond the last ID
-    let page = client.get_credit_lines_paginated(Some(100), &10);
-    assert_eq!(page.credit_lines.len(), 0);
+    let page = client.get_credit_lines_paginated(&Some(100), &10);
+    assert_eq!(page.lines.len(), 0);
     assert!(page.next_cursor.is_none());
 }
 
@@ -314,8 +314,8 @@ fn test_credit_lines_paginated_with_closed_lines() {
     client.close_credit_line(&b2, &admin);
 
     // Pagination should still return all lines (including closed)
-    let page = client.get_credit_lines_paginated(None, &10);
-    assert_eq!(page.credit_lines.len(), 3);
+    let page = client.get_credit_lines_paginated(&None, &10);
+    assert_eq!(page.lines.len(), 3);
 }
 
 #[test]
@@ -346,20 +346,20 @@ fn test_credit_lines_paginated_cursor_continuation() {
     client.open_credit_line(&b4, &4000, &800, &40);
 
     // First page: 2 items
-    let page1 = client.get_credit_lines_paginated(None, &2);
-    assert_eq!(page1.credit_lines.len(), 2);
+    let page1 = client.get_credit_lines_paginated(&None, &2);
+    assert_eq!(page1.lines.len(), 2);
     let cursor1 = page1.next_cursor.unwrap();
 
     // Second page: continue from cursor
-    let page2 = client.get_credit_lines_paginated(Some(cursor1), &2);
-    assert_eq!(page2.credit_lines.len(), 2);
+    let page2 = client.get_credit_lines_paginated(&Some(cursor1), &2);
+    assert_eq!(page2.lines.len(), 2);
     assert!(page2.next_cursor.is_none());
 
     // Verify we got all 4 distinct lines
     let all_limits: Vec<i128> = page1
-        .credit_lines
+        .lines
         .iter()
-        .chain(page2.credit_lines.iter())
+        .chain(page2.lines.iter())
         .map(|line| line.credit_limit)
         .collect();
     assert_eq!(all_limits.len(), 4);

@@ -210,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
 
     // Bump TTL on read.
     env.storage()
@@ -273,7 +273,7 @@ mod tests {
     fn leaf(env: &Env, pattern: u8) -> BytesN<32> {
         let mut data = Bytes::new(env);
         data.push_back(pattern);
-        env.crypto().sha256(&data)
+        env.crypto().sha256(&data).into()
     }
 
     /// Merkle root of two leaves via `hash_pair` (which sorts internally).

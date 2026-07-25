@@ -74,6 +74,13 @@ See the [category enum reference](#contracterrorcategory) below.
 | 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied. |
 | 51 | `AlreadySettled` | Lifecycle | Liquidation for this (borrower, id) already processed. |
 | 52 | `InvalidRiskWeight` | Numeric | Collateral risk weight exceeds 10 000 bps. |
+| 53 | `AdminQueryCooldownActive` | Risk | Admin attempted a query-critical action before the cooldown elapsed. |
+| 54 | `OracleNotFound` | Oracle | Oracle address not found in the oracle registry. |
+| 55 | `BorrowerMismatch` | Auth | Stored borrower address does not match the load key. |
+| 56 | `InsufficientReserve` | Liquidity | Liquidity reserve balance below the requested draw amount. |
+| 57 | `InsufficientAllowance` | Liquidity | Borrower token allowance is insufficient for the transfer. |
+| 58 | `InsufficientBalance` | Liquidity | Borrower token balance is insufficient for the transfer. |
+| 59 | `UtilizedNotZero` | Limit | Credit line utilization must be zero before this action. |
 
 ## `ContractErrorCategory`
 
@@ -83,13 +90,13 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 
 | Code | Category | Variants |
 | ---: | -------- | -------- |
-| 1  | Auth | `Unauthorized`, `NotAdmin`, `AdminNotInitialized` |
+| 1  | Auth | `Unauthorized`, `NotAdmin`, `AdminNotInitialized`, `BorrowerMismatch` |
 | 2  | Lifecycle | `CreditLineClosed`, `AlreadyInitialized`, `CreditLineSuspended`, `CreditLineDefaulted`, `AlreadySettled` |
 | 3  | Numeric | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds`, `InvalidRiskWeight` |
-| 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired` |
-| 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
-| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive` |
-| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet` |
+| 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired`, `UtilizedNotZero` |
+| 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet`, `InsufficientReserve`, `InsufficientAllowance`, `InsufficientBalance` |
+| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `AdminQueryCooldownActive` |
+| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound` |
 | 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance` |
 | 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen` |
 | 10 | Reentrancy | `Reentrancy` |
@@ -98,6 +105,6 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 ## Taxonomy
 
 See [`docs/ERROR_CODES.md`](./ERROR_CODES.md) for the authoritative
-grouping of all 52 variants into **named categories** (Auth, Lifecycle,
+grouping of all 59 variants into **named categories** (Auth, Lifecycle,
 Numeric, Limit, Liquidity, Risk, Oracle, Collateral, Block, Reentrancy, Misc)
 with **SDK-side recovery actions** per category.

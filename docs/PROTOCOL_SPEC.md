@@ -355,6 +355,7 @@ See `contracts/credit/src/fees.rs`.
 | `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
 | `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
 | Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
+| `set_query_admin_cooldown(seconds: u64)` | Admin + pause. Sets the minimum interval (seconds) between consecutive query-critical actions. Pass `0` to disable. |
 
 ### 2.10 Read-only queries
 
@@ -384,6 +385,8 @@ See `contracts/credit/src/fees.rs`.
 | `get_protocol_fee_bps()` | `Option<u32>` |
 | `get_collateral(borrower)` | `i128` |
 | `get_health_factor(borrower)` | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_query_admin_cooldown()` | `Option<u64>` — configured cooldown interval in seconds; `None` when disabled |
+| `get_query_admin_last_action_ts()` | `Option<u64>` — ledger timestamp of the most recent gated action; `None` before first call |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).

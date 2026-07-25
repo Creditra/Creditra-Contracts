@@ -406,7 +406,7 @@ fn first_gated_action_has_no_prior_anchor_and_always_passes() {
     let client = CreditClient::new(&env, &contract_id);
 
     // Set a large cooldown — should not block the very first call.
-    client.set_query_admin_cooldown(&u64::MAX / 2);
+    client.set_query_admin_cooldown(&(u64::MAX / 2));
 
     assert_eq!(client.get_query_admin_last_action_ts(), None);
     client.set_oracle_config(&500_u32, &3600_u64);
@@ -423,7 +423,7 @@ fn read_entrypoints_are_never_blocked() {
     open_line(&client, &borrower);
 
     // Install a very large cooldown and trigger it.
-    client.set_query_admin_cooldown(&u64::MAX / 2);
+    client.set_query_admin_cooldown(&(u64::MAX / 2));
     client.set_oracle_config(&500_u32, &3600_u64);
 
     // Still at START_TS — reads must proceed without error.

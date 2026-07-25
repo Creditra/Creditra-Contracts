@@ -333,9 +333,14 @@ pub fn update_risk_parameters(
     credit_line.risk_score = risk_score;
 
     let previous_status = credit_line.status;
-    // Handle limit decrease: transition to Restricted if utilization exceeds new limit
+    // Handle limit decrease: transition to Restricted if utilization exceeds new limit,
+    // and auto-cure Restricted back to Active if new limit is at/above utilization.
     if credit_line.utilized_amount > credit_limit {
-        credit_line.status = CreditStatus::Restricted;
+        if credit_line.status == CreditStatus::Active {
+            credit_line.status = CreditStatus::Restricted;
+        }
+    } else if credit_line.status == CreditStatus::Restricted {
+        credit_line.status = CreditStatus::Active;
     }
 
     credit_line.credit_limit = credit_limit;

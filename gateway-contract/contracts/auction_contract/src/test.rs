@@ -1198,9 +1198,10 @@ mod tests {
         client.place_bid(&auction_id, &winner, &420_i128);
         client.close_auction(&auction_id);
 
-        let balance_before = sac.balance(&winner);
+        let token_client = soroban_sdk::token::Client::new(&env, &bid_token);
+        let balance_before = token_client.balance(&winner);
         client.claim_auction(&auction_id);
-        let balance_after = sac.balance(&winner);
+        let balance_after = token_client.balance(&winner);
 
         assert_eq!(
             balance_after - balance_before,
@@ -1208,7 +1209,7 @@ mod tests {
             "winner must receive the bid amount after claim"
         );
 
-        let contract_balance = sac.balance(&contract_id);
+        let contract_balance = token_client.balance(&contract_id);
         assert_eq!(
             contract_balance, 580_i128,
             "contract balance must decrease by the bid amount"

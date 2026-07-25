@@ -65,31 +65,7 @@ use crate::types::{
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
-///
-/// # Storage tier convention
-///
-/// Variants in this enum are referenced from **two** Soroban storage tiers:
-///
-/// - **Instance storage** for global, single-row config and counters
-///   (`LiquidityToken`, `LiquiditySource`, `DrawsFrozen`, `SchemaVersion`,
-///   `CreditLineCount`, `TotalUtilized`, `MaxDrawAmount`, `MaxRepayAmount`,
-///   `DrawMinIntervalSeconds`, `MinCreditLimit`, `MaxCreditLimit`,
-///   `PenaltySurchargeBps`, `LateFeeFlat`, `AuctionContract`, `MaxTotalExposure`,
-///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
-///   `BountyAddress`, `BountyBalance`,
-///   `TotalCollateral`,
-///   `MinCollateralRatioBps`, `CollateralRiskWeightBps`, `OracleConfig`, `OracleLastPrice`,
-///   `OracleLastPriceTs`).
-/// - **Persistent storage** for per-borrower / per-timestamp data
-///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
-///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
-///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
-///   `DrawReversedAmount`).
-///
-/// Helper functions in this module always pick the correct tier; callers
-/// outside this module should never hit the storage API directly with these
-/// keys.
-#[contracttype]
+#[contracttype(export = false)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     /// Address of the liquidity token (SAC or compatible token contract).
@@ -205,9 +181,6 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
@@ -215,6 +188,10 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
+    /// Per-borrower collateral balance for a specific token.
+    CollateralBalanceV2(Address, Address),
+    /// List of allowlisted collateral tokens.
+    CollateralTokenAllowlist,
     /// Minimum interval in seconds required between consecutive admin query
     /// critical actions (update_risk_parameters, set_oracle_config,
     /// set_oracle_quorum_config, set_rate_formula_config, set_grace_period_config).
@@ -249,14 +226,6 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
@@ -376,7 +345,7 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
 pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
     env.storage()
         .persistent()
-        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }
 
 /// Set the per-borrower exposure cap. Passing `0` removes the cap.
@@ -384,11 +353,11 @@ pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128
     if let Some(cap) = cap {
         env.storage()
             .persistent()
-            .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
+            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::BorrowerExposureCap(borrower.clone()));
+            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
     }
 }
 
@@ -664,15 +633,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
@@ -1230,7 +1190,7 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+pub fn get_late_fee_config(env: &Env) -> Option<crate::penalties::LateFeeConfig> {
     env.storage().instance().get(&DataKey::LateFeeConfig)
 }
 
@@ -1242,7 +1202,7 @@ pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+pub fn set_late_fee_config(env: &Env, config: Option<crate::penalties::LateFeeConfig>) {
     match config {
         Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
         None => env.storage().instance().remove(&DataKey::LateFeeConfig),

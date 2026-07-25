@@ -37,7 +37,7 @@ pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
     require_admin_auth(&env);
     
     if weight == 0 {
-        panic!("Oracle weight must be greater than zero");
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let mut oracle_list: Vec<Address> = env
@@ -72,7 +72,7 @@ pub fn remove_oracle(env: Env, oracle: Address) {
         env.storage().instance().remove(&OracleDataKey::OracleWeight(oracle.clone()));
         env.storage().instance().remove(&OracleDataKey::OracleReport(oracle));
     } else {
-        panic!("Oracle not found in registry");
+        env.panic_with_error(ContractError::OracleNotFound);
     }
 }
 
@@ -103,7 +103,7 @@ pub fn report_value(env: Env, oracle: Address, value: u128) {
         .unwrap_or_else(|| Vec::new(&env));
 
     if !oracle_list.contains(&oracle) {
-        panic!("Oracle is not approved");
+        env.panic_with_error(ContractError::Unauthorized);
     }
 
     let report = OracleReportData {
@@ -162,11 +162,11 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     }
 
     if total_weight < quorum {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     if valid_reports.is_empty() {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     // Sort valid reports by value ascending using a simple insertion sort
@@ -412,10 +412,8 @@ mod test {
     }
 }
 
-use soroban_sdk::{Env, Vec};
-
 use crate::math_utils::compute_deviation_bps;
-use crate::types::{ContractError, OracleQuorumConfig};
+use crate::types::OracleQuorumConfig;
 
 /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
 ///

@@ -97,26 +97,27 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     // Clamp start_id to valid range
     if start_id >= total_count {
         return CreditLinesPage {
-            credit_lines: Vec::new(&env),
+            lines: Vec::new(&env),
             next_cursor: None,
+            has_more: false,
         };
     }
 
-    let mut credit_lines = Vec::new(&env);
+    let mut lines = Vec::new(&env);
     let mut next_cursor: Option<u32> = None;
     let mut current_id = start_id;
     let end_id = total_count.saturating_sub(1);
 
     // Iterate through IDs until we collect enough results or reach the end
-    while credit_lines.len() < limit as u32 && current_id <= end_id {
+    while lines.len() < limit as u32 && current_id <= end_id {
         if let Some(borrower) = get_borrower_by_credit_line_id(&env, current_id) {
             if let Some(line) = get_credit_line(&env, &borrower) {
-                credit_lines.push_back(line);
+                lines.push_back(line);
             }
         }
 
         // Prepare next cursor if we might have more results
-        if credit_lines.len() < limit as u32 && current_id < end_id {
+        if lines.len() < limit as u32 && current_id < end_id {
             next_cursor = Some(current_id.saturating_add(1));
         } else if current_id < end_id {
             // We've filled the page but there are more results
@@ -126,13 +127,15 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         current_id = current_id.saturating_add(1);
     }
 
+    let has_more = next_cursor.is_some();
     // If we didn't fill the page, there are no more results
-    if credit_lines.len() < limit as u32 {
+    if lines.len() < limit as u32 {
         next_cursor = None;
     }
 
     CreditLinesPage {
-        credit_lines,
+        lines,
         next_cursor,
+        has_more,
     }
 }
