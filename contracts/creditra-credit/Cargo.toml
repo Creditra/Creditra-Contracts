@@ -17,3 +17,6 @@ cw-storage-plus = "2"
 serde = { version = "1", features = ["derive"] }
 schemars = "0.8"
 thiserror = "2"
+
+[dev-dependencies]
+proptest = "1.0"
