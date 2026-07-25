@@ -51,7 +51,7 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracterror, contracttype, Address, Symbol};
 
 /// Status of a borrower's credit line.
 ///
@@ -165,7 +165,8 @@ pub enum CreditStatus {
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
 /// | 54   | `AdminCooldownActive`          | Risk          | Critical borrower admin action attempted before cooldown elapsed |
-#[soroban_sdk::contracterror]
+/// | 55   | `LiquidationGraceActive`       | Lifecycle     | Per-borrower liquidation grace window has not yet elapsed |
+#[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
@@ -277,6 +278,8 @@ pub enum ContractError {
     InvalidAttestation = 53,
     /// Critical borrower admin action attempted before the cooldown elapsed.
     AdminCooldownActive = 54,
+    /// Per-borrower liquidation grace window has not yet elapsed.
+    LiquidationGraceActive = 55,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -346,6 +349,7 @@ impl ContractError {
             Self::CreditLineSuspended => Lifecycle,
             Self::CreditLineDefaulted => Lifecycle,
             Self::AlreadySettled => Lifecycle,
+            Self::LiquidationGraceActive => Lifecycle,
             // Numeric (3)
             Self::InvalidAmount => Numeric,
             Self::NegativeLimit => Numeric,
@@ -617,6 +621,18 @@ pub struct ProtocolSummaryView {
     pub active_line_count: u32,
 }
 
+/// Paginated list of credit lines returned by `get_credit_lines_paginated`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Credit lines included in this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for fetching the next page, if more items exist.
+    pub next_cursor: Option<u32>,
+    /// `true` if there are additional lines beyond this page.
+    pub has_more: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
@@ -723,7 +739,8 @@ impl ContractError {
             ContractError::CreditLineClosed
             | ContractError::AlreadyInitialized
             | ContractError::CreditLineSuspended
-            | ContractError::CreditLineDefaulted => ContractErrorCategory::Lifecycle,
+            | ContractError::CreditLineDefaulted
+            | ContractError::LiquidationGraceActive => ContractErrorCategory::Lifecycle,
 
             ContractError::InvalidAmount
             | ContractError::NegativeLimit
