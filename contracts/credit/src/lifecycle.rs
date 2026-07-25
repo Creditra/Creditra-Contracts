@@ -118,43 +118,6 @@ fn liquidation_settlement_key(
     )
 }
 
-/// Set credit limit bounds (admin only, called through contractimpl).
-///
-/// These bounds are enforced by [`validate_credit_limit_bounds`] during
-/// `open_credit_line` and `update_risk_parameters`.
-pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
-    require_admin_auth(&env);
-    crate::storage::set_min_credit_limit(&env, min);
-    crate::storage::set_max_credit_limit(&env, max);
-}
-
-/// Get the current credit limit bounds, if configured.
-///
-/// Returns `(Option<min>, Option<max>)` where `None` means the bound is not set.
-pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
-    let min = crate::storage::get_min_credit_limit(env);
-    let max = crate::storage::get_max_credit_limit(env);
-    (min, max)
-}
-
-/// Validate that a credit limit falls within the configured min/max bounds (if set).
-///
-/// # Panics
-/// - `ContractError::LimitOutOfBounds` if `credit_limit` is outside the configured range.
-pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
-    let (min_limit, max_limit) = get_credit_limit_bounds(env);
-    if let Some(min) = min_limit {
-        if credit_limit < min {
-            env.panic_with_error(ContractError::LimitOutOfBounds);
-        }
-    }
-    if let Some(max) = max_limit {
-        if credit_limit > max {
-            env.panic_with_error(ContractError::LimitOutOfBounds);
-        }
-    }
-}
-
 /// Open a new credit line for a borrower (admin only).
 ///
 /// # Parameters
@@ -721,7 +684,6 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 /// Reinstate a defaulted credit line to Active or Suspended (admin only).
 ///
 /// Allowed only when status is Defaulted. Transition: Defaulted → Active or Suspended.
-pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
 ///
 /// This hook is accounting-only and intentionally performs no token transfer.

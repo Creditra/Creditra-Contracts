@@ -253,6 +253,7 @@ pub fn update_risk_parameters(
 ) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    crate::query_admin::assert_and_advance_query_admin_cooldown(&env);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));

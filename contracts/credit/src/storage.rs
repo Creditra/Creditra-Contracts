@@ -215,6 +215,14 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
+    /// Minimum interval in seconds required between consecutive admin query
+    /// critical actions (update_risk_parameters, set_oracle_config,
+    /// set_oracle_quorum_config, set_rate_formula_config, set_grace_period_config).
+    /// When absent, no cooldown is enforced.
+    AdminQueryCooldownSeconds,
+    /// Ledger timestamp of the last admin query critical action.
+    /// Set atomically with the action; used to enforce `AdminQueryCooldownSeconds`.
+    AdminQueryLastActionTs,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -1352,4 +1360,78 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Addre
 /// Return `true` when `token` is in the collateral allowlist.
 pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
+}
+
+// ── Admin query cooldown ──────────────────────────────────────────────────────
+//
+// Guards a configurable set of "query-critical" admin actions (those that
+// directly influence what read-only entrypoints — `get_health_factor`,
+// `is_delinquent`, `get_credit_line` rate, etc. — return) behind a minimum
+// time interval, preventing automated rapid cycling of risk parameters.
+//
+// Two instance-storage slots:
+//   AdminQueryCooldownSeconds  — the required gap between consecutive actions
+//   AdminQueryLastActionTs     — timestamp of the most recent gated action
+//
+// Both live in instance storage so they are always loaded together with the
+// rest of the hot config. The helpers below are intentionally free of auth —
+// callers (in `query_admin.rs`) enforce admin auth separately.
+
+/// Return the configured admin-query cooldown interval in seconds.
+///
+/// Returns `None` when not set, which means no cooldown is enforced.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryCooldownSeconds`]
+pub fn get_admin_query_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryCooldownSeconds)
+}
+
+/// Set the admin-query cooldown interval.
+///
+/// Pass `0` to remove the cooldown (no time gate enforced).
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryCooldownSeconds`]
+pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::AdminQueryCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminQueryCooldownSeconds, &seconds);
+    }
+}
+
+/// Return the ledger timestamp of the most recent admin query critical action.
+///
+/// Returns `None` before any gated action has been performed.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryLastActionTs`]
+pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryLastActionTs)
+}
+
+/// Record the current ledger timestamp as the admin query last-action anchor.
+///
+/// Called at the end of every successfully gated action so that the next
+/// invocation can measure elapsed time against this baseline.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryLastActionTs`]
+pub fn set_admin_query_last_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminQueryLastActionTs, &ts);
 }

@@ -163,6 +163,7 @@ pub enum CreditStatus {
 /// | 50   | `OracleQuorumNotMet`           | Oracle        | Oracle quorum condition not satisfied |
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
+/// | 53   | `AdminQueryCooldownActive`     | Risk          | Admin attempted a critical query action before the configured cooldown elapsed |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -277,6 +278,9 @@ pub enum ContractError {
     AlreadySettled = 51,
     /// Collateral risk weight exceeds the maximum allowed (10 000 bps).
     InvalidRiskWeight = 52,
+    /// Admin attempted a critical query-affecting action before the configured
+    /// cooldown interval has elapsed since the last such action.
+    AdminQueryCooldownActive = 53,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -376,6 +380,7 @@ impl ContractError {
             Self::ScoreTooHigh => Risk,
             Self::Paused => Risk,
             Self::DrawCooldownActive => Risk,
+            Self::AdminQueryCooldownActive => Risk,
             // Oracle (7)
             Self::OraclePriceInvalid => Oracle,
             Self::OraclePriceStale => Oracle,
@@ -746,7 +751,8 @@ impl ContractError {
             ContractError::RateTooHigh
             | ContractError::ScoreTooHigh
             | ContractError::Paused
-            | ContractError::DrawCooldownActive => ContractErrorCategory::Risk,
+            | ContractError::DrawCooldownActive
+            | ContractError::AdminQueryCooldownActive => ContractErrorCategory::Risk,
 
             ContractError::OraclePriceInvalid
             | ContractError::OraclePriceStale

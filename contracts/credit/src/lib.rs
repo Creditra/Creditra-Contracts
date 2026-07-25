@@ -98,7 +98,6 @@
 
 mod handshake;
 mod accrual;
-mod handshake;
 #[cfg(test)]
 mod accrual_tests;
 mod oracles;
@@ -112,18 +111,16 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
-mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
-mod oracles;
-mod limits;
+pub mod limits;
 pub mod math_utils;
 mod penalties;
 #[cfg(test)]
 mod penalties_tests;
 mod query;
-pub mod limits;
+mod query_admin;
 mod risk;
 mod views;
 pub use crate::risk::compute_rate_from_score;
@@ -133,20 +130,6 @@ pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
-
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
-};
-
-use events::{
-    publish_credit_line_event, publish_drawn_event, publish_repayment_event,
-    CreditLineEvent, DrawnEvent, RepaymentEvent,
-};
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
-use auth::require_admin_auth;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 
 
 #[cfg(test)]
@@ -751,6 +734,8 @@ impl Credit {
 
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
         lifecycle::reinstate_credit_line(env, borrower, target_status)
+    }
+
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         risk::get_rate_change_limits(env)
     }
@@ -818,6 +803,8 @@ impl Credit {
     /// Returns error if quorum threshold is not met.
     pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
         oracles::get_median_value(env)
+    }
+
     /// Get the per-borrower interest rate ceiling, if set.
     pub fn get_borrower_rate_ceiling(env: Env, borrower: Address) -> Option<u32> {
         crate::storage::get_borrower_rate_ceiling(&env, &borrower)
@@ -1025,6 +1012,7 @@ impl Credit {
         reduced_rate_bps: u32,
     ) {
         require_admin_auth(&env);
+        query_admin::assert_and_advance_query_admin_cooldown(&env);
         if reduced_rate_bps > crate::risk::MAX_INTEREST_RATE_BPS {
             env.panic_with_error(ContractError::RateTooHigh);
         }
@@ -1189,6 +1177,53 @@ impl Credit {
     /// Get the configured minimum draw interval between borrower draws.
     pub fn get_draw_min_interval(env: Env) -> Option<u64> {
         crate::storage::get_draw_min_interval(&env)
+    }
+
+    /// Set the minimum interval between consecutive admin query-critical actions
+    /// (admin only).
+    ///
+    /// Query-critical actions are those that directly influence what read-only
+    /// query entrypoints return: `update_risk_parameters`, `set_oracle_config`,
+    /// `set_oracle_quorum_config`, `set_rate_formula_config`, and
+    /// `set_grace_period_config`.
+    ///
+    /// Pass `0` to disable the cooldown entirely (no time gate enforced).
+    /// When disabled, actions may be executed at any frequency.
+    ///
+    /// # Parameters
+    /// - `seconds`: Minimum elapsed seconds between consecutive gated actions.
+    ///   Pass `0` to disable.
+    ///
+    /// # Authorization
+    /// Requires admin privileges.
+    ///
+    /// # Errors
+    /// - [`ContractError::Paused`] if the protocol is paused.
+    /// - Auth panic if the caller is not the configured admin.
+    pub fn set_query_admin_cooldown(env: Env, seconds: u64) {
+        query_admin::set_query_admin_cooldown(env, seconds)
+    }
+
+    /// Return the configured admin query-critical action cooldown in seconds.
+    ///
+    /// Returns `None` when the cooldown is disabled (no time gate is enforced).
+    /// Returns `Some(seconds)` when a positive cooldown has been configured.
+    ///
+    /// # Authorization
+    /// None — pure read.
+    pub fn get_query_admin_cooldown(env: Env) -> Option<u64> {
+        query_admin::get_query_admin_cooldown(env)
+    }
+
+    /// Return the ledger timestamp of the most recent admin query-critical action.
+    ///
+    /// Returns `None` before any gated action has been performed.
+    /// Indexers can use this to track the cadence of admin risk-parameter updates.
+    ///
+    /// # Authorization
+    /// None — pure read.
+    pub fn get_query_admin_last_action_ts(env: Env) -> Option<u64> {
+        query_admin::get_query_admin_last_action_ts(env)
     }
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
@@ -1902,6 +1937,7 @@ impl Credit {
     pub fn set_oracle_config(env: Env, max_deviation_bps: u32, max_age_seconds: u64) {
         assert_not_paused(&env);
         require_admin_auth(&env);
+        query_admin::assert_and_advance_query_admin_cooldown(&env);
 
         if max_deviation_bps == 0 || max_deviation_bps > 10_000 {
             env.panic_with_error(ContractError::InvalidAmount);
@@ -1957,6 +1993,7 @@ impl Credit {
     ) {
         assert_not_paused(&env);
         require_admin_auth(&env);
+        query_admin::assert_and_advance_query_admin_cooldown(&env);
 
         if min_quorum_k < 2 {
             env.panic_with_error(ContractError::InvalidAmount);
@@ -2140,6 +2177,7 @@ impl Credit {
     ) {
         assert_not_paused(&env);
         require_admin_auth(&env);
+        query_admin::assert_and_advance_query_admin_cooldown(&env);
 
         if min_rate_bps > max_rate_bps {
             env.panic_with_error(ContractError::InvalidAmount);
@@ -5632,6 +5670,8 @@ mod test_mock_liquidity_token {
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
         client.suspend_credit_line(&Address::generate(&env));
+    }
+
         /// Event is emitted on freeze with correct topic and payload.
         #[test]
         fn freeze_emits_borrower_frozen_event() {
@@ -5678,8 +5718,6 @@ mod test_mock_liquidity_token {
     // ── update_risk_parameters: rate change interval passes ──────────────────
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #9)")]
-    fn open_credit_line_rejects_score_too_high() {
     fn rate_change_after_interval_succeeds() {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
@@ -5961,8 +5999,12 @@ mod test_coverage_gaps {
         (client, admin, borrower)
     }
 
-    // ── update_risk_parameters: negative credit_limit ────────────────────────
+    // ── close_credit_line: defaulted line transitions to Closed ─────────────
 
+    #[test]
+    fn test_close_credit_line_defaulted() {
+        let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
@@ -6275,13 +6317,6 @@ mod test_draw_freeze {
         assert_eq!(line.utilized_amount, 300);
     }
 
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin);
-        let token_admin_client = StellarAssetClient::new(&env, &token.address());
-        client.set_liquidity_token(&token.address());
-        token_admin_client.mint(&contract_id, &500_i128);
-        client.close_credit_line(&borrower, &admin);
-        client.close_credit_line(&borrower, &admin);
     // ── unfreeze_draws ────────────────────────────────────────────────────────
 
     /// unfreeze_draws clears the flag.
@@ -6377,6 +6412,8 @@ mod test_draw_freeze {
 
         let err5: soroban_sdk::Error = soroban_sdk::Error::from(ContractError::InvalidAmount);
         assert_eq!(err5, soroban_sdk::Error::from_contract_error(5));
+    }
+
     /// unfreeze_draws emits a DrawsFrozenEvent with frozen=false.
     #[test]
     fn unfreeze_draws_emits_event_frozen_false() {
@@ -6400,9 +6437,8 @@ mod test_draw_freeze {
     // ── Isolation: freeze is per-contract, not per-borrower ──────────────────
 
     /// Freeze blocks draws for ALL borrowers, not just one.
+    /// Freeze blocks draws for ALL borrowers, not just one.
     #[test]
-    #[should_panic(expected = "Error(Contract, #12)")]
-    fn test_draw_credit_overflow_panics() {
     fn freeze_blocks_all_borrowers() {
         let env = Env::default();
         env.mock_all_auths();
@@ -6420,10 +6456,6 @@ mod test_draw_freeze {
         assert!(client.is_draws_frozen());
     }
 
-    /// draw_credit fails on a Defaulted credit line.
-    #[test]
-    #[should_panic(expected = "credit line is defaulted")]
-    fn test_draw_credit_allowed_on_defaulted_line() {
     /// Freeze on one contract does not affect another contract instance.
     #[test]
     fn freeze_is_per_contract_instance() {
@@ -6437,8 +6469,6 @@ mod test_draw_freeze {
         let client_a = CreditClient::new(&env, &contract_a);
         let client_b = CreditClient::new(&env, &contract_b);
 
-        // Draw should panic because credit line is defaulted.
-        client.draw_credit(&borrower, &100_i128);
         client_a.init(&admin);
         client_b.init(&admin);
         client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
