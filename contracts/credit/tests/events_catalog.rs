@@ -46,7 +46,7 @@ fn second_topic(env: &Env, index: u32) -> Symbol {
 fn credit_line_event_shape() {
     let (env, borrower, _admin) = env_and_addresses();
 
-    for suffix in ["opened", "suspend", "closed", "default", "reinstate"] {
+    for suffix in ["opened", "suspend", "closed", "defaulted", "reinstate"] {
         let ev = CreditLineEvent {
             borrower: borrower.clone(),
             status: CreditStatus::Active,
