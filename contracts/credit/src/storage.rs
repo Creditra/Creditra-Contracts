@@ -1522,6 +1522,13 @@ pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
         .get(&DataKey::LastFreezeTimestamp)
 }
 
+/// Record the timestamp of the last admin freeze/unfreeze action.
+pub fn set_last_freeze_timestamp(env: &Env, timestamp: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastFreezeTimestamp, &timestamp);
+}
+
 /// Record a freeze/unfreeze action timestamp, but only when a cooldown is
 /// configured. When no cooldown is set, this is a no-op so that timestamps
 /// recorded before cooldown was enabled never retroactively block actions.
