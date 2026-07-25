@@ -1,10 +1,12 @@
 #![cfg_attr(not(test), no_std)]
 
+pub mod curves;
 mod errors;
 mod events;
 mod storage;
 mod types;
 
+pub use curves::{calculate_price, CurveError, DecayCurve};
 pub use errors::AuctionError;
 pub use events::BidRefundedEvent;
 pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
@@ -13,7 +15,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 
 use crate::storage::{
     bump_auction_state_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
-    get_factory_contract, set_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
+    get_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
 };
 use crate::types::*;
 use events::{
@@ -346,9 +348,7 @@ impl Auction {
 
             AuctionMode::Dutch => {
                 let current_time = env.ledger().timestamp();
-                let elapsed_time = current_time
-                    .checked_sub(state.config.start_time)
-                    .unwrap_or(0);
+                let elapsed_time = current_time.saturating_sub(state.config.start_time);
                 let duration = state
                     .config
                     .end_time
