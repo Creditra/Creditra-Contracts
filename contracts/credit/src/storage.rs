@@ -487,20 +487,36 @@ pub fn persist_credit_line(
     }
 }
 
-/// Return a borrower's collateral balance without bumping unrelated TTL.
+/// Return a borrower's collateral balance and bump its persistent TTL.
+///
+/// The collateral balance is stored in a separate persistent entry from the
+/// credit line, so its TTL must be independently refreshed on every read path
+/// (deposit, withdraw, partial release, draw-credit ratio check, and the
+/// `get_collateral` query). Without a bump the entry would be archived
+/// independently of the credit-line entry, causing the borrower's collateral
+/// to appear as zero.
 pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CollateralBalance(borrower.clone()))
-        .unwrap_or(0)
+    let key = DataKey::CollateralBalance(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower collateral balance and update the global accumulator.
+///
+/// Bumps the TTL of the persistent `CollateralBalance(borrower)` entry so an
+/// active borrower's collateral is never archived independently of the credit
+/// line.
+///
+/// Note: the previous balance is read directly from storage (not via
+/// [`get_collateral_balance`]) to avoid a redundant TTL bump on the read
+/// path; the write path bumps TTL immediately after the set.
 pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
-    let previous_balance = get_collateral_balance(env, borrower);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CollateralBalance(borrower.clone()), &balance);
+    let key = DataKey::CollateralBalance(borrower.clone());
+    let previous_balance = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &balance);
+    bump_persistent_ttl(env, &key);
     adjust_total_collateral(env, previous_balance, balance);
 }
 
@@ -1414,13 +1430,14 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 
 // ── Multi-collateral (per-borrower, per-token) ────────────────────────────────
 
-/// Return a borrower's balance for a specific collateral token.
+/// Return a borrower's balance for a specific collateral token and bump
+/// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
     let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.

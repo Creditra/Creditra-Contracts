@@ -633,6 +633,34 @@ pub struct CreditLinesPage {
     pub has_more: bool,
 }
 
+/// Read-only capabilities bitmap for a borrower's credit line.
+///
+/// Returned by `borrow_capabilities` to let off-chain clients and
+/// on-chain integrators inspect which operations are currently
+/// permitted for a borrower, without needing to simulate the full
+/// entrypoint logic.
+///
+/// Each `bool` field represents a single operation; `true` means the
+/// operation should succeed assuming valid parameters (amount, etc.).
+/// Amount-dependent checks (credit limit, collateral ratio, draw
+/// cooldown, exposure caps) are NOT evaluated because this view does
+/// not know the intended draw amount.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowCapabilities {
+    /// Whether the borrower can draw credit. False when the credit line
+    /// does not exist, the protocol is paused, draws are frozen, the
+    /// borrower is blocked/frozen, or the credit-line status is not
+    /// draw-allowed (Active/Restricted).
+    pub can_draw: bool,
+    /// Whether the borrower can repay credit. False when the credit line
+    /// does not exist or is permanently Closed.
+    pub can_repay: bool,
+    /// Whether the borrower can self-suspend their credit line. True
+    /// only when the credit line exists and is currently Active.
+    pub can_self_suspend: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
