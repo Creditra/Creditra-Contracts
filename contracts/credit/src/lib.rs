@@ -2187,13 +2187,45 @@ impl Credit {
         }
     }
 
-    /// Materialize interest accrual for a bounded list of borrowers.
+    /// Materialize interest accrual across a bounded batch of borrower addresses.
     ///
-    /// No auth is required: the call only updates accounting state for lines
-    /// that already exist and are `Active`. Missing lines and non-active lines
-    /// are skipped without reverting the whole batch. Only non-zero accruals
-    /// emit `InterestAccruedEvent`.
+    /// # Overview
+    ///
+    /// Public Soroban entrypoint enabling off-chain indexers, keepers, or automated maintenance scripts
+    /// to trigger interest accrual on multiple active credit lines in a single transaction.
+    ///
+    /// # Parameters
+    ///
+    /// * `env` — The Soroban contract environment (`Env`).
+    /// * `borrowers` — Soroban [`Vec<Address>`] containing up to 50 borrower addresses to process.
+    ///
+    /// # Authentication & Authorization
+    ///
+    /// * **No Auth Required**: Anyone may call this function. Interest accrual is deterministic and based
+    ///   strictly on configured interest rates, penalty surcharges, and elapsed ledger time.
+    ///
+    /// # Panics & Reverts
+    ///
+    /// * Reverts with [`ContractError::Paused`] if the protocol circuit breaker is active.
+    /// * Reverts with [`ContractError::InvalidAmount`] if `borrowers.len() > ACCRUE_BATCH_MAX` (50).
+    ///
+    /// # Behavior
+    ///
+    /// 1. Verifies protocol is not paused (`assert_not_paused`).
+    /// 2. Validates batch length (`borrowers.len() <= 50`).
+    /// 3. Delegates to [`accrual::accrue_batch`], which iterates through active lines, computes interest
+    ///    via [`accrual::apply_accrual`], updates storage, and publishes [`crate::events::InterestAccruedEvent`].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut batch = Vec::new(&env);
+    /// batch.push_back(borrower_1);
+    /// batch.push_back(borrower_2);
+    /// client.accrue_batch(&batch);
+    /// ```
     pub fn accrue_batch(env: Env, borrowers: Vec<Address>) {
+
         assert_not_paused(&env);
         if borrowers.len() as u32 > ACCRUE_BATCH_MAX {
             env.panic_with_error(ContractError::InvalidAmount);
