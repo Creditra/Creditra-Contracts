@@ -27,3 +27,17 @@ ledger.timestamp >= LastAdminCollateralCriticalActionTs + AdminCollateralCooldow
 Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActive` (`54`).
 
 Implementation: [`src/admin.rs`](./src/admin.rs) (compiled into `creditra-credit`).
+
+## Authorization snapshot
+
+The collateral v7 API has per-entrypoint authorization regression coverage in
+[`tests/auth_snap.rs`](./tests/auth_snap.rs). Each state-changing collateral
+entrypoint records exactly one required signer:
+
+- borrower authorization for deposit, withdrawal, partial release, atomic
+  repay-and-release, and per-token deposit/withdrawal;
+- admin authorization for collateral ratio, risk weight, token allowlist, and
+  admin cooldown configuration.
+
+Collateral queries remain authorization-free. This documents and tests the
+existing public authorization contract; no function signatures changed.

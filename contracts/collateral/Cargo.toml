@@ -19,6 +19,10 @@ creditra-credit = { path = "../credit" }
 name = "admin_cooldown"
 path = "tests/admin_cooldown.rs"
 
+[[test]]
+name = "auth_snap"
+path = "tests/auth_snap.rs"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 creditra-credit = { path = "../credit", features = [] }
