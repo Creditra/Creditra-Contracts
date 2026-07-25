@@ -556,7 +556,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
-        ContractError::AdminCollateralCooldownActive.category(),
+        ContractError::AdminCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),

@@ -62,7 +62,7 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, GracePeriodConfig,
     RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{Address, Env, IntoVal, Symbol, Val};
 
 /// Storage keys used in instance and persistent storage.
 ///
@@ -89,116 +89,110 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 /// Helper functions in this module always pick the correct tier; callers
 /// outside this module should never hit the storage API directly with these
 /// keys.
-#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
-    /// Address of the liquidity token (SAC or compatible token contract).
+    /// Address of the liquidity token (SAC compatible).
     LiquidityToken,
-    /// Address of the liquidity source / reserve that funds draws.
+    /// Address of the liquidity source / reserve.
     LiquiditySource,
-    /// Global emergency switch: when `true`, all `draw_credit` calls revert.
-    /// Does not affect repayments. Distinct from per-line `Suspended` status.
+    /// Global switch: when `true`, `draw_credit` reverts.
+    /// Not affect repayments. Distinct from `Suspended`.
     DrawsFrozen,
-    /// Storage schema version for migration and compatibility checks.
+    /// Schema version for migration checks.
     SchemaVersion,
-    /// Monotonic count of unique borrowers that have had a credit line recorded.
+    /// Monotonic count of unique borrowers.
     CreditLineCount,
     /// Count of currently Active credit lines.
     ActiveLineCount,
-    /// Borrower → stable numeric id used for deterministic enumeration.
+    /// Borrower → stable numeric id for enumeration.
     CreditLineIdByBorrower(Address),
     /// Stable numeric id → borrower address.
     CreditLineBorrowerById(u32),
-    /// Global sum of every credit line's utilized_amount.
+    /// Global sum of all utilized_amount values.
     TotalUtilized,
     MaxDrawAmount,
     MaxRepayAmount,
-    /// Minimum interval in seconds required between successive draws for any borrower.
+    /// Min interval in seconds between successive draws.
     DrawMinIntervalSeconds,
     /// Per-borrower last successful draw timestamp.
     LastDrawTs(Address),
-    /// Per-borrower block flag; when `true`, draw_credit is rejected.
+    /// Per-borrower block flag; `true` rejects draws.
     BlockedBorrower(Address),
-    /// Per-borrower temporary freeze expiry timestamp; draws blocked while now < expiry_ts.
-    /// When key is absent or expiry_ts <= now, the borrower is not frozen.
+    /// Per-borrower freeze expiry; blocked while now < ts
+    /// When absent or ts <= now, not frozen.
     FrozenBorrower(Address),
-    /// Per-borrower credit-line draw freeze with structured reason taxonomy.
-    /// When absent, the line is not admin-frozen (distinct from [`CreditStatus::Suspended`]).
+    /// Per-borrower credit-line freeze with reason.
+    /// When absent, line is not admin-frozen.
     CreditLineFreeze(Address),
 
-    /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
-    /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
+/// Per-borrower max util ratio cap (e.g. 8000=80%).
     UtilizationCapBps(Address),
-    /// Minimum interval in seconds between critical admin actions for one borrower.
+    /// Min interval in seconds between critical actions.
     BorrowAdminCooldownSeconds,
-    /// Last timestamp at which a critical admin action mutated a borrower.
+    /// Timestamp of critical admin action on borrower
     LastBorrowAdminActionTs(Address),
-    /// Per-borrower interest rate floor in basis points.
-    /// When set, the effective interest rate must be >= floor.
+    /// Per-borrower rate floor in basis points.
+    /// When set, effective rate must be >= floor.
     RateFloorBps(Address),
-    /// Per-borrower interest rate ceiling in basis points.
-    /// When set, the effective interest rate must be <= ceiling.
+    /// Per-borrower rate ceiling in basis points.
+    /// When set, effective rate must be <= ceiling.
     RateCeilingBps(Address),
-    /// Per-borrower installment schedule for delinquency tracking.
+    /// Per-borrower installment schedule for delinquency.
     RepaymentSchedule(Address),
-    /// Per-borrower VRF commitment for credit score derivation.
-    /// Stores the hash of the VRF output that the risk score must be derived from.
+    /// VRF commitment for score derivation.
+    /// Stores hash that risk score derives from.
     VrfCommitment(Address),
-    /// Minimum allowed credit limit for new credit lines (admin-configurable).
+    /// Minimum allowed credit limit (admin-configurable).
     MinCreditLimit,
-    /// Maximum allowed credit limit for new credit lines (admin-configurable).
+    /// Maximum allowed credit limit (admin-configurable).
     MaxCreditLimit,
-    /// Protocol-level max close factor in basis points for partial liquidation.
+    /// Max close factor in bps for partial liquidation.
     CloseFactorBps,
-    /// Penalty surcharge in basis points applied to delinquent credit lines.
-    /// Admin-configurable via `set_penalty_surcharge_bps`. Default is 0.
+    /// Penalty surcharge in bps for delinquent lines.
+    /// Admin-configurable. Default is 0.
     PenaltySurchargeBps,
-    /// Flat fee charged per missed installment.
-    /// Admin-configurable via `set_late_fee_flat`. Default is 0 (disabled).
+    /// Flat fee per missed installment.
+    /// Admin-configurable. Default is 0 (disabled).
     LateFeeFlat,
-    /// Structured late-fee configuration (flat amount or APR-based surcharge).
-    /// Admin-configurable via `set_late_fee_config`. When absent, behavior
-    /// falls back to legacy `LateFeeFlat` / `PenaltySurchargeBps` keys.
+    /// Structured late-fee config (flat or APR-based).
+    /// Falls back to legacy keys when absent.
     LateFeeConfig,
-    /// Address of the auction contract used for default-liquidation settlement hooks.
-    /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
-    /// is skipped and settlement proceeds as an accounting-only operation.
+    /// Auction contract for liquidation settlement hooks.
+    /// Optional: when absent the hook is skipped.
     AuctionContract,
-    /// Maximum total exposure allowed across all credit lines (admin-configurable).
+    /// Max total exposure across all lines (admin-config)
     MaxTotalExposure,
-    /// Protocol fee in basis points applied to total repayment amount.
+    /// Protocol fee in bps on total repayment.
     ProtocolFeeBps,
-    /// Minimum allowed protocol fee in basis points (governance-configurable).
+    /// Min protocol fee in bps (governance-config).
     MinProtocolFeeBps,
-    /// Maximum allowed protocol fee in basis points (governance-configurable).
+    /// Max protocol fee in bps (governance-config).
     MaxProtocolFeeBps,
-    /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
-    /// When unset, defaults to 10_000 (100 % treasury).
+/// Treasury share of skimmed fees in bps (0..=10000).
     TreasuryFeeShareBps,
-    /// Treasury address where withdrawn fees will be sent.
+    /// Treasury address for withdrawn fees.
     TreasuryAddress,
-    /// Accumulated treasury balance held in contract (fees collected).
+    /// Accumulated treasury balance (fees collected).
     TreasuryBalance,
-    /// Bounty pool address where withdrawn bounty fees will be sent.
+    /// Bounty pool address for withdrawn fees.
     BountyAddress,
-    /// Accumulated bounty pool balance held in contract (fee share).
+    /// Accumulated bounty balance (fee share).
     BountyBalance,
-    /// Per-borrower attestation batch for cross-chain verification.
+    /// Per-borrower attestation for cross-chain verify.
     AttestationBatch(Address),
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
-    /// Minimum ledger seconds between critical collateral admin actions (v7).
+    /// Min ledger seconds between collateral admin acts.
     AdminCollateralCooldownSeconds,
-    /// Ledger timestamp of the last critical collateral admin action (v7).
-    LastAdminCollateralCriticalActionTs,
-    /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
-    /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
+    /// Ledger timestamp of last collateral admin act.
+    LastCollateralCriticalActionTs,
+    /// Per-asset risk weight in bps (10000=100%).
     CollateralRiskWeightBps(Address),
-    /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
+    /// Per-borrower draw audit: (borrower, ts) → amount.
     DrawAudit(Address, u64),
-    /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
+    /// Per-borrower draw reversal: (borrower, ts) -> rev.
     DrawReversedAmount(Address, u64),
     /// Oracle circuit-breaker configuration.
     OracleConfig,
@@ -208,28 +202,103 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
-    /// Global sum of every borrower's collateral balance.
+    /// Global sum of all borrowers' collateral balance.
     TotalCollateral,
-    /// Pending treasury withdrawal proposal (at most one at a time).
-    /// Stored in instance storage; cleared after successful execution.
+/// Pending treasury withdrawal proposal (at most one)
+    /// Stored in instance; cleared after exec.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
-    /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
-    /// Stored when admin invokes pause with a reason; cleared on unpause.
+    /// Reason for protocol pause (escape-hatch audit).
+    /// Stored on pause with reason; cleared on unpause.
     PauseReason,
-    /// Per-borrower maximum total exposure cap (absolute i128 amount).
-    /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
+    /// Per-borrower max exposure cap (absolute i128).
+    /// When set: utilized <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
     /// Admin freeze cooldown duration in seconds.
-    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
-    /// by a minimum interval between successive calls.
+    /// When set, freeze/unfreeze gated by min interval.
     FreezeCooldownSeconds,
-    /// Ledger timestamp of the last admin freeze or unfreeze action.
-    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
+    /// Timestamp of last admin freeze or unfreeze action.
+    /// Used w/ FreezeCooldownSeconds to enforce cooldown
     LastFreezeTimestamp,
+    /// Per-borrower exposure cap (absolute i128 max).
+    /// Legacy variant — prefer `MaxBorrowerExposure`.
+    BorrowerExposureCap(Address),
+    /// Per-borrower collateral balance by token.
+    CollateralBalanceV2(Address, Address),
+    /// Global allowlist of accepted collateral tokens.
+    CollateralTokenAllowlist,
+}
+
+impl IntoVal<Env, Val> for DataKey {
+    fn into_val(&self, env: &Env) -> Val {
+        let sym = match self {
+            Self::LiquidityToken => Symbol::new(env, "LiquidityToken"),
+            Self::LiquiditySource => Symbol::new(env, "LiquiditySource"),
+            Self::DrawsFrozen => Symbol::new(env, "DrawsFrozen"),
+            Self::SchemaVersion => Symbol::new(env, "SchemaVersion"),
+            Self::CreditLineCount => Symbol::new(env, "CreditLineCount"),
+            Self::ActiveLineCount => Symbol::new(env, "ActiveLineCount"),
+            Self::CreditLineIdByBorrower(_) => Symbol::new(env, "CreditLineIdByBorrower"),
+            Self::CreditLineBorrowerById(_) => Symbol::new(env, "CreditLineBorrowerById"),
+            Self::TotalUtilized => Symbol::new(env, "TotalUtilized"),
+            Self::MaxDrawAmount => Symbol::new(env, "MaxDrawAmount"),
+            Self::MaxRepayAmount => Symbol::new(env, "MaxRepayAmount"),
+            Self::DrawMinIntervalSeconds => Symbol::new(env, "DrawMinIntervalSeconds"),
+            Self::LastDrawTs(_) => Symbol::new(env, "LastDrawTs"),
+            Self::BlockedBorrower(_) => Symbol::new(env, "BlockedBorrower"),
+            Self::FrozenBorrower(_) => Symbol::new(env, "FrozenBorrower"),
+            Self::CreditLineFreeze(_) => Symbol::new(env, "CreditLineFreeze"),
+            Self::UtilizationCapBps(_) => Symbol::new(env, "UtilizationCapBps"),
+            Self::BorrowAdminCooldownSeconds => Symbol::new(env, "BorrowAdminCooldownSeconds"),
+            Self::LastBorrowAdminActionTs(_) => Symbol::new(env, "LastBorrowAdminActionTs"),
+            Self::RateFloorBps(_) => Symbol::new(env, "RateFloorBps"),
+            Self::RateCeilingBps(_) => Symbol::new(env, "RateCeilingBps"),
+            Self::RepaymentSchedule(_) => Symbol::new(env, "RepaymentSchedule"),
+            Self::VrfCommitment(_) => Symbol::new(env, "VrfCommitment"),
+            Self::MinCreditLimit => Symbol::new(env, "MinCreditLimit"),
+            Self::MaxCreditLimit => Symbol::new(env, "MaxCreditLimit"),
+            Self::CloseFactorBps => Symbol::new(env, "CloseFactorBps"),
+            Self::PenaltySurchargeBps => Symbol::new(env, "PenaltySurchargeBps"),
+            Self::LateFeeFlat => Symbol::new(env, "LateFeeFlat"),
+            Self::LateFeeConfig => Symbol::new(env, "LateFeeConfig"),
+            Self::AuctionContract => Symbol::new(env, "AuctionContract"),
+            Self::MaxTotalExposure => Symbol::new(env, "MaxTotalExposure"),
+            Self::ProtocolFeeBps => Symbol::new(env, "ProtocolFeeBps"),
+            Self::MinProtocolFeeBps => Symbol::new(env, "MinProtocolFeeBps"),
+            Self::MaxProtocolFeeBps => Symbol::new(env, "MaxProtocolFeeBps"),
+            Self::TreasuryFeeShareBps => Symbol::new(env, "TreasuryFeeShareBps"),
+            Self::TreasuryAddress => Symbol::new(env, "TreasuryAddress"),
+            Self::TreasuryBalance => Symbol::new(env, "TreasuryBalance"),
+            Self::BountyAddress => Symbol::new(env, "BountyAddress"),
+            Self::BountyBalance => Symbol::new(env, "BountyBalance"),
+            Self::AttestationBatch(_) => Symbol::new(env, "AttestationBatch"),
+            Self::CollateralBalance(_) => Symbol::new(env, "CollateralBalance"),
+            Self::MinCollateralRatioBps => Symbol::new(env, "MinCollateralRatioBps"),
+            Self::AdminCollateralCooldownSeconds => {
+                Symbol::new(env, "AdminCollateralCooldownSeconds")
+            }
+            Self::LastCollateralCriticalActionTs => {
+                Symbol::new(env, "LastCollateralCriticalActionTs")
+            }
+            Self::CollateralRiskWeightBps(_) => Symbol::new(env, "CollateralRiskWeightBps"),
+            Self::DrawAudit(_, _) => Symbol::new(env, "DrawAudit"),
+            Self::DrawReversedAmount(_, _) => Symbol::new(env, "DrawReversedAmount"),
+            Self::OracleConfig => Symbol::new(env, "OracleConfig"),
+            Self::OracleQuorumConfig => Symbol::new(env, "OracleQuorumConfig"),
+            Self::OracleLastPrice => Symbol::new(env, "OracleLastPrice"),
+            Self::OracleLastPriceTs => Symbol::new(env, "OracleLastPriceTs"),
+            Self::TotalCollateral => Symbol::new(env, "TotalCollateral"),
+            Self::PendingTreasuryWithdrawal => Symbol::new(env, "PendingTreasuryWithdrawal"),
+            Self::PauseReason => Symbol::new(env, "PauseReason"),
+            Self::MaxBorrowerExposure(_) => Symbol::new(env, "MaxBorrowerExposure"),
+            Self::FreezeCooldownSeconds => Symbol::new(env, "FreezeCooldownSeconds"),
+            Self::LastFreezeTimestamp => Symbol::new(env, "LastFreezeTimestamp"),
+            Self::BorrowerExposureCap(_) => Symbol::new(env, "BorrowerExposureCap"),
+            Self::CollateralBalanceV2(_, _) => Symbol::new(env, "CollateralBalanceV2"),
+            Self::CollateralTokenAllowlist => Symbol::new(env, "CollateralTokenAllowlist"),
+        };
+        sym.into_val(env)
+    }
 }
 
 /// Maximum number of credit lines returned per page.
@@ -524,31 +593,31 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
 }
 
 /// Get the configured admin collateral cool-off interval, if set.
-pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
+pub fn get_col_admin_cooldown_secs(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
         .get(&DataKey::AdminCollateralCooldownSeconds)
 }
 
 /// Set the admin collateral cool-off interval (admin only, enforced by caller).
-pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
+pub fn set_collateral_admin_cooldown(env: &Env, seconds: u64) {
     env.storage()
         .instance()
         .set(&DataKey::AdminCollateralCooldownSeconds, &seconds);
 }
 
 /// Get the ledger timestamp of the last critical collateral admin action, if any.
-pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
+pub fn get_last_collateral_action_ts(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
-        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+        .get(&DataKey::LastCollateralCriticalActionTs)
 }
 
 /// Record the ledger timestamp of the last critical collateral admin action.
-pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
+pub fn set_last_collateral_action_ts(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
+        .set(&DataKey::LastCollateralCriticalActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this
@@ -693,15 +762,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {

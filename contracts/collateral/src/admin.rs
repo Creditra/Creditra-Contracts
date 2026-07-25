@@ -5,7 +5,7 @@
 //! Critical admin entrypoints (`set_min_collateral_ratio_bps`,
 //! `set_collateral_risk_weight`, `set_collateral_token_allowlist`) share a single
 //! cooldown clock stored in instance storage. The interval is configured via
-//! [`set_admin_collateral_cooldown_seconds`]; when unset or zero, the guard is
+//! [`set_collateral_admin_cooldown`]; when unset or zero, the guard is
 //! disabled (same semantics as borrower draw cooldown).
 
 use crate::auth::require_admin_auth;
@@ -15,16 +15,16 @@ use soroban_sdk::{Address, Env, Vec};
 
 /// Enforce the configured cool-off since the last critical collateral admin action.
 fn enforce_admin_collateral_cooldown(env: &Env) {
-    let Some(cooldown_secs) = storage::get_admin_collateral_cooldown_seconds(env) else {
+    let Some(cooldown_secs) = storage::get_collateral_admin_cooldown(env) else {
         return;
     };
     if cooldown_secs == 0 {
         return;
     }
-    if let Some(last_ts) = storage::get_last_admin_collateral_critical_action_ts(env) {
+    if let Some(last_ts) = storage::get_last_collateral_action_ts(env) {
         let now = env.ledger().timestamp();
         if now < last_ts.saturating_add(cooldown_secs) {
-            env.panic_with_error(ContractError::AdminCollateralCooldownActive);
+            env.panic_with_error(ContractError::AdminCooldownActive);
         }
     }
 }
@@ -32,26 +32,26 @@ fn enforce_admin_collateral_cooldown(env: &Env) {
 /// Record the ledger timestamp of a successful critical collateral admin action.
 fn touch_admin_collateral_critical_action_ts(env: &Env) {
     let now = env.ledger().timestamp();
-    storage::set_last_admin_collateral_critical_action_ts(env, now);
+    storage::set_last_collateral_action_ts(env, now);
 }
 
 /// Set the minimum interval between critical collateral admin actions (admin only).
 ///
 /// Pass `0` to disable the cool-off guard.
-pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
+pub fn set_collateral_admin_cooldown(env: &Env, seconds: u64) {
     assert_not_paused(env);
     require_admin_auth(env);
-    storage::set_admin_collateral_cooldown_seconds(env, seconds);
+    storage::set_collateral_admin_cooldown(env, seconds);
 }
 
 /// Return the configured admin collateral cool-off interval, if set.
-pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
-    storage::get_admin_collateral_cooldown_seconds(env)
+pub fn get_collateral_admin_cooldown(env: &Env) -> Option<u64> {
+    storage::get_collateral_admin_cooldown(env)
 }
 
 /// Return the ledger timestamp of the last critical collateral admin action, if any.
-pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
-    storage::get_last_admin_collateral_critical_action_ts(env)
+pub fn get_last_collateral_action_ts(env: &Env) -> Option<u64> {
+    storage::get_last_collateral_action_ts(env)
 }
 
 /// Set the protocol-wide minimum collateral ratio in basis points (admin only).
