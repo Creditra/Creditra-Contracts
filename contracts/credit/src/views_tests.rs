@@ -368,3 +368,239 @@ fn test_credit_lines_paginated_cursor_continuation() {
     assert!(all_limits.contains(&3000));
     assert!(all_limits.contains(&4000));
 }
+
+// ── Borrow capabilities tests ─────────────────────────────────────────────────
+
+fn setup_caps_test(env: &Env) -> (CreditClient<'_>, Address, Address) {
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let admin = Address::generate(env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(env, &contract_id);
+
+    let token = Address::generate(env);
+    let source = Address::generate(env);
+    client.init(&admin);
+    client.set_liquidity_token(&token);
+    client.set_liquidity_source(&source);
+
+    let borrower = Address::generate(env);
+    client.open_credit_line(&borrower, &10_000, &500, &50);
+
+    (client, admin, borrower)
+}
+
+/// No credit line exists → all capabilities are false.
+#[test]
+fn borrow_caps_no_line() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let stranger = Address::generate(&env);
+    let caps = client.borrow_capabilities(&stranger);
+    assert!(!caps.can_draw, "no line → cannot draw");
+    assert!(!caps.can_repay, "no line → cannot repay");
+    assert!(!caps.can_self_suspend, "no line → cannot self-suspend");
+}
+
+/// Active credit line with no restrictions → all capabilities true.
+#[test]
+fn borrow_caps_active_line() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(caps.can_draw, "active line → can draw");
+    assert!(caps.can_repay, "active line → can repay");
+    assert!(caps.can_self_suspend, "active line → can self-suspend");
+}
+
+/// Suspended credit line → draw and self-suspend blocked, repay still allowed.
+#[test]
+fn borrow_caps_suspended() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.suspend_credit_line(&borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "suspended → cannot draw");
+    assert!(caps.can_repay, "suspended → can repay");
+    assert!(!caps.can_self_suspend, "suspended → cannot self-suspend");
+}
+
+/// Defaulted credit line → draw and self-suspend blocked, repay allowed.
+#[test]
+fn borrow_caps_defaulted() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.default_credit_line(&borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "defaulted → cannot draw");
+    assert!(caps.can_repay, "defaulted → can repay");
+    assert!(!caps.can_self_suspend, "defaulted → cannot self-suspend");
+}
+
+/// Closed credit line → all capabilities false.
+#[test]
+fn borrow_caps_closed() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    client.close_credit_line(&borrower, &admin);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "closed → cannot draw");
+    assert!(!caps.can_repay, "closed → cannot repay");
+    assert!(!caps.can_self_suspend, "closed → cannot self-suspend");
+}
+
+/// Self-suspended credit line → draws blocked, repay allowed, self-suspend blocked.
+#[test]
+fn borrow_caps_self_suspended() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.self_suspend_credit_line(&borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "self-suspended → cannot draw");
+    assert!(caps.can_repay, "self-suspended → can repay");
+    assert!(!caps.can_self_suspend, "already suspended → cannot self-suspend again");
+}
+
+/// Protocol paused → draws blocked, repay and self-suspend still allowed.
+#[test]
+fn borrow_caps_protocol_paused() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.set_protocol_paused(&true);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "paused → cannot draw");
+    assert!(caps.can_repay, "paused → can repay");
+    assert!(caps.can_self_suspend, "paused → can self-suspend");
+}
+
+/// Global draws frozen → draws blocked, repay and self-suspend still allowed.
+#[test]
+fn borrow_caps_global_draws_frozen() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.freeze_draws();
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "draws frozen → cannot draw");
+    assert!(caps.can_repay, "draws frozen → can repay");
+    assert!(caps.can_self_suspend, "draws frozen → can self-suspend");
+}
+
+/// Borrower blocked → draws blocked, repay and self-suspend still allowed.
+#[test]
+fn borrow_caps_borrower_blocked() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    client.block_borrower(&admin, &borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "blocked → cannot draw");
+    assert!(caps.can_repay, "blocked → can repay");
+    assert!(caps.can_self_suspend, "blocked → can self-suspend");
+}
+
+/// Borrower temporarily frozen → draws blocked, repay and self-suspend still allowed.
+#[test]
+fn borrow_caps_borrower_frozen() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    // Freeze until far in the future
+    client.freeze_borrower_until(&admin, &borrower, &1_000_000);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "frozen → cannot draw");
+    assert!(caps.can_repay, "frozen → can repay");
+    assert!(caps.can_self_suspend, "frozen → can self-suspend");
+}
+
+/// Credit line admin-frozen → draws blocked, repay and self-suspend still allowed.
+#[test]
+fn borrow_caps_credit_line_frozen() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_caps_test(&env);
+
+    client.freeze_credit_line(&borrower, &crate::FreezeReason::Compliance);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "line frozen → cannot draw");
+    assert!(caps.can_repay, "line frozen → can repay");
+    assert!(caps.can_self_suspend, "line frozen → can self-suspend");
+}
+
+/// Temporary freeze expiry → draws re-enabled.
+#[test]
+fn borrow_caps_freeze_expires() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    // Freeze until timestamp 2000
+    client.freeze_borrower_until(&admin, &borrower, &2000);
+
+    // Still frozen at t=1500
+    env.ledger().with_mut(|li| li.timestamp = 1500);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "before expiry → cannot draw");
+
+    // Expired at t=2000
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(caps.can_draw, "at expiry → can draw");
+
+    // Well past expiry at t=3000
+    env.ledger().with_mut(|li| li.timestamp = 3000);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(caps.can_draw, "after expiry → can draw");
+}
+
+/// Multiple blocking conditions: the most restrictive one applies.
+#[test]
+fn borrow_caps_multiple_blocks() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    // Paused + blocked + frozen = still just can_draw false
+    client.set_protocol_paused(&true);
+    client.block_borrower(&admin, &borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "multiple blocks → cannot draw");
+    assert!(caps.can_repay, "multiple blocks → still can repay");
+    assert!(caps.can_self_suspend, "multiple blocks → still can self-suspend");
+}
+
+/// After unblocking, draws are restored.
+#[test]
+fn borrow_caps_unblock_restores_draws() {
+    let env = Env::default();
+    let (client, admin, borrower) = setup_caps_test(&env);
+
+    client.block_borrower(&admin, &borrower);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "blocked → cannot draw");
+
+    client.unblock_borrower(&admin, &borrower);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(caps.can_draw, "unblocked → can draw again");
+}

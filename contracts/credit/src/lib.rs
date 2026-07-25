@@ -210,9 +210,9 @@ use crate::storage::{
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage, CreditStatus,
+    GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
+    ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec};
 
@@ -1523,6 +1523,25 @@ impl Credit {
     /// ```
     pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> CreditLinesPage {
         views::get_credit_lines_paginated(env, cursor, limit)
+    }
+
+    /// Return a borrower's current borrow capabilities bitmap.
+    ///
+    /// Read-only view that reports whether the borrower can draw, repay,
+    /// or self-suspend, based on the current protocol state and the
+    /// borrower's credit line status. Amount-dependent checks (limit,
+    /// collateral ratio, cooldown, exposure caps) are not evaluated.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`BorrowCapabilities`] struct with three bool fields:
+    /// - `can_draw` — draw pre-flight checks pass
+    /// - `can_repay` — repay pre-flight checks pass
+    /// - `can_self_suspend` — self-suspend pre-flight checks pass
+    pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
+        views::borrow_capabilities(env, borrower)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
