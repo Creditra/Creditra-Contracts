@@ -213,9 +213,6 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
@@ -713,14 +710,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .set(&DataKey::BountyAddress, bounty);
 }
 
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {

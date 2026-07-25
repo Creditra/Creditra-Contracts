@@ -116,14 +116,12 @@ mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
-mod oracles;
-mod limits;
+pub mod limits;
 pub mod math_utils;
 mod penalties;
 #[cfg(test)]
 mod penalties_tests;
 mod query;
-pub mod limits;
 mod risk;
 mod views;
 pub use crate::risk::compute_rate_from_score;
@@ -145,8 +143,6 @@ use events::{
 use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
 use auth::require_admin_auth;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 
 
 #[cfg(test)]

@@ -166,7 +166,7 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     }
 
-    let Some(schedule) = get_repayment_schedule(env.clone(), borrower) else {
+    let Some(schedule) = get_repayment_schedule(env.clone(), borrower.clone()) else {
         return false;
     };
 
