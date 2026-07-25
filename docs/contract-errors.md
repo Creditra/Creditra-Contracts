@@ -74,6 +74,7 @@ See the [category enum reference](#contracterrorcategory) below.
 | 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied. |
 | 51 | `AlreadySettled` | Lifecycle | Liquidation for this (borrower, id) already processed. |
 | 52 | `InvalidRiskWeight` | Numeric | Collateral risk weight exceeds 10 000 bps. |
+| 53 | `InvalidAttestation` | Misc | Attestation proof is invalid or no attestation batch has been committed. |
 
 ## `ContractErrorCategory`
 
@@ -93,7 +94,7 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 | 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance` |
 | 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen` |
 | 10 | Reentrancy | `Reentrancy` |
-| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound` |
+| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation` |
 
 ## Taxonomy
 

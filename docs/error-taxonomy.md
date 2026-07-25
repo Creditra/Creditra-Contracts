@@ -241,6 +241,7 @@ state before submitting a new call.
 | 44   | `TreasuryProposalExists` | A treasury withdrawal proposal already exists. |
 | 48   | `OriginalDrawNotFound` | Original draw audit record not found for reversal. |
 | 49   | `AttestationBatchNotFound` | No attestation batch has been committed for this borrower. |
+| 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed. |
 
 **Recovery action:**
 - `CreditLineNotFound`: Create a credit line first via `open_credit_line`.

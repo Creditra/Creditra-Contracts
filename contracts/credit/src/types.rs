@@ -163,6 +163,7 @@ pub enum CreditStatus {
 /// | 50   | `OracleQuorumNotMet`           | Oracle        | Oracle quorum condition not satisfied |
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
+| 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -195,12 +196,6 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    /// Quorum threshold was not met for oracle median calculation.
-    QuorumNotMet = 15,
-    /// The oracle is not approved or was not found in the registry.
-    OracleNotFound = 16,
-    /// The oracle is already approved in the registry.
-    OracleAlreadyExists = 17,
     /// Admin acceptance attempted before the delay window has elapsed.
     AdminAcceptTooEarly = 15,
     /// Borrower is blocked from drawing credit.
@@ -277,6 +272,8 @@ pub enum ContractError {
     AlreadySettled = 51,
     /// Collateral risk weight exceeds the maximum allowed (10 000 bps).
     InvalidRiskWeight = 52,
+    /// Attestation proof is invalid or no attestation batch has been committed.
+    InvalidAttestation = 53,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -353,6 +350,8 @@ impl ContractError {
             Self::TimestampRegression => Numeric,
             Self::LimitOutOfBounds => Numeric,
             Self::InvalidRiskWeight => Numeric,
+            // Misc (11)
+            Self::InvalidAttestation => Misc,
             // Limit (4)
             Self::OverLimit => Limit,
             Self::UtilizationNotZero => Limit,

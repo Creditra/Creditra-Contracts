@@ -109,3 +109,16 @@ outstanding debt, then `next_due_ts` advances by
 `floor(effective_repay / amount_per_period) * period_seconds` using saturating
 `u64` arithmetic.  The test also keeps deterministic edge cases for partial,
 exact, multi-installment, and over-repayment scenarios.
+
+## Oracle deviation snapshot test
+
+`contracts/credit/tests/snap_deviation.rs` adds snapshot-fuzz coverage for
+`math_utils::compute_deviation_bps` across realistic price pairs. Run it with:
+
+```bash
+cargo test -p creditra-credit --test snap_deviation
+```
+
+The test locks in expected outcomes for common oracle-feed moves, zero/negative
+price edge cases, and a deterministic proptest over positive prices so the
+oracle circuit-breaker math stays stable.

@@ -471,12 +471,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Error(Contract, #53)")]
     fn verify_no_batch_panics() {
         let env = Env::default();
         let borrower = Address::generate(&env);
         let l = leaf(&env, 0xDD);
-        // No batch committed — must panic with AttestationBatchNotFound.
+        // No batch committed — must panic with InvalidAttestation.
         verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
     }
 }
