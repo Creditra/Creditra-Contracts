@@ -188,14 +188,15 @@ use crate::events::{
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
-    get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    enforce_freeze_cooldown, get_borrower_by_credit_line_id, get_borrower_frozen_until,
     get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
     get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
     proposed_at_key, rate_formula_key, set_borrower_blocked as storage_set_borrower_blocked,
     set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, set_reentrancy_guard,
+    set_last_draw_ts as storage_set_last_draw_ts, record_freeze_timestamp_if_cooldown,
+    set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
@@ -1187,6 +1188,29 @@ impl Credit {
     /// Get the configured minimum draw interval between borrower draws.
     pub fn get_draw_min_interval(env: Env) -> Option<u64> {
         crate::storage::get_draw_min_interval(&env)
+    }
+
+    /// Set the admin freeze cooldown duration in seconds.
+    ///
+    /// When set to a non-zero value, admin freeze/unfreeze actions
+    /// (global draws freeze, per-credit-line freeze, borrower freeze)
+    /// must wait at least `seconds` between successive calls.
+    /// Pass `0` to disable the cooldown.
+    ///
+    /// # Authorization
+    /// Requires admin privileges.
+    pub fn set_freeze_cooldown(env: Env, seconds: u64) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        crate::storage::set_freeze_cooldown_seconds(&env, seconds);
+    }
+
+    /// Get the configured admin freeze cooldown duration in seconds.
+    ///
+    /// Returns `None` when no cooldown is configured (or when it has been
+    /// disabled by passing `0` to `set_freeze_cooldown`).
+    pub fn get_freeze_cooldown(env: Env) -> Option<u64> {
+        crate::storage::get_freeze_cooldown_seconds(&env)
     }
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
@@ -2379,6 +2403,7 @@ impl Credit {
     pub fn freeze_borrower_until(env: Env, admin: Address, borrower: Address, expiry_ts: u64) {
         admin.require_auth();
         require_admin_auth(&env);
+        enforce_freeze_cooldown(&env);
 
         let now = env.ledger().timestamp();
         if expiry_ts <= now {
@@ -2387,6 +2412,7 @@ impl Credit {
 
         set_borrower_frozen_until(&env, &borrower, expiry_ts);
         publish_borrower_frozen_event(&env, &borrower, expiry_ts);
+        record_freeze_timestamp_if_cooldown(&env);
     }
 
     /// Check whether a borrower's draws are currently frozen.
@@ -2417,7 +2443,9 @@ impl Credit {
     pub fn unfreeze_borrower(env: Env, admin: Address, borrower: Address) {
         admin.require_auth();
         require_admin_auth(&env);
+        enforce_freeze_cooldown(&env);
         clear_borrower_frozen(&env, &borrower);
+        record_freeze_timestamp_if_cooldown(&env);
     }
 
     /// Returns all global protocol configuration in a single call.

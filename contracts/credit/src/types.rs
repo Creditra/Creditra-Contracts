@@ -164,6 +164,7 @@ pub enum CreditStatus {
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
+| 54   | `FreezeCooldownActive`         | Block         | Admin freeze cooldown has not yet elapsed |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -274,6 +275,8 @@ pub enum ContractError {
     InvalidRiskWeight = 52,
     /// Attestation proof is invalid or no attestation batch has been committed.
     InvalidAttestation = 53,
+    /// Admin freeze cooldown period has not yet elapsed.
+    FreezeCooldownActive = 54,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -388,6 +391,7 @@ impl ContractError {
             Self::DrawsFrozen => Block,
             Self::BorrowerFrozen => Block,
             Self::CreditLineFrozen => Block,
+            Self::FreezeCooldownActive => Block,
             // Reentrancy (10)
             Self::Reentrancy => Reentrancy,
             // Misc (11)
@@ -756,7 +760,8 @@ impl ContractError {
 
             ContractError::BorrowerBlocked
             | ContractError::DrawsFrozen
-            | ContractError::BorrowerFrozen => ContractErrorCategory::Block,
+            | ContractError::BorrowerFrozen
+            | ContractError::FreezeCooldownActive => ContractErrorCategory::Block,
 
             ContractError::Reentrancy => ContractErrorCategory::Reentrancy,
 
