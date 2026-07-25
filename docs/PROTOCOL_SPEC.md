@@ -406,6 +406,7 @@ See `contracts/credit/src/fees.rs`.
 | `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
 | `get_collateral(borrower)`                                       | `i128`                                                                                                   |
 | `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).
