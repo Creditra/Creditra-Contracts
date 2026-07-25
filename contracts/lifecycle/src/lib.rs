@@ -9,4 +9,7 @@
 //! discriminants relevant to the v7 lifecycle subsystem for CI stability
 //! guards. See [`tests/err_stab.rs`] for the pinning assertions.
 
+//! Lifecycle hot reads refresh persistent credit-line TTL without changing
+//! contract entrypoints, parameters, return values, events, or error codes.
+
 pub use creditra_credit::*;

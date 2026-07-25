@@ -6,7 +6,10 @@
 //! These entries must have their TTL extended on frequently-invoked read/write
 //! paths so that active credit lines are not silently archived by the network.
 
-use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
+use creditra_credit::storage::{
+    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, LEDGER_BUMP_AMOUNT,
+    LEDGER_BUMP_THRESHOLD,
+};
 use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
@@ -226,5 +229,29 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
     assert!(
         ttl_after >= LEDGER_BUMP_AMOUNT,
         "instance TTL not extended for accrual reads: initial={initial_ttl} after={ttl_after}"
+    );
+}
+
+#[test]
+fn already_closed_credit_line_read_bumps_ttl() {
+    let env = Env::default();
+    let (contract_id, client, admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.close_credit_line(&borrower, &admin);
+
+    let initial_ttl = ttl_for_key(&env, &contract_id, &borrower);
+    let target_remaining = CREDIT_LINE_TTL_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, initial_ttl.saturating_sub(target_remaining));
+
+    // The already-closed path returns early, but its storage read must still
+    // refresh the persistent credit-line TTL.
+    client.close_credit_line(&borrower, &admin);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= CREDIT_LINE_TTL_EXTEND_TO,
+        "credit-line TTL not bumped on idempotent close: initial={initial_ttl} after={ttl_after}"
     );
 }

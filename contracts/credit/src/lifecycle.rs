@@ -59,6 +59,8 @@
 //! - **Borrower credit lines**: Persistent storage (independent TTL per borrower).
 //!   - Key: `borrower: Address` (via `DataKey::CreditLineIdByBorrower`)
 //!   - Value: `CreditLineData`
+//!   - Hot reads use [`crate::storage::get_credit_line`] to refresh TTL when
+//!     the remaining lifetime falls below the configured threshold.
 //! - **Liquidation settlement markers**: Persistent storage (replay protection).
 //!   - Key: `(Symbol("liq_seen"), borrower, settlement_id)`
 //!   - Value: `bool` (presence = settled; replay reverts
@@ -93,10 +95,9 @@ use crate::events::{
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
-    liquidation_settlement_key, persist_credit_line,
-    set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD,
+    assert_not_paused, bump_credit_line_ttl, clear_repayment_schedule, get_credit_line,
+    get_repayment_schedule, liquidation_settlement_key, persist_credit_line,
+    set_repayment_schedule as storage_set_repayment_schedule,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
@@ -248,10 +249,7 @@ pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
 
@@ -309,10 +307,7 @@ pub fn set_per_borrower_liquidation_grace(
     assert_not_paused(env);
     require_admin_auth(env);
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
 
     if stored_line.status == CreditStatus::Closed {
@@ -342,10 +337,7 @@ pub fn set_repayment_schedule(
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
 
     if stored_line.status == CreditStatus::Closed {
@@ -465,11 +457,9 @@ pub fn open_credit_line(
     // Validate credit limit is within configured bounds
     validate_credit_limit_bounds(&env, credit_limit);
 
-    if let Some(existing) = env
-        .storage()
-        .persistent()
-        .get::<Address, CreditLineData>(&borrower)
-    {
+    let existing_line = get_credit_line(&env, &borrower);
+
+    if let Some(existing) = existing_line.as_ref() {
         if existing.status == CreditStatus::Active {
             env.panic_with_error(ContractError::AlreadyInitialized);
         }
@@ -478,10 +468,7 @@ pub fn open_credit_line(
         require_admin_auth(&env);
     }
 
-    let previous_utilized = env
-        .storage()
-        .persistent()
-        .get::<Address, CreditLineData>(&borrower)
+    let previous_utilized = existing_line
         .map(|existing| existing.utilized_amount)
         .unwrap_or(0);
 
@@ -530,11 +517,8 @@ pub fn open_credit_line(
 pub fn suspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .expect("Credit line not found");
+    let mut credit_line =
+        get_credit_line(&env, &borrower).unwrap_or_else(|| panic!("Credit line not found"));
 
     if credit_line.status != CreditStatus::Active {
         panic!("Only active credit lines can be suspended");
@@ -615,10 +599,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     let admin: Address = require_admin(&env);
 
     // Load the credit line; revert if it does not exist.
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let mut credit_line = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let _previous_utilized = credit_line.utilized_amount;
 
@@ -708,10 +689,7 @@ pub fn close_credit_lines_batch(env: Env, borrowers: soroban_sdk::Vec<Address>) 
 pub fn default_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let _previous_utilized = stored_line.utilized_amount;
 
@@ -801,10 +779,7 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::AlreadySettled);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
     let previous_status = stored_line.status;
@@ -892,10 +867,7 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
     let previous_status = stored_line.status;
@@ -956,7 +928,7 @@ pub fn set_repayment_schedule(
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    if !env.storage().persistent().has(&borrower) {
+    if get_credit_line(env, &borrower).is_none() {
         env.panic_with_error(ContractError::CreditLineNotFound);
     }
 
@@ -966,10 +938,6 @@ pub fn set_repayment_schedule(
         next_due_ts: first_due_ts,
     };
     storage_set_repayment_schedule(env, &borrower, &schedule);
-    // Setting a schedule is an interaction with the credit line, so keep the
-    // credit-line entry live as well (the schedule entry is bumped by the
-    // storage setter itself).
-    bump_credit_line_ttl(env, &borrower);
 }
 
 /// Advance a borrower's installment schedule after a repayment.
