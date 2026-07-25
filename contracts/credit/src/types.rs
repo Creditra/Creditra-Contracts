@@ -280,6 +280,10 @@ pub enum ContractError {
     AdminCooldownActive = 54,
     /// Per-borrower liquidation grace window has not yet elapsed.
     LiquidationGraceActive = 55,
+    /// Per-borrower maximum exposure cap was exceeded during a draw.
+    BorrowerExposureCapExceeded = 56,
+    /// Admin freeze/unfreeze action attempted before the freeze cooldown elapsed.
+    FreezeCooldownActive = 57,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -407,6 +411,8 @@ impl ContractError {
             Self::TreasuryProposalExists => Misc,
             Self::OriginalDrawNotFound => Misc,
             Self::AttestationBatchNotFound => Misc,
+            // Limit (4) — continued
+            Self::BorrowerExposureCapExceeded => Limit,
         }
     }
 }
@@ -786,71 +792,4 @@ pub enum ContractErrorCategory {
     Reentrancy = 10,
     /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
     Misc = 11,
-}
-
-impl ContractError {
-    /// Return the error category for this variant.
-    ///
-    /// Categories allow clients to group errors without matching on individual
-    /// discriminant values. Every variant maps to exactly one category.
-    pub fn category(&self) -> ContractErrorCategory {
-        match self {
-            ContractError::Unauthorized
-            | ContractError::NotAdmin
-            | ContractError::AdminNotInitialized => ContractErrorCategory::Auth,
-
-            ContractError::CreditLineClosed
-            | ContractError::AlreadyInitialized
-            | ContractError::CreditLineSuspended
-            | ContractError::CreditLineDefaulted
-            | ContractError::LiquidationGraceActive => ContractErrorCategory::Lifecycle,
-
-            ContractError::InvalidAmount
-            | ContractError::NegativeLimit
-            | ContractError::Overflow
-            | ContractError::TimestampRegression
-            | ContractError::LimitOutOfBounds => ContractErrorCategory::Numeric,
-
-            ContractError::OverLimit
-            | ContractError::UtilizationNotZero
-            | ContractError::LimitDecreaseRequiresRepayment
-            | ContractError::DrawExceedsMaxAmount
-            | ContractError::RepayExceedsMaxAmount
-            | ContractError::BorrowerExposureCapExceeded => ContractErrorCategory::Limit,
-
-            ContractError::MissingLiquidityToken
-            | ContractError::MissingLiquiditySource
-            | ContractError::InsufficientLiquidityReserve
-            | ContractError::LiquidityTokenCallFailed
-            | ContractError::InsufficientRepaymentAllowance
-            | ContractError::InsufficientRepaymentBalance
-            | ContractError::TreasuryNotSet
-            | ContractError::ExposureCapExceeded => ContractErrorCategory::Liquidity,
-
-            ContractError::RateTooHigh
-            | ContractError::ScoreTooHigh
-            | ContractError::Paused
-            | ContractError::DrawCooldownActive
-            | ContractError::AdminCooldownActive => ContractErrorCategory::Risk,
-
-            ContractError::OraclePriceInvalid
-            | ContractError::OraclePriceStale
-            | ContractError::OraclePriceDeviation => ContractErrorCategory::Oracle,
-
-            ContractError::CollateralRatioBelowMinimum
-            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
-
-            ContractError::BorrowerBlocked
-            | ContractError::DrawsFrozen
-            | ContractError::BorrowerFrozen
-            | ContractError::FreezeCooldownActive => ContractErrorCategory::Block,
-
-            ContractError::Reentrancy => ContractErrorCategory::Reentrancy,
-
-            ContractError::CreditLineNotFound
-            | ContractError::AdminAcceptTooEarly
-            | ContractError::DrawReversalWindowExpired
-            | ContractError::OriginalDrawNotFound => ContractErrorCategory::Misc,
-        }
-    }
 }
