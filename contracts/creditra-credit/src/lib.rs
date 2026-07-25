@@ -1,3 +1,4 @@
+pub mod accrual;
 pub mod contract;
 pub mod error;
 pub mod errors;

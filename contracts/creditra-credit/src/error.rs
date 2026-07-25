@@ -59,6 +59,15 @@ pub enum ContractError {
     /// than the effective ceiling for that borrower.
     #[error("RateCeilingExceeded")]
     RateCeilingExceeded,
+
+    /// An arithmetic operation overflowed its integer type.
+    ///
+    /// Raised by overflow-safe math (e.g. interest accrual in
+    /// [`crate::accrual`]) when an intermediate product would exceed
+    /// `Uint128::MAX`, so the contract reverts deterministically instead of
+    /// wrapping or panicking.
+    #[error("Overflow")]
+    Overflow,
 }
 
 #[cfg(test)]
@@ -122,6 +131,15 @@ mod tests {
         assert_eq!(err, ContractError::RateCeilingExceeded);
         assert_ne!(err, ContractError::InvalidAmount);
         assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn overflow_display_and_equality() {
+        let err = ContractError::Overflow;
+        assert_eq!(err.to_string(), "Overflow");
+        assert_eq!(err, ContractError::Overflow);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::RateCeilingExceeded);
     }
 
     #[test]
