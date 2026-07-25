@@ -6729,3 +6729,5 @@ mod test_max_draw_amount {
 
 #[cfg(test)]
 mod test_ttl;
+#[cfg(test)]
+mod collateral_ttl;
