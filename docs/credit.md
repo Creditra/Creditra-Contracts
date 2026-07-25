@@ -557,6 +557,18 @@ Set the per-borrower draw cooldown interval in seconds (admin only).
 - This setting is optional and defaults to disabled when unset.
 - It affects only `draw_credit`; `repay_credit` remains available regardless of the cooldown.
 
+### `set_borrow_admin_cooldown(env, seconds)`
+Set the per-borrower cooldown interval between critical admin actions.
+
+- Admin only.
+- `seconds > 0` enforces a minimum interval between borrower-specific admin mutations such as `open_credit_line`, `update_risk_parameters`, `suspend_credit_line`, `default_credit_line`, `reinstate_credit_line`, `forgive_debt`, admin `close_credit_line`, borrower freeze, and credit-line freeze changes.
+- `seconds = 0` disables the admin-action cooldown.
+- The cooldown is per borrower, so actions on one borrower do not block actions on another borrower.
+- Reverts with `ContractError::AdminCooldownActive` (`54`) when a critical admin action is attempted before the interval has elapsed.
+
+### `get_borrow_admin_cooldown(env) -> Option<u64>`
+Returns the configured per-borrower admin-action cooldown, if set. No auth required.
+
 ### `is_draws_frozen(env) -> bool`
 Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
 
@@ -634,6 +646,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `27`       | `InsufficientRepaymentBalance`   | Borrower's token balance is below the effective repayment amount.             |
 | `28`       | `RepayExceedsMaxAmount`          | The requested repay exceeds the configured per-transaction maximum.           |
 | `29`       | `DrawCooldownActive`             | Borrower attempted to draw again before the cooldown interval elapsed.        |
+| `54`       | `AdminCooldownActive`            | Critical borrower admin action attempted before the cooldown elapsed.         |
 
 ---
 

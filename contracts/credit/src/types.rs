@@ -164,7 +164,7 @@ pub enum CreditStatus {
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
-/// | 54   | `AdminCollateralCooldownActive`| Risk          | Critical collateral admin action attempted before cool-off elapsed |
+/// | 54   | `AdminCooldownActive`          | Risk          | Critical borrower admin action attempted before cooldown elapsed |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -275,8 +275,8 @@ pub enum ContractError {
     InvalidRiskWeight = 52,
     /// Attestation proof is invalid or no attestation batch has been committed.
     InvalidAttestation = 53,
-    /// Admin attempted a critical collateral action before the cool-off elapsed.
-    AdminCollateralCooldownActive = 54,
+    /// Critical borrower admin action attempted before the cooldown elapsed.
+    AdminCooldownActive = 54,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -378,7 +378,7 @@ impl ContractError {
             Self::ScoreTooHigh => Risk,
             Self::Paused => Risk,
             Self::DrawCooldownActive => Risk,
-            Self::AdminCollateralCooldownActive => Risk,
+            Self::AdminCooldownActive => Risk,
             // Oracle (7)
             Self::OraclePriceInvalid => Oracle,
             Self::OraclePriceStale => Oracle,
@@ -695,7 +695,7 @@ pub enum ContractErrorCategory {
     Limit = 4,
     /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
     Liquidity = 5,
-    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, DrawCooldownActive).
+    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
     Risk = 6,
     /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
     Oracle = 7,
@@ -751,7 +751,7 @@ impl ContractError {
             | ContractError::ScoreTooHigh
             | ContractError::Paused
             | ContractError::DrawCooldownActive
-            | ContractError::AdminCollateralCooldownActive => ContractErrorCategory::Risk,
+            | ContractError::AdminCooldownActive => ContractErrorCategory::Risk,
 
             ContractError::OraclePriceInvalid
             | ContractError::OraclePriceStale

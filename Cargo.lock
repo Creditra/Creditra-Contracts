@@ -364,7 +364,6 @@ name = "creditra-accrual"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
- "proptest",
  "soroban-sdk",
 ]
 
