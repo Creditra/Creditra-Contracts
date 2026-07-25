@@ -8,5 +8,13 @@
 //! thin wrapper that anchors the [`creditra_credit::types::ContractError`]
 //! discriminants relevant to the v7 accrual subsystem for CI stability
 //! guards. See [`tests/err_stab.rs`] for the pinning assertions.
+//!
+//! ## Public surface (v7)
+//!
+//! - [`views::accrual_capabilities`] — read-only capabilities bitmap for the
+//!   accrual subsystem. Returns an [`creditra_credit::types::AccrualCapabilities`]
+//!   with four boolean flags describing the current state of the accrual
+//!   engine for a given borrower. No auth, no mutations.
 
+pub mod views;
 pub use creditra_credit::*;

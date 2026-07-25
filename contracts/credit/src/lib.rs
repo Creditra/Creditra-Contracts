@@ -125,7 +125,7 @@ mod penalties_tests;
 mod query;
 pub mod limits;
 mod risk;
-mod views;
+pub mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 #[cfg(not(target_arch = "wasm32"))]
@@ -210,8 +210,8 @@ use crate::storage::{
 };
 use crate::storage::{get_oracle_config, set_oracle_config};
 use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage, CreditStatus,
-    GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
+    AccrualCapabilities, BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
     ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec};
@@ -1561,6 +1561,23 @@ impl Credit {
     /// - `can_self_suspend` — self-suspend pre-flight checks pass
     pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
         views::borrow_capabilities(env, borrower)
+    }
+
+    /// Return the accrual-subsystem capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only view — no authentication required, no state mutations.
+    /// Evaluates the same pre-flight conditions that `accrue_batch` and
+    /// `apply_accrual` check, WITHOUT actually running accrual math or
+    /// writing any storage.
+    ///
+    /// # Returns
+    /// An [`AccrualCapabilities`] struct with four bool fields:
+    /// - `can_accrue`          — `accrue_batch` will process this borrower
+    /// - `batch_open`          — protocol accepts new batch submissions
+    /// - `penalty_rate_active` — delinquency surcharge will apply on next accrual
+    /// - `grace_waiver_active` — borrower is within their suspension grace window
+    pub fn capabilities(env: Env, borrower: Address) -> AccrualCapabilities {
+        views::accrual_capabilities(env, borrower)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
