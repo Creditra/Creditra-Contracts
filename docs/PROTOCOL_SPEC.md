@@ -368,45 +368,47 @@ See `contracts/credit/src/fees.rs`.
 
 ### 2.9 Operational controls
 
-| Entrypoint                                                                                                                                | Effect                                                                                                                                                 |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `freeze_draws(env, reason)` / `unfreeze_draws(env)`                                                                                       | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`.                                                          |
-| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)`                                                       | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`.                                            |
-| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state.                                                                                                                                |
-| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers`                                                           | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`.                                                         |
-| `accrue_batch(borrowers)`                                                                                                                 | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook.                                                                                   |
-| `reverse_draw(borrower, amount, original_ts, reason_code)`                                                                                | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
-| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ)                                                                  | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`.                                                                  |
+| Entrypoint | Effect |
+|---|---|
+| `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
+| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
+| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
+| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
+| `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
+| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
+| `set_query_admin_cooldown(seconds: u64)` | Admin + pause. Sets the minimum interval (seconds) between consecutive query-critical actions. Pass `0` to disable. |
 
 ### 2.10 Read-only queries
 
-| Entrypoint                                                       | Returns                                                                                                  |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `get_credit_line(borrower)`                                      | `Option<CreditLineData>`                                                                                 |
-| `get_credit_line_summary(borrower)`                              | `Option<CreditLineData>` (alias)                                                                         |
-| `get_credit_line_count()`                                        | `u32`                                                                                                    |
-| `enumerate_credit_lines(start_after, limit)`                     | `Vec<(u32, CreditLineData)>`, `limit <= 100`                                                             |
-| `get_total_utilized()`                                           | `i128`                                                                                                   |
-| `get_repayment_schedule(borrower)`                               | `Option<RepaymentSchedule>`                                                                              |
-| `is_delinquent(borrower)`                                        | `bool` (see `query.rs:57`)                                                                               |
-| `get_protocol_config()`                                          | `ProtocolConfig { liquidity_token, liquidity_source }`                                                   |
-| `get_liquidity_source()`                                         | `Address`                                                                                                |
-| `get_oracle_config()`                                            | `Option<OracleConfig>`                                                                                   |
-| `get_rate_formula_config()`                                      | `Option<RateFormulaConfig>`                                                                              |
-| `get_rate_change_limits()`                                       | `Option<RateChangeConfig>`                                                                               |
-| `get_borrower_rate_floor(borrower)`                              | `Option<u32>`                                                                                            |
-| `get_borrower_rate_ceiling(borrower)`                            | `Option<u32>`                                                                                            |
-| `get_grace_period_config()`                                      | `Option<GracePeriodConfig>`                                                                              |
-| `get_penalty_surcharge_bps()`                                    | `u32`                                                                                                    |
-| `get_max_total_exposure()`                                       | `Option<i128>`                                                                                           |
-| `get_credit_limit_bounds()`                                      | `(Option<i128>, Option<i128>)`                                                                           |
-| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars                                                                                                  |
-| `get_auction_contract()`                                         | `Option<Address>`                                                                                        |
-| `get_treasury()`                                                 | `Option<Address>`                                                                                        |
-| `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
-| `get_collateral(borrower)`                                       | `i128`                                                                                                   |
-| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
-| `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
+| Entrypoint | Returns |
+|---|---|
+| `get_credit_line(borrower)` | `Option<CreditLineData>` |
+| `get_credit_line_summary(borrower)` | `Option<CreditLineData>` (alias) |
+| `get_credit_line_count()` | `u32` |
+| `enumerate_credit_lines(start_after, limit)` | `Vec<(u32, CreditLineData)>`, `limit <= 100` |
+| `get_total_utilized()` | `i128` |
+| `get_repayment_schedule(borrower)` | `Option<RepaymentSchedule>` |
+| `is_delinquent(borrower)` | `bool` (see `query.rs:57`) |
+| `get_protocol_config()` | `ProtocolConfig { liquidity_token, liquidity_source }` |
+| `get_liquidity_source()` | `Address` |
+| `get_oracle_config()` | `Option<OracleConfig>` |
+| `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
+| `get_rate_change_limits()` | `Option<RateChangeConfig>` |
+| `get_borrower_rate_floor(borrower)` | `Option<u32>` |
+| `get_borrower_rate_ceiling(borrower)` | `Option<u32>` |
+| `get_grace_period_config()` | `Option<GracePeriodConfig>` |
+| `get_penalty_surcharge_bps()` | `u32` |
+| `get_max_total_exposure()` | `Option<i128>` |
+| `get_credit_limit_bounds()` | `(Option<i128>, Option<i128>)` |
+| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars |
+| `get_auction_contract()` | `Option<Address>` |
+| `get_treasury()` | `Option<Address>` |
+| `get_protocol_fee_bps()` | `Option<u32>` |
+| `get_collateral(borrower)` | `i128` |
+| `get_health_factor(borrower)` | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_query_admin_cooldown()` | `Option<u64>` — configured cooldown interval in seconds; `None` when disabled |
+| `get_query_admin_last_action_ts()` | `Option<u64>` — ledger timestamp of the most recent gated action; `None` before first call |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).

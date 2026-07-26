@@ -1,4 +1,5 @@
 use crate::collateral;
+use crate::lifecycle;
 use crate::events::{
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
@@ -45,7 +46,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 
     if credit_line.borrower != borrower {
         clear_reentrancy_guard(&env);
-        panic!("Borrower mismatch for credit line");
+        env.panic_with_error(ContractError::BorrowerMismatch);
     }
 
     if let Some(status_error) = draw_status_error(credit_line.status) {
@@ -58,12 +59,12 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         .checked_add(amount)
         .unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
-            panic!("overflow");
+            env.panic_with_error(ContractError::Overflow);
         });
 
     if updated_utilized > credit_line.credit_limit {
         clear_reentrancy_guard(&env);
-        panic!("exceeds credit limit");
+        env.panic_with_error(ContractError::OverLimit);
     }
 
     if let Some(token_address) = token_address {
@@ -71,7 +72,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         let reserve_balance = token_client.balance(&reserve_address);
         if reserve_balance < amount {
             clear_reentrancy_guard(&env);
-            panic!("Insufficient liquidity reserve for requested draw amount");
+            env.panic_with_error(ContractError::InsufficientReserve);
         }
 
         token_client.transfer(&reserve_address, &borrower, &amount);
@@ -211,13 +212,13 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient allowance");
+                env.panic_with_error(ContractError::InsufficientAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient balance");
+                env.panic_with_error(ContractError::InsufficientBalance);
             }
 
             token_client.transfer_from(
@@ -316,13 +317,13 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient allowance");
+                env.panic_with_error(ContractError::InsufficientAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient balance");
+                env.panic_with_error(ContractError::InsufficientBalance);
             }
 
             // Compute protocol fee on the total repayment amount.

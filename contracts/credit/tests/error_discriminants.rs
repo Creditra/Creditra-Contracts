@@ -67,8 +67,13 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
-    assert_eq!(ContractError::InvalidAttestation as u32, 53);
-    assert_eq!(ContractError::AdminCooldownActive as u32, 54);
+    assert_eq!(ContractError::AdminQueryCooldownActive as u32, 53);
+    assert_eq!(ContractError::OracleNotFound as u32, 54);
+    assert_eq!(ContractError::BorrowerMismatch as u32, 55);
+    assert_eq!(ContractError::InsufficientReserve as u32, 56);
+    assert_eq!(ContractError::InsufficientAllowance as u32, 57);
+    assert_eq!(ContractError::InsufficientBalance as u32, 58);
+    assert_eq!(ContractError::UtilizedNotZero as u32, 59);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -129,8 +134,13 @@ fn no_duplicate_discriminants() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
-        ContractError::InvalidAttestation as u32,
-        ContractError::AdminCooldownActive as u32,
+        ContractError::AdminQueryCooldownActive as u32,
+        ContractError::OracleNotFound as u32,
+        ContractError::BorrowerMismatch as u32,
+        ContractError::InsufficientReserve as u32,
+        ContractError::InsufficientAllowance as u32,
+        ContractError::InsufficientBalance as u32,
+        ContractError::UtilizedNotZero as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -144,7 +154,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 54;
+    const EXPECTED_VARIANT_COUNT: usize = 59;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -199,8 +209,13 @@ fn variant_count_is_known() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
-        ContractError::InvalidAttestation as u32,
-        ContractError::AdminCooldownActive as u32,
+        ContractError::AdminQueryCooldownActive as u32,
+        ContractError::OracleNotFound as u32,
+        ContractError::BorrowerMismatch as u32,
+        ContractError::InsufficientReserve as u32,
+        ContractError::InsufficientAllowance as u32,
+        ContractError::InsufficientBalance as u32,
+        ContractError::UtilizedNotZero as u32,
     ];
 
     assert_eq!(
@@ -299,6 +314,10 @@ fn category_mappings_are_stable() {
         ContractError::AdminNotInitialized.category(),
         ContractErrorCategory::Auth
     );
+    assert_eq!(
+        ContractError::BorrowerMismatch.category(),
+        ContractErrorCategory::Auth
+    );
     // Lifecycle
     assert_eq!(
         ContractError::CreditLineClosed.category(),
@@ -374,6 +393,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawReversalWindowExpired.category(),
         ContractErrorCategory::Limit
     );
+    assert_eq!(
+        ContractError::UtilizedNotZero.category(),
+        ContractErrorCategory::Limit
+    );
     // Liquidity
     assert_eq!(
         ContractError::MissingLiquidityToken.category(),
@@ -411,6 +434,18 @@ fn category_mappings_are_stable() {
         ContractError::BountyNotSet.category(),
         ContractErrorCategory::Liquidity
     );
+    assert_eq!(
+        ContractError::InsufficientReserve.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientAllowance.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientBalance.category(),
+        ContractErrorCategory::Liquidity
+    );
     // Risk
     assert_eq!(
         ContractError::RateTooHigh.category(),
@@ -429,7 +464,7 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Risk
     );
     assert_eq!(
-        ContractError::AdminCooldownActive.category(),
+        ContractError::AdminQueryCooldownActive.category(),
         ContractErrorCategory::Risk
     );
     // Oracle
@@ -447,6 +482,10 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::OracleQuorumNotMet.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OracleNotFound.category(),
         ContractErrorCategory::Oracle
     );
     // Collateral
@@ -524,6 +563,8 @@ fn category_mappings_are_stable() {
 /// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
+    // AdminQueryCooldownActive must resolve to Risk (discriminant 53)
+    let _: ContractErrorCategory = ContractError::AdminQueryCooldownActive.category();
     use std::collections::HashSet;
 
     let all_variants: Vec<ContractErrorCategory> = vec![
@@ -580,8 +621,13 @@ fn every_variant_has_known_category() {
         ContractError::OracleQuorumNotMet.category(),
         ContractError::AlreadySettled.category(),
         ContractError::InvalidRiskWeight.category(),
-        ContractError::InvalidAttestation.category(),
-        ContractError::FreezeCooldownActive.category(),
+        ContractError::AdminQueryCooldownActive.category(),
+        ContractError::OracleNotFound.category(),
+        ContractError::BorrowerMismatch.category(),
+        ContractError::InsufficientReserve.category(),
+        ContractError::InsufficientAllowance.category(),
+        ContractError::InsufficientBalance.category(),
+        ContractError::UtilizedNotZero.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -590,7 +636,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 54, "Expected 54 ContractError variants");
+    assert_eq!(all_variants.len(), 59, "Expected 59 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1079,7 +1125,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::AlreadySettled,
+            ContractError::AlreadySettled.into(),
             "Expected AlreadySettled error on settlement replay"
         );
 

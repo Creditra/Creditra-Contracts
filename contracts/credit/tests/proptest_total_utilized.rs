@@ -135,7 +135,8 @@ fn assert_total_utilized_invariant(ctx: &TestCtx, modeled: &[i128]) -> TestCaseR
         prop_assert_eq!(
             line.utilized_amount,
             modeled[index],
-            "per-borrower utilized mismatch for borrower index {index}",
+            "per-borrower utilized mismatch for borrower index {}",
+            index,
         );
 
         recomputed_total = recomputed_total

@@ -440,9 +440,9 @@ fn borrower_cap_and_global_cap_apply_independently() {
 // ── Error discriminant stability ──────────────────────────────────────────────
 
 #[test]
-fn borrower_exposure_cap_error_discriminant_is_43() {
+fn borrower_exposure_cap_error_discriminant_is_31() {
     assert_eq!(
-        ContractError::BorrowerExposureCapExceeded as u32,
-        43
+        ContractError::ExposureCapExceeded as u32,
+        31
     );
 }

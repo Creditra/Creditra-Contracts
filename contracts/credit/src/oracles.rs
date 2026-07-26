@@ -37,7 +37,7 @@ pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
     require_admin_auth(&env);
     
     if weight == 0 {
-        panic!("Oracle weight must be greater than zero");
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let mut oracle_list: Vec<Address> = env
@@ -72,7 +72,7 @@ pub fn remove_oracle(env: Env, oracle: Address) {
         env.storage().instance().remove(&OracleDataKey::OracleWeight(oracle.clone()));
         env.storage().instance().remove(&OracleDataKey::OracleReport(oracle));
     } else {
-        panic!("Oracle not found in registry");
+        env.panic_with_error(ContractError::OracleNotFound);
     }
 }
 
@@ -103,7 +103,7 @@ pub fn report_value(env: Env, oracle: Address, value: u128) {
         .unwrap_or_else(|| Vec::new(&env));
 
     if !oracle_list.contains(&oracle) {
-        panic!("Oracle is not approved");
+        env.panic_with_error(ContractError::Unauthorized);
     }
 
     let report = OracleReportData {
@@ -162,11 +162,11 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     }
 
     if total_weight < quorum {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     if valid_reports.is_empty() {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     // Sort valid reports by value ascending using a simple insertion sort
@@ -409,39 +409,11 @@ mod test {
         // Median should be 150.
         let val = client.get_median_value();
         assert_eq!(val, 150);
-// # Multi-oracle quorum price resolution
-//
-// Implements the quorum-of-K algorithm for combining multiple independent
-// oracle price feeds into a single canonical price used by
-// [`crate::lib::settle_default_liquidation`].
-//
-// ## Algorithm
-//
-// Given N submitted prices and a quorum threshold K:
-//
-// 1. Validate every price is strictly positive and N ≤ [`MAX_ORACLE_FEEDS`].
-// 2. Sort prices ascending (selection sort; O(n²) but bounded by
-//    [`MAX_ORACLE_FEEDS`] ≤ 20 to keep gas predictable).
-// 3. Slide a window of K consecutive prices over the sorted array.
-// 4. For each window, check whether the highest price deviates from the
-//    lowest by no more than `max_deviation_bps` of the lowest.
-// 5. Return the **lower-median** of the first qualifying window.
-// 6. Panic with [`crate::types::ContractError::OracleQuorumNotMet`] if no
-//    window qualifies.
-//
-// ## Security properties
-//
-// - An outlier feed cannot influence the result unless it falls inside a
-//   qualifying K-wide window alongside K−1 honest feeds.
-// - Requires at least K feeds to agree, so an attacker must corrupt K
-//   independent feeds simultaneously to manipulate the canonical price.
-// - The stack buffer is bounded at compile time; gas consumption is O(n²)
-//   for sorting and O(n) for window scanning.
-
-use soroban_sdk::{Env, Vec};
+    }
+}
 
 use crate::math_utils::compute_deviation_bps;
-use crate::types::{ContractError, OracleQuorumConfig};
+use crate::types::OracleQuorumConfig;
 
 /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
 ///

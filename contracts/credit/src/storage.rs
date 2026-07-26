@@ -65,31 +65,7 @@ use crate::types::{
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
-///
-/// # Storage tier convention
-///
-/// Variants in this enum are referenced from **two** Soroban storage tiers:
-///
-/// - **Instance storage** for global, single-row config and counters
-///   (`LiquidityToken`, `LiquiditySource`, `DrawsFrozen`, `SchemaVersion`,
-///   `CreditLineCount`, `TotalUtilized`, `MaxDrawAmount`, `MaxRepayAmount`,
-///   `DrawMinIntervalSeconds`, `MinCreditLimit`, `MaxCreditLimit`,
-///   `PenaltySurchargeBps`, `LateFeeFlat`, `AuctionContract`, `MaxTotalExposure`,
-///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
-///   `BountyAddress`, `BountyBalance`,
-///   `TotalCollateral`,
-///   `MinCollateralRatioBps`, `CollateralRiskWeightBps`, `OracleConfig`, `OracleLastPrice`,
-///   `OracleLastPriceTs`).
-/// - **Persistent storage** for per-borrower / per-timestamp data
-///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
-///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
-///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
-///   `DrawReversedAmount`).
-///
-/// Helper functions in this module always pick the correct tier; callers
-/// outside this module should never hit the storage API directly with these
-/// keys.
-#[contracttype]
+#[contracttype(export = false)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     /// Address of the liquidity token (SAC or compatible token contract).
@@ -224,16 +200,18 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
-    /// Admin freeze cooldown duration in seconds.
-    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
-    /// by a minimum interval between successive calls.
-    FreezeCooldownSeconds,
-    /// Ledger timestamp of the last admin freeze or unfreeze action.
-    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
-    LastFreezeTimestamp,
-    /// Per-borrower liquidation grace period in seconds.
-    /// Specifies a grace window before a credit line can be defaulted or liquidated.
-    LiquidationGracePeriod(Address),
+    /// Per-borrower collateral balance for a specific token.
+    CollateralBalanceV2(Address, Address),
+    /// List of allowlisted collateral tokens.
+    CollateralTokenAllowlist,
+    /// Minimum interval in seconds required between consecutive admin query
+    /// critical actions (update_risk_parameters, set_oracle_config,
+    /// set_oracle_quorum_config, set_rate_formula_config, set_grace_period_config).
+    /// When absent, no cooldown is enforced.
+    AdminQueryCooldownSeconds,
+    /// Ledger timestamp of the last admin query critical action.
+    /// Set atomically with the action; used to enforce `AdminQueryCooldownSeconds`.
+    AdminQueryLastActionTs,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -260,8 +238,6 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-
-/// TTL policy used by per-borrower credit-line entries.
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
@@ -383,11 +359,9 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
 /// Bumps the persistent TTL of the entry so it is not archived independently
 /// of the credit line.
 pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
-    let key = DataKey::BorrowerExposureCap(borrower.clone());
-    if env.storage().persistent().has(&key) {
-        bump_persistent_ttl(env, &key);
-    }
-    env.storage().persistent().get(&key)
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }
 
 /// Set the per-borrower exposure cap. Passing `0` removes the cap.
@@ -399,11 +373,11 @@ pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128
     if let Some(cap) = cap {
         env.storage()
             .persistent()
-            .set(&key, &cap);
+            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&key);
+            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
     }
     bump_persistent_ttl(env, &key);
 }
@@ -1440,7 +1414,7 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+pub fn get_late_fee_config(env: &Env) -> Option<crate::penalties::LateFeeConfig> {
     env.storage().instance().get(&DataKey::LateFeeConfig)
 }
 
@@ -1452,7 +1426,7 @@ pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+pub fn set_late_fee_config(env: &Env, config: Option<crate::penalties::LateFeeConfig>) {
     match config {
         Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
         None => env.storage().instance().remove(&DataKey::LateFeeConfig),
@@ -1581,66 +1555,76 @@ pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
 }
 
-// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+// ── Admin query cooldown ──────────────────────────────────────────────────────
+//
+// Guards a configurable set of "query-critical" admin actions (those that
+// directly influence what read-only entrypoints — `get_health_factor`,
+// `is_delinquent`, `get_credit_line` rate, etc. — return) behind a minimum
+// time interval, preventing automated rapid cycling of risk parameters.
+//
+// Two instance-storage slots:
+//   AdminQueryCooldownSeconds  — the required gap between consecutive actions
+//   AdminQueryLastActionTs     — timestamp of the most recent gated action
+//
+// Both live in instance storage so they are always loaded together with the
+// rest of the hot config. The helpers below are intentionally free of auth —
+// callers (in `query_admin.rs`) enforce admin auth separately.
 
-/// Get the configured freeze cooldown duration in seconds.
+/// Return the configured admin-query cooldown interval in seconds.
 ///
-/// Returns `None` when not configured, meaning no cooldown is enforced.
-/// A value of `0` also means the cooldown is disabled.
-pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+/// Returns `None` when not set, which means no cooldown is enforced.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryCooldownSeconds`]
+pub fn get_admin_query_cooldown_seconds(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
-        .get(&DataKey::FreezeCooldownSeconds)
-        .filter(|&secs: &u64| secs > 0)
+        .get(&DataKey::AdminQueryCooldownSeconds)
 }
 
-/// Set the freeze cooldown duration in seconds.
+/// Set the admin-query cooldown interval.
 ///
-/// Pass `0` or `None`-equivalent behaviour: remove the key entirely,
-/// effectively disabling the cooldown.
-pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+/// Pass `0` to remove the cooldown (no time gate enforced).
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryCooldownSeconds`]
+pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
     if seconds == 0 {
         env.storage()
             .instance()
-            .remove(&DataKey::FreezeCooldownSeconds);
+            .remove(&DataKey::AdminQueryCooldownSeconds);
     } else {
         env.storage()
             .instance()
-            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+            .set(&DataKey::AdminQueryCooldownSeconds, &seconds);
     }
 }
 
-/// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
-pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+/// Return the ledger timestamp of the most recent admin query critical action.
+///
+/// Returns `None` before any gated action has been performed.
+///
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryLastActionTs`]
+pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
-        .get(&DataKey::LastFreezeTimestamp)
+        .get(&DataKey::AdminQueryLastActionTs)
 }
 
-/// Record a freeze/unfreeze action timestamp, but only when a cooldown is
-/// configured. When no cooldown is set, this is a no-op so that timestamps
-/// recorded before cooldown was enabled never retroactively block actions.
-pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
-    if get_freeze_cooldown_seconds(env).is_some() {
-        set_last_freeze_timestamp(env, env.ledger().timestamp());
-    }
-}
-
-/// Check and enforce the admin freeze cooldown.
+/// Record the current ledger timestamp as the admin query last-action anchor.
 ///
-/// If a cooldown is configured and the last freeze action was less than
-/// `cooldown_seconds` ago, this function reverts with
-/// [`crate::types::ContractError::FreezeCooldownActive`].
+/// Called at the end of every successfully gated action so that the next
+/// invocation can measure elapsed time against this baseline.
 ///
-/// Call this at the start of every admin freeze/unfreeze entrypoint.
-pub fn enforce_freeze_cooldown(env: &Env) {
-    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
-        return;
-    };
-    if let Some(last_ts) = get_last_freeze_timestamp(env) {
-        let now = env.ledger().timestamp();
-        if now < last_ts.saturating_add(cooldown_secs) {
-            env.panic_with_error(crate::types::ContractError::FreezeCooldownActive);
-        }
-    }
+/// # Storage
+/// - **Type**: Instance storage
+/// - **Key**: [`DataKey::AdminQueryLastActionTs`]
+pub fn set_admin_query_last_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminQueryLastActionTs, &ts);
 }
