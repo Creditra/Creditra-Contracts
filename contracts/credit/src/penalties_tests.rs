@@ -35,8 +35,11 @@ fn flat_zero_amount_is_noop() {
 #[test]
 fn flat_large_amount() {
     // 1_000_000 tokens × 100 installments = 100_000_000
-    let fee =
-        compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount: 1_000_000 }), 100).unwrap();
+    let fee = compute_late_fee(
+        LateFeeConfig::Flat(FlatFeeConfig { amount: 1_000_000 }),
+        100,
+    )
+    .unwrap();
     assert_eq!(fee, 100_000_000);
 }
 
@@ -62,11 +65,8 @@ fn flat_negative_amount_with_zero_missed_is_ok() {
 #[test]
 fn flat_max_i128_overflow_returns_overflow() {
     // amount × count overflows i128
-    let err = compute_late_fee(
-        LateFeeConfig::Flat(FlatFeeConfig { amount: i128::MAX }),
-        2,
-    )
-    .unwrap_err();
+    let err =
+        compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount: i128::MAX }), 2).unwrap_err();
     assert_eq!(err, ContractError::Overflow);
 }
 
@@ -88,16 +88,22 @@ fn flat_boundary_max_safe_multiplication() {
 
 #[test]
 fn apr_always_returns_zero_for_any_installments() {
-    let fee =
-        compute_late_fee(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }), 5).unwrap();
+    let fee = compute_late_fee(
+        LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }),
+        5,
+    )
+    .unwrap();
     // APR surcharge is handled by crate::accrual, not here.
     assert_eq!(fee, 0);
 }
 
 #[test]
 fn apr_zero_surcharge_returns_zero() {
-    let fee =
-        compute_late_fee(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 0 }), 10).unwrap();
+    let fee = compute_late_fee(
+        LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 0 }),
+        10,
+    )
+    .unwrap();
     assert_eq!(fee, 0);
 }
 
@@ -115,8 +121,11 @@ fn apr_max_surcharge_returns_zero() {
 
 #[test]
 fn apr_zero_missed_installments_returns_zero() {
-    let fee =
-        compute_late_fee(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }), 0).unwrap();
+    let fee = compute_late_fee(
+        LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }),
+        0,
+    )
+    .unwrap();
     assert_eq!(fee, 0);
 }
 
@@ -125,8 +134,11 @@ fn apr_zero_missed_installments_returns_zero() {
 #[test]
 fn flat_and_apr_produce_different_results() {
     let flat_fee = compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount: 100 }), 3).unwrap();
-    let apr_fee =
-        compute_late_fee(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }), 3).unwrap();
+    let apr_fee = compute_late_fee(
+        LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }),
+        3,
+    )
+    .unwrap();
     assert_eq!(flat_fee, 300);
     assert_eq!(apr_fee, 0);
     assert_ne!(flat_fee, apr_fee);
@@ -136,7 +148,9 @@ fn flat_and_apr_produce_different_results() {
 fn switching_config_from_apr_to_flat_does_not_carry_state() {
     // Pure functions — no state carried between calls.
     let apr = compute_late_fee(
-        LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 9_999 }),
+        LateFeeConfig::AprBased(AprFeeConfig {
+            surcharge_bps: 9_999,
+        }),
         10,
     )
     .unwrap();

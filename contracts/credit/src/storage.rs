@@ -64,9 +64,44 @@ use crate::types::{
 };
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
-/// Composite key for per-borrower draw audit entries.
-/// Wraps `(borrower, timestamp)` as a single `#[contracttype]` value
-/// because `#[contracttype]` enums do not support multi-field tuple variants.
+/// Storage keys used in instance and persistent storage.
+///
+/// # Storage tier convention
+///
+/// Variants in this enum are referenced from **two** Soroban storage tiers:
+///
+/// - **Instance storage** for global, single-row config and counters
+///   (`LiquidityToken`, `LiquiditySource`, `DrawsFrozen`, `SchemaVersion`,
+///   `CreditLineCount`, `TotalUtilized`, `MaxDrawAmount`, `MaxRepayAmount`,
+///   `DrawMinIntervalSeconds`, `MinCreditLimit`, `MaxCreditLimit`,
+///   `PenaltySurchargeBps`, `LateFeeFlat`, `AuctionContract`, `MaxTotalExposure`,
+///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
+///   `BountyAddress`, `BountyBalance`,
+///   `TotalCollateral`,
+///   `MinCollateralRatioBps`, `CollateralRiskWeightBps`, `OracleConfig`, `OracleLastPrice`,
+///   `OracleLastPriceTs`).
+/// - **Persistent storage** for per-borrower / per-timestamp data
+///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
+///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
+///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
+///   `DrawReversedAmount`).
+///
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralTokenKey {
+    pub borrower: Address,
+    pub token: Address,
+}
+
+/// Key payload for per-borrower per-timestamp draw audit and reversal storage entries.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawAuditKey {
+    pub borrower: Address,
+    pub timestamp: u64,
+}
+
+/// Instance and persistent storage key taxonomy for the credit contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawAuditKey {
@@ -187,11 +222,7 @@ pub enum DataKey {
     /// Minimum ledger seconds between critical collateral admin actions (v7).
     AdminCollateralCooldownSeconds,
     /// Ledger timestamp of the last critical collateral admin action (v7).
-    LastAdminCollateralCriticalActionTs,
-    /// Minimum ledger seconds between critical lifecycle admin actions (v7).
-    AdminLifecycleCooldownSeconds,
-    /// Ledger timestamp of the last critical lifecycle admin action (v7).
-    LastAdminLifecycleCriticalActionTs,
+    LastAdminCollateralActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
@@ -229,8 +260,10 @@ pub enum DataKey {
     /// Per-borrower liquidation grace period in seconds.
     /// Specifies a grace window before a credit line can be defaulted or liquidated.
     LiquidationGracePeriod(Address),
-    /// Per-borrower per-token collateral balance (v2, multi-token support).
-    CollateralBalanceV2(CollateralBalanceV2Key),
+    /// Per-borrower per-token collateral balance tracking.
+    CollateralBalanceV2(CollateralTokenKey),
+    /// Allowlist of authorized collateral token contract addresses.
+    CollateralTokenAllowlist,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -591,14 +624,14 @@ pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
     bump_instance_ttl(env);
     env.storage()
         .instance()
-        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+        .get(&DataKey::LastAdminCollateralActionTs)
 }
 
 /// Record the ledger timestamp of the last critical collateral admin action.
 pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
+        .set(&DataKey::LastAdminCollateralActionTs, &ts);
 }
 
 /// Get the configured admin lifecycle cool-off interval, if set.
@@ -641,9 +674,10 @@ pub fn get_collateral_risk_weight_bps(env: &Env, asset: &Address) -> Option<u32>
 /// Set the risk weight for a specific collateral asset, in basis points.
 /// Caller is responsible for admin auth and for validating `weight_bps <= 10_000`.
 pub fn set_collateral_risk_weight_bps(env: &Env, asset: &Address, weight_bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CollateralRiskWeightBps(asset.clone()), &weight_bps);
+    env.storage().instance().set(
+        &DataKey::CollateralRiskWeightBps(asset.clone()),
+        &weight_bps,
+    );
 }
 
 /// Return configured protocol fee basis points, if set.
@@ -1555,7 +1589,7 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 /// Return a borrower's balance for a specific collateral token and bump
 /// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
-    let key = DataKey::CollateralBalanceV2(CollateralBalanceV2Key {
+    let key = DataKey::CollateralBalanceV2(CollateralTokenKey {
         borrower: borrower.clone(),
         token: token.clone(),
     });
@@ -1566,8 +1600,13 @@ pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
-pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
-    let key = DataKey::CollateralBalanceV2(CollateralBalanceV2Key {
+pub fn set_collateral_balance_for_token(
+    env: &Env,
+    borrower: &Address,
+    token: &Address,
+    balance: i128,
+) {
+    let key = DataKey::CollateralBalanceV2(CollateralTokenKey {
         borrower: borrower.clone(),
         token: token.clone(),
     });
@@ -1645,17 +1684,16 @@ pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
     }
 }
 
-/// Return the ledger timestamp of the most recent admin query critical action.
-///
-/// Returns `None` before any gated action has been performed.
-///
-/// # Storage
-/// - **Type**: Instance storage
-/// - **Key**: [`DataKey::AdminQueryLastActionTs`]
-pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
+/// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::LastFreezeTimestamp)
+}
+
+/// Set the ledger timestamp of the last admin freeze/unfreeze action.
+pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .get(&DataKey::AdminQueryLastActionTs)
+        .set(&DataKey::LastFreezeTimestamp, &ts);
 }
 
 /// Record the current ledger timestamp as the admin query last-action anchor.

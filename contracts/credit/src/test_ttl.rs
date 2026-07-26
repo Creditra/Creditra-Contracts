@@ -50,7 +50,10 @@ mod test {
         }));
 
         assert!(result.is_err());
-        assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
+        assert_eq!(
+            check_ttl(&env, &contract_id, &borrower),
+            CREDIT_LINE_TTL_EXTEND_TO
+        );
     }
 
     #[test]
@@ -123,8 +126,11 @@ mod test {
 
         // 8. reinstate_credit_line
         client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
-        assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
-        
+        assert_eq!(
+            check_ttl(&env, &contract_id, &borrower),
+            CREDIT_LINE_TTL_EXTEND_TO
+        );
+
         advance_ledger(&env, &contract_id);
 
         // 9. close_credit_line (by admin)

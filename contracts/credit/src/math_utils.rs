@@ -432,7 +432,10 @@ mod tests {
     #[test]
     fn safe_mul_div_ceil_exact_and_overflow() {
         // u128::MAX * 1 / 1 = u128::MAX (exact, no remainder, no overflow)
-        assert_eq!(safe_mul_div(u128::MAX, 1, 1, Rounding::Ceil), Some(u128::MAX));
+        assert_eq!(
+            safe_mul_div(u128::MAX, 1, 1, Rounding::Ceil),
+            Some(u128::MAX)
+        );
     }
 
     #[test]
@@ -444,8 +447,14 @@ mod tests {
 
     #[test]
     fn safe_mul_div_max_boundary() {
-        assert_eq!(safe_mul_div(u128::MAX, 1, 1, Rounding::Floor), Some(u128::MAX));
-        assert_eq!(safe_mul_div(u128::MAX, 1, 2, Rounding::Floor), Some(u128::MAX / 2));
+        assert_eq!(
+            safe_mul_div(u128::MAX, 1, 1, Rounding::Floor),
+            Some(u128::MAX)
+        );
+        assert_eq!(
+            safe_mul_div(u128::MAX, 1, 2, Rounding::Floor),
+            Some(u128::MAX / 2)
+        );
     }
 
     // ── mul_div ──────────────────────────────────────────────────────────────

@@ -79,7 +79,7 @@ pub enum FreezeReason {
     BorrowerRequest = 4,
 }
 
-/// Structured state for protocol-level draw freeze.
+/// Structured state for global draw freezes.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawsFreezeState {
@@ -87,14 +87,6 @@ pub struct DrawsFreezeState {
     pub reason: FreezeReason,
 }
 
-/// Paginated credit line result page.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreditLinesPage {
-    pub lines: soroban_sdk::Vec<CreditLineData>,
-    pub next_cursor: Option<u32>,
-    pub has_more: bool,
-}
 
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -227,10 +219,8 @@ pub enum ContractError {
     AdminCooldownActive = 54,
     /// Per-borrower liquidation grace window has not yet elapsed.
     LiquidationGraceActive = 55,
-    /// Per-borrower maximum exposure cap was exceeded during a draw.
-    BorrowerExposureCapExceeded = 56,
-    /// Admin freeze/unfreeze action attempted before the freeze cooldown elapsed.
-    FreezeCooldownActive = 57,
+    /// Admin freeze cooldown is active.
+    FreezeCooldownActive = 56,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -371,7 +361,6 @@ impl ContractError {
         }
     }
 }
-
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -671,7 +660,6 @@ pub struct ProofOfReserve {
     pub bounty_balance: i128,
 }
 
-
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///
 /// Exactly one proposal can exist at a time. It must be executed (or superseded
@@ -714,37 +702,4 @@ pub struct PauseReason {
     pub timestamp: u64,
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
-}
-
-/// Error categories for client-side grouping of [`ContractError`] variants.
-///
-/// # Discriminant stability
-/// Discriminants are permanently pinned. New variants must be appended at the
-/// end with the next available integer.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum ContractErrorCategory {
-    /// Authentication / authorization errors (Unauthorized, NotAdmin, AdminNotInitialized).
-    Auth = 1,
-    /// Credit line lifecycle state errors (Closed, Suspended, Defaulted, AlreadyInitialized).
-    Lifecycle = 2,
-    /// Numeric domain errors (InvalidAmount, NegativeLimit, Overflow, TimestampRegression, LimitOutOfBounds).
-    Numeric = 3,
-    /// Per-borrower limit enforcement (OverLimit, UtilizationNotZero, DrawExceedsMaxAmount, BorrowerExposureCapExceeded).
-    Limit = 4,
-    /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
-    Liquidity = 5,
-    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
-    Risk = 6,
-    /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
-    Oracle = 7,
-    /// Collateral ratio errors (CollateralRatioBelowMinimum, InsufficientCollateralBalance).
-    Collateral = 8,
-    /// Blocklist / freeze / draw-freeze errors (BorrowerBlocked, DrawsFrozen, BorrowerFrozen).
-    Block = 9,
-    /// Reentrancy guard trigger.
-    Reentrancy = 10,
-    /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
-    Misc = 11,
 }

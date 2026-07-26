@@ -310,18 +310,9 @@ fn borrower_cap_applies_independently_per_borrower() {
     client.draw_credit(&b1, &1_000_i128); // at b1's cap
     client.draw_credit(&b2, &1_500_i128); // at b2's cap
 
-    assert_eq!(
-        client.get_credit_line(&b0).unwrap().utilized_amount,
-        500
-    );
-    assert_eq!(
-        client.get_credit_line(&b1).unwrap().utilized_amount,
-        1_000
-    );
-    assert_eq!(
-        client.get_credit_line(&b2).unwrap().utilized_amount,
-        1_500
-    );
+    assert_eq!(client.get_credit_line(&b0).unwrap().utilized_amount, 500);
+    assert_eq!(client.get_credit_line(&b1).unwrap().utilized_amount, 1_000);
+    assert_eq!(client.get_credit_line(&b2).unwrap().utilized_amount, 1_500);
 }
 
 #[test]
@@ -340,10 +331,7 @@ fn borrower_cap_does_not_affect_other_borrowers() {
 
     // b1 has no cap — can draw up to their credit limit.
     client.draw_credit(&b1, &9_000_i128);
-    assert_eq!(
-        client.get_credit_line(&b1).unwrap().utilized_amount,
-        9_000
-    );
+    assert_eq!(client.get_credit_line(&b1).unwrap().utilized_amount, 9_000);
 }
 
 #[test]
@@ -440,9 +428,6 @@ fn borrower_cap_and_global_cap_apply_independently() {
 // ── Error discriminant stability ──────────────────────────────────────────────
 
 #[test]
-fn borrower_exposure_cap_error_discriminant_is_31() {
-    assert_eq!(
-        ContractError::ExposureCapExceeded as u32,
-        31
-    );
+fn borrower_exposure_cap_error_discriminant_is_43() {
+    assert_eq!(ContractError::BorrowerExposureCapExceeded as u32, 43);
 }

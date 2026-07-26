@@ -185,7 +185,12 @@ fn test_credit_lines_paginated_multiple_pages() {
     // Create 5 credit lines
     let borrowers: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
     for (i, borrower) in borrowers.iter().enumerate() {
-        client.open_credit_line(borrower, &(1000 * (i as i128 + 1)), &500, &(10 * (i as u32 + 1)));
+        client.open_credit_line(
+            borrower,
+            &(1000 * (i as i128 + 1)),
+            &500,
+            &(10 * (i as u32 + 1)),
+        );
     }
 
     // First page with 2 items
@@ -225,7 +230,12 @@ fn test_credit_lines_paginated_limit_enforcement() {
     // Create 5 credit lines
     let borrowers: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
     for (i, borrower) in borrowers.iter().enumerate() {
-        client.open_credit_line(borrower, &(1000 * (i as i128 + 1)), &500, &(10 * (i as u32 + 1)));
+        client.open_credit_line(
+            borrower,
+            &(1000 * (i as i128 + 1)),
+            &500,
+            &(10 * (i as u32 + 1)),
+        );
     }
 
     // Request exactly 3 items
@@ -475,7 +485,10 @@ fn borrow_caps_self_suspended() {
     let caps = client.borrow_capabilities(&borrower);
     assert!(!caps.can_draw, "self-suspended → cannot draw");
     assert!(caps.can_repay, "self-suspended → can repay");
-    assert!(!caps.can_self_suspend, "already suspended → cannot self-suspend again");
+    assert!(
+        !caps.can_self_suspend,
+        "already suspended → cannot self-suspend again"
+    );
 }
 
 /// Protocol paused → draws blocked, repay and self-suspend still allowed.
@@ -587,7 +600,10 @@ fn borrow_caps_multiple_blocks() {
     let caps = client.borrow_capabilities(&borrower);
     assert!(!caps.can_draw, "multiple blocks → cannot draw");
     assert!(caps.can_repay, "multiple blocks → still can repay");
-    assert!(caps.can_self_suspend, "multiple blocks → still can self-suspend");
+    assert!(
+        caps.can_self_suspend,
+        "multiple blocks → still can self-suspend"
+    );
 }
 
 /// After unblocking, draws are restored.

@@ -197,7 +197,10 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
         reduced_rate_bps: 0,
     };
     env.as_contract(&contract_id, || {
-        env.storage().instance().set(&creditra_credit::storage::grace_period_key(&env), &grace_cfg);
+        env.storage().instance().set(
+            &creditra_credit::storage::grace_period_key(&env),
+            &grace_cfg,
+        );
     });
 
     let grace_key = creditra_credit::storage::grace_period_key(&env);

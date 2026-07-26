@@ -95,11 +95,10 @@ use crate::events::{
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
-    get_max_credit_limit, get_min_credit_limit, get_repayment_schedule, persist_credit_line,
-    set_max_credit_limit, set_min_credit_limit,
+    assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
+    persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD,
+    CREDIT_LINE_TTL_THRESHOLD, DrawAuditKey,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{Address, Env, Symbol};
@@ -250,6 +249,123 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
             risk_score: credit_line.risk_score,
         },
     );
+}
+
+// ── per-borrower liquidation grace ──────────────────────────────────────────
+
+/// Set or update the per-borrower liquidation grace period in seconds (admin only).
+///
+/// # Arguments
+/// - `env`: Soroban environment.
+/// - `borrower`: Borrower address to configure.
+/// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
+///
+/// # Panics
+/// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
+/// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: Address, grace_period_seconds: u64) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+    if stored_line.status == CreditStatus::Closed {
+        env.panic_with_error(ContractError::CreditLineClosed);
+    }
+
+    crate::storage::set_per_borrower_liquidation_grace(env, &borrower, grace_period_seconds);
+}
+
+/// Return the per-borrower liquidation grace period in seconds for `borrower`.
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
+    crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
+}
+
+/// Set or replace a borrower's installment repayment schedule.
+pub fn set_repayment_schedule(
+    env: &Env,
+    borrower: Address,
+    amount_per_period: i128,
+    period_seconds: u64,
+    first_due_ts: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    if amount_per_period <= 0 || period_seconds == 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+    if stored_line.status == CreditStatus::Closed {
+        env.panic_with_error(ContractError::CreditLineClosed);
+    }
+
+    storage_set_repayment_schedule(
+        env,
+        &borrower,
+        &RepaymentSchedule {
+            amount_per_period,
+            period_seconds,
+            next_due_ts: first_due_ts,
+        },
+    );
+}
+
+/// Advance the next due timestamp when a qualifying repayment covers one or more installments.
+/// Also charges a flat late fee per overdue installment when `LateFeeFlat` is configured.
+pub fn advance_repayment_schedule_after_repay(env: &Env, borrower: &Address, amount: i128) {
+    if amount <= 0 {
+        return;
+    }
+
+    let Some(mut schedule) = storage_get_repayment_schedule(env, borrower) else {
+        return;
+    };
+
+    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
+        return;
+    }
+
+    let installments_paid = (amount / schedule.amount_per_period) as u64;
+    if installments_paid == 0 {
+        return;
+    }
+
+    // ── Late-fee surcharge ──────────────────────────────────────────────────
+    let late_fee = storage_get_late_fee_flat(env);
+    if late_fee > 0 {
+        let now = env.ledger().timestamp();
+        for i in 0_u64..installments_paid {
+            let due_ts = schedule
+                .next_due_ts
+                .saturating_add(i.saturating_mul(schedule.period_seconds));
+            if now > due_ts {
+                storage_add_treasury_balance(env, late_fee);
+                publish_late_fee_charged_event(
+                    env,
+                    LateFeeChargedEvent {
+                        borrower: borrower.clone(),
+                        fee: late_fee,
+                        installment_index: i.saturating_add(1),
+                    },
+                );
+            }
+        }
+    }
+
+    let advance_seconds = schedule.period_seconds.saturating_mul(installments_paid);
+    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
+    storage_set_repayment_schedule(env, borrower, &schedule);
 }
 
 /// Set the flat late fee per missed installment (admin only).
@@ -614,7 +730,7 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = DataKey::DrawAudit(crate::storage::DrawAuditKey {
+    let settlement_key = DataKey::DrawAudit(DrawAuditKey {
         borrower: borrower.clone(),
         timestamp: env.ledger().sequence() as u64,
     });
@@ -653,7 +769,13 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(CreditStatus::Defaulted),
+    );
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -762,7 +884,13 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     let previous_status = credit_line.status;
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(CreditStatus::Defaulted),
+    );
 
     publish_credit_line_event(
         &env,
@@ -775,95 +903,6 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
             risk_score: credit_line.risk_score,
         },
     );
-}
-
-// ── repayment schedule helpers ───────────────────────────────────────────────
-
-/// Set or replace a borrower's installment repayment schedule (admin only).
-///
-/// # Parameters
-/// - `borrower`: Borrower whose credit line schedule is being configured.
-/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
-/// - `period_seconds`: Duration of each installment period in seconds; must be positive.
-/// - `first_due_ts`: Timestamp at which the first installment is due.
-///
-/// # Panics
-/// - [`ContractError::InvalidAmount`] when `amount_per_period <= 0` or
-///   `period_seconds == 0`.
-/// - [`ContractError::CreditLineNotFound`] when `borrower` has no credit line.
-///
-/// # Authorization
-/// Requires admin authorization because the schedule controls delinquency and
-/// due-date state for the borrower.
-pub fn set_repayment_schedule(
-    env: &Env,
-    borrower: Address,
-    amount_per_period: i128,
-    period_seconds: u64,
-    first_due_ts: u64,
-) {
-    assert_not_paused(env);
-    require_admin_auth(env);
-
-    if amount_per_period <= 0 || period_seconds == 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    if get_credit_line(env, &borrower).is_none() {
-        env.panic_with_error(ContractError::CreditLineNotFound);
-    }
-
-    let schedule = RepaymentSchedule {
-        amount_per_period,
-        period_seconds,
-        next_due_ts: first_due_ts,
-    };
-    storage_set_repayment_schedule(env, &borrower, &schedule);
-}
-
-/// Advance a borrower's installment schedule after a repayment.
-///
-/// `effective_repay` is the amount actually applied to the debt after capping
-/// an overpayment to the outstanding balance. `interest_repaid` is the portion
-/// of that amount that was allocated to accrued interest. Only the principal
-/// portion of a repayment can satisfy installment obligations:
-///
-/// ```text
-/// principal_repaid  = effective_repay - interest_repaid
-/// installments_paid = floor(principal_repaid / amount_per_period)
-/// next_due_ts       = next_due_ts + installments_paid * period_seconds
-/// ```
-///
-/// Interest-only repayments and partial principal installments do not move the
-/// due date. Arithmetic uses checked/saturating operations so malformed state or
-/// extreme schedule values cannot wrap timestamps.
-pub fn advance_repayment_schedule_after_repay(
-    env: &Env,
-    borrower: &Address,
-    effective_repay: i128,
-    interest_repaid: i128,
-) {
-    let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
-        Some(principal) if principal > 0 => principal,
-        _ => return,
-    };
-
-    let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
-        return;
-    };
-
-    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
-        return;
-    }
-
-    let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
-    if installments_paid == 0 {
-        return;
-    }
-
-    let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
-    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
-    storage_set_repayment_schedule(env, borrower, &schedule);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

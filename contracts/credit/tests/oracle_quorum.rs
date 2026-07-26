@@ -161,7 +161,13 @@ fn submit_two_of_three_quorum_stores_median() {
 
     // Verify via settlement — quorum price should allow settlement without oracle_price
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "settle1"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "settle1"),
+        &10_000_u32,
+        &None,
+    );
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed
@@ -262,13 +268,7 @@ fn settlement_uses_quorum_price_ignores_oracle_price_arg() {
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
     // oracle_price=None is fine in quorum mode — uses the stored quorum price
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed

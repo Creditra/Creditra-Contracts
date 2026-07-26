@@ -1,5 +1,7 @@
 use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
-use crate::types::{CreditLineData, ProtocolSummary, RepaymentSchedule, CreditStatus, GracePeriodConfig};
+use crate::types::{
+    CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
+};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -53,7 +55,6 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
         bounty_balance: crate::storage::get_bounty_balance(&env),
     }
 }
-
 
 /// Return the configured installment repayment schedule for `borrower`, if any.
 ///
@@ -182,7 +183,7 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     }
 
-    let Some(schedule) = get_repayment_schedule(env.clone(), borrower) else {
+    let Some(schedule) = get_repayment_schedule(env.clone(), borrower.clone()) else {
         return false;
     };
 
