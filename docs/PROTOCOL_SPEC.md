@@ -381,34 +381,34 @@ See `contracts/credit/src/fees.rs`.
 
 ### 2.10 Read-only queries
 
-| Entrypoint | Returns |
-|---|---|
-| `get_credit_line(borrower)` | `Option<CreditLineData>` |
-| `get_credit_line_summary(borrower)` | `Option<CreditLineData>` (alias) |
-| `get_credit_line_count()` | `u32` |
-| `enumerate_credit_lines(start_after, limit)` | `Vec<(u32, CreditLineData)>`, `limit <= 100` |
-| `get_total_utilized()` | `i128` |
-| `get_repayment_schedule(borrower)` | `Option<RepaymentSchedule>` |
-| `is_delinquent(borrower)` | `bool` (see `query.rs:57`) |
-| `get_protocol_config()` | `ProtocolConfig { liquidity_token, liquidity_source }` |
-| `get_liquidity_source()` | `Address` |
-| `get_oracle_config()` | `Option<OracleConfig>` |
-| `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
-| `get_rate_change_limits()` | `Option<RateChangeConfig>` |
-| `get_borrower_rate_floor(borrower)` | `Option<u32>` |
-| `get_borrower_rate_ceiling(borrower)` | `Option<u32>` |
-| `get_grace_period_config()` | `Option<GracePeriodConfig>` |
-| `get_penalty_surcharge_bps()` | `u32` |
-| `get_max_total_exposure()` | `Option<i128>` |
-| `get_credit_limit_bounds()` | `(Option<i128>, Option<i128>)` |
-| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars |
-| `get_auction_contract()` | `Option<Address>` |
-| `get_treasury()` | `Option<Address>` |
-| `get_protocol_fee_bps()` | `Option<u32>` |
-| `get_collateral(borrower)` | `i128` |
-| `get_health_factor(borrower)` | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
-| `get_query_admin_cooldown()` | `Option<u64>` — configured cooldown interval in seconds; `None` when disabled |
-| `get_query_admin_last_action_ts()` | `Option<u64>` — ledger timestamp of the most recent gated action; `None` before first call |
+| Entrypoint                                                       | Returns                                                                                                  |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `get_credit_line(borrower)`                                      | `Option<CreditLineData>`                                                                                 |
+| `get_credit_line_summary(borrower)`                              | `Option<CreditLineData>` (alias)                                                                         |
+| `get_credit_line_count()`                                        | `u32`                                                                                                    |
+| `enumerate_credit_lines(start_after, limit)`                     | `Vec<(u32, CreditLineData)>`, `limit <= 100`                                                             |
+| `get_total_utilized()`                                           | `i128`                                                                                                   |
+| `get_repayment_schedule(borrower)`                               | `Option<RepaymentSchedule>`                                                                              |
+| `is_delinquent(borrower)`                                        | `bool` (see `query.rs:57`)                                                                               |
+| `get_protocol_config()`                                          | `ProtocolConfig { liquidity_token, liquidity_source }`                                                   |
+| `get_liquidity_source()`                                         | `Address`                                                                                                |
+| `get_oracle_config()`                                            | `Option<OracleConfig>`                                                                                   |
+| `get_rate_formula_config()`                                      | `Option<RateFormulaConfig>`                                                                              |
+| `get_rate_change_limits()`                                       | `Option<RateChangeConfig>`                                                                               |
+| `get_borrower_rate_floor(borrower)`                              | `Option<u32>`                                                                                            |
+| `get_borrower_rate_ceiling(borrower)`                            | `Option<u32>`                                                                                            |
+| `get_grace_period_config()`                                      | `Option<GracePeriodConfig>`                                                                              |
+| `get_penalty_surcharge_bps()`                                    | `u32`                                                                                                    |
+| `get_max_total_exposure()`                                       | `Option<i128>`                                                                                           |
+| `get_credit_limit_bounds()`                                      | `(Option<i128>, Option<i128>)`                                                                           |
+| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars                                                                                                  |
+| `get_auction_contract()`                                         | `Option<Address>`                                                                                        |
+| `get_treasury()`                                                 | `Option<Address>`                                                                                        |
+| `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
+| `get_collateral(borrower)`                                       | `i128`                                                                                                   |
+| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
+| `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).

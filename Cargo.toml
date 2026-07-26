@@ -5,7 +5,7 @@ members = [
     "contracts/credit",
     "contracts/accrual",
     "contracts/collateral",
-    "contracts/query",
+    "contracts/risk",
     "gateway-contract/contracts/auction_contract",
 ]
 

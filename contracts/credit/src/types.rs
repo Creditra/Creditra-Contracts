@@ -611,39 +611,26 @@ pub struct BorrowCapabilities {
     pub can_self_suspend: bool,
 }
 
-/// Read-only capabilities bitmap for the accrual (v7) subsystem.
+/// Read-only capabilities bitmap for risk mutations on a borrower's line.
 ///
-/// Returned by [`crate::views::accrual_capabilities`] / the `capabilities()`
-/// entrypoint on the accrual contract. All fields are pure boolean flags
-/// derived from protocol and per-borrower state; no state is mutated.
-///
-/// # Bit semantics
-///
-/// | Field                    | `true` when …                                                          |
-/// |--------------------------|------------------------------------------------------------------------|
-/// | `can_accrue`             | `accrue_batch` will process the borrower (line exists, Active, utilization > 0, protocol not paused) |
-/// | `batch_open`             | protocol accepts new `accrue_batch` submissions (not paused, batch size < `ACCRUE_BATCH_MAX`) |
-/// | `penalty_rate_active`    | a penalty surcharge is configured and the borrower is currently delinquent |
-/// | `grace_waiver_active`    | a grace-period config exists and the borrower is within the grace window |
+/// Returned by `risk_capabilities` (implemented in `contracts/risk/src/views.rs`)
+/// so off-chain scorers and admin tooling can inspect which risk operations
+/// are currently permitted without simulating full entrypoints.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AccrualCapabilities {
-    /// `true` when `accrue_batch` will capitalize interest for this borrower:
-    /// the credit line exists, is `Active`, has `utilized_amount > 0`, and the
-    /// protocol is not paused.
-    pub can_accrue: bool,
-    /// `true` when the protocol is accepting new `accrue_batch` submissions
-    /// (i.e. the circuit breaker is not engaged).
-    pub batch_open: bool,
-    /// `true` when a positive `penalty_surcharge_bps` is configured and the
-    /// borrower is currently past their due date (delinquent). This means
-    /// the next accrual will apply the elevated penalty rate.
-    pub penalty_rate_active: bool,
-    /// `true` when a `GracePeriodConfig` is set and the current ledger
-    /// timestamp is within the borrower's grace window (i.e.
-    /// `now <= suspension_ts + grace_period_seconds`). Only meaningful when
-    /// the line is `Suspended`.
-    pub grace_waiver_active: bool,
+pub struct RiskCapabilities {
+    /// Whether `update_risk_parameters` state pre-checks pass (credit line
+    /// exists, protocol not paused, borrow admin cooldown elapsed). Does not
+    /// validate proposed limit, rate, or score values.
+    pub can_update_risk_parameters: bool,
+    /// Whether an interest-rate change would pass the cadence guard in
+    /// [`RateChangeConfig`]. Rate delta caps are not evaluated because the
+    /// intended new rate is unknown. Limit-only updates may still succeed when
+    /// this field is `false`.
+    pub can_change_rate: bool,
+    /// Whether `commit_vrf_output` state pre-checks pass (protocol not paused,
+    /// no existing VRF commitment for this borrower).
+    pub can_commit_vrf: bool,
 }
 
 /// Proof-of-reserve view for the protocol treasury.

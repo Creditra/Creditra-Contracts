@@ -120,6 +120,13 @@ mod penalties;
 mod penalties_tests;
 mod query;
 mod risk;
+#[path = "../../risk/src/views.rs"]
+mod risk_views;
+mod views;
+pub use crate::risk::compute_rate_from_score;
+pub use crate::types::FreezeReason;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
@@ -189,6 +196,7 @@ use crate::storage::{get_oracle_quorum_config, set_oracle_quorum_config};
 use crate::types::ProofOfReserve;
 use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage, CreditStatus,
+    RiskCapabilities,
     GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
     ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
@@ -1542,6 +1550,19 @@ impl Credit {
     /// - `can_self_suspend` — self-suspend pre-flight checks pass
     pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
         views::borrow_capabilities(env, borrower)
+    }
+
+    /// Return a borrower's current risk capabilities bitmap.
+    ///
+    /// Read-only view that reports whether risk-parameter updates, interest-rate
+    /// cadence changes, and VRF commitments are currently permitted for the
+    /// borrower. Value-dependent checks (limit bounds, rate delta caps, score
+    /// vs VRF hash) are not evaluated.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    pub fn risk_capabilities(env: Env, borrower: Address) -> RiskCapabilities {
+        risk_views::capabilities(env, borrower)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
