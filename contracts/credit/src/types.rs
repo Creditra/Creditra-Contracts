@@ -167,115 +167,115 @@ pub enum CreditStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
-    /// Caller is not authorized to perform this action.
+    /// Caller is not authorized to perform the requested action.
     Unauthorized = 1,
-    /// Caller does not have admin privileges.
+    /// Caller does not have admin privileges for this entrypoint.
     NotAdmin = 2,
-    /// The specified credit line was not found.
+    /// The requested borrower does not have an open credit line.
     CreditLineNotFound = 3,
-    /// Action cannot be performed because the credit line is closed.
+    /// The credit line is permanently closed and cannot accept new activity.
     CreditLineClosed = 4,
-    /// The requested amount is invalid (e.g., zero or negative where positive is expected).
+    /// The requested amount is zero, negative, or otherwise invalid for this operation.
     InvalidAmount = 5,
-    /// The requested draw exceeds the available credit limit.
+    /// The requested draw would exceed the available credit line limit.
     OverLimit = 6,
-    /// The credit limit cannot be negative.
+    /// The proposed credit limit cannot be negative.
     NegativeLimit = 7,
-    /// The interest rate change exceeds the maximum allowed delta.
+    /// The requested rate exceeds the maximum allowed delta for the borrower.
     RateTooHigh = 8,
-    /// The risk score is above the acceptable maximum threshold.
+    /// The supplied risk score is above the acceptable maximum threshold.
     ScoreTooHigh = 9,
-    /// Action cannot be performed because the credit line utilization is not zero.
+    /// The requested transition requires zero outstanding utilization first.
     UtilizationNotZero = 10,
-    /// Reentrancy detected during cross-contract calls.
+    /// Reentrant execution was detected during a state-changing call.
     Reentrancy = 11,
-    /// Math overflow occurred during calculation.
+    /// An arithmetic operation overflowed or underflowed during contract logic.
     Overflow = 12,
-    /// Credit limit decrease requires immediate repayment of excess amount.
+    /// Lowering the credit limit would leave outstanding debt above the new cap.
     LimitDecreaseRequiresRepayment = 13,
-    /// Contract has already been initialized; `init` may only be called once.
+    /// The contract has already been initialized and cannot be initialized twice.
     AlreadyInitialized = 14,
-    /// Quorum threshold was not met for oracle median calculation.
+    /// The oracle quorum requirement was not satisfied for the requested operation.
     QuorumNotMet = 15,
-    /// The oracle is not approved or was not found in the registry.
+    /// The referenced oracle has not been registered in the configured registry.
     OracleNotFound = 16,
-    /// The oracle is already approved in the registry.
+    /// The referenced oracle is already registered and cannot be re-added.
     OracleAlreadyExists = 17,
-    /// Admin acceptance attempted before the delay window has elapsed.
+    /// Admin role acceptance was attempted before the required delay window elapsed.
     AdminAcceptTooEarly = 15,
-    /// Borrower is blocked from drawing credit.
+    /// The borrower is blocked from drawing credit.
     BorrowerBlocked = 16,
     /// The requested draw exceeds the configured per-transaction maximum.
     DrawExceedsMaxAmount = 17,
-    /// Protocol is paused by the emergency circuit breaker.
+    /// The protocol is currently paused and the requested action is blocked.
     Paused = 18,
-    /// All draws are globally frozen by admin for liquidity reserve operations.
+    /// Global draws are temporarily frozen by admin for the protocol.
     DrawsFrozen = 19,
-    /// Action cannot be performed because the credit line is suspended.
+    /// The credit line is suspended and cannot accept the requested action.
     CreditLineSuspended = 20,
-    /// Action cannot be performed because the credit line is defaulted.
+    /// The credit line is in default and requires cure or liquidation.
     CreditLineDefaulted = 21,
-    /// Liquidity token has not been configured.
+    /// The liquidity token address has not been configured for the contract.
     MissingLiquidityToken = 22,
-    /// Liquidity source has not been configured.
+    /// The liquidity source address has not been configured for the contract.
     MissingLiquiditySource = 23,
-    /// Liquidity reserve balance is below the requested draw amount.
+    /// The configured reserve balance cannot cover the requested draw.
     InsufficientLiquidityReserve = 24,
-    /// Liquidity token call failed where the contract can observe it.
+    /// The liquidity token call failed in a way that the contract could observe.
     LiquidityTokenCallFailed = 25,
-    /// Borrower's token allowance is below the effective repayment amount.
+    /// The borrower's token allowance is below the effective repayment amount.
     InsufficientRepaymentAllowance = 26,
-    /// Borrower's token balance is below the effective repayment amount.
+    /// The borrower's token balance is below the effective repayment amount.
     InsufficientRepaymentBalance = 27,
-    /// The requested repay exceeds the configured per-transaction maximum.
+    /// The repayment amount exceeds the configured per-transaction maximum.
     RepayExceedsMaxAmount = 28,
-    /// Borrower attempted to draw again before the cooldown interval elapsed.
+    /// The borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
-    /// Treasury address is not configured when attempting a treasury withdrawal.
+    /// The treasury address is not configured for the requested withdrawal flow.
     TreasuryNotSet = 30,
-    /// Draw would exceed the global protocol exposure cap.
+    /// The requested draw would exceed the global protocol exposure cap.
     ExposureCapExceeded = 31,
-    /// Admin address has not been initialized in contract storage.
+    /// The admin address has not been initialized in contract storage.
     AdminNotInitialized = 32,
-    /// Timestamp regression detected (new timestamp is not greater than stored timestamp).
+    /// A timestamp write regressed relative to the previously stored value.
     TimestampRegression = 33,
-    /// Credit limit is outside the configured minimum/maximum bounds.
+    /// The proposed credit limit falls outside the configured min/max bounds.
     LimitOutOfBounds = 34,
-    /// Collateral ratio is below the minimum required ratio.
+    /// The collateral ratio is below the minimum required threshold.
     CollateralRatioBelowMinimum = 35,
-    /// Oracle price is invalid (zero, negative, or malformed).
+    /// The oracle price is zero, negative, or malformed and cannot be used.
     OraclePriceInvalid = 36,
-    /// Oracle price is stale (exceeds max_age_seconds).
+    /// The oracle price is older than the configured freshness window.
     OraclePriceStale = 37,
-    /// Oracle price deviation exceeds the configured maximum.
+    /// The oracle price deviates beyond the configured threshold.
     OraclePriceDeviation = 38,
-    /// Borrower's collateral balance is below the requested withdrawal amount.
+    /// The borrower's collateral balance is insufficient for the requested operation.
     InsufficientCollateralBalance = 39,
-    /// Borrower's draws are temporarily frozen until the specified expiry timestamp.
+    /// The borrower is temporarily frozen from drawing until the expiry timestamp.
     BorrowerFrozen = 40,
-    /// Bounty pool address is not configured when attempting a bounty withdrawal.
+    /// The bounty pool address is not configured for the requested withdrawal flow.
     BountyNotSet = 41,
-    /// No pending treasury withdrawal proposal exists when attempting execution.
+    /// No pending treasury withdrawal proposal exists for the requested execution.
     NoPendingTreasuryWithdrawal = 42,
-    /// The 24-hour treasury withdrawal timelock has not yet elapsed.
+    /// The treasury withdrawal timelock has not elapsed yet.
     TreasuryTimelockActive = 43,
-    /// A treasury withdrawal proposal already exists; cancel or execute it first.
+    /// A treasury withdrawal proposal already exists and must be resolved first.
     TreasuryProposalExists = 44,
-    /// The supplied close_factor_bps exceeds the protocol-configured maximum.
+    /// The supplied close factor exceeds the protocol-configured maximum.
     CloseFactorAboveMax = 45,
-    /// Credit line draws are frozen by admin (compliance or investigation hold).
+    /// The credit line is frozen by admin and cannot accept new draws.
     CreditLineFrozen = 46,
-    /// Draw reversal attempted after the allowed reversal window has expired.
+    /// The draw reversal window has expired and the reversal is no longer allowed.
     DrawReversalWindowExpired = 47,
-    /// Original draw audit record not found when attempting a reversal.
+    /// The original draw record required for reversal was not found.
     OriginalDrawNotFound = 48,
-    /// No attestation batch has been committed for the specified borrower.
+    /// No attestation batch has been committed for the requested operation.
     AttestationBatchNotFound = 49,
-    /// Oracle quorum condition was not satisfied (too few agreeing feeds).
+    /// The oracle quorum condition was not satisfied by the available feeds.
     OracleQuorumNotMet = 50,
-    /// Liquidation settlement already processed for this (borrower, settlement_id) pair.
+    /// The liquidation settlement for this borrower and settlement identifier was already processed.
     AlreadySettled = 51,
-    /// Collateral risk weight exceeds the maximum allowed (10 000 bps).
+    /// The collateral risk weight exceeds the maximum allowed value.
     InvalidRiskWeight = 52,
 }
 
@@ -402,7 +402,6 @@ impl ContractError {
         }
     }
 }
-
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -626,7 +625,6 @@ pub struct ProofOfReserve {
     /// Accumulated bounty pool fees held in the contract.
     pub bounty_balance: i128,
 }
-
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///
