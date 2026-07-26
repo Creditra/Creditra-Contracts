@@ -266,6 +266,18 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
     bump_persistent_ttl(env, borrower);
 }
 
+/// Refresh the persistent TTL for an active credit-line freeze record.
+pub fn bump_credit_line_freeze_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::CreditLineFreeze(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
+/// Refresh the persistent TTL for a temporary borrower freeze record.
+pub fn bump_borrower_frozen_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
 /// Return the credit line for `borrower` and bump TTL if present.
 pub fn get_credit_line(env: &Env, borrower: &Address) -> Option<CreditLineData> {
     if env.storage().persistent().has(borrower) {
@@ -1459,9 +1471,9 @@ pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
 /// - **Type**: Persistent storage (per-borrower, shares TTL with other persistent keys)
 /// - **Key**: [`DataKey::FrozenBorrower`]
 pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::FrozenBorrower(borrower.clone()), &expiry_ts);
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    env.storage().persistent().set(&key, &expiry_ts);
+    bump_borrower_frozen_ttl(env, borrower);
 }
 
 /// Check if a borrower is temporarily frozen from drawing.
@@ -1484,12 +1496,14 @@ pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
     let now = env.ledger().timestamp();
     let key = DataKey::FrozenBorrower(borrower.clone());
     if env.storage().persistent().has(&key) {
-        bump_persistent_ttl(env, &key);
+        bump_borrower_frozen_ttl(env, borrower);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .is_some_and(|expiry: u64| now < expiry)
+    } else {
+        false
     }
-    env.storage()
-        .persistent()
-        .get(&key)
-        .is_some_and(|expiry: u64| now < expiry)
 }
 
 /// Get the freeze expiry timestamp for a borrower, if one is set.
@@ -1498,9 +1512,13 @@ pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
 /// expired — callers should compare against `now` themselves). Returns `None`
 /// when no freeze has ever been set.
 pub fn get_borrower_frozen_until(env: &Env, borrower: &Address) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::FrozenBorrower(borrower.clone()))
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_borrower_frozen_ttl(env, borrower);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
 }
 
 /// Remove the temporary freeze for a borrower (admin only, enforced by caller).
