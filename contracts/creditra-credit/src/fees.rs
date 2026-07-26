@@ -12,12 +12,12 @@
 //! The treasury share is computed with floor rounding; the bounty pool receives
 //! the remainder so no tokens are lost to integer division.
 
-use cosmwasm_std::{Deps, DepsMut, Uint128};
+use cosmwasm_std::{Addr, Deps, DepsMut, Uint128};
 
 use crate::error::ContractError;
 use crate::state::{
-    Config, CONFIG, DEFAULT_FEE_SHARE_BPS, MARKET_FEE_SHARE_BPS, TREASURY_BALANCE,
-    BOUNTY_BALANCE,
+    Config, CONFIG, DEFAULT_FEE_SHARE_BPS, MARKET_FEE_SHARE_BPS, PROTOCOL_FEE_BPS,
+    TREASURY_BALANCE, BOUNTY_BALANCE,
 };
 
 /// Maximum basis points for a fee-share ratio (100%).
@@ -25,6 +25,9 @@ pub const MAX_FEE_SHARE_BPS: u32 = 10_000;
 
 /// Default treasury share when unset: 100% to treasury (backward compatible).
 pub const DEFAULT_TREASURY_FEE_SHARE_BPS: u32 = 10_000;
+
+/// Maximum protocol fee in basis points (10% = 1_000 bps).
+pub const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 
 /// Result of splitting a protocol fee between treasury and bounty accumulators.
 #[derive(Clone, Debug, PartialEq)]
@@ -48,6 +51,8 @@ pub struct FeeSplitAmounts {
 /// # Examples
 ///
 /// ```
+/// use cosmwasm_std::Uint128;
+/// use creditra_credit::fees::split_protocol_fee;
 /// // 50/50 split
 /// let split = split_protocol_fee(Uint128::new(100), 5_000).unwrap();
 /// assert_eq!(split.treasury_amount, Uint128::new(50));
@@ -168,6 +173,36 @@ pub fn accrue_protocol_fee(
     }
 
     Ok(split)
+}
+
+/// Set the governance-controlled protocol fee in basis points.
+///
+/// The value must not exceed [`MAX_PROTOCOL_FEE_BPS`].  Only the contract
+/// owner may call this.
+///
+/// # Errors
+///
+/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
+/// - [`ContractError::ProtocolFeeBpsExceeded`] if `bps` exceeds the ceiling.
+pub fn set_protocol_fee_bps(
+    deps: DepsMut,
+    sender: &Addr,
+    bps: u32,
+) -> Result<(), ContractError> {
+    assert_owner(deps.as_ref(), sender)?;
+    if bps > MAX_PROTOCOL_FEE_BPS {
+        return Err(ContractError::ProtocolFeeBpsExceeded);
+    }
+    PROTOCOL_FEE_BPS.save(deps.storage, &bps)?;
+    Ok(())
+}
+
+/// Return the current protocol fee in basis points, defaulting to 0 when unset.
+pub fn get_protocol_fee_bps(deps: Deps) -> u32 {
+    PROTOCOL_FEE_BPS
+        .may_load(deps.storage)
+        .unwrap_or(None)
+        .unwrap_or(0)
 }
 
 /// Validate the owner is the caller. Returns the loaded config.
