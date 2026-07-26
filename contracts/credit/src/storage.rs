@@ -89,7 +89,11 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 /// Helper functions in this module always pick the correct tier; callers
 /// outside this module should never hit the storage API directly with these
 /// keys.
-#[contracttype]
+// `export = false`: DataKey has grown past the 50-case limit the Soroban
+// contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
+// exported type spec. This is an internal storage-key type (never crosses
+// the contract ABI), so skipping spec export has no client-visible effect.
+#[contracttype(export = false)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     /// Address of the liquidity token (SAC or compatible token contract).
@@ -192,7 +196,7 @@ pub enum DataKey {
     /// Minimum ledger seconds between critical collateral admin actions (v7).
     AdminCollateralCooldownSeconds,
     /// Ledger timestamp of the last critical collateral admin action (v7).
-    LastAdminCollateralCriticalActionTs,
+    LastColAdminActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
@@ -213,9 +217,6 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
@@ -233,6 +234,12 @@ pub enum DataKey {
     /// Per-borrower liquidation grace period in seconds.
     /// Specifies a grace window before a credit line can be defaulted or liquidated.
     LiquidationGracePeriod(Address),
+    /// Per-borrower absolute exposure cap (i128 amount).
+    BorrowerExposureCap(Address),
+    /// Admin-configured allowlist of accepted multi-collateral token addresses.
+    CollateralTokenAllowlist,
+    /// Per-borrower, per-token collateral balance (multi-collateral path).
+    CollateralBalanceV2(Address, Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -259,10 +266,6 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-
-/// TTL policy used by per-borrower credit-line entries.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
@@ -560,14 +563,14 @@ pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
 pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
-        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+        .get(&DataKey::LastColAdminActionTs)
 }
 
 /// Record the ledger timestamp of the last critical collateral admin action.
 pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
+        .set(&DataKey::LastColAdminActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this
@@ -1336,7 +1339,7 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+pub fn get_late_fee_config(env: &Env) -> Option<crate::penalties::LateFeeConfig> {
     env.storage().instance().get(&DataKey::LateFeeConfig)
 }
 
@@ -1348,7 +1351,7 @@ pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+pub fn set_late_fee_config(env: &Env, config: Option<crate::penalties::LateFeeConfig>) {
     match config {
         Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
         None => env.storage().instance().remove(&DataKey::LateFeeConfig),
@@ -1503,6 +1506,13 @@ pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
         .get(&DataKey::LastFreezeTimestamp)
+}
+
+/// Set the ledger timestamp of the last admin freeze/unfreeze action.
+fn set_last_freeze_timestamp(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastFreezeTimestamp, &ts);
 }
 
 /// Record a freeze/unfreeze action timestamp, but only when a cooldown is

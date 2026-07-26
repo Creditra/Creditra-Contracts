@@ -162,11 +162,11 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     }
 
     if total_weight < quorum {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     if valid_reports.is_empty() {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     // Sort valid reports by value ascending using a simple insertion sort
@@ -409,6 +409,9 @@ mod test {
         // Median should be 150.
         let val = client.get_median_value();
         assert_eq!(val, 150);
+    }
+}
+
 // # Multi-oracle quorum price resolution
 //
 // Implements the quorum-of-K algorithm for combining multiple independent
@@ -675,6 +678,4 @@ mod tests {
         let prices = vec![&env, 1_051i128, 1_000i128];
         resolve_quorum_price(&env, &prices, &cfg(2, 500));
     }
-}
-}
 }

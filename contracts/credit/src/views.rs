@@ -10,8 +10,30 @@ use crate::storage::{
     get_borrower_by_credit_line_id, get_credit_line, is_borrower_blocked, is_borrower_frozen,
     is_paused, MAX_ENUMERATION_LIMIT,
 };
-use crate::types::{BorrowCapabilities, CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
+use crate::types::{
+    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+};
 use soroban_sdk::{Address, Env, Vec};
+
+/// Assemble a full read-only snapshot of `borrower`'s credit line.
+///
+/// Returns `None` when no credit line has been opened for `borrower`.
+/// See [`CreditLineSnapshot`] for the aggregated fields.
+pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<CreditLineSnapshot> {
+    let line = get_credit_line(&env, &borrower)?;
+    let collateral_balance = crate::collateral::get_collateral(&env, &borrower);
+    let health_factor_bps = crate::query::get_health_factor(env.clone(), borrower.clone());
+    let repayment_schedule = crate::query::get_repayment_schedule(env.clone(), borrower.clone());
+    let is_delinquent = crate::query::is_delinquent(env.clone(), borrower);
+
+    Some(CreditLineSnapshot {
+        line,
+        collateral_balance,
+        health_factor_bps,
+        repayment_schedule,
+        is_delinquent,
+    })
+}
 
 // ── Borrow capabilities view ─────────────────────────────────────────────────
 
@@ -162,8 +184,9 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     // Clamp start_id to valid range
     if start_id >= total_count {
         return CreditLinesPage {
-            credit_lines: Vec::new(&env),
+            lines: Vec::new(&env),
             next_cursor: None,
+            has_more: false,
         };
     }
 
@@ -196,8 +219,10 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         next_cursor = None;
     }
 
+    let has_more = next_cursor.is_some();
     CreditLinesPage {
-        credit_lines,
+        lines: credit_lines,
         next_cursor,
+        has_more,
     }
 }
