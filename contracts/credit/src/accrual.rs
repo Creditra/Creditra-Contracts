@@ -8,8 +8,8 @@
 //! entrypoint calls at the head of its flow. Computes pro-rated interest
 //! since `last_accrual_ts`, capitalizes it into both `accrued_interest`
 //! and `utilized_amount`, and conditionally emits
-//! [`InterestAccruedEvent`], [`PenaltyRateEnteredEvent`],
-//! [`PenaltyRateExitedEvent`], and [`GraceWaiverReceiptEvent`].
+//! [`InterestAccruedEvent`], [`PenaltyRateEnteredEvent`], and
+//! [`PenaltyRateExitedEvent`].
 //!
 //! # How (three branches)
 //!
@@ -24,10 +24,7 @@
 //! 3. **Suspended with grace policy**: Δt is split into in-grace
 //!    `min(Δt, T_g)` and post-grace remainder. In FullWaiver mode the
 //!    in-grace portion is waived; in ReducedRate mode it accrues at
-//!    `reduced_rate_bps`. **Both sub-cases emit [`GraceWaiverReceiptEvent`]**
-//!    when `waived_amount > 0`, including when the entire period falls
-//!    inside the grace window (branch 1) as well as when the window
-//!    straddles the grace boundary (branch 3).
+//!    `reduced_rate_bps`.
 //!
 //! The math primitive is [`crate::math_utils::prorate_interest`] with
 //! [`crate::math_utils::Rounding::Floor`], so every `ΔI` rounds **down**.
@@ -58,7 +55,7 @@
 #![warn(missing_docs)]
 
 use crate::events::{
-    publish_grace_waiver_receipt_event, publish_interest_accrued_event,
+    publish_grace_waiver_applied_event, publish_interest_accrued_event,
     publish_penalty_rate_entered_event, publish_penalty_rate_exited_event, InterestAccruedEvent,
 };
 use crate::math_utils::{prorate_interest, Rounding};
@@ -247,40 +244,26 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     // Compute accrued interest using the audited prorate helper with floor rounding.
     let accrued_u: u128 = if line.status == CreditStatus::Suspended {
-        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(env);
+        let grace_cfg: Option<GracePeriodConfig> = env
+            .storage()
+            .instance()
+            .get(&crate::storage::grace_period_key(env));
 
         match grace_cfg {
             Some(cfg) if cfg.grace_period_seconds > 0 => {
                 let grace_end = line.suspension_ts.saturating_add(cfg.grace_period_seconds);
 
                 if now <= grace_end {
-                    // Entire period in grace window — compute waived amount and emit receipt.
-                    let elapsed_secs = (now - accrual_start) as u64;
-                    let full_rate_interest = prorate_interest(
-                        line.utilized_amount as u128,
-                        effective_rate_bps,
-                        elapsed_secs,
-                        Rounding::Floor,
-                    ) as i128;
-                    let actual_interest = match cfg.waiver_mode {
-                        GraceWaiverMode::FullWaiver => 0i128,
+                    // Entire period in grace window
+                    match cfg.waiver_mode {
+                        GraceWaiverMode::FullWaiver => 0u128,
                         GraceWaiverMode::ReducedRate => prorate_interest(
                             line.utilized_amount as u128,
                             cfg.reduced_rate_bps,
-                            elapsed_secs,
+                            (now - accrual_start) as u64,
                             Rounding::Floor,
-                        ) as i128,
-                    };
-                    let waived_amount = full_rate_interest.saturating_sub(actual_interest);
-                    if waived_amount > 0 {
-                        publish_grace_waiver_receipt_event(
-                            env,
-                            &line.borrower,
-                            waived_amount,
-                            cfg.waiver_mode,
-                        );
+                        ),
                     }
-                    actual_interest as u128
                 } else if accrual_start >= grace_end {
                     // Entire period after grace window - use effective rate (may include penalty)
                     prorate_interest(
@@ -324,7 +307,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
                     let waived_amount = full_rate_interest.saturating_sub(actual_interest);
                     if waived_amount > 0 {
-                        publish_grace_waiver_receipt_event(
+                        publish_grace_waiver_applied_event(
                             env,
                             &line.borrower,
                             waived_amount,

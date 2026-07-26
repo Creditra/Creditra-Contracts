@@ -295,22 +295,6 @@ impl Auction {
         storage::set_factory_contract(&env, &factory);
     }
 
-    /// Places a bid on an active auction.
-    ///
-    /// # Authorization
-    /// Requires `require_auth` from the `bidder`.
-    ///
-    /// # Parameters
-    /// - `env`: The execution environment.
-    /// - `auction_id`: The unique identifier of the auction.
-    /// - `bidder`: The address placing the bid.
-    /// - `amount`: The amount of the bid token being bid.
-    ///
-    /// # Panics
-    /// * [`AuctionError::BidTooLow`] - Bid amount is not strictly positive, or does not meet minimum threshold/current Dutch price.
-    /// * [`AuctionError::NotFound`] - Auction state not found.
-    /// * [`AuctionError::AuctionNotOpen`] - Auction is not in `Open` status or end time has passed.
-    /// * [`AuctionError::GracePeriodActive`] - Attempting to bid during the liquidation grace window.
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
