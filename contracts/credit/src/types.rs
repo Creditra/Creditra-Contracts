@@ -293,32 +293,6 @@ pub enum ContractError {
 /// Use [`ContractError::category`] to map any error to its category at
 /// runtime. This allows SDK clients to group errors by category without
 /// matching on individual error codes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum ContractErrorCategory {
-    /// Authentication / authorization failures.
-    Auth = 1,
-    /// Credit-line lifecycle state violations.
-    Lifecycle = 2,
-    /// Numeric computation failures (overflow, invalid input, bounds).
-    Numeric = 3,
-    /// Credit limit / draw / repay cap violations.
-    Limit = 4,
-    /// Liquidity configuration or reserve failures.
-    Liquidity = 5,
-    /// Risk-parameter violations (rate, score, cooldown, pause).
-    Risk = 6,
-    /// Oracle price-feed failures.
-    Oracle = 7,
-    /// Collateral ratio or balance violations.
-    Collateral = 8,
-    /// Draw-block conditions (blocked, frozen).
-    Block = 9,
-    /// Reentrancy guard violations.
-    Reentrancy = 10,
-    /// Miscellaneous errors (not found, admin timelock, treasury proposals).
-    Misc = 11,
-}
 
 impl ContractError {
     /// Map this error to its [`ContractErrorCategory`] for client-side grouping.

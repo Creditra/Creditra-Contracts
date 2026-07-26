@@ -26,8 +26,10 @@ pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
 
 /// Return protocol-level dashboard aggregates in one read-only call.
 ///
-/// This reads only aggregate storage slots and does not touch per-borrower
-/// records, so it does not bump persistent-entry TTL.
+/// # Authentication
+/// No authentication required. This is a pure read — it reads only aggregate
+/// storage slots and does not touch per-borrower records, so it does not
+/// bump persistent-entry TTL.
 pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
     ProtocolSummary {
         count: crate::storage::get_credit_line_count(&env),
@@ -41,8 +43,10 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
 
 /// Return the configured installment repayment schedule for `borrower`, if any.
 ///
-/// Delegates to [`crate::storage::get_repayment_schedule`], which bumps the
-/// schedule entry's TTL on read so an active borrower's schedule stays live.
+/// # Authentication
+/// No authentication required. This is a pure read — it delegates to
+/// [`crate::storage::get_repayment_schedule`], which bumps the schedule
+/// entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
     crate::storage::get_repayment_schedule(&env, &borrower)
 }
@@ -93,6 +97,9 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 /// - `utilized_amount` is negative (should never happen): returns `u32::MAX`
 ///   via the zero-utilised short-circuit since the storage invariant enforces
 ///   `utilized_amount >= 0`.
+/// # Authentication
+/// No authentication required. This is a pure read — it computes the health
+/// ratio from on-chain data without modifying any storage.
 pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     // Load the borrower's credit line.  If none exists, treat as zero
     // utilization → infinitely healthy.
@@ -147,6 +154,10 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
 }
 
 /// Return `true` when the borrower has missed an installment past the grace window.
+///
+/// # Authentication
+/// No authentication required. This is a pure read — it examines the stored
+/// repayment schedule and grace-period config without modifying any storage.
 ///
 /// Returns `false` for the following short-circuit cases:
 /// - The borrower has no credit line.
