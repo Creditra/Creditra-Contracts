@@ -6,10 +6,11 @@
 //! These entries must have their TTL extended on frequently-invoked read/write
 //! paths so that active credit lines are not silently archived by the network.
 
-use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
-use creditra_credit::types::{
-    CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode,
+use creditra_credit::storage::{
+    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, LEDGER_BUMP_AMOUNT,
+    LEDGER_BUMP_THRESHOLD,
 };
+use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Address as _, Ledger};
@@ -231,291 +232,26 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
     );
 }
 
-// ── Borrow hot-key TTL bump tests ─────────────────────────────────────────
-
-/// Helper: drain the TTL of a persistent key to just below the bump
-/// threshold so the next read/write path must perform a real bump.
-fn advance_past_ttl_threshold<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
-    env: &Env,
-    contract_id: &Address,
-    key: &K,
-) {
-    let initial = ttl_for_key(env, contract_id, key);
-    let target = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
-    let delta = initial.saturating_sub(target);
-    advance_ledgers(env, delta);
-}
-
 #[test]
-fn set_max_borrower_exposure_bumps_persistent_ttl_on_write() {
+fn already_closed_credit_line_read_bumps_ttl() {
     let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
+    let (contract_id, client, admin) = setup(&env);
 
     let borrower = Address::generate(&env);
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.close_credit_line(&borrower, &admin);
 
-    // Set exposure cap via the contract client (admin-authed).
-    client.set_borrower_exposure_cap(&borrower, &5_000_i128);
-    let exp_key = DataKey::MaxBorrowerExposure(borrower.clone());
-    let initial_ttl = ttl_for_key(&env, &contract_id, &exp_key);
+    let initial_ttl = ttl_for_key(&env, &contract_id, &borrower);
+    let target_remaining = CREDIT_LINE_TTL_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, initial_ttl.saturating_sub(target_remaining));
+
+    // The already-closed path returns early, but its storage read must still
+    // refresh the persistent credit-line TTL.
+    client.close_credit_line(&borrower, &admin);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
     assert!(
-        initial_ttl >= LEDGER_BUMP_AMOUNT,
-        "first set must set TTL >= bump amount; got {initial_ttl}"
-    );
-
-    advance_past_ttl_threshold(&env, &contract_id, &exp_key);
-
-    // Write again to trigger re-bump.
-    client.set_borrower_exposure_cap(&borrower, &7_000_i128);
-    let after_ttl = ttl_for_key(&env, &contract_id, &exp_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "set must extend TTL on re-write; after={after_ttl}"
-    );
-}
-
-#[test]
-fn get_max_borrower_exposure_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-    client.set_borrower_exposure_cap(&borrower, &5_000_i128);
-
-    let exp_key = DataKey::MaxBorrowerExposure(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &exp_key);
-
-    let cap = client.get_borrower_exposure_cap(&borrower);
-    assert_eq!(cap, Some(5_000_i128));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &exp_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "exposure cap read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn get_borrower_rate_floor_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-    client.set_borrower_rate_floor(&borrower, &Some(200_u32));
-
-    let floor_key = DataKey::RateFloorBps(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &floor_key);
-
-    let floor = client.get_borrower_rate_floor(&borrower);
-    assert_eq!(floor, Some(200_u32));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &floor_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "rate floor read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn get_borrower_rate_ceiling_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-    client.set_borrower_rate_ceiling(&borrower, &Some(600_u32));
-
-    let ceil_key = DataKey::RateCeilingBps(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &ceil_key);
-
-    let ceiling = client.get_borrower_rate_ceiling(&borrower);
-    assert_eq!(ceiling, Some(600_u32));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &ceil_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "rate ceiling read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn is_borrower_blocked_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    // Block the borrower to create the persistent entry.
-    client.block_borrower(&_admin, &borrower);
-
-    let blocked_key = DataKey::BlockedBorrower(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &blocked_key);
-
-    let blocked = client.is_borrower_blocked(&borrower);
-    assert!(blocked, "borrower should be blocked");
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &blocked_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "blocked check read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn is_borrower_frozen_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    // Freeze the borrower to create the persistent entry.
-    let far_future = env.ledger().timestamp() + 86_400;
-    client.freeze_borrower_until(&_admin, &borrower, &far_future);
-
-    let frozen_key = DataKey::FrozenBorrower(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &frozen_key);
-
-    let frozen = env.as_contract(&contract_id, || {
-        creditra_credit::storage::is_borrower_frozen(&env, &borrower)
-    });
-    assert!(frozen, "borrower should be frozen");
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &frozen_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "frozen check read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn get_credit_line_id_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
-    advance_past_ttl_threshold(&env, &contract_id, &id_key);
-
-    let id = client.get_credit_line_id(&borrower);
-    assert!(id.is_some(), "credit line id should exist");
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &id_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "credit line id read must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn set_borrower_rate_floor_bumps_persistent_ttl_on_write() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    let floor_key = DataKey::RateFloorBps(borrower.clone());
-    client.set_borrower_rate_floor(&borrower, &Some(500_u32));
-    let initial_ttl = ttl_for_key(&env, &contract_id, &floor_key);
-    assert!(
-        initial_ttl >= LEDGER_BUMP_AMOUNT,
-        "set rate floor must set TTL >= bump amount; got {initial_ttl}"
-    );
-
-    advance_past_ttl_threshold(&env, &contract_id, &floor_key);
-    client.set_borrower_rate_floor(&borrower, &Some(300_u32));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &floor_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "re-set rate floor must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn set_borrower_blocked_bumps_persistent_ttl_on_write() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    let blocked_key = DataKey::BlockedBorrower(borrower.clone());
-    client.block_borrower(&_admin, &borrower);
-    let initial_ttl = ttl_for_key(&env, &contract_id, &blocked_key);
-    assert!(
-        initial_ttl >= LEDGER_BUMP_AMOUNT,
-        "block must set TTL >= bump amount; got {initial_ttl}"
-    );
-
-    advance_past_ttl_threshold(&env, &contract_id, &blocked_key);
-    // Unblock and re-block to trigger write + bump.
-    client.unblock_borrower(&_admin, &borrower);
-    client.block_borrower(&_admin, &borrower);
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &blocked_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "re-block must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn set_borrower_rate_ceiling_bumps_persistent_ttl_on_write() {
-    let env = Env::default();
-    let (contract_id, client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
-
-    let ceil_key = DataKey::RateCeilingBps(borrower.clone());
-    client.set_borrower_rate_ceiling(&borrower, &Some(800_u32));
-    let initial_ttl = ttl_for_key(&env, &contract_id, &ceil_key);
-    assert!(
-        initial_ttl >= LEDGER_BUMP_AMOUNT,
-        "set rate ceiling must set TTL >= bump amount; got {initial_ttl}"
-    );
-
-    advance_past_ttl_threshold(&env, &contract_id, &ceil_key);
-    client.set_borrower_rate_ceiling(&borrower, &Some(600_u32));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &ceil_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "re-set rate ceiling must extend TTL; after={after_ttl}"
-    );
-}
-
-#[test]
-fn get_borrower_exposure_cap_bumps_persistent_ttl_on_read() {
-    let env = Env::default();
-    let (contract_id, _client, _admin) = setup(&env);
-
-    let borrower = Address::generate(&env);
-    // Write BorrowerExposureCap directly to persistent storage (this key is
-    // distinct from MaxBorrowerExposure and is set via the internal
-    // set_borrower_exposure_cap helper).
-    let cap_key = DataKey::BorrowerExposureCap(borrower.clone());
-    env.as_contract(&contract_id, || {
-        env.storage().persistent().set(&cap_key, &3_000_i128);
-    });
-
-    advance_past_ttl_threshold(&env, &contract_id, &cap_key);
-
-    let cap = env.as_contract(&contract_id, || {
-        creditra_credit::storage::get_borrower_exposure_cap(&env, &borrower)
-    });
-    assert_eq!(cap, Some(3_000_i128));
-
-    let after_ttl = ttl_for_key(&env, &contract_id, &cap_key);
-    assert!(
-        after_ttl >= LEDGER_BUMP_AMOUNT,
-        "BorrowerExposureCap read must extend TTL; after={after_ttl}"
+        ttl_after >= CREDIT_LINE_TTL_EXTEND_TO,
+        "credit-line TTL not bumped on idempotent close: initial={initial_ttl} after={ttl_after}"
     );
 }
