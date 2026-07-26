@@ -22,6 +22,54 @@ pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
     }
 }
 
+/// Draw funds from the borrower's credit line.
+///
+/// Transfers `amount` of liquidity tokens from the reserve to the borrower
+/// and increases the credit line's utilized amount. This is the primary
+/// borrowing operation that converts available credit into actual borrowed funds.
+///
+/// # What
+/// - Validates the credit line exists and belongs to the borrower
+/// - Checks the credit line status allows draws (Active or Restricted only)
+/// - Ensures the draw amount is positive and within credit limit
+/// - Verifies sufficient liquidity reserve exists
+/// - Transfers tokens from reserve to borrower
+/// - Updates utilized amount and bumps TTL
+/// - Emits a DrawnEvent
+///
+/// # How
+/// 1. Sets reentrancy guard to prevent re-entry attacks
+/// 2. Requires borrower authentication
+/// 3. Validates amount is positive
+/// 4. Retrieves liquidity token and reserve addresses
+/// 5. Loads the borrower's credit line
+/// 6. Validates borrower matches credit line owner
+/// 7. Checks credit line status allows draws
+/// 8. Calculates new utilized amount with overflow protection
+/// 9. Ensures new utilized amount doesn't exceed credit limit
+/// 10. Verifies reserve has sufficient liquidity
+/// 11. Transfers tokens from reserve to borrower
+/// 12. Updates credit line state and persists
+/// 13. Extends TTL to prevent expiry
+/// 14. Emits DrawnEvent
+/// 15. Clears reentrancy guard
+///
+/// # Why
+/// Borrowers need to access their available credit to obtain liquidity for
+/// their intended use cases. This function provides the mechanism to convert
+/// approved credit limits into actual borrowed funds while maintaining all
+/// safety checks and protocol invariants.
+///
+/// # Errors
+/// - `ContractError::InvalidAmount` - if amount <= 0
+/// - `ContractError::CreditLineNotFound` - if no credit line exists for borrower
+/// - `ContractError::CreditLineSuspended` - if credit line is suspended
+/// - `ContractError::CreditLineDefaulted` - if credit line is defaulted
+/// - `ContractError::CreditLineClosed` - if credit line is closed
+/// - Panics with "Borrower mismatch" - if borrower doesn't match credit line owner
+/// - Panics with "overflow" - if utilized amount would overflow
+/// - Panics with "exceeds credit limit" - if draw would exceed credit limit
+/// - Panics with "Insufficient liquidity reserve" - if reserve lacks funds
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
@@ -168,6 +216,51 @@ pub(crate) fn repay_credit_internal(
     );
 }
 
+/// Repay funds to reduce the borrower's outstanding debt.
+///
+/// Transfers `amount` of liquidity tokens from the borrower to the reserve
+/// and decreases the credit line's utilized amount. Repayment is applied
+/// interest-first: any accrued interest is paid down before principal reduction.
+///
+/// # What
+/// - Validates the credit line exists and is not closed
+/// - Ensures the repayment amount is positive
+/// - Caps effective repayment at outstanding utilized amount (no overpayment)
+/// - Calculates interest portion of repayment (interest-first allocation)
+/// - Verifies borrower has sufficient allowance and balance
+/// - Transfers tokens from borrower to reserve
+/// - Updates credit line state via repay_credit_internal
+/// - Emits InterestAccruedEvent and RepaymentEvent
+///
+/// # How
+/// 1. Sets reentrancy guard to prevent re-entry attacks
+/// 2. Requires borrower authentication
+/// 3. Validates amount is positive
+/// 4. Loads the borrower's credit line
+/// 5. Checks credit line is not closed
+/// 6. Calculates effective repayment (capped at utilized amount)
+/// 7. Calculates interest portion (min of effective repay and accrued interest)
+/// 8. If effective repayment > 0:
+///    a. Retrieves liquidity token and reserve addresses
+///    b. Verifies borrower has sufficient allowance
+///    c. Verifies borrower has sufficient balance
+///    d. Transfers tokens from borrower to reserve
+/// 9. Captures previous utilized amount and status
+/// 10. Calls repay_credit_internal to update state and emit events
+/// 11. Clears reentrancy guard
+///
+/// # Why
+/// Borrowers must be able to repay their debt at any time, even if the protocol
+/// is paused. This function is NOT pause-gated to ensure borrowers can always
+/// deleverage. Interest-first allocation ensures protocol revenue is captured
+/// before principal reduction.
+///
+/// # Errors
+/// - `ContractError::InvalidAmount` - if amount <= 0
+/// - `ContractError::CreditLineNotFound` - if no credit line exists for borrower
+/// - `ContractError::CreditLineClosed` - if credit line is closed
+/// - Panics with "Insufficient allowance" - if borrower hasn't approved spend
+/// - Panics with "Insufficient balance" - if borrower lacks tokens
 pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
@@ -259,6 +352,50 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
 /// This preserves the collateral ratio exactly (verified by the linear
 /// `required = utilized * ratio / 10_000` constraint).
 ///
+/// # What
+/// - Validates the credit line exists and is not closed
+/// - Ensures the repayment amount is positive
+/// - Caps effective repayment at outstanding utilized amount (no overpayment)
+/// - Calculates interest portion of repayment (interest-first allocation)
+/// - Verifies borrower has sufficient allowance and balance
+/// - Calculates and deducts protocol fee if configured
+/// - Transfers fee portion to contract treasury accumulator
+/// - Transfers remaining amount to reserve
+/// - Calculates proportional collateral release
+/// - Releases collateral to borrower
+/// - Updates credit line state via repay_credit_internal
+/// - Emits InterestAccruedEvent and RepaymentEvent
+///
+/// # How
+/// 1. Sets reentrancy guard to prevent re-entry attacks
+/// 2. Requires borrower authentication
+/// 3. Validates amount is positive
+/// 4. Loads the borrower's credit line
+/// 5. Checks credit line is not closed
+/// 6. Captures previous utilized amount and status
+/// 7. Calculates effective repayment (capped at utilized amount)
+/// 8. Calculates interest portion (min of effective repay and accrued interest)
+/// 9. If effective repayment > 0:
+///    a. Retrieves liquidity token and reserve addresses
+///    b. Verifies borrower has sufficient allowance
+///    c. Verifies borrower has sufficient balance
+///    d. Calculates protocol fee if configured
+///    e. Transfers fee portion to contract (treasury accumulator)
+///    f. Transfers remaining amount to reserve
+/// 10. Calculates proportional collateral release:
+///     - If full repay (effective_repay >= utilized_before): release all collateral
+///     - Otherwise: release = collateral * effective_repay / utilized_before
+/// 11. If release amount > 0: calls release_collateral
+/// 12. Calls repay_credit_internal to update state and emit events
+/// 13. Clears reentrancy guard
+///
+/// # Why
+/// Borrowers need to deleverage while simultaneously reclaiming collateral
+/// as their debt decreases. This atomic operation ensures the collateral ratio
+/// remains exactly preserved during partial repayments, preventing rounding errors
+/// that could otherwise force liquidation. The protocol fee on repayment provides
+/// ongoing revenue to support operations.
+///
 /// # Full repay
 /// When `effective_repay == utilized_before`, all collateral is released
 /// (explicit branch avoids rounding residue).
@@ -266,6 +403,13 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
 /// # Overpayment
 /// When `amount > utilized_amount`, `effective_repay` is capped at
 /// `utilized_amount`. All collateral is released.
+///
+/// # Errors
+/// - `ContractError::InvalidAmount` - if amount <= 0
+/// - `ContractError::CreditLineNotFound` - if no credit line exists for borrower
+/// - `ContractError::CreditLineClosed` - if credit line is closed
+/// - Panics with "Insufficient allowance" - if borrower hasn't approved spend
+/// - Panics with "Insufficient balance" - if borrower lacks tokens
 pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
     borrower.require_auth();
