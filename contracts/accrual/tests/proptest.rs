@@ -318,7 +318,10 @@ fn zero_utilization_zero_accrual() {
     client.update_risk_parameters(borrower, &50_000_i128, &10_000_u32, &50_u32);
 
     let line = client.get_credit_line(borrower).unwrap();
-    assert_eq!(line.accrued_interest, 0, "zero utilization must produce zero interest");
+    assert_eq!(
+        line.accrued_interest, 0,
+        "zero utilization must produce zero interest"
+    );
     assert_eq!(line.utilized_amount, 0);
 }
 
@@ -336,10 +339,16 @@ fn max_rate_one_year_bound() {
     client.update_risk_parameters(borrower, &1_000_000_i128, &10_000_u32, &50_u32);
 
     let line = client.get_credit_line(borrower).unwrap();
-    assert!(line.accrued_interest > 0, "should have accrued interest at max rate");
-    assert!(line.accrued_interest <= line.utilized_amount,
+    assert!(
+        line.accrued_interest > 0,
+        "should have accrued interest at max rate"
+    );
+    assert!(
+        line.accrued_interest <= line.utilized_amount,
         "accrued_interest ({}) must not exceed utilized_amount ({})",
-        line.accrued_interest, line.utilized_amount);
+        line.accrued_interest,
+        line.utilized_amount
+    );
 }
 
 /// Multiple accruals without repayment must accumulate monotonically.
@@ -356,11 +365,16 @@ fn accrual_monotonic_without_repayment() {
         client.update_risk_parameters(borrower, &50_000_i128, &500_u32, &30_u32);
 
         let line = client.get_credit_line(borrower).unwrap();
-        assert!(line.utilized_amount >= prev_utilized,
+        assert!(
+            line.utilized_amount >= prev_utilized,
             "quarter {quarter}: utilized_amount ({}) < previous ({})",
-            line.utilized_amount, prev_utilized);
-        assert!(line.accrued_interest <= line.utilized_amount,
-            "quarter {quarter}: accrued > utilized");
+            line.utilized_amount,
+            prev_utilized
+        );
+        assert!(
+            line.accrued_interest <= line.utilized_amount,
+            "quarter {quarter}: accrued > utilized"
+        );
         prev_utilized = line.utilized_amount;
     }
 }
@@ -381,7 +395,10 @@ fn over_repay_resets_accrued_interest() {
 
     let line = client.get_credit_line(borrower).unwrap();
     assert_eq!(line.utilized_amount, 0, "over-repay must zero utilization");
-    assert_eq!(line.accrued_interest, 0, "over-repay must zero accrued_interest");
+    assert_eq!(
+        line.accrued_interest, 0,
+        "over-repay must zero accrued_interest"
+    );
 }
 
 /// Batch accrual on empty batch must succeed without reverting.

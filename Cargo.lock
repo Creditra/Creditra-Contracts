@@ -364,6 +364,15 @@ name = "creditra-accrual"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
+ "proptest",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "creditra-collateral"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
  "soroban-sdk",
 ]
 

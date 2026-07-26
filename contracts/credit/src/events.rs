@@ -472,12 +472,11 @@ pub fn publish_collateral_deposited_event(env: &Env, event: CollateralDepositedE
         .publish((symbol_short!("credit"), symbol_short!("col_dep")), event);
 }
 
-pub fn publish_collateral_partial_released_event(
-    env: &Env,
-    event: CollateralPartialReleasedEvent,
-) {
-    env.events()
-        .publish((symbol_short!("credit"), Symbol::new(env, "col_prel")), event);
+pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "col_prel")),
+        event,
+    );
 }
 
 pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnEvent) {
@@ -591,8 +590,6 @@ pub fn publish_grace_waiver_receipt_event(
         },
     );
 }
-
-
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]

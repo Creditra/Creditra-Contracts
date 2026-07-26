@@ -110,13 +110,17 @@ fn setup() -> Ctx {
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
     client.draw_credit(&borrower, &DRAW_AMOUNT);
 
-    Ctx { env, contract_id, token_address, borrower }
+    Ctx {
+        env,
+        contract_id,
+        token_address,
+        borrower,
+    }
 }
 
 /// Mint enough tokens and set an unlimited allowance so `repay_credit` succeeds.
 fn fund_repayment(ctx: &Ctx, amount: i128) {
-    token::StellarAssetClient::new(&ctx.env, &ctx.token_address)
-        .mint(&ctx.borrower, &amount);
+    token::StellarAssetClient::new(&ctx.env, &ctx.token_address).mint(&ctx.borrower, &amount);
     token::Client::new(&ctx.env, &ctx.token_address).approve(
         &ctx.borrower,
         &ctx.contract_id,
@@ -432,12 +436,8 @@ mod edge_cases {
     fn schedule_is_cleared_on_close() {
         let ctx = setup();
 
-        ctx.client().set_repayment_schedule(
-            &ctx.borrower,
-            &500_i128,
-            &86_400_u64,
-            &(T0 + 86_400),
-        );
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &500_i128, &86_400_u64, &(T0 + 86_400));
         assert!(
             ctx.client().get_repayment_schedule(&ctx.borrower).is_some(),
             "pre-condition: schedule must exist before close"
@@ -470,18 +470,15 @@ mod edge_cases {
         let ctx = setup();
         let first_due = T0 + 3_600;
 
-        ctx.client().set_repayment_schedule(
-            &ctx.borrower,
-            &100_i128,
-            &3_600_u64,
-            &first_due,
-        );
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &100_i128, &3_600_u64, &first_due);
 
         // Repay the full drawn amount.
         fund_repayment(&ctx, DRAW_AMOUNT);
         ctx.client().repay_credit(&ctx.borrower, &DRAW_AMOUNT);
 
-        let due_after_full_repay = ctx.client()
+        let due_after_full_repay = ctx
+            .client()
             .get_repayment_schedule(&ctx.borrower)
             .unwrap()
             .next_due_ts;
@@ -490,7 +487,8 @@ mod edge_cases {
         fund_repayment(&ctx, 500);
         ctx.client().repay_credit(&ctx.borrower, &500);
 
-        let due_after_second = ctx.client()
+        let due_after_second = ctx
+            .client()
             .get_repayment_schedule(&ctx.borrower)
             .unwrap()
             .next_due_ts;
@@ -599,12 +597,8 @@ mod edge_cases {
         let ctx = setup();
         let first_due = T0 + 1_000;
 
-        ctx.client().set_repayment_schedule(
-            &ctx.borrower,
-            &100_i128,
-            &1_000_u64,
-            &first_due,
-        );
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &100_i128, &1_000_u64, &first_due);
 
         // Repay everything before the due date.
         fund_repayment(&ctx, DRAW_AMOUNT);
@@ -628,12 +622,8 @@ mod edge_cases {
         let ctx = setup();
         let first_due = T0 + 600;
 
-        ctx.client().set_repayment_schedule(
-            &ctx.borrower,
-            &500_i128,
-            &600_u64,
-            &first_due,
-        );
+        ctx.client()
+            .set_repayment_schedule(&ctx.borrower, &500_i128, &600_u64, &first_due);
 
         // Repayment amounts chosen to exercise partial, exact, and multi-period advances.
         let repayments: &[i128] = &[499, 1, 500, 501, 1_000, 3_000, 5_000, 2_000, 500, 999];

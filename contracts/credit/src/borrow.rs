@@ -37,8 +37,8 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         .get(&DataKey::LiquiditySource)
         .unwrap_or_else(|| env.current_contract_address());
 
-    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
-        .unwrap_or_else(|| {
+    let mut credit_line: CreditLineData =
+        storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineNotFound)
         });
@@ -176,8 +176,8 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
-        .unwrap_or_else(|| {
+    let mut credit_line: CreditLineData =
+        storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineNotFound)
         });
@@ -385,4 +385,3 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
 
     clear_reentrancy_guard(&env);
 }
-

@@ -163,13 +163,22 @@ fn lifecycle_v7_category_mappings_are_pinned() {
     // Limit bucket (discriminant 4)
     assert_eq!(ContractError::OverLimit.category(), Limit);
     assert_eq!(ContractError::UtilizationNotZero.category(), Limit);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), Limit);
+    assert_eq!(
+        ContractError::LimitDecreaseRequiresRepayment.category(),
+        Limit
+    );
     assert_eq!(ContractError::DrawExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::RepayExceedsMaxAmount.category(), Limit);
 
     // Collateral bucket (discriminant 8)
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), Collateral);
-    assert_eq!(ContractError::InsufficientCollateralBalance.category(), Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        Collateral
+    );
+    assert_eq!(
+        ContractError::InsufficientCollateralBalance.category(),
+        Collateral
+    );
 
     // Misc bucket (discriminant 11)
     assert_eq!(ContractError::CreditLineNotFound.category(), Misc);
@@ -313,8 +322,7 @@ mod integration {
         client.set_liquidity_token(&token_address);
         client.set_liquidity_source(&contract_id);
 
-        token::StellarAssetClient::new(&env, &token_address)
-            .mint(&contract_id, &1_000_000_i128);
+        token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
 
         (env, contract_id, admin)
     }
@@ -483,7 +491,9 @@ mod integration {
         assert!(result.is_err());
         let err_str = extract_error_str(&result.unwrap_err());
         assert!(
-            err_str.contains("Only active") || err_str.contains("active credit lines") || err_str.contains("#20"),
+            err_str.contains("Only active")
+                || err_str.contains("active credit lines")
+                || err_str.contains("#20"),
             "expected suspend-already-suspended error, got: {:?}",
             err_str
         );

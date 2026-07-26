@@ -79,6 +79,15 @@ pub enum FreezeReason {
     BorrowerRequest = 4,
 }
 
+/// Structured state for global draw freezes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    pub frozen: bool,
+    pub reason: FreezeReason,
+}
+
+
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CreditStatus {
@@ -280,6 +289,8 @@ pub enum ContractError {
     AdminCooldownActive = 54,
     /// Per-borrower liquidation grace window has not yet elapsed.
     LiquidationGraceActive = 55,
+    /// Admin freeze cooldown is active.
+    FreezeCooldownActive = 56,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -410,7 +421,6 @@ impl ContractError {
         }
     }
 }
-
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -674,7 +684,6 @@ pub struct ProofOfReserve {
     /// Accumulated bounty pool fees held in the contract.
     pub bounty_balance: i128,
 }
-
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///

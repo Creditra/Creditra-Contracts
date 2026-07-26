@@ -94,9 +94,9 @@ use crate::events::{
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
     assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
-    liquidation_settlement_key, persist_credit_line,
+    persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD,
+    CREDIT_LINE_TTL_THRESHOLD, DrawAuditKey,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
@@ -117,7 +117,6 @@ fn liquidation_settlement_key(
         settlement_id.clone(),
     )
 }
-
 
 /// Open a new credit line for a borrower (admin only).
 ///
@@ -265,11 +264,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
 /// # Panics
 /// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
 /// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
-pub fn set_per_borrower_liquidation_grace(
-    env: &Env,
-    borrower: Address,
-    grace_period_seconds: u64,
-) {
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: Address, grace_period_seconds: u64) {
     assert_not_paused(env);
     require_admin_auth(env);
 
@@ -760,7 +755,10 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = DataKey::DrawAudit(borrower.clone(), env.ledger().sequence() as u64);
+    let settlement_key = DataKey::DrawAudit(DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp: env.ledger().sequence() as u64,
+    });
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadySettled);
     }
@@ -799,7 +797,13 @@ pub fn settle_default_liquidation(
         credit_line.status = CreditStatus::Closed;
     }
 
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(CreditStatus::Defaulted),
+    );
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
@@ -873,7 +877,13 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     let previous_status = credit_line.status;
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Defaulted));
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(CreditStatus::Defaulted),
+    );
 
     publish_credit_line_event(
         &env,
@@ -887,7 +897,6 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         },
     );
 }
-
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

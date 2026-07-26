@@ -93,7 +93,11 @@ fn test_draw_status_error_all_variants_lifecycle_or_none() {
 /// } else { amount };
 /// ```
 fn compute_effective_repay(utilized: i128, amount: i128) -> i128 {
-    if amount > utilized { utilized } else { amount }
+    if amount > utilized {
+        utilized
+    } else {
+        amount
+    }
 }
 
 /// Overpayment: amount > utilized → clamp to utilized.
@@ -206,7 +210,10 @@ fn test_interest_repaid_bounds_invariant() {
         }
         let eff = compute_effective_repay(utilized, amount);
         let int_rep = compute_interest_repaid(eff, accrued);
-        assert!(int_rep <= accrued.max(0), "interest_repaid must be ≤ accrued");
+        assert!(
+            int_rep <= accrued.max(0),
+            "interest_repaid must be ≤ accrued"
+        );
         assert!(int_rep <= eff, "interest_repaid must be ≤ effective_repay");
         assert!(int_rep >= 0, "interest_repaid must be non-negative");
     }
@@ -334,7 +341,10 @@ fn test_apply_bps_fee_never_exceeds_amount() {
     for &amount in &amounts {
         for bps in 0_u32..=10_000 {
             let fee = apply_bps(amount, bps, Rounding::Floor);
-            assert!(fee <= amount, "fee ({fee}) > amount ({amount}) at bps={bps}");
+            assert!(
+                fee <= amount,
+                "fee ({fee}) > amount ({amount}) at bps={bps}"
+            );
         }
     }
 }
@@ -346,8 +356,13 @@ fn compute_released(collateral: u128, effective_repay: u128, previous_utilized: 
     if effective_repay >= previous_utilized {
         collateral
     } else {
-        safe_mul_div(collateral, effective_repay, previous_utilized, Rounding::Floor)
-            .unwrap_or(collateral)
+        safe_mul_div(
+            collateral,
+            effective_repay,
+            previous_utilized,
+            Rounding::Floor,
+        )
+        .unwrap_or(collateral)
     }
 }
 

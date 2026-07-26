@@ -34,16 +34,12 @@ fn borrow_admin_cooldown_rejects_second_action_until_boundary() {
     let borrower = Address::generate(&env);
 
     client.set_borrow_admin_cooldown(&COOLDOWN_SECONDS);
-    assert_eq!(
-        client.get_borrow_admin_cooldown(),
-        Some(COOLDOWN_SECONDS)
-    );
+    assert_eq!(client.get_borrow_admin_cooldown(), Some(COOLDOWN_SECONDS));
 
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
     set_timestamp(&env, START_TS + COOLDOWN_SECONDS - 1);
-    let result =
-        client.try_update_risk_parameters(&borrower, &1_100_i128, &350_u32, &71_u32);
+    let result = client.try_update_risk_parameters(&borrower, &1_100_i128, &350_u32, &71_u32);
     assert_eq!(
         result.err().unwrap().unwrap(),
         ContractError::AdminCooldownActive.into()
@@ -85,5 +81,8 @@ fn borrow_admin_cooldown_zero_disables_guard() {
     set_timestamp(&env, START_TS);
     client.update_risk_parameters(&borrower, &1_200_i128, &350_u32, &71_u32);
 
-    assert_eq!(client.get_credit_line(&borrower).unwrap().credit_limit, 1_200);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().credit_limit,
+        1_200
+    );
 }

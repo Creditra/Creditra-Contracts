@@ -98,7 +98,12 @@ fn setup() -> Ctx {
     credit.set_liquidity_source(&admin);
 
     // Allow the contract to pull from the liquidity source.
-    soroban_sdk::token::Client::new(&env, &token.address).approve(&admin, &credit.address, &10_000_000_i128, &100_000_u32);
+    soroban_sdk::token::Client::new(&env, &token.address).approve(
+        &admin,
+        &credit.address,
+        &10_000_000_i128,
+        &100_000_u32,
+    );
 
     // Open a credit line and immediately draw.
     credit.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS);
@@ -320,7 +325,12 @@ fn zero_repay_does_not_advance() {
 
     // Some contracts reject a zero amount; catch that gracefully.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(&ctx.borrower, &ctx.credit.address, &0_i128, &100_000_u32);
+        soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+            &ctx.borrower,
+            &ctx.credit.address,
+            &0_i128,
+            &100_000_u32,
+        );
         ctx.credit.repay_credit(&ctx.borrower, &0_i128);
     }));
 

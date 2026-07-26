@@ -73,8 +73,14 @@ fn gas_accrue_batch_empty() {
 
     // Empty batch should be cheap — just auth + bounds check + early return.
     assert!(cpu > 0, "accrue_batch empty must consume some CPU");
-    assert!(cpu < 500_000, "accrue_batch empty CPU unexpectedly high: {cpu}");
-    assert!(mem < 100_000, "accrue_batch empty memory unexpectedly high: {mem}");
+    assert!(
+        cpu < 500_000,
+        "accrue_batch empty CPU unexpectedly high: {cpu}"
+    );
+    assert!(
+        mem < 100_000,
+        "accrue_batch empty memory unexpectedly high: {mem}"
+    );
 
     eprintln!("accrue_batch(empty): cpu={cpu} mem={mem}");
 }
@@ -97,7 +103,10 @@ fn gas_accrue_batch_single_missing() {
 
     // Single non-existent borrower: overhead + one storage miss.
     assert!(cpu > 0);
-    assert!(cpu < 1_000_000, "accrue_batch single CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 1_000_000,
+        "accrue_batch single CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("accrue_batch(single_missing): cpu={cpu} mem={mem}");
 }
@@ -124,7 +133,10 @@ fn gas_accrue_batch_five_no_time_advance() {
 
     // 5 borrowers with zero elapsed time: 5 line reads + skip for each.
     assert!(cpu > 0);
-    assert!(cpu < 2_000_000, "accrue_batch 5 no-advance CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 2_000_000,
+        "accrue_batch 5 no-advance CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("accrue_batch(5_no_advance): cpu={cpu} mem={mem}");
 }
@@ -155,7 +167,10 @@ fn gas_accrue_batch_five_with_interest() {
 
     // 5 borrowers with interest computation.
     assert!(cpu > 0);
-    assert!(cpu < 5_000_000, "accrue_batch 5 with interest CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 5_000_000,
+        "accrue_batch 5 with interest CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("accrue_batch(5_with_interest): cpu={cpu} mem={mem}");
 }
@@ -216,7 +231,10 @@ fn gas_accrue_batch_max_boundary_50() {
 
     assert!(cpu > 0);
     // 50-borrower batch should complete within a reasonable budget.
-    assert!(cpu < 20_000_000, "accrue_batch 50 CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 20_000_000,
+        "accrue_batch 50 CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("accrue_batch(50): cpu={cpu} mem={mem}");
 }

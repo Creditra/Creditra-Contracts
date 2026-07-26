@@ -86,9 +86,22 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
 ///   `DrawReversedAmount`).
 ///
-/// Helper functions in this module always pick the correct tier; callers
-/// outside this module should never hit the storage API directly with these
-/// keys.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralTokenKey {
+    pub borrower: Address,
+    pub token: Address,
+}
+
+/// Key payload for per-borrower per-timestamp draw audit and reversal storage entries.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawAuditKey {
+    pub borrower: Address,
+    pub timestamp: u64,
+}
+
+/// Instance and persistent storage key taxonomy for the credit contract.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
@@ -192,14 +205,14 @@ pub enum DataKey {
     /// Minimum ledger seconds between critical collateral admin actions (v7).
     AdminCollateralCooldownSeconds,
     /// Ledger timestamp of the last critical collateral admin action (v7).
-    LastAdminCollateralCriticalActionTs,
+    LastAdminCollateralActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
     /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
-    DrawAudit(Address, u64),
+    DrawAudit(DrawAuditKey),
     /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
-    DrawReversedAmount(Address, u64),
+    DrawReversedAmount(DrawAuditKey),
     /// Oracle circuit-breaker configuration.
     OracleConfig,
     /// Multi-oracle quorum configuration.
@@ -230,6 +243,10 @@ pub enum DataKey {
     /// Per-borrower liquidation grace period in seconds.
     /// Specifies a grace window before a credit line can be defaulted or liquidated.
     LiquidationGracePeriod(Address),
+    /// Per-borrower per-token collateral balance tracking.
+    CollateralBalanceV2(CollateralTokenKey),
+    /// Allowlist of authorized collateral token contract addresses.
+    CollateralTokenAllowlist,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -557,14 +574,14 @@ pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
 pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
-        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+        .get(&DataKey::LastAdminCollateralActionTs)
 }
 
 /// Record the ledger timestamp of the last critical collateral admin action.
 pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
+        .set(&DataKey::LastAdminCollateralActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this
@@ -578,9 +595,10 @@ pub fn get_collateral_risk_weight_bps(env: &Env, asset: &Address) -> Option<u32>
 /// Set the risk weight for a specific collateral asset, in basis points.
 /// Caller is responsible for admin auth and for validating `weight_bps <= 10_000`.
 pub fn set_collateral_risk_weight_bps(env: &Env, asset: &Address, weight_bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CollateralRiskWeightBps(asset.clone()), &weight_bps);
+    env.storage().instance().set(
+        &DataKey::CollateralRiskWeightBps(asset.clone()),
+        &weight_bps,
+    );
 }
 
 /// Return configured protocol fee basis points, if set.
@@ -709,7 +727,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
@@ -1422,7 +1439,10 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 /// Return a borrower's balance for a specific collateral token and bump
 /// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let key = DataKey::CollateralBalanceV2(CollateralTokenKey {
+        borrower: borrower.clone(),
+        token: token.clone(),
+    });
     if env.storage().persistent().has(&key) {
         bump_persistent_ttl(env, &key);
     }
@@ -1430,8 +1450,16 @@ pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
-pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+pub fn set_collateral_balance_for_token(
+    env: &Env,
+    borrower: &Address,
+    token: &Address,
+    balance: i128,
+) {
+    let key = DataKey::CollateralBalanceV2(CollateralTokenKey {
+        borrower: borrower.clone(),
+        token: token.clone(),
+    });
     let previous = get_collateral_balance_for_token(env, borrower, token);
     env.storage().persistent().set(&key, &balance);
     bump_persistent_ttl(env, &key);
@@ -1489,9 +1517,14 @@ pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
 
 /// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
 pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::LastFreezeTimestamp)
+}
+
+/// Set the ledger timestamp of the last admin freeze/unfreeze action.
+pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
     env.storage()
         .instance()
-        .get(&DataKey::LastFreezeTimestamp)
+        .set(&DataKey::LastFreezeTimestamp, &ts);
 }
 
 /// Record a freeze/unfreeze action timestamp, but only when a cooldown is
