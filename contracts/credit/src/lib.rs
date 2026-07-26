@@ -247,7 +247,7 @@ const DRAW_REVERSAL_WINDOW_SECS: u64 = 3600;
 /// Prevents unbounded gas consumption. Adjust after gas profiling.
 const BATCH_CLOSE_MAX: u32 = 50;
 
-/// Enforce and record the per-borrower cooldown for critical admin mutations.
+/// Enforce and record the per-borrower cooldown for critical borrow admin mutations.
 ///
 /// The guard is disabled when no cooldown is configured or when the configured
 /// value is `0`. It records only successful preflight checks, so failed calls do
@@ -268,6 +268,29 @@ fn enforce_borrow_admin_cooldown(env: &Env, borrower: &Address) {
     }
 
     crate::storage::set_last_borrow_admin_action_ts(env, borrower, now);
+}
+
+/// Enforce and record the per-borrower cooldown for critical accrual admin mutations.
+///
+/// This cooldown is independent from the generic borrow admin cooldown and is
+/// intended for borrower-specific admin actions that realize or mutate accrued
+/// debt state via `apply_accrual`.
+fn enforce_accrual_admin_cooldown(env: &Env, borrower: &Address) {
+    let Some(cooldown_seconds) = crate::storage::get_accrual_admin_cooldown(env) else {
+        return;
+    };
+    if cooldown_seconds == 0 {
+        return;
+    }
+
+    let now = env.ledger().timestamp();
+    if let Some(last_ts) = crate::storage::get_last_accrual_admin_action_ts(env, borrower) {
+        if now < last_ts.saturating_add(cooldown_seconds) {
+            env.panic_with_error(ContractError::AdminCooldownActive);
+        }
+    }
+
+    crate::storage::set_last_accrual_admin_action_ts(env, borrower, now);
 }
 
 #[soroban_sdk::contractclient(name = "AuctionClient")]
@@ -745,7 +768,7 @@ impl Credit {
         risk_score: u32,
     ) {
         require_admin_auth(&env);
-        enforce_borrow_admin_cooldown(&env, &borrower);
+        enforce_accrual_admin_cooldown(&env, &borrower);
         risk::update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)
     }
 
@@ -1253,6 +1276,19 @@ impl Credit {
         crate::storage::get_borrow_admin_cooldown(&env)
     }
 
+    /// Set the minimum interval between accrual-critical admin actions for one borrower.
+    /// Pass `0` to disable the per-borrower accrual admin cooldown.
+    pub fn set_accrual_admin_cooldown(env: Env, seconds: u64) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        crate::storage::set_accrual_admin_cooldown(&env, seconds);
+    }
+
+    /// Get the configured accrual-critical admin-action cooldown.
+    pub fn get_accrual_admin_cooldown(env: Env) -> Option<u64> {
+        crate::storage::get_accrual_admin_cooldown(&env)
+    }
+
     /// Set protocol fee in basis points (applied to interest portion of repayments).
     /// Admin only. Fee must be within the configured min/max bounds.
     ///
@@ -1574,7 +1610,7 @@ impl Credit {
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
-    
+
     /// Set the risk weight for a collateral asset, in basis points (admin only).
     ///
     /// Risk weight scales how much a unit of this asset counts toward the
@@ -1810,7 +1846,7 @@ impl Credit {
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
-        enforce_borrow_admin_cooldown(&env, &borrower);
+        enforce_accrual_admin_cooldown(&env, &borrower);
         lifecycle::suspend_credit_line(env, borrower)
     }
 
@@ -1821,7 +1857,7 @@ impl Credit {
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         closer.require_auth();
         if closer == require_admin(&env) {
-            enforce_borrow_admin_cooldown(&env, &borrower);
+            enforce_accrual_admin_cooldown(&env, &borrower);
         }
         lifecycle::close_credit_line(env, borrower, closer)
     }
@@ -1837,27 +1873,27 @@ impl Credit {
         }
         require_admin_auth(&env);
         for borrower in borrowers.iter() {
-            enforce_borrow_admin_cooldown(&env, &borrower);
+            enforce_accrual_admin_cooldown(&env, &borrower);
         }
         lifecycle::close_credit_lines_batch(env, borrowers)
     }
 
     pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
-        enforce_borrow_admin_cooldown(&env, &borrower);
+        enforce_accrual_admin_cooldown(&env, &borrower);
         lifecycle::default_credit_line(env, borrower)
     }
 
     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
         require_admin_auth(&env);
-        enforce_borrow_admin_cooldown(&env, &borrower);
+        enforce_accrual_admin_cooldown(&env, &borrower);
         lifecycle::reinstate_credit_line(env, borrower, target_status)
     }
 
     /// Forgive outstanding debt without transferring tokens (admin only).
     pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
         require_admin_auth(&env);
-        enforce_borrow_admin_cooldown(&env, &borrower);
+        enforce_accrual_admin_cooldown(&env, &borrower);
         lifecycle::forgive_debt(env, borrower, amount)
     }
 
@@ -4246,7 +4282,7 @@ mod test_mock_liquidity_token {
         assert_eq!(cfg.max_rate_change_bps, 250);
         assert_eq!(cfg.rate_change_min_interval, 3600);
     }
-    
+
 // ── Collateral risk weight tests ─────────────────────────────────────────────
 
     #[test]

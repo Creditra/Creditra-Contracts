@@ -129,10 +129,14 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
-    /// Minimum interval in seconds between critical admin actions for one borrower.
+    /// Minimum interval in seconds between critical borrow admin actions for one borrower.
     BorrowAdminCooldownSeconds,
-    /// Last timestamp at which a critical admin action mutated a borrower.
+    /// Last timestamp at which a critical borrow admin action mutated a borrower.
     LastBorrowAdminActionTs(Address),
+    /// Minimum interval in seconds between critical accrual admin actions for one borrower.
+    AccrualAdminCooldownSeconds,
+    /// Last timestamp at which a critical accrual admin action mutated a borrower.
+    LastAccrualAdminActionTs(Address),
     /// Per-borrower interest rate floor in basis points.
     /// When set, the effective interest rate must be >= floor.
     RateFloorBps(Address),
@@ -542,7 +546,7 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
         .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
 }
 
-/// Get the configured admin collateral cool-off interval, if set.
+/// Return the configured admin collateral cool-off interval, if set.
 pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
@@ -1100,29 +1104,58 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
 }
 
 /// Get the configured per-borrower admin action cooldown, if set.
+/// Return the configured borrow admin cooldown, if set.
 pub fn get_borrow_admin_cooldown(env: &Env) -> Option<u64> {
     env.storage()
         .instance()
         .get(&DataKey::BorrowAdminCooldownSeconds)
 }
 
-/// Set the per-borrower admin action cooldown. A zero value disables it.
+/// Persist the borrow admin cooldown in seconds.
 pub fn set_borrow_admin_cooldown(env: &Env, seconds: u64) {
     env.storage()
         .instance()
         .set(&DataKey::BorrowAdminCooldownSeconds, &seconds);
 }
 
-/// Return the last critical admin-action timestamp for a borrower, if any.
+/// Return the last successful critical borrow admin-action timestamp for `borrower`, if any.
 pub fn get_last_borrow_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
     env.storage()
         .persistent()
         .get(&DataKey::LastBorrowAdminActionTs(borrower.clone()))
 }
 
-/// Store the last critical admin-action timestamp for a borrower.
+/// Persist the last successful critical borrow admin-action timestamp for `borrower`.
 pub fn set_last_borrow_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
     let key = DataKey::LastBorrowAdminActionTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
+/// Return the configured accrual admin cooldown, if set.
+pub fn get_accrual_admin_cooldown(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AccrualAdminCooldownSeconds)
+}
+
+/// Persist the accrual admin cooldown in seconds.
+pub fn set_accrual_admin_cooldown(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AccrualAdminCooldownSeconds, &seconds);
+}
+
+/// Return the last successful critical accrual admin-action timestamp for `borrower`, if any.
+pub fn get_last_accrual_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastAccrualAdminActionTs(borrower.clone()))
+}
+
+/// Persist the last successful critical accrual admin-action timestamp for `borrower`.
+pub fn set_last_accrual_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
+    let key = DataKey::LastAccrualAdminActionTs(borrower.clone());
     env.storage().persistent().set(&key, &ts);
     bump_persistent_ttl(env, &key);
 }
