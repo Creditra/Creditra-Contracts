@@ -1,10 +1,12 @@
 #![cfg_attr(not(test), no_std)]
 
+pub mod curves;
 mod errors;
 mod events;
 mod storage;
 mod types;
 
+pub use curves::{calculate_price, CurveError, DecayCurve};
 pub use errors::AuctionError;
 pub use events::BidRefundedEvent;
 pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
@@ -13,7 +15,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 
 use crate::storage::{
     bump_auction_state_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
-    get_factory_contract, set_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
+    get_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
 };
 use crate::types::*;
 use events::{
@@ -204,6 +206,23 @@ pub enum AuctionKey {
 
 #[contractimpl]
 impl Auction {
+    /// Initializes a new auction.
+    ///
+    /// # Parameters
+    /// - `env`: The execution environment.
+    /// - `auction_id`: The unique identifier for the auction.
+    /// - `mode`: The mode of the auction (e.g., English or Dutch).
+    /// - `start_time`: The timestamp when the auction starts.
+    /// - `end_time`: The timestamp when the auction ends.
+    /// - `min_bid`: The minimum initial bid (English) or floor price equivalent logic.
+    /// - `min_increment_bps`: The minimum bid increment in basis points (max 10000).
+    /// - `dutch_start_price`: The starting price for a Dutch auction.
+    /// - `dutch_floor_price`: The lowest possible price for a Dutch auction.
+    /// - `dutch_decay`: The price decay configuration for a Dutch auction.
+    /// - `dutch_step_count`: Required steps if decay is `Stepped`.
+    ///
+    /// # Panics
+    /// Panics if `start_time >= end_time`, if `min_increment_bps > 10_000`, or if Dutch auction parameters are invalid.
     pub fn init_auction(
         env: Env,
         auction_id: Symbol,
@@ -267,46 +286,31 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
+    /// Sets the factory contract address.
+    ///
+    /// # Authorization
+    /// Requires `require_auth` from the factory itself.
     pub fn set_factory_contract(env: Env, factory: Address) {
         factory.require_auth();
         storage::set_factory_contract(&env, &factory);
     }
 
-    pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
-        let factory = get_factory_contract(&env)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
-        factory.require_auth();
-        storage::set_liquidation_grace_window(&env, seconds);
-    }
-
-    pub fn get_liquidation_grace_window(env: Env) -> u64 {
-        storage::get_liquidation_grace_window(&env)
-    }
-
-    pub fn close_auction(env: Env, auction_id: Symbol) {
-        let mut state: AuctionState = env
-            .storage()
-            .persistent()
-            .get(&auction_id)
-            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
-        bump_auction_state_ttl(&env, &auction_id);
-        if state.status == AuctionStatus::Claimed {
-            env.panic_with_error(AuctionError::AlreadyClaimed);
-        }
-        if state.status != AuctionStatus::Open {
-            env.panic_with_error(AuctionError::AuctionNotOpen);
-        }
-        state.status = AuctionStatus::Closed;
-        env.storage().persistent().set(&auction_id, &state);
-        bump_auction_state_ttl(&env, &auction_id);
-        publish_auction_closed_event(
-            &env,
-            auction_id,
-            state.highest_bidder.clone(),
-            state.highest_bid,
-        );
-    }
-
+    /// Places a bid on an active auction.
+    ///
+    /// # Authorization
+    /// Requires `require_auth` from the `bidder`.
+    ///
+    /// # Parameters
+    /// - `env`: The execution environment.
+    /// - `auction_id`: The unique identifier of the auction.
+    /// - `bidder`: The address placing the bid.
+    /// - `amount`: The amount of the bid token being bid.
+    ///
+    /// # Panics
+    /// * [`AuctionError::BidTooLow`] - Bid amount is not strictly positive, or does not meet minimum threshold/current Dutch price.
+    /// * [`AuctionError::NotFound`] - Auction state not found.
+    /// * [`AuctionError::AuctionNotOpen`] - Auction is not in `Open` status or end time has passed.
+    /// * [`AuctionError::GracePeriodActive`] - Attempting to bid during the liquidation grace window.
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bidder.require_auth();
 
@@ -344,7 +348,7 @@ impl Auction {
                     min_next_bid(&env, state.highest_bid, state.config.min_increment_bps)
                         .max(state.config.min_bid)
                 } else {
-                    state.config.min_bid
+                    min_next_bid(&env, state.config.min_bid, state.config.min_increment_bps)
                 };
                 if amount < threshold {
                     env.panic_with_error(AuctionError::BidTooLow);
@@ -381,9 +385,7 @@ impl Auction {
 
             AuctionMode::Dutch => {
                 let current_time = env.ledger().timestamp();
-                let elapsed_time = current_time
-                    .checked_sub(state.config.start_time)
-                    .unwrap_or(0);
+                let elapsed_time = current_time.saturating_sub(state.config.start_time);
                 let duration = state
                     .config
                     .end_time
@@ -446,6 +448,22 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
+    /// Settles an auction that ended in default or completes the liquidation process.
+    ///
+    /// Transfers the highest bid amount (if any) to the credit contract.
+    ///
+    /// # Authorization
+    /// Requires `require_auth` from the factory contract.
+    ///
+    /// # Returns
+    /// The `highest_bid` amount that was settled.
+    ///
+    /// # Panics
+    /// * [`AuctionError::NoFactoryContract`] - Factory contract not set.
+    /// * [`AuctionError::Unauthorized`] - Caller is not the factory contract.
+    /// * [`AuctionError::NotFound`] - Auction not found.
+    /// * [`AuctionError::NotClosed`] - Auction is not in the `Closed` state.
+    /// * [`AuctionError::AlreadySettled`] - Auction has already been settled.
     pub fn settle_default_liquidation(
         env: Env,
         auction_id: Symbol,
@@ -514,6 +532,18 @@ impl Auction {
         state.highest_bid
     }
 
+    /// Claims the proceeds or assets of a closed auction by the winning bidder.
+    ///
+    /// # Authorization
+    /// Requires `require_auth` from the winning bidder.
+    ///
+    /// # Panics
+    /// * [`AuctionError::NotFound`] - Auction not found.
+    /// * [`AuctionError::AuctionNotClosed`] - Auction is not in `Closed` status.
+    /// * [`AuctionError::AlreadySettled`] - Auction has already been liquidated/settled.
+    /// * [`AuctionError::NoWinner`] - There is no winning bidder.
+    /// * [`AuctionError::AlreadyClaimed`] - Auction was already claimed.
+    /// * [`AuctionError::InvalidState`] - Bid token not found in storage.
     pub fn claim_auction(env: Env, auction_id: Symbol) {
         let state: AuctionState = env
             .storage()
@@ -609,20 +639,19 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
-    /// Set the liquidation grace window (in seconds) for newly created auctions.
-    ///
-    /// # Authorization
-    /// Requires [`require_auth`] from the registered factory contract.
-    ///
-    /// Return the configured liquidation grace window in seconds.
+    /// Returns the configured liquidation grace window in seconds.
     ///
     /// Returns `0` if never configured (no grace period enforced).
     pub fn get_liquidation_grace_window(env: Env) -> u64 {
         storage::get_liquidation_grace_window(&env)
     }
 
-    /// When non-zero, bidders cannot place bids before
-    /// `auction.start_time + grace_window` has elapsed.
+    /// Sets the liquidation grace window (in seconds) for newly created auctions.
+    ///
+    /// When non-zero, bidders cannot place bids before `auction.start_time + grace_window` has elapsed.
+    ///
+    /// # Authorization
+    /// Requires [`require_auth`] from the registered factory contract.
     pub fn set_liquidation_grace_window(env: Env, seconds: u64) {
         let factory = get_factory_contract(&env)
             .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));

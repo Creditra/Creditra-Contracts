@@ -45,7 +45,7 @@ fn setup_settleable() -> (Env, Address, Symbol, Address, Address, i128) {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &Some(DutchAuctionDecay::None),
         &None,
     );
     client.place_bid(&auction_id, &bidder, &420_i128);
@@ -128,7 +128,7 @@ fn init_auction_reverts_when_factory_unset() {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &Some(DutchAuctionDecay::None),
         &None,
     );
 
@@ -166,7 +166,7 @@ fn init_auction_requires_factory_auth() {
                     0_u32,
                     None::<i128>,
                     None::<i128>,
-                    DutchAuctionDecay::None,
+                    Some(DutchAuctionDecay::None),
                     None::<u32>,
                 )
                     .into_val(&env),
@@ -182,7 +182,7 @@ fn init_auction_requires_factory_auth() {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -219,7 +219,7 @@ fn init_auction_succeeds_with_factory_auth() {
                     0_u32,
                     None::<i128>,
                     None::<i128>,
-                    DutchAuctionDecay::None,
+                    Some(DutchAuctionDecay::None),
                     None::<u32>,
                 )
                     .into_val(&env),
@@ -235,7 +235,7 @@ fn init_auction_succeeds_with_factory_auth() {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -283,7 +283,7 @@ fn close_auction_requires_factory_auth() {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &Some(DutchAuctionDecay::None),
         &None,
     );
 
@@ -327,7 +327,7 @@ fn close_auction_succeeds_with_factory_auth() {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &Some(DutchAuctionDecay::None),
         &None,
     );
 

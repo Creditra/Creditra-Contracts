@@ -81,6 +81,7 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `51` | `AlreadySettled`                 | Liquidation for this (borrower, id) already processed. | No action needed — already settled. |
 | `52` | `InvalidRiskWeight`              | Collateral risk weight exceeds 10 000 bps. | Ensure risk weight is in `0..=10_000`. |
 | `53` | `InvalidAttestation`             | Attestation proof is invalid or no batch committed. | Commit a valid batch and retry. |
+| `54` | `AdminCollateralCooldownActive`  | Critical collateral admin action before cool-off elapsed. | Wait for `admin_collateral_cooldown_seconds` or set interval to `0`. |
 
 ---
 

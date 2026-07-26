@@ -513,6 +513,11 @@ fn category_mappings_are_stable() {
         ContractError::InvalidAttestation.category(),
         ContractErrorCategory::Misc
     );
+    // Block (9)
+    assert_eq!(
+        ContractError::FreezeCooldownActive.category(),
+        ContractErrorCategory::Block
+    );
 }
 
 /// Verify every ContractError variant has a known category and that all 11
@@ -551,6 +556,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
+        ContractError::AdminCollateralCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),

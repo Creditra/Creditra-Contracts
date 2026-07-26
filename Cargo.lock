@@ -381,6 +381,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "creditra-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -5,8 +5,9 @@ use crate::events::{
 };
 use crate::math_utils::{apply_bps, mul_div, Rounding};
 use crate::storage::{
-    clear_reentrancy_guard, get_collateral_balance, persist_credit_line, set_reentrancy_guard,
-    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
+    persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
@@ -36,14 +37,11 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         .get(&DataKey::LiquiditySource)
         .unwrap_or_else(|| env.current_contract_address());
 
-    let mut credit_line: CreditLineData =
-        env.storage()
-            .persistent()
-            .get(&borrower)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
+    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
+        .unwrap_or_else(|| {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::CreditLineNotFound)
+        });
 
     if credit_line.borrower != borrower {
         clear_reentrancy_guard(&env);
@@ -178,14 +176,11 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let mut credit_line: CreditLineData =
-        env.storage()
-            .persistent()
-            .get(&borrower)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
+    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
+        .unwrap_or_else(|| {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::CreditLineNotFound)
+        });
 
     if credit_line.status == CreditStatus::Closed {
         clear_reentrancy_guard(&env);
