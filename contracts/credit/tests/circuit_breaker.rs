@@ -536,6 +536,23 @@ fn pause_without_reason_has_no_stored_reason() {
 }
 
 #[test]
+fn later_reasonless_pause_clears_stale_reason() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    let reason = soroban_sdk::Symbol::new(&env, "oracle-outage");
+    client.set_protocol_paused_with_reason(&true, &reason);
+    assert!(client.get_protocol_pause_reason().is_some());
+
+    client.set_protocol_paused(&true);
+    assert!(client.is_protocol_paused());
+    assert!(
+        client.get_protocol_pause_reason().is_none(),
+        "a later reason-less pause must clear any stale reason"
+    );
+}
+
+#[test]
 fn pause_with_reason_records_timestamp_and_actor() {
     let (env, admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
