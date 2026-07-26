@@ -8,11 +8,11 @@ use crate::handshake::{self, ProtocolVersion};
 use crate::limits;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::oracles;
+use crate::penalties::LateFeeConfig;
 use crate::state::{
-    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord,
-    BORROWER_RATE_CEILING_BPS, BORROWER_TO_ID, CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT,
-    DEFAULT_RATE_CEILING_BPS, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, ORACLE_PRICE_RECORD,
-    ORACLE_QUORUM_CONFIG,
+    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
+    CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
+    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
 
@@ -86,15 +86,8 @@ pub fn execute(
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
-        ExecuteMsg::SetDefaultRateCeiling { max_rate_bps } => {
-            execute_set_default_rate_ceiling(deps, info, max_rate_bps)
-        }
-        ExecuteMsg::SetBorrowerRateCeiling {
-            borrower,
-            max_rate_bps,
-        } => execute_set_borrower_rate_ceiling(deps, info, borrower, max_rate_bps),
-        ExecuteMsg::ClearBorrowerRateCeiling { borrower } => {
-            execute_clear_borrower_rate_ceiling(deps, info, borrower)
+        ExecuteMsg::SetLateFeeConfig { config } => {
+            execute_set_late_fee_config(deps, info, config)
         }
     }
 }
@@ -292,6 +285,48 @@ pub fn execute_update_protocol_version(
         .add_attribute("action", "update_protocol_version")
         .add_attribute("major", major.to_string())
         .add_attribute("minor", minor.to_string()))
+}
+
+/// Configure the late-fee penalty model (admin only).
+///
+/// Sets the active [`LateFeeConfig`] — either a flat amount per missed
+/// installment or an APR-based surcharge applied during delinquency.
+/// Pass `None` to clear the config (disables late fees).
+pub fn execute_set_late_fee_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    config: Option<LateFeeConfig>,
+) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    if info.sender != cfg.owner {
+        return Err(ContractError::Unauthorized);
+    }
+
+    if let Some(ref c) = config {
+        match c {
+            LateFeeConfig::Flat(flat) => {
+                if flat.amount < 0 {
+                    return Err(ContractError::LateFeeConfigInvalid);
+                }
+            }
+            LateFeeConfig::AprBased(apr) => {
+                if apr.surcharge_bps > 10_000 {
+                    return Err(ContractError::LateFeeConfigInvalid);
+                }
+            }
+        }
+    }
+
+    let has_config = config.is_some();
+    if let Some(ref c) = config {
+        LATE_FEE_CONFIG.save(deps.storage, c)?;
+    } else {
+        LATE_FEE_CONFIG.remove(deps.storage);
+    }
+
+    Ok(Response::default()
+        .add_attribute("action", "set_late_fee_config")
+        .add_attribute("has_config", has_config.to_string()))
 }
 
 /// Configure the multi-oracle quorum parameters (admin only).
@@ -504,18 +539,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             };
             to_json_binary(&resp)
         }
-        QueryMsg::GetBorrowerRateCeiling { borrower } => {
-            let borrower_addr = deps.api.addr_validate(&borrower)?;
-            let default_bps = DEFAULT_RATE_CEILING_BPS.may_load(deps.storage)?;
-            let override_bps = BORROWER_RATE_CEILING_BPS.may_load(deps.storage, borrower_addr)?;
-            // Effective ceiling: override wins, else default, else None.
-            let effective_ceiling_bps = override_bps.or(default_bps);
-            let resp = crate::msg::BorrowerRateCeilingResponse {
-                borrower,
-                effective_ceiling_bps,
-                override_bps,
-                default_bps,
-            };
+        QueryMsg::GetLateFeeConfig {} => {
+            let config = LATE_FEE_CONFIG
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::LateFeeConfigResponse { config };
             to_json_binary(&resp)
         }
     }
@@ -527,337 +555,204 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 }
 
 #[cfg(test)]
-mod rate_ceiling_tests {
+mod tests {
     use super::*;
-    use crate::limits::MAX_RATE_BPS;
-    use crate::msg::BorrowerRateCeilingResponse;
-    use cosmwasm_std::from_json;
-    use cosmwasm_std::testing::{
-        message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
-    };
-    use cosmwasm_std::{Addr, OwnedDeps};
+    use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+    use crate::penalties::{AprFeeConfig, FlatFeeConfig, LateFeeConfig};
+    use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
+    use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage};
+    use cosmwasm_std::{from_json, Addr, OwnedDeps};
 
-    /// Instantiate the contract with a known owner and return that owner.
-    fn setup(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
-        let owner = deps.api.addr_make("owner");
-        let info = message_info(&owner, &[]);
-        let msg = InstantiateMsg {
-            owner: owner.to_string(),
-        };
-        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-        owner
+    fn creator(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
+        deps.api.addr_make("creator")
     }
 
-    fn exec(
+    fn non_admin(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
+        deps.api.addr_make("non_admin")
+    }
+
+    fn setup(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>) {
+        let env = mock_env();
+        let info = message_info(&creator(deps), &[]);
+        let msg = InstantiateMsg {
+            owner: creator(deps).to_string(),
+        };
+        instantiate(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn query_late_fee_config(
+        deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
+    ) -> Option<LateFeeConfig> {
+        let env = mock_env();
+        let msg = QueryMsg::GetLateFeeConfig {};
+        let raw = query(deps.as_ref(), env, msg).unwrap();
+        let resp: crate::msg::LateFeeConfigResponse = from_json(&raw).unwrap();
+        resp.config
+    }
+
+    fn set_late_fee_config(
         deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
         sender: &Addr,
-        msg: ExecuteMsg,
+        config: Option<LateFeeConfig>,
     ) -> Result<Response, ContractError> {
+        let env = mock_env();
         let info = message_info(sender, &[]);
-        execute(deps.as_mut(), mock_env(), info, msg)
+        let msg = ExecuteMsg::SetLateFeeConfig { config };
+        execute(deps.as_mut(), env, info, msg)
     }
 
-    fn query_ceiling(
-        deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-        borrower: &str,
-    ) -> BorrowerRateCeilingResponse {
-        let bin = query(
-            deps.as_ref(),
-            mock_env(),
-            QueryMsg::GetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-            },
-        )
-        .unwrap();
-        from_json(bin).unwrap()
-    }
+    mod set_late_fee_config {
+        use super::*;
 
-    // ── set_default_rate_ceiling ────────────────────────────────────────────
+        #[test]
+        fn admin_can_set_flat_config() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    #[test]
-    fn owner_sets_default_ceiling() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: 1_500,
-            },
-        )
-        .unwrap();
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(config));
+        }
 
-        assert_eq!(
-            DEFAULT_RATE_CEILING_BPS
-                .load(deps.as_ref().storage)
-                .unwrap(),
-            1_500
-        );
-    }
+        #[test]
+        fn admin_can_set_apr_config() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    #[test]
-    fn non_owner_cannot_set_default_ceiling() {
-        let mut deps = mock_dependencies();
-        let _owner = setup(&mut deps);
-        let stranger = deps.api.addr_make("stranger");
+            let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 });
+            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
-        let err = exec(
-            &mut deps,
-            &stranger,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: 1_500,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::Unauthorized);
-    }
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(config));
+        }
 
-    #[test]
-    fn default_ceiling_above_max_is_rejected() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
+        #[test]
+        fn admin_can_clear_config() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-        let err = exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: MAX_RATE_BPS + 1,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::InvalidAmount);
-    }
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 50 });
+            set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
+            assert!(query_late_fee_config(&deps).is_some());
 
-    // ── set_borrower_rate_ceiling ───────────────────────────────────────────
+            set_late_fee_config(&mut deps, &admin, None).unwrap();
+            assert!(query_late_fee_config(&deps).is_none());
+        }
 
-    #[test]
-    fn owner_sets_borrower_override() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+        #[test]
+        fn non_admin_cannot_set_config() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let unauth = non_admin(&deps);
 
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: 800,
-            },
-        )
-        .unwrap();
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let err = set_late_fee_config(&mut deps, &unauth, Some(config)).unwrap_err();
+            assert_eq!(err, ContractError::Unauthorized);
+        }
 
-        let stored = BORROWER_RATE_CEILING_BPS
-            .load(deps.as_ref().storage, borrower)
-            .unwrap();
-        assert_eq!(stored, 800);
-    }
+        #[test]
+        fn negative_flat_amount_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    #[test]
-    fn non_owner_cannot_set_borrower_override() {
-        let mut deps = mock_dependencies();
-        let _owner = setup(&mut deps);
-        let stranger = deps.api.addr_make("stranger");
-        let borrower = deps.api.addr_make("borrower");
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: -1 });
+            let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
+            assert_eq!(err, ContractError::LateFeeConfigInvalid);
+        }
 
-        let err = exec(
-            &mut deps,
-            &stranger,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: 800,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::Unauthorized);
-    }
+        #[test]
+        fn apr_surcharge_exceeds_max_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    #[test]
-    fn borrower_override_above_max_is_rejected() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+            let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 10_001 });
+            let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
+            assert_eq!(err, ContractError::LateFeeConfigInvalid);
+        }
 
-        let err = exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: MAX_RATE_BPS + 1,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::InvalidAmount);
-    }
+        #[test]
+        fn max_apr_surcharge_accepted() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    // ── clear_borrower_rate_ceiling ─────────────────────────────────────────
+            let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 10_000 });
+            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
-    #[test]
-    fn owner_clears_borrower_override() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(config));
+        }
 
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: 800,
-            },
-        )
-        .unwrap();
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::ClearBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-            },
-        )
-        .unwrap();
+        #[test]
+        fn clearing_config_when_already_clear_is_noop() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-        assert!(BORROWER_RATE_CEILING_BPS
-            .may_load(deps.as_ref().storage, borrower)
-            .unwrap()
-            .is_none());
-    }
+            assert!(query_late_fee_config(&deps).is_none());
+            set_late_fee_config(&mut deps, &admin, None).unwrap();
+            assert!(query_late_fee_config(&deps).is_none());
+        }
 
-    #[test]
-    fn clearing_absent_override_is_ok() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+        #[test]
+        fn set_response_has_correct_attributes() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-        // No override set; clearing should still succeed as a no-op.
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::ClearBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-            },
-        )
-        .unwrap();
-    }
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 200 });
+            let resp = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
+            assert_eq!(resp.attributes[0].key, "action");
+            assert_eq!(resp.attributes[0].value, "set_late_fee_config");
+            assert_eq!(resp.attributes[1].key, "has_config");
+            assert_eq!(resp.attributes[1].value, "true");
 
-    #[test]
-    fn non_owner_cannot_clear_borrower_override() {
-        let mut deps = mock_dependencies();
-        let _owner = setup(&mut deps);
-        let stranger = deps.api.addr_make("stranger");
-        let borrower = deps.api.addr_make("borrower");
+            let resp = set_late_fee_config(&mut deps, &admin, None).unwrap();
+            assert_eq!(resp.attributes[1].value, "false");
+        }
 
-        let err = exec(
-            &mut deps,
-            &stranger,
-            ExecuteMsg::ClearBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-            },
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::Unauthorized);
-    }
+        #[test]
+        fn query_default_is_none() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
 
-    // ── query GetBorrowerRateCeiling ────────────────────────────────────────
+            assert!(query_late_fee_config(&deps).is_none());
+        }
 
-    #[test]
-    fn query_returns_none_when_unconfigured() {
-        let mut deps = mock_dependencies();
-        let _owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+        #[test]
+        fn flat_config_survives_set_overwrite() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-        let resp = query_ceiling(&deps, borrower.as_str());
-        assert_eq!(resp.effective_ceiling_bps, None);
-        assert_eq!(resp.override_bps, None);
-        assert_eq!(resp.default_bps, None);
-    }
+            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let apr = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 });
 
-    #[test]
-    fn query_falls_back_to_default() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+            set_late_fee_config(&mut deps, &admin, Some(flat)).unwrap();
+            set_late_fee_config(&mut deps, &admin, Some(apr.clone())).unwrap();
 
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: 1_200,
-            },
-        )
-        .unwrap();
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(apr));
+        }
 
-        let resp = query_ceiling(&deps, borrower.as_str());
-        assert_eq!(resp.effective_ceiling_bps, Some(1_200));
-        assert_eq!(resp.override_bps, None);
-        assert_eq!(resp.default_bps, Some(1_200));
-    }
+        #[test]
+        fn zero_flat_amount_accepted() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
 
-    #[test]
-    fn query_override_takes_precedence_over_default() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 0 });
+            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: 1_200,
-            },
-        )
-        .unwrap();
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: 500,
-            },
-        )
-        .unwrap();
-
-        let resp = query_ceiling(&deps, borrower.as_str());
-        assert_eq!(resp.effective_ceiling_bps, Some(500));
-        assert_eq!(resp.override_bps, Some(500));
-        assert_eq!(resp.default_bps, Some(1_200));
-    }
-
-    #[test]
-    fn query_reflects_override_after_clear() {
-        let mut deps = mock_dependencies();
-        let owner = setup(&mut deps);
-        let borrower = deps.api.addr_make("borrower");
-
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetDefaultRateCeiling {
-                max_rate_bps: 1_200,
-            },
-        )
-        .unwrap();
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::SetBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-                max_rate_bps: 500,
-            },
-        )
-        .unwrap();
-        exec(
-            &mut deps,
-            &owner,
-            ExecuteMsg::ClearBorrowerRateCeiling {
-                borrower: borrower.to_string(),
-            },
-        )
-        .unwrap();
-
-        // After clearing, the borrower reverts to the default ceiling.
-        let resp = query_ceiling(&deps, borrower.as_str());
-        assert_eq!(resp.effective_ceiling_bps, Some(1_200));
-        assert_eq!(resp.override_bps, None);
-        assert_eq!(resp.default_bps, Some(1_200));
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(config));
+        }
     }
 }

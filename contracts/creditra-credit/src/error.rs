@@ -52,22 +52,14 @@ pub enum ContractError {
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
 
-    /// A proposed interest rate exceeds the borrower's configured rate ceiling.
-    ///
-    /// Raised by the per-borrower rate-ceiling enforcement in
-    /// [`crate::limits`] when the requested rate (in basis points) is greater
-    /// than the effective ceiling for that borrower.
-    #[error("RateCeilingExceeded")]
-    RateCeilingExceeded,
-
-    /// An arithmetic operation overflowed its integer type.
-    ///
-    /// Raised by overflow-safe math (e.g. interest accrual in
-    /// [`crate::accrual`]) when an intermediate product would exceed
-    /// `Uint128::MAX`, so the contract reverts deterministically instead of
-    /// wrapping or panicking.
+    /// Arithmetic overflow occurred.
     #[error("Overflow")]
     Overflow,
+
+    /// Late-fee configuration is invalid (e.g., negative flat amount or
+    /// surcharge > 10_000 bps).
+    #[error("LateFeeConfigInvalid")]
+    LateFeeConfigInvalid,
 }
 
 #[cfg(test)]
@@ -148,5 +140,21 @@ mod tests {
         let insufficient_err = ContractError::CollateralInsufficient;
         assert_ne!(balance_err, insufficient_err);
         assert_ne!(balance_err.to_string(), insufficient_err.to_string());
+    }
+
+    #[test]
+    fn overflow_display_and_equality() {
+        let err = ContractError::Overflow;
+        assert_eq!(err.to_string(), "Overflow");
+        assert_eq!(err, ContractError::Overflow);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn late_fee_config_invalid_display_and_equality() {
+        let err = ContractError::LateFeeConfigInvalid;
+        assert_eq!(err.to_string(), "LateFeeConfigInvalid");
+        assert_eq!(err, ContractError::LateFeeConfigInvalid);
+        assert_ne!(err, ContractError::Overflow);
     }
 }
