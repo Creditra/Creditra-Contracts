@@ -377,37 +377,57 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
 }
 
 /// Return the configured per-borrower exposure cap, if set.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
+    let key = DataKey::BorrowerExposureCap(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set the per-borrower exposure cap. Passing `0` removes the cap.
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128>) {
+    let key = DataKey::BorrowerExposureCap(borrower.clone());
     if let Some(cap) = cap {
         env.storage()
             .persistent()
-            .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
+            .set(&key, &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::BorrowerExposureCap(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Return the stable id for a borrower, if present.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_credit_line_id(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineIdByBorrower(borrower.clone()))
+    let key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Return the borrower for a stable id, if present.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_by_credit_line_id(env: &Env, id: u32) -> Option<Address> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineBorrowerById(id))
+    let key = DataKey::CreditLineBorrowerById(id);
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Ensure a borrower has a stable enumeration id and return it.
@@ -863,6 +883,9 @@ pub fn clear_reentrancy_guard(env: &Env) {
 }
 
 /// Set a per-borrower interest rate floor (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<u32>) {
     if let Some(floor) = floor_bps {
         assert!(
@@ -870,25 +893,35 @@ pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<
             "floor exceeds max rate"
         );
     }
+    let key = DataKey::RateFloorBps(borrower.clone());
     if let Some(floor) = floor_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::RateFloorBps(borrower.clone()), &floor);
+            .set(&key, &floor);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::RateFloorBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower interest rate floor, if set.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RateFloorBps(borrower.clone()))
+    let key = DataKey::RateFloorBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set a per-borrower interest rate ceiling (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Option<u32>) {
     if let Some(ceiling) = ceiling_bps {
         assert!(
@@ -896,69 +929,96 @@ pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Opt
             "ceiling exceeds max rate"
         );
     }
+    let key = DataKey::RateCeilingBps(borrower.clone());
     if let Some(ceiling) = ceiling_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::RateCeilingBps(borrower.clone()), &ceiling);
+            .set(&key, &ceiling);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::RateCeilingBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower interest rate ceiling, if set.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_rate_ceiling(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RateCeilingBps(borrower.clone()))
+    let key = DataKey::RateCeilingBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set a per-borrower max utilization ratio cap in basis points (admin only).
 /// Pass `None` to remove the cap.
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
     if let Some(cap) = cap_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::UtilizationCapBps(borrower.clone()), &cap);
+            .set(&key, &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::UtilizationCapBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower max utilization ratio cap, if set.
+///
+/// Bumps the persistent TTL of the entry so an active borrower's utilization
+/// cap is not silently archived by the network.
 pub fn get_utilization_cap_bps(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::UtilizationCapBps(borrower.clone()))
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Return the per-borrower maximum exposure cap, if set.
 ///
 /// When `None`, no per-borrower exposure cap is enforced for this borrower.
 /// Configured via `set_max_borrower_exposure`.
+///
+/// Bumps the persistent TTL of the entry so an active borrower's exposure
+/// cap is not silently archived by the network.
 pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
+    let key = DataKey::MaxBorrowerExposure(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set or remove the per-borrower maximum exposure cap (admin only, enforced by caller).
 ///
 /// Passing `0` removes the cap entirely for this borrower.
 /// A non-zero value caps the borrower's total `utilized_amount` in `draw_credit`.
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
+    let key = DataKey::MaxBorrowerExposure(borrower.clone());
     if cap == 0 {
         env.storage()
             .persistent()
-            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
+            .remove(&key);
     } else {
         env.storage()
             .persistent()
-            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+            .set(&key, &cap);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Clear the installment schedule for a borrower.
@@ -969,24 +1029,33 @@ pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
 }
 
 /// Block a borrower from drawing (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
+    let key = DataKey::BlockedBorrower(borrower.clone());
     if blocked {
         env.storage()
             .persistent()
-            .set(&DataKey::BlockedBorrower(borrower.clone()), &true);
+            .set(&key, &true);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::BlockedBorrower(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.
+///
+/// Bumps the persistent TTL of the entry so a blocked borrower's flag is
+/// not silently archived by the network.
 pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .get(&DataKey::BlockedBorrower(borrower.clone()))
-        .unwrap_or(false)
+    let key = DataKey::BlockedBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Get the configured minimum credit limit, if set.
@@ -1072,17 +1141,26 @@ pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &Repaymen
 }
 
 /// Get the last draw timestamp for a borrower, if any.
+///
+/// Bumps the persistent TTL of the entry so an active borrower's last-draw
+/// timestamp is not silently archived by the network.
 pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::LastDrawTs(borrower.clone()))
+    let key = DataKey::LastDrawTs(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
-/// Set the last draw timestamp for a borrower.
+/// Set the last draw timestamp for a borrower and bump its persistent TTL.
+///
+/// The timestamp lives in its own persistent entry, so writing it must also
+/// extend that entry's TTL to keep it live for the lifetime of an active
+/// credit line.
 pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
+    let key = DataKey::LastDrawTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the configured draw min interval, if set.
@@ -1393,6 +1471,9 @@ pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) 
 /// - No freeze has been set (key is absent),
 /// - The freeze has expired (`now >= expiry_ts`).
 ///
+/// Bumps the persistent TTL of the entry so an active borrower's freeze
+/// state is not silently archived by the network.
+///
 /// # Time semantics
 /// Uses `env.ledger().timestamp()` so the check is deterministic per ledger.
 ///
@@ -1401,9 +1482,13 @@ pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) 
 /// - **Key**: [`DataKey::FrozenBorrower`]
 pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
     let now = env.ledger().timestamp();
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
     env.storage()
         .persistent()
-        .get(&DataKey::FrozenBorrower(borrower.clone()))
+        .get(&key)
         .is_some_and(|expiry: u64| now < expiry)
 }
 
