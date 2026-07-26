@@ -382,7 +382,7 @@ pub fn publish_borrower_blocked_event(env: &Env, borrower: &Address, blocked: bo
 /// will auto-expire.
 ///
 /// # Topic
-/// `("credit", "brw_frz")`
+/// `("br_freeze",)`
 pub fn publish_borrower_frozen_event(env: &Env, borrower: &Address, frozen_until: u64) {
     env.events().publish(
         (Symbol::new(env, "br_freeze"),),
