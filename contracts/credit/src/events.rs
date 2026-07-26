@@ -8,9 +8,6 @@ use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 use crate::types::CreditStatus;
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-
 /// Dedicated lifecycle event emitted when a credit line is opened.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -58,6 +55,9 @@ pub struct CreditLineReinstatedEvent {
     pub target_status: CreditStatus,
     pub timestamp: u64,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreditLineEvent {
     pub borrower: Address,
     pub status: CreditStatus,
@@ -159,7 +159,6 @@ pub struct DrawnEventV2 {
     pub timestamp: u64,
 }
 
-
 pub fn publish_credit_line_opened_event(env: &Env, event: CreditLineOpenedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("opened_v2")), event);
@@ -184,6 +183,7 @@ pub fn publish_credit_line_reinstated_event(env: &Env, event: CreditLineReinstat
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("rein_v2")), event);
 }
+
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
 }
@@ -303,7 +303,3 @@ pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("blk_chg")), event);
 }
-
-
-
-
