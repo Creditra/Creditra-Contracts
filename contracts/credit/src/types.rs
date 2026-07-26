@@ -661,6 +661,28 @@ pub struct BorrowCapabilities {
     pub can_self_suspend: bool,
 }
 
+/// Read-only capabilities bitmap for risk mutations on a borrower's line.
+///
+/// Returned by `risk_capabilities` (implemented in `contracts/risk/src/views.rs`)
+/// so off-chain scorers and admin tooling can inspect which risk operations
+/// are currently permitted without simulating full entrypoints.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskCapabilities {
+    /// Whether `update_risk_parameters` state pre-checks pass (credit line
+    /// exists, protocol not paused, borrow admin cooldown elapsed). Does not
+    /// validate proposed limit, rate, or score values.
+    pub can_update_risk_parameters: bool,
+    /// Whether an interest-rate change would pass the cadence guard in
+    /// [`RateChangeConfig`]. Rate delta caps are not evaluated because the
+    /// intended new rate is unknown. Limit-only updates may still succeed when
+    /// this field is `false`.
+    pub can_change_rate: bool,
+    /// Whether `commit_vrf_output` state pre-checks pass (protocol not paused,
+    /// no existing VRF commitment for this borrower).
+    pub can_commit_vrf: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single

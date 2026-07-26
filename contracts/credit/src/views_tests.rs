@@ -604,3 +604,108 @@ fn borrow_caps_unblock_restores_draws() {
     let caps = client.borrow_capabilities(&borrower);
     assert!(caps.can_draw, "unblocked → can draw again");
 }
+
+// ── Risk capabilities tests ───────────────────────────────────────────────────
+
+fn setup_risk_caps_test(env: &Env) -> (CreditClient<'_>, Address, Address) {
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 10_000);
+
+    let admin = Address::generate(env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(env, &contract_id);
+    client.init(&admin);
+
+    let borrower = Address::generate(env);
+    client.open_credit_line(&borrower, &10_000, &500, &50);
+
+    (client, admin, borrower)
+}
+
+#[test]
+fn risk_caps_no_line() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register_contract(None, Credit);
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let stranger = Address::generate(&env);
+    let caps = client.risk_capabilities(&stranger);
+    assert!(!caps.can_update_risk_parameters);
+    assert!(!caps.can_change_rate);
+    assert!(caps.can_commit_vrf, "VRF commit does not require a credit line");
+}
+
+#[test]
+fn risk_caps_active_line() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_risk_caps_test(&env);
+
+    let caps = client.risk_capabilities(&borrower);
+    assert!(caps.can_update_risk_parameters);
+    assert!(caps.can_change_rate);
+    assert!(caps.can_commit_vrf);
+}
+
+#[test]
+fn risk_caps_protocol_paused() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_risk_caps_test(&env);
+
+    client.set_protocol_paused(&true);
+
+    let caps = client.risk_capabilities(&borrower);
+    assert!(!caps.can_update_risk_parameters);
+    assert!(!caps.can_change_rate);
+    assert!(!caps.can_commit_vrf);
+}
+
+#[test]
+fn risk_caps_admin_cooldown_blocks_update() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_risk_caps_test(&env);
+
+    client.set_borrow_admin_cooldown(&300);
+    client.update_risk_parameters(&borrower, &11_000, &500, &50);
+
+    let caps = client.risk_capabilities(&borrower);
+    assert!(!caps.can_update_risk_parameters);
+    assert!(!caps.can_change_rate);
+
+    env.ledger().with_mut(|li| li.timestamp = 10_300);
+    let caps = client.risk_capabilities(&borrower);
+    assert!(caps.can_update_risk_parameters);
+    assert!(caps.can_change_rate);
+}
+
+#[test]
+fn risk_caps_rate_interval_blocks_rate_only() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_risk_caps_test(&env);
+
+    client.set_rate_change_limits(&100, &600);
+    client.update_risk_parameters(&borrower, &10_000, &600, &50);
+
+    let caps = client.risk_capabilities(&borrower);
+    assert!(caps.can_update_risk_parameters, "limit-only update still allowed");
+    assert!(!caps.can_change_rate, "cadence guard active");
+
+    env.ledger().with_mut(|li| li.timestamp = 10_600);
+    let caps = client.risk_capabilities(&borrower);
+    assert!(caps.can_change_rate);
+}
+
+#[test]
+fn risk_caps_existing_vrf_commitment() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup_risk_caps_test(&env);
+
+    let hash = soroban_sdk::BytesN::from_array(&env, &[7u8; 32]);
+    client.commit_vrf_output(&borrower, &hash);
+
+    let caps = client.risk_capabilities(&borrower);
+    assert!(!caps.can_commit_vrf);
+    assert!(caps.can_update_risk_parameters);
+}

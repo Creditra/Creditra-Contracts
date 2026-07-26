@@ -1,0 +1,24 @@
+[package]
+name = "creditra-risk"
+version = "0.1.0"
+edition = "2021"
+description = "Creditra risk v7 capabilities view tests"
+license = "MIT"
+keywords = ["soroban", "stellar", "risk", "credit", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "../../README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+creditra-credit = { path = "../credit" }
+
+[[test]]
+name = "capabilities"
+path = "tests/capabilities.rs"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+creditra-credit = { path = "../credit", features = [] }
