@@ -22,8 +22,8 @@ pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
 }
 
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
-    set_reentrancy_guard(&env);
     borrower.require_auth();
+    set_reentrancy_guard(&env);
 
     if amount <= 0 {
         clear_reentrancy_guard(&env);
@@ -45,7 +45,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 
     if credit_line.borrower != borrower {
         clear_reentrancy_guard(&env);
-        panic!("Borrower mismatch for credit line");
+        env.panic_with_error(ContractError::BorrowerMismatch);
     }
 
     if let Some(status_error) = draw_status_error(credit_line.status) {
@@ -58,20 +58,21 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         .checked_add(amount)
         .unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
-            panic!("overflow");
+            env.panic_with_error(ContractError::MathOverflow);
         });
 
     if updated_utilized > credit_line.credit_limit {
         clear_reentrancy_guard(&env);
-        panic!("exceeds credit limit");
+        env.panic_with_error(ContractError::CreditLimitExceeded);
     }
 
     if let Some(token_address) = token_address {
         let token_client = token::Client::new(&env, &token_address);
         let reserve_balance = token_client.balance(&reserve_address);
+        
         if reserve_balance < amount {
             clear_reentrancy_guard(&env);
-            panic!("Insufficient liquidity reserve for requested draw amount");
+            env.panic_with_error(ContractError::InsufficientLiquidity);
         }
 
         token_client.transfer(&reserve_address, &borrower, &amount);
@@ -79,6 +80,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 
     credit_line.utilized_amount = updated_utilized;
     env.storage().persistent().set(&borrower, &credit_line);
+    
     // Bump TTL: every draw is an interaction that resets the expiry window.
     env.storage().persistent().extend_ttl(
         &borrower,
@@ -104,7 +106,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 /// helper to avoid duplicating financial logic.
 ///
 /// # Preconditions
-/// - `effective_repay` has already been transferred (borrower → reserve).
+/// - `effective_repay` has already been transferred (borrower -> reserve).
 /// - `interest_repaid` is the interest component of `effective_repay`.
 /// - `previous_utilized` is `credit_line.utilized_amount` **before** accrual.
 /// - `previous_status` is `credit_line.status` **before** any mutation.
@@ -168,8 +170,8 @@ pub(crate) fn repay_credit_internal(
 }
 
 pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
-    set_reentrancy_guard(&env);
     borrower.require_auth();
+    set_reentrancy_guard(&env);
 
     if amount <= 0 {
         clear_reentrancy_guard(&env);
@@ -211,13 +213,13 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient allowance");
+                env.panic_with_error(ContractError::InsufficientAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient balance");
+                env.panic_with_error(ContractError::InsufficientBalance);
             }
 
             token_client.transfer_from(
@@ -245,18 +247,11 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
     clear_reentrancy_guard(&env);
 }
 
-/// Atomic repay that also releases proportional collateral.
+/// Atomically repays a specified amount of the borrower's outstanding debt 
+/// and releases a proportional share of their deposited collateral.
 ///
-/// Repays `amount` of the borrower's outstanding debt and simultaneously
-/// returns a proportional share of their deposited collateral. The release
-/// formula is:
-///
-/// ```text
-/// released = collateral_balance * effective_repay / utilized_before
-/// ```
-///
-/// This preserves the collateral ratio exactly (verified by the linear
-/// `required = utilized * ratio / 10_000` constraint).
+/// The release formula preserves the collateral ratio exactly:
+/// `released = collateral_balance * effective_repay / utilized_before`
 ///
 /// # Full repay
 /// When `effective_repay == utilized_before`, all collateral is released
@@ -265,9 +260,14 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
 /// # Overpayment
 /// When `amount > utilized_amount`, `effective_repay` is capped at
 /// `utilized_amount`. All collateral is released.
+///
+/// # Arguments
+/// * `env` - The execution environment.
+/// * `borrower` - The address of the borrower making the repayment.
+/// * `amount` - The total amount being repaid.
 pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
-    set_reentrancy_guard(&env);
     borrower.require_auth();
+    set_reentrancy_guard(&env);
 
     if amount <= 0 {
         clear_reentrancy_guard(&env);
@@ -316,13 +316,13 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient allowance");
+                env.panic_with_error(ContractError::InsufficientAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient balance");
+                env.panic_with_error(ContractError::InsufficientBalance);
             }
 
             // Compute protocol fee on the total repayment amount.
@@ -385,4 +385,3 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
 
     clear_reentrancy_guard(&env);
 }
-
