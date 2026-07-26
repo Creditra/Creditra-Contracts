@@ -44,7 +44,7 @@
 use soroban_sdk::{contracttype, Address, BytesN};
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuctionMode {
     /// English auction: ascending price, highest bidder wins at end
     English,
@@ -53,7 +53,7 @@ pub enum AuctionMode {
 }
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuctionStatus {
     Open,
     Closed,
@@ -138,4 +138,11 @@ pub struct Bid {
     pub bidder: Address,
     pub amount: i128,
     pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolVersion {
+    pub major: u32,
+    pub minor: u32,
 }

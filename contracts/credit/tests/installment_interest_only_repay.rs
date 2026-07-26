@@ -57,8 +57,8 @@ const RATE_BPS: u32 = 1_000;
 
 struct Ctx {
     env: Env,
-    credit: credit::CreditClient<'static>,
-    token: token::StellarAssetClient<'static>,
+    credit: CreditClient<'static>,
+    token: token::Client<'static>,
     admin: Address,
     borrower: Address,
 }
@@ -85,32 +85,32 @@ fn setup() -> Ctx {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let token = token::StellarAssetClient::new(&env, &token_id);
-    token.mint(&admin, &10_000_000_i128);
-    token.mint(&borrower, &10_000_000_i128);
+    let sac = token::StellarAssetClient::new(&env, &token_id);
+    sac.mint(&admin, &10_000_000_i128);
+    sac.mint(&borrower, &10_000_000_i128);
 
     // Deploy and initialise the credit contract.
-    let credit_id = env.register(credit::Credit, ());
-    let credit = credit::CreditClient::new(&env, &credit_id);
+    let credit_id = env.register(Credit, ());
+    let credit = CreditClient::new(&env, &credit_id);
 
     credit.init(&admin);
     credit.set_liquidity_token(&token_id);
     credit.set_liquidity_source(&admin);
 
     // Allow the contract to pull from the liquidity source.
-    token.approve(&admin, &credit.address, &10_000_000_i128, &100_000_u32);
+    let token = token::Client::new(&env, &token_id);
+    token.approve(&admin, &credit_id, &10_000_000_i128, &100_000_u32);
 
     // Open a credit line and immediately draw.
-    credit.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS);
+    credit.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
     credit.draw_credit(&borrower, &DRAW_AMOUNT);
 
     // Configure a 6-period repayment schedule (first due at T0 + PERIOD).
     credit.set_repayment_schedule(
         &borrower,
         &AMOUNT_PER_PERIOD,
-        &(T0 + PERIOD), // first_due_ts
-        &PERIOD,        // period_secs
-        &6_u32,         // num_periods
+        &PERIOD,
+        &(T0 + PERIOD),
     );
 
     Ctx {

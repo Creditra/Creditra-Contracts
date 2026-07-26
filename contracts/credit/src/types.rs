@@ -144,6 +144,11 @@ pub enum CreditStatus {
 /// | 42   | `NoPendingTreasuryWithdrawal`  | No pending treasury withdrawal proposal exists |
 /// | 43   | `TreasuryTimelockActive`       | Treasury withdrawal timelock has not yet elapsed |
 /// | 44   | `TreasuryProposalExists`       | A treasury withdrawal proposal already exists |
+/// | 45   | `DrawReversalWindowExpired`     | Draw reversal window has expired |
+/// | 46   | `OriginalDrawNotFound`           | Original draw record not found for borrower |
+/// | 47   | `AttestationBatchNotFound`       | No attestation batch committed for borrower |
+/// | 48   | `CloseFactorAboveMax`            | Liquidation close factor exceeds protocol cap |
+/// | 49   | `CreditLineFrozen`               | Credit line draws are frozen by admin |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -236,7 +241,103 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
+    /// Draw reversal window has expired (admin must reverse within DRAW_REVERSAL_WINDOW_SECS).
+    DrawReversalWindowExpired = 45,
+    /// Original draw audit record not found for the specified (borrower, timestamp) pair.
+    OriginalDrawNotFound = 46,
+    /// No attestation batch has been committed for the specified borrower.
+    AttestationBatchNotFound = 47,
+    /// Liquidation close factor exceeds the protocol-level maximum.
+    CloseFactorAboveMax = 48,
+    /// Credit line draws are frozen by admin with a structured [`FreezeReason`].
+    CreditLineFrozen = 49,
 }
+
+/// Stable category codes for [`ContractError`] variants.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authorization failures (wrong caller, missing admin).
+    Auth = 1,
+    /// Credit-line lifecycle state violations.
+    Lifecycle = 2,
+    /// Numeric validation or arithmetic errors.
+    Numeric = 3,
+    /// Credit limit and per-transaction cap violations.
+    Limit = 4,
+    /// Liquidity, reserve, and treasury availability failures.
+    Liquidity = 5,
+    /// Risk-score, rate, pause, and cooldown violations.
+    Risk = 6,
+    /// Oracle price-feed circuit-breaker failures.
+    Oracle = 7,
+    /// Collateral ratio or balance violations.
+    Collateral = 8,
+    /// Borrower-blocked or draw-freeze state.
+    Block = 9,
+    /// Reentrancy guard triggered.
+    Reentrancy = 10,
+    /// Miscellaneous errors that do not fit a specific category.
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Return the stable category for this error variant.
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            Self::Unauthorized | Self::NotAdmin | Self::AdminNotInitialized => {
+                ContractErrorCategory::Auth
+            }
+            Self::CreditLineClosed
+            | Self::AlreadyInitialized
+            | Self::CreditLineSuspended
+            | Self::CreditLineDefaulted => ContractErrorCategory::Lifecycle,
+            Self::InvalidAmount
+            | Self::NegativeLimit
+            | Self::Overflow
+            | Self::TimestampRegression
+            | Self::LimitOutOfBounds => ContractErrorCategory::Numeric,
+            Self::OverLimit
+            | Self::UtilizationNotZero
+            | Self::LimitDecreaseRequiresRepayment
+            | Self::DrawExceedsMaxAmount
+            | Self::RepayExceedsMaxAmount => ContractErrorCategory::Limit,
+            Self::MissingLiquidityToken
+            | Self::MissingLiquiditySource
+            | Self::InsufficientLiquidityReserve
+            | Self::LiquidityTokenCallFailed
+            | Self::InsufficientRepaymentAllowance
+            | Self::InsufficientRepaymentBalance
+            | Self::TreasuryNotSet
+            | Self::ExposureCapExceeded
+            | Self::BountyNotSet
+            | Self::NoPendingTreasuryWithdrawal
+            | Self::TreasuryTimelockActive
+            | Self::TreasuryProposalExists => ContractErrorCategory::Liquidity,
+            Self::RateTooHigh | Self::ScoreTooHigh | Self::Paused | Self::DrawCooldownActive => {
+                ContractErrorCategory::Risk
+            }
+            Self::OraclePriceInvalid | Self::OraclePriceStale | Self::OraclePriceDeviation => {
+                ContractErrorCategory::Oracle
+            }
+            Self::CollateralRatioBelowMinimum | Self::InsufficientCollateralBalance => {
+                ContractErrorCategory::Collateral
+            }
+            Self::BorrowerBlocked | Self::DrawsFrozen | Self::BorrowerFrozen | Self::CreditLineFrozen => {
+                ContractErrorCategory::Block
+            }
+            Self::Reentrancy => ContractErrorCategory::Reentrancy,
+            Self::CreditLineNotFound
+            | Self::AdminAcceptTooEarly
+            | Self::DrawReversalWindowExpired
+            | Self::OriginalDrawNotFound
+            | Self::AttestationBatchNotFound
+            | Self::CloseFactorAboveMax => ContractErrorCategory::Misc,
+        }
+    }
+}
+
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -446,4 +547,71 @@ pub struct TreasuryWithdrawalProposal {
     pub proposed_at: u64,
     /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
     pub execute_after: u64,
+}
+
+/// Reason for protocol pause (escape-hatch audit trail).
+///
+/// Stored alongside the pause flag in instance storage when the admin invokes
+/// `set_protocol_paused`. Intended for governance transparency and off-chain
+/// monitoring — the reason is a human-readable symbol that indexers and
+/// dashboards can display to explain why the protocol is paused.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseReason {
+    /// Human-readable reason for pausing (e.g., "oracle-outage", "token-migration").
+    pub reason: soroban_sdk::Symbol,
+    /// Ledger timestamp when the pause was activated.
+    pub timestamp: u64,
+    /// Admin address that invoked the pause.
+    pub actor: soroban_sdk::Address,
+}
+
+/// Proof-of-reserve view for the protocol treasury.
+///
+/// Exposes the accumulated reserves held by the protocol in a single
+/// read-only call. Indexers and dashboards can use this to verify that
+/// the protocol's accounting balances are consistent.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees held in the contract (treasury share).
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees held in the contract.
+    pub bounty_balance: i128,
+}
+
+/// Structured taxonomy for credit-line and global draw freezes.
+///
+/// # Discriminant stability
+/// Discriminants are part of the contract ABI. New variants must be appended;
+/// existing values must never be reordered or renumbered.
+///
+/// # Usage
+/// - [`crate::freeze::freeze_draws`] records a global reason alongside the
+///   contract-wide draw kill-switch.
+/// - [`crate::freeze::freeze_credit_line`] records a per-borrower reason without
+///   mutating [`CreditStatus`], preserving lifecycle history for indexers.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreezeReason {
+    /// Scheduled reserve or treasury operations affecting draw liquidity.
+    LiquidityReserve = 0,
+    /// Regulatory or compliance-mandated draw pause.
+    Compliance = 1,
+    /// Active risk investigation or off-chain risk signal.
+    RiskInvestigation = 2,
+    /// Planned operational maintenance window.
+    OperationalMaintenance = 3,
+    /// Borrower-initiated voluntary draw pause.
+    BorrowerRequest = 4,
+}
+
+/// Global draw-freeze state stored under [`crate::storage::DataKey::DrawsFrozen`].
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrawsFreezeState {
+    /// Whether draws are currently frozen contract-wide.
+    pub frozen: bool,
+    /// Structured reason recorded when the freeze was last activated.
+    pub reason: FreezeReason,
 }

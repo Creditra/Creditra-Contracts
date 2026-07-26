@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env};
 
 fn setup() -> (Env, Address, Address, Address, Address, Address) {
@@ -26,16 +26,16 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
     (env, contract_id, token_address, borrower, reserve, treasury)
 }
 
-fn prepare_repay(
-    env: &Env,
-    contract_id: &Address,
-    token_address: &Address,
-    borrower: &Address,
+fn prepare_repay<'a>(
+    env: &'a Env,
+    contract_id: &'a Address,
+    token_address: &'a Address,
+    borrower: &'a Address,
     draw_amount: i128,
     repay_amount: i128,
     interest_rate_bps: u32,
     fee_bps: u32,
-) -> CreditClient {
+) -> CreditClient<'a> {
     let client = CreditClient::new(env, contract_id);
     client.open_credit_line(borrower, &draw_amount, &interest_rate_bps, &50_u32);
 

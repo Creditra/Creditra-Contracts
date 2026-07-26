@@ -209,13 +209,13 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient allowance");
+                env.panic_with_error(ContractError::InsufficientRepaymentAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                panic!("Insufficient balance");
+                env.panic_with_error(ContractError::InsufficientRepaymentBalance);
             }
 
             token_client.transfer_from(
@@ -366,4 +366,18 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     );
 
     clear_reentrancy_guard(&env);
+}
+
+/// Map a credit-line status to the draw-time error, if any.
+///
+/// Restricted is intentionally allowed to reach the numeric limit check in
+/// `draw_credit`; that keeps the status distinct from terminal states while
+/// still preventing fresh borrowing until the line is cured.
+pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
+    match status {
+        CreditStatus::Active | CreditStatus::Restricted => None,
+        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
+        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
+        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
+    }
 }

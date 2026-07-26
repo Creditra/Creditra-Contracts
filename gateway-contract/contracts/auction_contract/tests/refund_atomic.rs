@@ -28,7 +28,7 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent,
+    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent, DutchAuctionDecay,
 };
 use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
@@ -68,7 +68,7 @@ fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
         &0_u32,
         &None,
         &None,
-        &None,
+        &DutchAuctionDecay::None,
         &None,
     );
 }

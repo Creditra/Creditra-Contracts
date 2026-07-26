@@ -30,7 +30,7 @@
 use gateway_auction::{
     Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
 };
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env, Symbol};
 /// Entrypoints that can attempt an `AuctionStatus` transition.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,7 +176,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &None,
                 &None,
-                &None,
+                &DutchAuctionDecay::None,
                 &None,
             );
         }
@@ -190,7 +190,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &None,
+                &DutchAuctionDecay::None,
                 &None,
             );
             client.env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -215,10 +215,10 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
         &u64::MAX,
         &1_i128,
         &0_u32,
+        &None,
+        &None,
         &DutchAuctionDecay::None,
-       &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
+        &None,
     );
 
     match (mode, from) {

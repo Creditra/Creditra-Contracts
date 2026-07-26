@@ -24,13 +24,12 @@ mod test {
         })
     }
 
-    fn advance_ledger(env: &Env, contract_id: &Address) {
+    fn advance_ledger(env: &Env, contract_id: &Address, borrower: &Address) {
         env.as_contract(contract_id, || {
             env.storage().instance().extend_ttl(500_000, 500_000);
         });
-        // Advance sequence by enough to drop the remaining TTL below CREDIT_LINE_TTL_THRESHOLD.
-        // If current TTL is 432,000, advancing by 432,000 - 100 makes remaining TTL 100.
-        env.ledger().set_sequence_number(env.ledger().sequence() + 432_000 - 100);
+        let current_ttl = check_ttl(env, contract_id, borrower);
+        env.ledger().set_sequence_number(env.ledger().sequence() + current_ttl - 100);
     }
 
     #[test]
@@ -42,49 +41,49 @@ mod test {
         client.open_credit_line(&borrower, &1000, &300, &70);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
 
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
         
         // 2. get_credit_line
         client.get_credit_line(&borrower);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
         
         // 3. update_risk_parameters
         client.update_risk_parameters(&borrower, &1000, &350, &75);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 4. draw_credit
         client.draw_credit(&borrower, &100);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 5. repay_credit
         client.repay_credit(&borrower, &50);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
         
         // 6. suspend_credit_line
         client.suspend_credit_line(&borrower);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 7. default_credit_line (susp -> default)
         client.default_credit_line(&borrower);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 8. reinstate_credit_line
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
         assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
         
-        advance_ledger(&env, &contract_id);
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 9. close_credit_line (by admin)
         client.close_credit_line(&borrower, &admin);

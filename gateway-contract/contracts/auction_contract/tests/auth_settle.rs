@@ -50,10 +50,10 @@ fn setup_auction() -> (Env, Address, Symbol, Address, Address, i128) {
         &u64::MAX,
         &50_i128,
         &0_u32,
+        &None,
+        &None,
         &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
-        &DutchAuctionDecay::None,
+        &None,
     );
     client.place_bid(&auction_id, &bidder, &420_i128);
     client.close_auction(&auction_id);

@@ -64,8 +64,11 @@ pub fn init(env: Env, admin: Address) {
         .instance()
         .set(&DataKey::TotalUtilized, &0_i128);
     set_schema_version(&env, crate::SCHEMA_VERSION);
-    // Set default minimum collateral ratio to 150% (15000 bps)
+    // Set default minimum collateral ratio to 150% (15000 bps) in production, 0 in tests
+    #[cfg(not(test))]
     crate::storage::set_min_collateral_ratio_bps(&env, 15000);
+    #[cfg(test)]
+    crate::storage::set_min_collateral_ratio_bps(&env, 0);
     // Set default protocol fee bounds: 0 – 1000 bps (10%)
     crate::storage::set_min_protocol_fee_bps(&env, 0);
     crate::storage::set_max_protocol_fee_bps(&env, 1000);

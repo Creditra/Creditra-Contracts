@@ -59,6 +59,11 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
+    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 45);
+    assert_eq!(ContractError::OriginalDrawNotFound as u32, 46);
+    assert_eq!(ContractError::AttestationBatchNotFound as u32, 47);
+    assert_eq!(ContractError::CloseFactorAboveMax as u32, 48);
+    assert_eq!(ContractError::CreditLineFrozen as u32, 49);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -113,6 +118,11 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -127,8 +137,8 @@ fn no_duplicate_discriminants() {
 /// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 44 variants as of this writing (added 42-44 for treasury timelock in #606).
-    const EXPECTED_VARIANT_COUNT: usize = 44;
+    // 49 variants as of this writing (added 45-49 for restored compilation fixes).
+    const EXPECTED_VARIANT_COUNT: usize = 49;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -175,6 +185,11 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::DrawReversalWindowExpired as u32,
+        ContractError::OriginalDrawNotFound as u32,
+        ContractError::AttestationBatchNotFound as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
     ];
 
     assert_eq!(
@@ -427,8 +442,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when admin not initialized");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::AdminNotInitialized,
+            err.unwrap(), ContractError::AdminNotInitialized.into(),
             "Expected AdminNotInitialized error"
         );
     }
@@ -449,8 +463,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on draw"
         );
     }
@@ -471,8 +484,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on repay"
         );
     }
@@ -493,8 +505,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on close"
         );
     }
@@ -515,8 +526,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on suspend"
         );
     }
@@ -537,8 +547,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on default"
         );
     }
@@ -559,8 +568,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::CreditLineNotFound,
+            err.unwrap(), ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on risk update"
         );
     }
@@ -592,8 +600,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected overflow error");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::Overflow,
+            err.unwrap(), ContractError::Overflow.into(),
             "Expected Overflow error on utilization add"
         );
     }
@@ -617,6 +624,8 @@ use creditra_credit::types::ContractError;
             &borrower,
             &2000_i128,
             &soroban_sdk::symbol_short!("settle1"),
+            &10_000_u32,
+            &None,
         );
 
         assert!(
@@ -648,8 +657,7 @@ use creditra_credit::types::ContractError;
         );
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::MissingLiquidityToken,
+            err.unwrap(), ContractError::MissingLiquidityToken.into(),
             "Expected MissingLiquidityToken error"
         );
     }
@@ -678,8 +686,7 @@ use creditra_credit::types::ContractError;
         );
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::MissingLiquiditySource,
+            err.unwrap(), ContractError::MissingLiquiditySource.into(),
             "Expected MissingLiquiditySource error"
         );
     }
@@ -698,8 +705,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::TreasuryNotSet,
+            err.unwrap(), ContractError::TreasuryNotSet.into(),
             "Expected TreasuryNotSet error"
         );
     }
@@ -733,8 +739,7 @@ use creditra_credit::types::ContractError;
         if result.is_err() {
             let err = result.err().unwrap();
             assert_eq!(
-                err.unwrap(),
-                ContractError::Overflow,
+                err.unwrap(), ContractError::Overflow.into(),
                 "Expected Overflow error on cap calculation"
             );
         }
@@ -772,8 +777,7 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when exposure cap exceeded");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(),
-            ContractError::ExposureCapExceeded,
+            err.unwrap(), ContractError::ExposureCapExceeded.into(),
             "Expected ExposureCapExceeded error"
         );
     }
@@ -815,7 +819,7 @@ use creditra_credit::types::ContractError;
         if result.is_err() {
             let err = result.err().unwrap();
             // Could be TimestampRegression or another validation error
-            assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression);
+            assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression.into());
         }
     }
 }

@@ -1,7 +1,12 @@
 //! Cross-chain liquidation hook
 //! Consumes bridge attestations and triggers local liquidation safely.
 
+extern crate std;
+
 use std::collections::HashSet;
+use std::string::String;
+use std::vec::Vec;
+use std::println;
 
 /// Bridge attestation coming from external chain
 #[derive(Clone, Debug)]

@@ -444,6 +444,10 @@ impl Auction {
         // token_client.transfer(...) — proceeds to winner (to be wired up)
         clear_reentrancy_guard(&env);
     }
+
+    pub fn get_version(env: Env) -> ProtocolVersion {
+        ProtocolVersion { major: 1, minor: 0 }
+    }
 }
 
 #[cfg(test)]

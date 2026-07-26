@@ -192,11 +192,29 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
+    /// Protocol-level close factor for partial liquidation.
+    CloseFactorBps,
+    /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
+    /// Stored when admin invokes pause with a reason; cleared on unpause.
+    PauseReason,
+    /// Per-borrower aggregated attestation batch committed as a Merkle root.
+    /// Stores an [`crate::attestation::AttestationBatch`] whose `merkle_root`
+    /// is the SHA-256 root of all leaf hashes in the batch.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
+
+/// Minimum TTL threshold for credit-line persistent entries.
+/// If the remaining TTL falls below this ledger count we extend it.
+/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
+
+/// Target TTL to extend credit-line persistent entries to on every interaction.
+/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 // ── Persistent storage TTL policy ────────────────────────────────────────────
 //
@@ -239,9 +257,11 @@ where
         .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
-/// Bump TTL for the borrower's `CreditLineData` entry (keyed by borrower address).
 pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
-    bump_persistent_ttl(env, borrower);
+    bump_instance_ttl(env);
+    env.storage()
+        .persistent()
+        .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
 }
 
 /// Return the credit line for `borrower` and bump TTL if present.
