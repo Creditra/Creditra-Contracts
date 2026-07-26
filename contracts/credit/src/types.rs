@@ -637,7 +637,12 @@ pub struct CreditLineSnapshot {
     /// `utilized_amount == 0`.
     pub health_factor_bps: u32,
     /// The borrower's installment repayment schedule, if configured.
-    pub repayment_schedule: Option<RepaymentSchedule>,
+    /// Empty when no schedule is set; exactly one element when a schedule
+    /// is configured. Represented as a `Vec` rather than `Option<T>`
+    /// because the Soroban SDK's struct-field XDR codegen does not support
+    /// `Option<CustomStruct>` fields (`Option<T>` requires `T: Into<ScVal>`,
+    /// which `#[contracttype]`-derived UDTs only implement fallibly).
+    pub repayment_schedule: soroban_sdk::Vec<RepaymentSchedule>,
     /// `true` when the borrower is past the delinquency grace window.
     pub is_delinquent: bool,
 }
@@ -655,12 +660,101 @@ pub struct CreditLineSnapshot {
 /// cooldown, exposure caps) are NOT evaluated because this view does
 /// not know the intended draw amount.
 #[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DrawsFreezeState {
-    /// Whether draws are currently frozen contract-wide.
-    pub frozen: bool,
-    /// Structured reason recorded when the freeze was last activated.
-    pub reason: FreezeReason,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowCapabilities {
+    /// Whether the borrower can draw credit. False when the credit line
+    /// does not exist, the protocol is paused, draws are frozen, the
+    /// borrower is blocked/frozen, or the credit-line status is not
+    /// draw-allowed (Active/Restricted).
+    pub can_draw: bool,
+    /// Whether the borrower can repay credit. False when the credit line
+    /// does not exist or is permanently Closed.
+    pub can_repay: bool,
+    /// Whether the borrower can self-suspend their credit line. True
+    /// only when the credit line exists and is currently Active.
+    pub can_self_suspend: bool,
+}
+
+/// Read-only capabilities bitmap for a credit line's lifecycle transitions (v7).
+///
+/// Returned by the `lifecycle_capabilities` view to let off-chain clients and
+/// on-chain integrators inspect which lifecycle transitions are currently
+/// permitted for a borrower's credit line, without simulating the full
+/// entrypoint logic (state lookup + status checks + pause guard).
+///
+/// Every field is derived purely from the credit line's current
+/// [`CreditStatus`] and the protocol pause flag — no token CPIs, no auth
+/// checks, no mutation. See [`crate::lifecycle`] for the authoritative
+/// transition rules each field mirrors.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LifecycleCapabilities {
+    /// Whether an admin can suspend this line via `suspend_credit_line`.
+    /// True only when the line exists, the protocol is not paused, and the
+    /// status is [`CreditStatus::Active`].
+    pub can_suspend: bool,
+    /// Whether the borrower can self-suspend via `self_suspend_credit_line`.
+    /// Same precondition as `can_suspend` (only `Active` self-suspends).
+    pub can_self_suspend: bool,
+    /// Whether an admin can force-close this line via `close_credit_line`
+    /// unconditionally (any non-`Closed` status). False when the line does
+    /// not exist, the protocol is paused, or the status is already `Closed`.
+    pub can_close_admin: bool,
+    /// Whether the borrower can self-close via `close_credit_line`. Requires
+    /// the same preconditions as `can_close_admin` **plus**
+    /// `utilized_amount == 0`.
+    pub can_close_borrower: bool,
+    /// Whether an admin can move this line to `Defaulted` via
+    /// `default_credit_line`. True when the line exists, the protocol is not
+    /// paused, and the status is `Active`, `Restricted`, or `Suspended`.
+    pub can_default: bool,
+    /// Whether an admin can cure this line via `reinstate_credit_line`. True
+    /// only when the line exists, the protocol is not paused, and the status
+    /// is `Defaulted`.
+    pub can_reinstate: bool,
+}
+
+/// Proof-of-reserve view for the protocol treasury.
+///
+/// Exposes the accumulated reserves held by the protocol in a single
+/// read-only call. Indexers and dashboards can use this to verify that
+/// the protocol's accounting balances are consistent.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofOfReserve {
+    /// Accumulated protocol fees held in the contract (treasury share).
+    pub treasury_balance: i128,
+    /// Accumulated bounty pool fees held in the contract.
+    pub bounty_balance: i128,
+}
+
+
+/// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
+///
+/// Exactly one proposal can exist at a time. It must be executed (or superseded
+/// only after a successful `execute_treasury_withdrawal` clears it) no sooner
+/// than 24 hours after it was proposed.
+///
+/// # Timelock
+/// `execute_after` is set to `proposal_ts + 86_400` (24 hours in seconds) at
+/// proposal time. The execution entrypoint rejects calls when
+/// `env.ledger().timestamp() < execute_after`.
+///
+/// # Storage
+/// Stored in instance storage under [`crate::storage::DataKey::PendingTreasuryWithdrawal`].
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalProposal {
+    /// The treasury address that will receive the funds.
+    pub recipient: Address,
+    /// Amount to transfer (snapshot of `TreasuryBalance` at proposal time).
+    pub amount: i128,
+    /// Address of the admin who submitted the proposal.
+    pub proposer: Address,
+    /// Ledger timestamp at which the proposal was created.
+    pub proposed_at: u64,
+    /// Earliest ledger timestamp at which execution is permitted (`proposed_at + 86_400`).
+    pub execute_after: u64,
 }
 
 /// Reason for protocol pause (escape-hatch audit trail).

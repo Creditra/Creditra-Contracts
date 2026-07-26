@@ -684,6 +684,7 @@ mod integration {
         let borrower = Address::generate(&env);
 
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
+        client.set_min_collateral_ratio_bps(&0);
         client.draw_credit(&borrower, &500_i128);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -726,7 +727,8 @@ mod integration {
         let client = CreditClient::new(&env, &contract_id);
         let borrower = Address::generate(&env);
 
-        client.pause_protocol(&admin);
+        let _ = &admin;
+        client.set_protocol_paused(&true);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);

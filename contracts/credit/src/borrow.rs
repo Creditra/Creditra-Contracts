@@ -1,18 +1,17 @@
-// SPDX-License-Identifier: MIT
-//! Borrow module: draw-time status gating.
-//!
-//! # Status semantics
-//!
-//! - [`CreditStatus::Active`]: full borrowing capability.
-//! - [`CreditStatus::Restricted`]: cure state. Repayments are allowed and
-//!   draws still flow through the numeric limit check, so they cannot create
-//!   new net borrowing while the line remains over its reduced limit.
-//! - [`CreditStatus::Suspended`]: draws blocked, repayments allowed.
-//! - [`CreditStatus::Defaulted`]: draws blocked, repayments allowed.
-//! - [`CreditStatus::Closed`]: draws blocked, repayments blocked.
-//!
-//! See [`docs/state-machine.md`](../../../docs/state-machine.md) for the
-//! authoritative transition diagram.
+use crate::collateral;
+use crate::lifecycle;
+use crate::events::{
+    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent,
+};
+use crate::math_utils::{apply_bps, mul_div, Rounding};
+use crate::storage::{
+    clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
+    persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
+};
+use crate::types::{ContractError, CreditLineData, CreditStatus};
+use soroban_sdk::{token, Address, Env};
 
 use crate::types::{ContractError, CreditStatus};
 

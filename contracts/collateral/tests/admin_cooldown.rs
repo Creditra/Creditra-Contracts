@@ -10,7 +10,7 @@ use soroban_sdk::{Address, Env, Vec};
 const START_TS: u64 = 5_000;
 const COOLDOWN_SECONDS: u64 = 120;
 
-fn setup() -> (Env, CreditClient, Address) {
+fn setup() -> (Env, CreditClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().with_mut(|li| li.timestamp = START_TS);
@@ -46,7 +46,7 @@ fn assert_admin_collateral_cooldown_active(result: std::thread::Result<()>, cont
 #[test]
 fn admin_collateral_cooldown_zero_disables_guard() {
     let (env, client, _admin) = setup();
-    client.set_admin_collateral_cooldown_seconds(&0_u64);
+    client.set_col_admin_cooldown_secs(&0_u64);
 
     client.set_min_collateral_ratio_bps(&12_000_u32);
     set_timestamp(&env, START_TS);
@@ -60,7 +60,7 @@ fn admin_collateral_cooldown_rejects_before_boundary_and_allows_at_boundary() {
     let (env, client, _admin) = setup();
     let asset = Address::generate(&env);
 
-    client.set_admin_collateral_cooldown_seconds(&COOLDOWN_SECONDS);
+    client.set_col_admin_cooldown_secs(&COOLDOWN_SECONDS);
     client.set_min_collateral_ratio_bps(&14_000_u32);
 
     set_timestamp(&env, START_TS + COOLDOWN_SECONDS - 1);
@@ -74,7 +74,7 @@ fn admin_collateral_cooldown_rejects_before_boundary_and_allows_at_boundary() {
     set_timestamp(&env, START_TS + COOLDOWN_SECONDS);
     client.set_collateral_risk_weight(&asset, &5_000_u32);
     assert_eq!(
-        client.get_last_admin_collateral_critical_action_ts(),
+        client.get_last_col_admin_action_ts(),
         Some(START_TS + COOLDOWN_SECONDS)
     );
 }
@@ -83,11 +83,11 @@ fn admin_collateral_cooldown_rejects_before_boundary_and_allows_at_boundary() {
 fn configuring_cooldown_does_not_consume_cooldown_window() {
     let (env, client, _admin) = setup();
 
-    client.set_admin_collateral_cooldown_seconds(&COOLDOWN_SECONDS);
+    client.set_col_admin_cooldown_secs(&COOLDOWN_SECONDS);
     client.set_min_collateral_ratio_bps(&15_000_u32);
 
     set_timestamp(&env, START_TS + 1);
-    client.set_admin_collateral_cooldown_seconds(&COOLDOWN_SECONDS);
+    client.set_col_admin_cooldown_secs(&COOLDOWN_SECONDS);
 
     assert_admin_collateral_cooldown_active(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -104,7 +104,7 @@ fn allowlist_update_shares_single_cooldown_clock() {
     let mut tokens = Vec::new(&env);
     tokens.push_back(token.clone());
 
-    client.set_admin_collateral_cooldown_seconds(&COOLDOWN_SECONDS);
+    client.set_col_admin_cooldown_secs(&COOLDOWN_SECONDS);
     client.set_collateral_token_allowlist(&tokens);
 
     set_timestamp(&env, START_TS + 30);

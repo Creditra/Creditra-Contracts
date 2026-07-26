@@ -21,7 +21,10 @@ pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<CreditLin
     let line = get_credit_line(&env, &borrower)?;
     let collateral_balance = crate::collateral::get_collateral(&env, &borrower);
     let health_factor_bps = crate::query::get_health_factor(env.clone(), borrower.clone());
-    let repayment_schedule = crate::query::get_repayment_schedule(env.clone(), borrower.clone());
+    let mut repayment_schedule = Vec::new(&env);
+    if let Some(schedule) = crate::query::get_repayment_schedule(env.clone(), borrower.clone()) {
+        repayment_schedule.push_back(schedule);
+    }
     let is_delinquent = crate::query::is_delinquent(env.clone(), borrower);
 
     Some(CreditLineSnapshot {

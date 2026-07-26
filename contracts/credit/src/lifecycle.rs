@@ -305,8 +305,37 @@ pub fn open_credit_line(
 /// Emits a `("credit", "suspend")` [`CreditLineEvent`].
 pub fn suspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
-    suspend_credit_line_internal(&env, borrower);
+    // Admin auth is enforced by the `lib.rs` `suspend_credit_line` entrypoint
+    // wrapper before this is called; not re-checked here to avoid a double
+    // `require_auth` on the same address within one invocation (Soroban's
+    // auth-mock treats a second `require_auth` for an already-authorized
+    // address in the same frame as an error).
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    if credit_line.status != CreditStatus::Active {
+        panic!("Only active credit lines can be suspended");
+    }
+
+    credit_line.status = CreditStatus::Suspended;
+    env.storage().persistent().set(&borrower, &credit_line);
+    // Bump TTL: interacting with a suspended line keeps it live.
+    bump_credit_line_ttl(&env, &borrower);
+
+    publish_credit_line_event(
+        &env,
+        (symbol_short!("credit"), symbol_short!("suspend")),
+        CreditLineEvent {
+            borrower: borrower.clone(),
+            status: CreditStatus::Suspended,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            risk_score: credit_line.risk_score,
+        },
+    );
 }
 
 /// Suspend the caller's own active credit line.
@@ -364,8 +393,9 @@ pub fn self_suspend_credit_line(env: Env, borrower: Address) {
 ///   non-closed status. This is intentional for operational efficiency.
 pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     assert_not_paused(&env);
-    // Authenticate the closer before any storage access.
-    closer.require_auth();
+    // `closer` auth is enforced by the `lib.rs` `close_credit_line` entrypoint
+    // wrapper before this is called; not re-checked here (see the comment on
+    // `suspend_credit_line` above for why).
 
     // Resolve the current admin address.
     let admin: Address = require_admin(&env);
@@ -465,10 +495,11 @@ pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
 /// on to mutate and persist the line.
 pub fn default_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
-    // Bump TTL on read: this is a hot accrual read path, so an active
-    // borrower's entry must never be archived independently of draw/repay.
-    let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
+    // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
 
@@ -533,9 +564,43 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
 ///
-/// This hook is accounting-only and intentionally performs no token transfer.
-/// Off-chain orchestration is responsible for ensuring auction proceeds are settled
-/// into protocol custody before this function is called.
+/// Reduces `accrued_interest` first, then `utilized_amount`, by `amount`
+/// (clamped to the outstanding balance). No token movement occurs — this is
+/// pure accounting relief, e.g. for negotiated settlements handled off-chain.
+pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
+    assert_not_paused(&env);
+    // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
+
+    if amount <= 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+    let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
+
+    // Apply interest accrual before any mutation.
+    let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
+
+    let forgive_amount = amount.min(credit_line.utilized_amount);
+    let interest_forgiven = forgive_amount.min(credit_line.accrued_interest);
+
+    credit_line.accrued_interest -= interest_forgiven;
+    credit_line.utilized_amount -= forgive_amount;
+
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        Some(previous_status),
+    );
+}
+
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
@@ -698,7 +763,7 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
 /// on to mutate and persist the line.
 pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
+    // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
 
     // Only Active and Restricted are valid reinstate targets per the state-machine spec.
     if target_status != CreditStatus::Active && target_status != CreditStatus::Restricted {

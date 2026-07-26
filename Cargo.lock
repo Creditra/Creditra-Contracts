@@ -382,12 +382,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "creditra-risk"
+name = "creditra-lifecycle"
 version = "0.1.0"
 dependencies = [
- "proptest",
- "serde",
- "serde_json",
+ "creditra-credit",
  "soroban-sdk",
 ]
 
