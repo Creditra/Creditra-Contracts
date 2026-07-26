@@ -559,6 +559,78 @@ fn category_mappings_are_stable() {
     );
 }
 
+/// Verify the borrow error catalog remains synchronized with the enum.
+#[test]
+fn borrow_error_catalog_lists_all_variants() {
+    let catalog_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors/borrow.md");
+    let catalog = std::fs::read_to_string(&catalog_path)
+        .unwrap_or_else(|_| panic!("Missing borrow error catalog at {:?}", catalog_path));
+
+    for variant in [
+        "Unauthorized",
+        "NotAdmin",
+        "CreditLineNotFound",
+        "CreditLineClosed",
+        "InvalidAmount",
+        "OverLimit",
+        "NegativeLimit",
+        "RateTooHigh",
+        "ScoreTooHigh",
+        "UtilizationNotZero",
+        "Reentrancy",
+        "Overflow",
+        "LimitDecreaseRequiresRepayment",
+        "AlreadyInitialized",
+        "QuorumNotMet",
+        "OracleNotFound",
+        "OracleAlreadyExists",
+        "AdminAcceptTooEarly",
+        "BorrowerBlocked",
+        "DrawExceedsMaxAmount",
+        "Paused",
+        "DrawsFrozen",
+        "CreditLineSuspended",
+        "CreditLineDefaulted",
+        "MissingLiquidityToken",
+        "MissingLiquiditySource",
+        "InsufficientLiquidityReserve",
+        "LiquidityTokenCallFailed",
+        "InsufficientRepaymentAllowance",
+        "InsufficientRepaymentBalance",
+        "RepayExceedsMaxAmount",
+        "DrawCooldownActive",
+        "TreasuryNotSet",
+        "ExposureCapExceeded",
+        "AdminNotInitialized",
+        "TimestampRegression",
+        "LimitOutOfBounds",
+        "CollateralRatioBelowMinimum",
+        "OraclePriceInvalid",
+        "OraclePriceStale",
+        "OraclePriceDeviation",
+        "InsufficientCollateralBalance",
+        "BorrowerFrozen",
+        "BountyNotSet",
+        "NoPendingTreasuryWithdrawal",
+        "TreasuryTimelockActive",
+        "TreasuryProposalExists",
+        "CloseFactorAboveMax",
+        "CreditLineFrozen",
+        "DrawReversalWindowExpired",
+        "OriginalDrawNotFound",
+        "AttestationBatchNotFound",
+        "OracleQuorumNotMet",
+        "AlreadySettled",
+        "InvalidRiskWeight",
+    ] {
+        assert!(
+            catalog.contains(variant),
+            "Borrow error catalog is missing the variant {variant}"
+        );
+    }
+}
+
 /// Verify every ContractError variant has a known category and that all 11
 /// categories are covered.
 #[test]
