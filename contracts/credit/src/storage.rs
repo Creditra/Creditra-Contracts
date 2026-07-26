@@ -59,10 +59,10 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
     TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 ///
@@ -241,14 +241,6 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
@@ -656,15 +648,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
@@ -1352,4 +1335,61 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Addre
 /// Return `true` when `token` is in the collateral allowlist.
 pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
+}
+
+// ── Risk admin cooldown helpers ─────────────────────────────────────────────
+
+/// Get the configured risk admin cooldown duration in seconds.
+/// Returns `0` when the cooldown is disabled (default).
+pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
+    let key = symbol_short!("rad_cool");
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the risk admin cooldown duration in seconds.
+pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
+    let key = symbol_short!("rad_cool");
+    env.storage()
+        .instance()
+        .set(&key, &seconds);
+}
+
+/// Get the timestamp of the last risk admin action.
+/// Returns `0` when no action has been recorded yet.
+pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
+    let key = symbol_short!("rad_last");
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the timestamp of the last risk admin action.
+pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
+    let key = symbol_short!("rad_last");
+    env.storage()
+        .instance()
+        .set(&key, &ts);
+}
+
+/// Assert that the risk admin cooldown has elapsed since the last action.
+/// Panics with `RiskAdminCooldownActive` if the cooldown has not yet elapsed.
+/// When `last_ts` is `0` (no prior action recorded), the cooldown is not
+/// enforced so the first call always succeeds.
+pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
+    let cooldown = get_risk_admin_cooldown_seconds(env);
+    if cooldown == 0 {
+        return;
+    }
+    let last_ts = get_last_risk_admin_action_ts(env);
+    if last_ts == 0 {
+        return;
+    }
+    let now = env.ledger().timestamp();
+    if now < last_ts.saturating_add(cooldown) {
+        env.panic_with_error(ContractError::RiskAdminCooldownActive);
+    }
 }

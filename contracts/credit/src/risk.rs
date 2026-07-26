@@ -61,8 +61,9 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::events::publish_risk_parameters_updated;
-use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+use crate::events::{publish_risk_parameters_updated, publish_risk_admin_cooldown_configured};
+use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    assert_risk_admin_cooldown_elapsed, set_last_risk_admin_action_ts, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
@@ -253,6 +254,7 @@ pub fn update_risk_parameters(
 ) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    assert_risk_admin_cooldown_elapsed(&env);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
@@ -354,6 +356,8 @@ pub fn update_risk_parameters(
         credit_line.interest_rate_bps,
         credit_line.risk_score,
     );
+
+    set_last_risk_admin_action_ts(&env, env.ledger().timestamp());
 }
 
 /// Get the configured rate-change limits, if any.
@@ -364,4 +368,25 @@ pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
 /// Get the configured rate formula, if any.
 pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
     env.storage().instance().get(&rate_formula_key(&env))
+}
+
+/// Set the risk admin cooldown duration in seconds (admin only).
+///
+/// When `seconds > 0`, every risk admin mutation (e.g. `update_risk_parameters`)
+/// enforces a minimum elapsed interval since the last mutation. This provides a
+/// time-based circuit breaker that limits the blast radius of compromised admin keys.
+///
+/// A value of `0` disables the cooldown (default).
+pub fn set_risk_admin_cooldown(env: Env, seconds: u64) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    set_risk_admin_cooldown_seconds(&env, seconds);
+    publish_risk_admin_cooldown_configured(&env, seconds);
+}
+
+/// Get the configured risk admin cooldown duration in seconds.
+///
+/// Returns `0` when the cooldown is disabled (default).
+pub fn get_risk_admin_cooldown(env: Env) -> u64 {
+    get_risk_admin_cooldown_seconds(&env)
 }

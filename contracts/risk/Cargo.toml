@@ -1,0 +1,29 @@
+[package]
+name = "creditra-risk"
+version = "0.1.0"
+edition = "2021"
+description = "Creditra risk admin cooldown contract for GrantFox FWC26 campaign"
+license = "MIT"
+keywords = ["soroban", "stellar", "risk", "admin", "cooldown"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "../../README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[features]
+instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
+
+[[test]]
+name = "risk_admin_cooldown"
+path = "tests/risk_admin_cooldown.rs"
+required-features = ["instrument"]
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+proptest = "1.4"

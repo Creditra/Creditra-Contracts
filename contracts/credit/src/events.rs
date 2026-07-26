@@ -659,3 +659,19 @@ pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCom
         event,
     );
 }
+
+/// Payload emitted when the risk admin cooldown is configured.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskAdminCooldownConfiguredEvent {
+    /// New cooldown duration in seconds. `0` means disabled.
+    pub cooldown_seconds: u64,
+}
+
+/// Publish a risk admin cooldown configured event.
+pub fn publish_risk_admin_cooldown_configured(env: &Env, cooldown_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rad_cooldown")),
+        RiskAdminCooldownConfiguredEvent { cooldown_seconds },
+    );
+}
