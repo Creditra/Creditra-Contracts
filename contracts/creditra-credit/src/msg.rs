@@ -46,6 +46,18 @@ pub enum ExecuteMsg {
     SubmitOraclePrices {
         prices: Vec<i128>,
     },
+    /// Configure the protocol fee in basis points (admin only).
+    SetProtocolFeeBps { bps: u32 },
+    /// Configure the treasury share of the protocol fee in basis points (admin only).
+    SetTreasuryFeeShareBps { bps: u32 },
+    /// Configure the treasury address (admin only).
+    SetTreasuryAddress { address: String },
+    /// Configure the bounty pool address (admin only).
+    SetBountyAddress { address: String },
+    /// Withdraw the accumulated treasury balance for a denom (admin only).
+    WithdrawTreasury { denom: String },
+    /// Withdraw the accumulated bounty balance for a denom (admin only).
+    WithdrawBounty { denom: String },
 }
 
 #[cw_serde]
@@ -64,6 +76,18 @@ pub enum QueryMsg {
     GetOracleQuorumConfig {},
     #[returns(OraclePriceResponse)]
     GetOraclePrice {},
+    #[returns(u32)]
+    GetProtocolFeeBps {},
+    #[returns(u32)]
+    GetTreasuryFeeShareBps {},
+    #[returns(Option<Addr>)]
+    GetTreasuryAddress {},
+    #[returns(Option<Addr>)]
+    GetBountyAddress {},
+    #[returns(Uint128)]
+    GetTreasuryBalance { denom: String },
+    #[returns(Uint128)]
+    GetBountyBalance { denom: String },
 }
 
 #[cw_serde]

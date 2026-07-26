@@ -51,6 +51,12 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    #[error("TreasuryAddressNotSet")]
+    TreasuryAddressNotSet,
+
+    #[error("BountyAddressNotSet")]
+    BountyAddressNotSet,
 }
 
 #[cfg(test)]
@@ -113,5 +119,21 @@ mod tests {
         let insufficient_err = ContractError::CollateralInsufficient;
         assert_ne!(balance_err, insufficient_err);
         assert_ne!(balance_err.to_string(), insufficient_err.to_string());
+    }
+
+    #[test]
+    fn treasury_address_not_set_display_and_equality() {
+        let err = ContractError::TreasuryAddressNotSet;
+        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
+        assert_eq!(err, ContractError::TreasuryAddressNotSet);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn bounty_address_not_set_display_and_equality() {
+        let err = ContractError::BountyAddressNotSet;
+        assert_eq!(err.to_string(), "BountyAddressNotSet");
+        assert_eq!(err, ContractError::BountyAddressNotSet);
+        assert_ne!(err, ContractError::Unauthorized);
     }
 }

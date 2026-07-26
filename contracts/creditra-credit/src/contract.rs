@@ -13,6 +13,7 @@ use crate::state::{
     ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
+use crate::fees;
 
 #[entry_point]
 pub fn instantiate(
@@ -77,6 +78,24 @@ pub fn execute(
         } => execute_set_oracle_quorum_config(deps, info, min_quorum_k, max_deviation_bps, max_age_seconds),
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
+        }
+        ExecuteMsg::SetProtocolFeeBps { bps } => {
+            fees::execute_set_protocol_fee_bps(deps, info, bps)
+        }
+        ExecuteMsg::SetTreasuryFeeShareBps { bps } => {
+            fees::execute_set_treasury_fee_share_bps(deps, info, bps)
+        }
+        ExecuteMsg::SetTreasuryAddress { address } => {
+            fees::execute_set_treasury_address(deps, info, address)
+        }
+        ExecuteMsg::SetBountyAddress { address } => {
+            fees::execute_set_bounty_address(deps, info, address)
+        }
+        ExecuteMsg::WithdrawTreasury { denom } => {
+            fees::execute_withdraw_treasury(deps, info, denom)
+        }
+        ExecuteMsg::WithdrawBounty { denom } => {
+            fees::execute_withdraw_bounty(deps, info, denom)
         }
     }
 }
@@ -192,7 +211,7 @@ pub fn execute_create_draw(
 }
 
 pub fn execute_repay_draw(
-    deps: DepsMut,
+    mut deps: DepsMut,
     env: Env,
     info: MessageInfo,
     credit_line_id: u64,
@@ -204,6 +223,16 @@ pub fn execute_repay_draw(
 
     if info.sender != draw.drawn_by {
         return Err(ContractError::Unauthorized);
+    }
+
+    let fee_bps = fees::PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
+    let mut fee_amount = Uint128::zero();
+    if fee_bps > 0 && !draw.amount.is_zero() {
+        fee_amount = draw.amount.multiply_ratio(fee_bps, 10_000u32);
+    }
+
+    if !fee_amount.is_zero() {
+        fees::accrue_protocol_fee(deps.branch(), &draw.denom, fee_amount)?;
     }
 
     draw.repaid = true;
@@ -219,10 +248,16 @@ pub fn execute_repay_draw(
         String::new(),
     )?;
 
-    Ok(Response::default()
+    let mut response = Response::default()
         .add_attribute("action", "repay_draw")
         .add_attribute("credit_line_id", credit_line_id.to_string())
-        .add_attribute("draw_id", draw_id.to_string()))
+        .add_attribute("draw_id", draw_id.to_string());
+
+    if !fee_amount.is_zero() {
+        response = response.add_attribute("protocol_fee_skimmed", fee_amount.to_string());
+    }
+
+    Ok(response)
 }
 
 pub fn execute_add_audit_memo(
@@ -415,6 +450,30 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                 price: record.as_ref().map(|r| r.price),
                 timestamp: record.as_ref().map(|r| r.timestamp),
             };
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetProtocolFeeBps {} => {
+            let resp = fees::query_protocol_fee_bps(deps)?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetTreasuryFeeShareBps {} => {
+            let resp = fees::query_treasury_fee_share_bps(deps)?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetTreasuryAddress {} => {
+            let resp = fees::query_treasury_address(deps)?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetBountyAddress {} => {
+            let resp = fees::query_bounty_address(deps)?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetTreasuryBalance { denom } => {
+            let resp = fees::query_treasury_balance(deps, denom)?;
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetBountyBalance { denom } => {
+            let resp = fees::query_bounty_balance(deps, denom)?;
             to_json_binary(&resp)
         }
     }
