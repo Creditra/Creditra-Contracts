@@ -51,6 +51,26 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// Treasury fee share in basis points exceeds the maximum (10_000).
+    #[error("InvalidFeeShareBps")]
+    InvalidFeeShareBps,
+
+    /// Treasury balance is insufficient for the requested withdrawal.
+    #[error("InsufficientTreasuryBalance")]
+    InsufficientTreasuryBalance,
+
+    /// Bounty pool balance is insufficient for the requested withdrawal.
+    #[error("InsufficientBountyBalance")]
+    InsufficientBountyBalance,
+
+    /// Treasury address has not been configured.
+    #[error("TreasuryAddressNotSet")]
+    TreasuryAddressNotSet,
+
+    /// Bounty address has not been configured.
+    #[error("BountyAddressNotSet")]
+    BountyAddressNotSet,
 }
 
 #[cfg(test)]
@@ -113,5 +133,45 @@ mod tests {
         let insufficient_err = ContractError::CollateralInsufficient;
         assert_ne!(balance_err, insufficient_err);
         assert_ne!(balance_err.to_string(), insufficient_err.to_string());
+    }
+
+    #[test]
+    fn invalid_fee_share_bps_display_and_equality() {
+        let err = ContractError::InvalidFeeShareBps;
+        assert_eq!(err.to_string(), "InvalidFeeShareBps");
+        assert_eq!(err, ContractError::InvalidFeeShareBps);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn insufficient_treasury_balance_display_and_equality() {
+        let err = ContractError::InsufficientTreasuryBalance;
+        assert_eq!(err.to_string(), "InsufficientTreasuryBalance");
+        assert_eq!(err, ContractError::InsufficientTreasuryBalance);
+        assert_ne!(err, ContractError::InsufficientBountyBalance);
+    }
+
+    #[test]
+    fn insufficient_bounty_balance_display_and_equality() {
+        let err = ContractError::InsufficientBountyBalance;
+        assert_eq!(err.to_string(), "InsufficientBountyBalance");
+        assert_eq!(err, ContractError::InsufficientBountyBalance);
+        assert_ne!(err, ContractError::InsufficientTreasuryBalance);
+    }
+
+    #[test]
+    fn treasury_address_not_set_display_and_equality() {
+        let err = ContractError::TreasuryAddressNotSet;
+        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
+        assert_eq!(err, ContractError::TreasuryAddressNotSet);
+        assert_ne!(err, ContractError::BountyAddressNotSet);
+    }
+
+    #[test]
+    fn bounty_address_not_set_display_and_equality() {
+        let err = ContractError::BountyAddressNotSet;
+        assert_eq!(err.to_string(), "BountyAddressNotSet");
+        assert_eq!(err, ContractError::BountyAddressNotSet);
+        assert_ne!(err, ContractError::TreasuryAddressNotSet);
     }
 }
