@@ -248,10 +248,9 @@ pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    // Bump TTL on read: this is a hot accrual read path, so an active
+    // borrower's entry must never be archived independently of draw/repay.
+    let stored_line: CreditLineData = crate::storage::get_credit_line(env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
 
@@ -563,6 +562,11 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
 /// This is a borrower safety control that blocks future draws while leaving
 /// repayments available. Reactivation still requires a separate admin-controlled
 /// workflow.
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read — independent of whether the call goes
+/// on to mutate and persist the line.
 pub fn self_suspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     borrower.require_auth();
@@ -705,13 +709,17 @@ pub fn close_credit_lines_batch(env: Env, borrowers: soroban_sdk::Vec<Address>) 
 ///
 /// # Events
 /// Emits a `("credit", "default")` [`CreditLineEvent`].
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read — independent of whether the call goes
+/// on to mutate and persist the line.
 pub fn default_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     require_admin_auth(&env);
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    // Bump TTL on read: this is a hot accrual read path, so an active
+    // borrower's entry must never be archived independently of draw/repay.
+    let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let _previous_utilized = stored_line.utilized_amount;
 
@@ -774,6 +782,12 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
+/// Accounting half of a default-liquidation settlement (admin only).
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read — independent of whether the call goes
+/// on to mutate and persist the line.
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
@@ -801,10 +815,9 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::AlreadySettled);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    // Bump TTL on read: this is a hot accrual read path, so an active
+    // borrower's entry must never be archived independently of draw/repay.
+    let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
     let previous_status = stored_line.status;
@@ -883,6 +896,11 @@ pub fn settle_default_liquidation(
 ///
 /// # Events
 /// Emits a `("credit", "reinstate")` [`CreditLineEvent`].
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read — independent of whether the call goes
+/// on to mutate and persist the line.
 pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
     assert_not_paused(&env);
     require_admin_auth(&env);
@@ -892,10 +910,9 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    // Bump TTL on read: this is a hot accrual read path, so an active
+    // borrower's entry must never be archived independently of draw/repay.
+    let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
     let previous_status = stored_line.status;

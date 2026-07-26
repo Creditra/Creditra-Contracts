@@ -2300,6 +2300,11 @@ impl Credit {
     }
 
     /// Admin-only bounded reversal for an erroneous draw.
+    ///
+    /// # Storage
+    /// Loads the credit line via `storage_get_credit_line`, which bumps the
+    /// entry's persistent TTL on read — independent of whether the call goes
+    /// on to mutate and persist the line.
     pub fn reverse_draw(
         env: Env,
         borrower: Address,
@@ -2319,10 +2324,9 @@ impl Credit {
             env.panic_with_error(ContractError::DrawReversalWindowExpired);
         }
 
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
+        // Bump TTL on read: this is a hot accrual read path, so an active
+        // borrower's entry must never be archived independently of draw/repay.
+        let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
             .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
         credit_line = accrual::apply_accrual(&env, credit_line);
 
