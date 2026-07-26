@@ -115,7 +115,10 @@ mod lifecycle_views;
 mod limits;
 pub mod math_utils;
 mod query;
+#[path = "../../query/src/views.rs"]
+mod query_views;
 mod risk;
+mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 mod scoring;
@@ -214,7 +217,7 @@ use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
     CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
     OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
@@ -1414,6 +1417,23 @@ impl Credit {
     /// precondition each flag mirrors.
     pub fn lifecycle_capabilities(env: Env, borrower: Address) -> LifecycleCapabilities {
         lifecycle_views::capabilities(env, borrower)
+    }
+
+    /// Return the query-subsystem capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only pre-flight / batching view for borrower-scoped query
+    /// entrypoints (`get_credit_line`, `get_repayment_schedule`,
+    /// `get_health_factor`, `is_delinquent`). Every field is derived from
+    /// storage with no auth, no token CPIs, and no mutation.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`QueryCapabilities`] bitmap. See its field docs for the exact
+    /// meaning of each flag.
+    pub fn query_capabilities(env: Env, borrower: Address) -> QueryCapabilities {
+        query_views::capabilities(env, borrower)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {

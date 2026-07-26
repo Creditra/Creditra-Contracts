@@ -6,6 +6,7 @@ members = [
     "contracts/accrual",
     "contracts/collateral",
     "contracts/lifecycle",
+    "contracts/query",
     "gateway-contract/contracts/auction_contract",
 ]
 

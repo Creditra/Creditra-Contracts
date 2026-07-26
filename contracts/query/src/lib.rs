@@ -10,6 +10,8 @@
 //!
 //! - [`events`] — structured lifecycle events for query entrypoints, allowing
 //!   off-chain indexers to observe when read-only queries are executed.
+//! - [`views`] — read-only [`views::capabilities`] bitmap (compiled into
+//!   `creditra-credit` via `#[path]`; see that module's rustdoc).
 //!
 //! ## Error stability
 //!
@@ -26,7 +28,10 @@
 //! - `is_delinquent`
 //! - `get_credit_lines_paginated`
 //! - `borrow_capabilities`
-//! - `capabilities` (accrual capabilities view)
+//! - `query_capabilities` / `capabilities` (query capabilities view)
 
 pub mod events;
+// `views` is compiled into `creditra-credit` via `#[path]` (see
+// `contracts/credit/src/lib.rs`). It is intentionally not declared as a
+// submodule here so `crate::` inside `views.rs` resolves to the credit crate.
 pub use creditra_credit::*;
