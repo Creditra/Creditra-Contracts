@@ -19,4 +19,4 @@ schemars = "0.8"
 thiserror = "2"
 
 [dev-dependencies]
-proptest = "1"
+proptest = "1.0"
