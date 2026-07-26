@@ -112,6 +112,7 @@ fn lifecycle_v7_error_discriminants_are_pinned() {
     assert_eq!(ContractError::DrawCooldownActive as u32, 29);
     assert_eq!(ContractError::CollateralRatioBelowMinimum as u32, 35);
     assert_eq!(ContractError::InsufficientCollateralBalance as u32, 39);
+    assert_eq!(ContractError::AdminLifecycleCooldownActive as u32, 56);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -147,6 +148,7 @@ fn lifecycle_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::RateTooHigh.category(), Risk);
     assert_eq!(ContractError::ScoreTooHigh.category(), Risk);
     assert_eq!(ContractError::DrawCooldownActive.category(), Risk);
+    assert_eq!(ContractError::AdminLifecycleCooldownActive.category(), Risk);
 
     // Block bucket (discriminant 9)
     assert_eq!(ContractError::CreditLineFrozen.category(), Block);
@@ -224,6 +226,7 @@ fn lifecycle_v7_subset_has_no_duplicate_discriminants() {
         ContractError::DrawCooldownActive as u32,
         ContractError::CollateralRatioBelowMinimum as u32,
         ContractError::InsufficientCollateralBalance as u32,
+        ContractError::AdminLifecycleCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -243,7 +246,7 @@ fn lifecycle_v7_subset_has_no_duplicate_discriminants() {
 /// `lifecycle_v7_category_mappings_are_pinned`.
 #[test]
 fn lifecycle_v7_subset_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 35;
+    const EXPECTED_VARIANT_COUNT: usize = 36;
 
     let codes = [
         ContractError::CreditLineNotFound as u32,
@@ -281,6 +284,7 @@ fn lifecycle_v7_subset_variant_count_is_known() {
         ContractError::DrawCooldownActive as u32,
         ContractError::CollateralRatioBelowMinimum as u32,
         ContractError::InsufficientCollateralBalance as u32,
+        ContractError::AdminLifecycleCooldownActive as u32,
     ];
 
     assert_eq!(

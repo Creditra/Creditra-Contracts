@@ -192,7 +192,11 @@ pub enum DataKey {
     /// Minimum ledger seconds between critical collateral admin actions (v7).
     AdminCollateralCooldownSeconds,
     /// Ledger timestamp of the last critical collateral admin action (v7).
-    LastAdminCollateralCritActTs,
+    LastAdminCollateralCriticalActionTs,
+    /// Minimum ledger seconds between critical lifecycle admin actions (v7).
+    AdminLifecycleCooldownSeconds,
+    /// Ledger timestamp of the last critical lifecycle admin action (v7).
+    LastAdminLifecycleCriticalActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
@@ -590,6 +594,34 @@ pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
     env.storage()
         .instance()
         .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
+}
+
+/// Get the configured admin lifecycle cool-off interval, if set.
+pub fn get_admin_lifecycle_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminLifecycleCooldownSeconds)
+}
+
+/// Set the admin lifecycle cool-off interval (admin only, enforced by caller).
+pub fn set_admin_lifecycle_cooldown_seconds(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminLifecycleCooldownSeconds, &seconds);
+}
+
+/// Get the ledger timestamp of the last critical lifecycle admin action, if any.
+pub fn get_last_admin_lifecycle_critical_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastAdminLifecycleCriticalActionTs)
+}
+
+/// Record the ledger timestamp of the last critical lifecycle admin action.
+pub fn set_last_admin_lifecycle_critical_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastAdminLifecycleCriticalActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this

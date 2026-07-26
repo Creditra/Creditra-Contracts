@@ -280,6 +280,8 @@ pub enum ContractError {
     AdminCooldownActive = 54,
     /// Per-borrower liquidation grace window has not yet elapsed.
     LiquidationGraceActive = 55,
+    /// Critical lifecycle admin action attempted before the cooldown elapsed.
+    AdminLifecycleCooldownActive = 56,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -321,6 +323,8 @@ pub enum ContractErrorCategory {
 }
 
 impl ContractError {
+    pub const AdminCollateralCooldownActive: Self = Self::AdminCooldownActive;
+
     /// Map this error to its [`ContractErrorCategory`] for client-side grouping.
     ///
     /// # Example
@@ -383,6 +387,7 @@ impl ContractError {
             Self::Paused => Risk,
             Self::DrawCooldownActive => Risk,
             Self::AdminCooldownActive => Risk,
+            Self::AdminLifecycleCooldownActive => Risk,
             // Oracle (7)
             Self::OraclePriceInvalid => Oracle,
             Self::OraclePriceStale => Oracle,
@@ -767,7 +772,8 @@ impl ContractError {
             | ContractError::ScoreTooHigh
             | ContractError::Paused
             | ContractError::DrawCooldownActive
-            | ContractError::AdminCooldownActive => ContractErrorCategory::Risk,
+            | ContractError::AdminCooldownActive
+            | ContractError::AdminLifecycleCooldownActive => ContractErrorCategory::Risk,
 
             ContractError::OraclePriceInvalid
             | ContractError::OraclePriceStale
