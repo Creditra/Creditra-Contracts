@@ -28,11 +28,16 @@ Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActiv
 
 Implementation: [`src/admin.rs`](./src/admin.rs) (compiled into `creditra-credit`).
 
-## Fuzzing
+## Authorization snapshot
 
-This module includes a stateful fuzz target that verifies the strict cool-off enforcement and proper administrative math. 
-To run the fuzz tests:
+The collateral v7 API has per-entrypoint authorization regression coverage in
+[`tests/auth_snap.rs`](./tests/auth_snap.rs). Each state-changing collateral
+entrypoint records exactly one required signer:
 
-```bash
-cargo fuzz run --manifest-path contracts/collateral/fuzz/Cargo.toml main
-```
+- borrower authorization for deposit, withdrawal, partial release, atomic
+  repay-and-release, and per-token deposit/withdrawal;
+- admin authorization for collateral ratio, risk weight, token allowlist, and
+  admin cooldown configuration.
+
+Collateral queries remain authorization-free. This documents and tests the
+existing public authorization contract; no function signatures changed.
