@@ -4,7 +4,7 @@ resolver = "2"
 members = [
     "contracts/credit",
     "contracts/collateral",
-    "contracts/freeze",
+    "contracts/borrow",
     "gateway-contract/contracts/auction_contract",
 ]
 
