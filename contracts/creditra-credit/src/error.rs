@@ -51,6 +51,15 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// Arithmetic overflow occurred.
+    #[error("Overflow")]
+    Overflow,
+
+    /// Late-fee configuration is invalid (e.g., negative flat amount or
+    /// surcharge > 10_000 bps).
+    #[error("LateFeeConfigInvalid")]
+    LateFeeConfigInvalid,
 }
 
 #[cfg(test)]
@@ -113,5 +122,21 @@ mod tests {
         let insufficient_err = ContractError::CollateralInsufficient;
         assert_ne!(balance_err, insufficient_err);
         assert_ne!(balance_err.to_string(), insufficient_err.to_string());
+    }
+
+    #[test]
+    fn overflow_display_and_equality() {
+        let err = ContractError::Overflow;
+        assert_eq!(err.to_string(), "Overflow");
+        assert_eq!(err, ContractError::Overflow);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn late_fee_config_invalid_display_and_equality() {
+        let err = ContractError::LateFeeConfigInvalid;
+        assert_eq!(err.to_string(), "LateFeeConfigInvalid");
+        assert_eq!(err, ContractError::LateFeeConfigInvalid);
+        assert_ne!(err, ContractError::Overflow);
     }
 }

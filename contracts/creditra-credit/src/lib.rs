@@ -5,6 +5,7 @@ pub mod handshake;
 pub mod key;
 pub mod msg;
 pub mod oracles;
+pub mod penalties;
 pub mod state;
 pub mod views;
 

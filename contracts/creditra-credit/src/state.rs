@@ -2,6 +2,8 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map};
 
+use crate::penalties::LateFeeConfig;
+
 #[cw_serde]
 pub struct Config {
     pub owner: Addr,
@@ -128,3 +130,8 @@ pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg")
 
 /// Storage key for the last resolved oracle price record.
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
+
+/// Storage key for the late-fee configuration.
+///
+/// When absent the contract falls back to legacy behaviour (no late fee).
+pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("late_fee_cfg");
