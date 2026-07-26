@@ -120,11 +120,6 @@ mod scoring;
 mod storage;
 pub mod types;
 
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, Env, Symbol,
-};
-
-
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
@@ -139,42 +134,47 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
+use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
+    publish_oracle_quorum_price_set_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    CreditLineEvent, DrawnEvent, DrawReversedEvent, InterestAccruedEvent, RepaymentEvent,
-    ContractUpgradedEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
-use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
+use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::penalties::LateFeeConfig;
 use crate::storage::{
-    assert_not_paused, clear_borrower_frozen,
-    enforce_freeze_cooldown, get_borrower_by_credit_line_id, get_borrower_frozen_until,
-    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
-    get_oracle_config, get_oracle_quorum_config, get_pending_treasury_withdrawal,
-    get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
+    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
+    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key,
-    set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, record_freeze_timestamp_if_cooldown,
-    set_oracle_config, set_oracle_quorum_config, set_reentrancy_guard,
-    clear_pending_treasury_withdrawal, set_pending_treasury_withdrawal,
+    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
+    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
-use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage, CreditStatus,
-    GracePeriodConfig, GraceWaiverMode, OracleConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary,
-    ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig, OracleQuorumConfig,
+    ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
+    RateFormulaConfig, TreasuryWithdrawalProposal,
 };
-
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -727,7 +727,6 @@ impl Credit {
         rate_change_min_interval: u64,
     ) {
         risk::set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)
-        risk::set_borrower_rate_ceiling(env, borrower, ceiling_bps)
     }
 
     /// Set the penalty surcharge in basis points for delinquent lines (admin only).
@@ -856,9 +855,70 @@ impl Credit {
     }
 
     pub fn get_grace_period_config(env: Env) -> Option<GracePeriodConfig> {
-        env.storage()
-            .instance()
-            .get(&crate::storage::grace_period_key(&env))
+        crate::storage::get_grace_period_config(&env)
+    }
+
+    /// Set or update the per-borrower liquidation grace period in seconds (admin only).
+    ///
+    /// # Arguments
+    /// - `env`: Soroban environment.
+    /// - `borrower`: Borrower address to configure.
+    /// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
+    pub fn set_borrower_liq_grace(
+        env: Env,
+        borrower: Address,
+        grace_period_seconds: u64,
+    ) {
+        lifecycle::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
+    }
+
+    /// Return the per-borrower liquidation grace period in seconds for `borrower`.
+    pub fn get_borrower_liq_grace(env: Env, borrower: Address) -> u64 {
+        lifecycle::get_per_borrower_liquidation_grace(&env, borrower)
+    }
+
+    /// Set the structured late-fee configuration (flat amount or APR-based).
+    ///
+    /// Pass `Some(LateFeeConfig::Flat(FlatFeeConfig { amount }))` to charge a
+    /// fixed token amount per overdue installment.  Pass
+    /// `Some(LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps }))` to use
+    /// the existing APR-surcharge behaviour.  Pass `None` to remove the
+    /// structured config and fall back to the legacy `LateFeeFlat` /
+    /// `PenaltySurchargeBps` instance keys.
+    ///
+    /// # Authorization
+    /// Requires admin signature via [`require_admin_auth`].
+    ///
+    /// # Validation
+    /// - `Flat` mode: `amount` must be `>= 0`; negative amounts revert with
+    ///   [`ContractError::InvalidAmount`].
+    /// - `AprBased` mode: `surcharge_bps` must be `<= 10_000`; values above
+    ///   the cap revert with [`ContractError::RateTooHigh`].
+    pub fn set_late_fee_config(env: Env, config: Option<LateFeeConfig>) {
+        require_admin_auth(&env);
+        if let Some(cfg) = config {
+            match cfg {
+                LateFeeConfig::Flat(crate::penalties::FlatFeeConfig { amount }) => {
+                    if amount < 0 {
+                        env.panic_with_error(ContractError::InvalidAmount);
+                    }
+                }
+                LateFeeConfig::AprBased(crate::penalties::AprFeeConfig { surcharge_bps }) => {
+                    if surcharge_bps > crate::risk::MAX_INTEREST_RATE_BPS {
+                        env.panic_with_error(ContractError::RateTooHigh);
+                    }
+                }
+            }
+        }
+        crate::storage::set_late_fee_config(&env, config);
+    }
+
+    /// Get the currently configured structured late-fee configuration.
+    ///
+    /// Returns `None` when no structured config has been stored, meaning the
+    /// contract uses the legacy `LateFeeFlat` / `PenaltySurchargeBps` keys.
+    pub fn get_late_fee_config(env: Env) -> Option<LateFeeConfig> {
+        crate::storage::get_late_fee_config(&env)
     }
 
     pub fn set_repayment_schedule(
@@ -1126,6 +1186,139 @@ impl Credit {
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
+    
+    /// Set the risk weight for a collateral asset, in basis points (admin only).
+    ///
+    /// Risk weight scales how much a unit of this asset counts toward the
+    /// collateral ratio check. 10_000 bps (100%) means full value; lower
+    /// values discount the asset.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::InvalidRiskWeight`] if `weight_bps > 10_000`.
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed since the last
+    ///   critical collateral admin action.
+    /// - Reverts if caller is not the configured admin.
+    pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
+        collateral_admin::set_collateral_risk_weight(&env, &asset, weight_bps);
+    }
+
+    /// Set the protocol-wide minimum collateral ratio in basis points (admin only).
+    ///
+    /// Dial down to `0` to disable the ratio check on draws and withdrawals.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed.
+    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
+        collateral_admin::set_min_collateral_ratio_bps(&env, ratio_bps);
+    }
+
+    /// Query the configured minimum collateral ratio in basis points.
+    pub fn get_min_collateral_ratio_bps(env: Env) -> Option<u32> {
+        crate::storage::get_min_collateral_ratio_bps(&env)
+    }
+
+    /// Set the minimum interval between critical collateral admin actions (admin only).
+    ///
+    /// Pass `0` to disable the cool-off guard.
+    pub fn set_col_admin_cooldown_secs(env: Env, seconds: u64) {
+        collateral_admin::set_admin_collateral_cooldown_seconds(&env, seconds);
+    }
+
+    /// Query the configured admin collateral cool-off interval, if set.
+    pub fn get_col_admin_cooldown_secs(env: Env) -> Option<u64> {
+        collateral_admin::get_admin_collateral_cooldown_seconds(&env)
+    }
+
+    /// Query the ledger timestamp of the last critical collateral admin action.
+    pub fn get_last_col_admin_action_ts(env: Env) -> Option<u64> {
+        collateral_admin::get_last_admin_collateral_critical_action_ts(&env)
+    }
+
+    /// Release a portion of collateral to the borrower while the credit line
+    /// stays above the configured health-factor threshold.
+    ///
+    /// # What
+    ///
+    /// Transfers exactly `amount` collateral tokens from the contract back to
+    /// `borrower`, subject to two invariants:
+    ///
+    /// 1. **Balance invariant** — `amount` must not exceed the borrower's
+    ///    current collateral balance.
+    /// 2. **Health-factor invariant** — after the release,
+    ///    `remaining_collateral >= utilized_amount * min_collateral_ratio_bps / 10_000`.
+    ///    When `utilized_amount == 0` the ratio is not checked.
+    ///
+    /// # Authorization
+    ///
+    /// `borrower.require_auth()` — only the borrower may release their own
+    /// collateral.
+    ///
+    /// # Parameters
+    ///
+    /// - `borrower` — address whose collateral balance is reduced; must
+    ///   authorize this call.
+    /// - `amount` — token units to release; must be strictly positive.
+    ///
+    /// # Errors
+    ///
+    /// | Error | Condition |
+    /// |---|---|
+    /// | [`ContractError::InvalidAmount`] (5) | `amount <= 0` |
+    /// | [`ContractError::InsufficientCollateralBalance`] (39) | `amount > current_balance` |
+    /// | [`ContractError::CollateralRatioBelowMinimum`] (35) | post-release HF < threshold |
+    /// | [`ContractError::MissingLiquidityToken`] (22) | no token configured |
+    /// | [`ContractError::Overflow`] (12) | arithmetic overflow |
+    ///
+    /// # Events
+    ///
+    /// Emits `("credit", "col_prel")` → [`crate::events::CollateralPartialReleasedEvent`]
+    /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
+    pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
+        crate::collateral::partial_release_collateral(&env, &borrower, amount);
+    }
+
+    // ── Multi-collateral entrypoints ─────────────────────────────────────────
+
+    /// Admin: add a token to the collateral allowlist.
+    ///
+    /// The token must be a valid SAC-compatible contract address. Once listed
+    /// borrowers can call [`deposit_collateral_token`] / [`withdraw_collateral_token`]
+    /// using this token.
+    ///
+    /// # Errors
+    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
+    ///   configured admin collateral cool-off has not elapsed.
+    pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
+        collateral_admin::set_collateral_token_allowlist(&env, &tokens);
+    }
+
+    /// Query: return the current collateral token allowlist.
+    pub fn get_collateral_tokens(env: Env) -> soroban_sdk::Vec<Address> {
+        crate::storage::get_collateral_token_allowlist(&env)
+    }
+
+    /// Deposit a specific allowlisted collateral token from the borrower.
+    ///
+    /// Requires borrower `require_auth`. Reverts with `MissingLiquidityToken` if
+    /// `token` is not on the allowlist.
+    pub fn deposit_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
+        crate::collateral::deposit_collateral_token(&env, &borrower, &token, amount);
+    }
+
+    /// Withdraw a specific allowlisted collateral token to the borrower.
+    ///
+    /// Requires borrower `require_auth`. Reverts with `InsufficientCollateralBalance`
+    /// if the borrower's balance for `token` is below `amount`.
+    pub fn withdraw_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
+        crate::collateral::withdraw_collateral_token(&env, &borrower, &token, amount);
+    }
+
+    /// Query: return a borrower's balance for a specific collateral token.
+    pub fn get_collateral_for_token(env: Env, borrower: Address, token: Address) -> i128 {
+        crate::collateral::get_collateral_for_token(&env, &borrower, &token)
+    }
 
     /// Set the maximum total utilization allowed across all credit lines (admin only).
     ///
@@ -1260,10 +1453,11 @@ impl Credit {
         }
         lifecycle::close_credit_lines_batch(env, borrowers)
     }
-    pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+
+    pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
-        lifecycle::reinstate_credit_line(env, borrower, target_status)
+        lifecycle::default_credit_line(env, borrower)
     }
 
     /// Forgive outstanding debt without transferring tokens (admin only).
@@ -1492,6 +1686,106 @@ impl Credit {
     /// Return the current oracle circuit-breaker configuration, if set.
     pub fn get_oracle_config(env: Env) -> Option<OracleConfig> {
         get_oracle_config(&env)
+    }
+
+    // ── Multi-oracle quorum admin ─────────────────────────────────────────────
+
+    /// Configure the multi-oracle quorum parameters (admin only).
+    ///
+    /// Once set, calls to `submit_oracle_prices` validate that at least
+    /// `min_quorum_k` of the supplied prices agree within `max_deviation_bps`
+    /// of each other. The resolved median price is stored and used by
+    /// `settle_default_liquidation` (staleness-checked against
+    /// `max_age_seconds`).
+    ///
+    /// Quorum mode takes precedence over the single-oracle circuit breaker:
+    /// when both are configured, `settle_default_liquidation` uses the quorum
+    /// price and ignores the `oracle_price` parameter.
+    ///
+    /// # Validation
+    /// - `min_quorum_k` must be ≥ 2.
+    /// - `max_deviation_bps` must be ≤ 10_000.
+    /// - `max_age_seconds` must be > 0.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits an `orc_qcfg` event with the new configuration.
+    pub fn set_oracle_quorum_config(
+        env: Env,
+        min_quorum_k: u32,
+        max_deviation_bps: u32,
+        max_age_seconds: u64,
+    ) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        if min_quorum_k < 2 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        if max_deviation_bps > 10_000 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        if max_age_seconds == 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        set_oracle_quorum_config(
+            &env,
+            &OracleQuorumConfig {
+                min_quorum_k,
+                max_deviation_bps,
+                max_age_seconds,
+            },
+        );
+        publish_oracle_quorum_config_set_event(&env, min_quorum_k, max_deviation_bps, max_age_seconds);
+    }
+
+    /// Return the current multi-oracle quorum configuration, if set.
+    pub fn get_oracle_quorum_config(env: Env) -> Option<OracleQuorumConfig> {
+        get_oracle_quorum_config(&env)
+    }
+
+    /// Submit N oracle prices and resolve a quorum canonical price (admin only).
+    ///
+    /// Runs the quorum-of-K algorithm:
+    /// 1. Sorts submitted prices ascending.
+    /// 2. Finds the first K-wide window whose spread is within
+    ///    `max_deviation_bps` of the lowest price in that window.
+    /// 3. Returns the lower-median of that window as the canonical price.
+    /// 4. Stores the canonical price and the current ledger timestamp.
+    ///
+    /// The stored price is subsequently used by `settle_default_liquidation`
+    /// (staleness is re-checked there against `max_age_seconds`).
+    ///
+    /// # Validation
+    /// - Oracle quorum config must be set via `set_oracle_quorum_config` first.
+    /// - 2 ≤ `prices.len()` ≤ `MAX_ORACLE_FEEDS` (20).
+    /// - Every price must be strictly positive.
+    /// - At least `min_quorum_k` prices must agree within `max_deviation_bps`.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Events
+    /// Emits an `orc_qprc` event with the resolved price, quorum K, and timestamp.
+    pub fn submit_oracle_prices(env: Env, prices: Vec<i128>) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        let qcfg = get_oracle_quorum_config(&env).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid)
+        });
+
+        if prices.len() > oracles::MAX_ORACLE_FEEDS {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        }
+
+        let canonical_price = oracles::resolve_quorum_price(&env, &prices, &qcfg);
+        let now = env.ledger().timestamp();
+        crate::storage::set_oracle_last_price(&env, canonical_price, now);
+        publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
 
     // ── Borrower blocklist ────────────────────────────────────────────────────
@@ -1761,9 +2055,14 @@ impl Credit {
         publish_paused_event(&env, paused);
     }
 
-    pub fn freeze_draws(env: Env, reason: FreezeReason) {
-        freeze::freeze_draws(env, reason)
+    pub fn freeze_draws(env: Env) {
+        freeze::freeze_draws(env, crate::types::FreezeReason::LiquidityReserve)
     }
+
+    pub fn unfreeze_draws(env: Env) {
+        freeze::unfreeze_draws(env)
+    }
+
     pub fn is_draws_frozen(env: Env) -> bool {
         freeze::is_draws_frozen(&env)
     }

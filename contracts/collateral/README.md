@@ -24,7 +24,7 @@ action requires:
 ledger.timestamp >= LastAdminCollateralCriticalActionTs + AdminCollateralCooldownSeconds
 ```
 
-Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActive` (`54`).
+Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActive` (`56`).
 
 Implementation: [`src/admin.rs`](./src/admin.rs) (compiled into `creditra-credit`).
 

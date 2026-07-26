@@ -96,11 +96,10 @@ use crate::events::{
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
-    clear_repayment_schedule, get_late_fee_flat as storage_get_late_fee_flat, get_max_credit_limit,
-    get_min_credit_limit, get_repayment_schedule as storage_get_repayment_schedule,
-    persist_credit_line, set_late_fee_flat as storage_set_late_fee_flat, set_max_credit_limit,
-    set_min_credit_limit, set_repayment_schedule as storage_set_repayment_schedule,
+    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
+    get_repayment_schedule, persist_credit_line,
+    set_repayment_schedule as storage_set_repayment_schedule, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
@@ -122,9 +121,7 @@ fn liquidation_settlement_key(
     )
 }
 
-// ── Credit Limit Bounds Management ───────────────────────────────────────────
-
-/// Set global credit limit bounds (admin only).
+/// Get the current credit limit bounds, if configured.
 ///
 /// Returns `(Option<min>, Option<max>)` where `None` means the bound is not set.
 pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
@@ -150,6 +147,50 @@ pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
         }
     }
 }
+
+/// Open a new credit line for a borrower (admin only).
+///
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `min`: Minimum allowed credit limit. Must be >= 0.
+/// - `max`: Maximum allowed credit limit. Must be >= min.
+///
+/// # Authorization
+/// Requires admin authorization via `require_admin_auth()`.
+///
+/// # Panics
+/// - `ContractError::InvalidAmount` if `min < 0`
+/// - `ContractError::LimitOutOfBounds` if `max < min`
+///
+/// # Storage
+/// - Writes `min` to instance storage under `DataKey::MinCreditLimit`
+/// - Writes `max` to instance storage under `DataKey::MaxCreditLimit`
+///
+/// # Example
+/// ```ignore
+/// set_credit_limit_bounds(env, 1_000, 1_000_000_000);
+/// // Now all credit lines must have limits between 1,000 and 1,000,000,000
+/// ```
+pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+
+    // Validate minimum is non-negative
+    if min < 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    // Validate max >= min
+    if max < min {
+        env.panic_with_error(ContractError::LimitOutOfBounds);
+    }
+
+    // Store bounds in instance storage
+    crate::storage::set_min_credit_limit(&env, min);
+    crate::storage::set_max_credit_limit(&env, max);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     // Bump TTL on read: this is a hot accrual read path, so an active
@@ -224,89 +265,6 @@ pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: Address, grace_pe
 /// Return the per-borrower liquidation grace period in seconds for `borrower`.
 pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
     crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
-}
-
-/// Set or replace a borrower's installment repayment schedule.
-pub fn set_repayment_schedule(
-    env: &Env,
-    borrower: Address,
-    amount_per_period: i128,
-    period_seconds: u64,
-    first_due_ts: u64,
-) {
-    assert_not_paused(env);
-    require_admin_auth(env);
-
-    if amount_per_period <= 0 || period_seconds == 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-
-    if stored_line.status == CreditStatus::Closed {
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
-    storage_set_repayment_schedule(
-        env,
-        &borrower,
-        &RepaymentSchedule {
-            amount_per_period,
-            period_seconds,
-            next_due_ts: first_due_ts,
-        },
-    );
-}
-
-/// Advance the next due timestamp when a qualifying repayment covers one or more installments.
-/// Also charges a flat late fee per overdue installment when `LateFeeFlat` is configured.
-pub fn advance_repayment_schedule_after_repay(env: &Env, borrower: &Address, amount: i128) {
-    if amount <= 0 {
-        return;
-    }
-
-    let Some(mut schedule) = storage_get_repayment_schedule(env, borrower) else {
-        return;
-    };
-
-    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
-        return;
-    }
-
-    let installments_paid = (amount / schedule.amount_per_period) as u64;
-    if installments_paid == 0 {
-        return;
-    }
-
-    // ── Late-fee surcharge ──────────────────────────────────────────────────
-    let late_fee = storage_get_late_fee_flat(env);
-    if late_fee > 0 {
-        let now = env.ledger().timestamp();
-        for i in 0_u64..installments_paid {
-            let due_ts = schedule
-                .next_due_ts
-                .saturating_add(i.saturating_mul(schedule.period_seconds));
-            if now > due_ts {
-                storage_add_treasury_balance(env, late_fee);
-                publish_late_fee_charged_event(
-                    env,
-                    LateFeeChargedEvent {
-                        borrower: borrower.clone(),
-                        fee: late_fee,
-                        installment_index: i.saturating_add(1),
-                    },
-                );
-            }
-        }
-    }
-
-    let advance_seconds = schedule.period_seconds.saturating_mul(installments_paid);
-    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
-    storage_set_repayment_schedule(env, borrower, &schedule);
 }
 
 /// Set the flat late fee per missed installment (admin only).
@@ -606,6 +564,24 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
+    let grace_seconds = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
+    if grace_seconds > 0 {
+        let now = env.ledger().timestamp();
+        let base_ts = if credit_line.suspension_ts > 0 {
+            credit_line.suspension_ts
+        } else if let Some(schedule) = get_repayment_schedule(&env, &borrower) {
+            schedule.next_due_ts
+        } else if credit_line.last_rate_update_ts > 0 {
+            credit_line.last_rate_update_ts
+        } else {
+            credit_line.last_accrual_ts
+        };
+
+        if now < base_ts.saturating_add(grace_seconds) {
+            env.panic_with_error(ContractError::LiquidationGraceActive);
+        }
+    }
+
     let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
     persist_credit_line(
@@ -631,11 +607,11 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
-/// Forgive outstanding debt without transferring tokens (admin only).
+/// Write off outstanding debt without transferring tokens (admin only).
 ///
-/// This is an accounting-only write-off path intended for explicit admin debt
-/// relief or off-chain settlements that have already been handled elsewhere.
-/// The forgiven amount is capped to the current `utilized_amount`.
+/// Reduces `accrued_interest` first, then `utilized_amount`, by `amount`
+/// (clamped to the outstanding balance). No token movement occurs — this is
+/// pure accounting relief, e.g. for negotiated settlements handled off-chain.
 pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     assert_not_paused(&env);
     require_admin_auth(&env);
@@ -650,25 +626,17 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
         .get(&borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
+    let previous_status = stored_line.status;
 
-    if stored_line.status == CreditStatus::Closed {
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
+    // Apply interest accrual before any mutation.
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
-    let effective_forgive = amount.min(credit_line.utilized_amount);
-    let interest_forgiven = effective_forgive.min(credit_line.accrued_interest);
 
-    credit_line.accrued_interest = credit_line
-        .accrued_interest
-        .checked_sub(interest_forgiven)
-        .unwrap_or(0);
-    credit_line.utilized_amount = credit_line
-        .utilized_amount
-        .checked_sub(effective_forgive)
-        .unwrap_or(0);
+    let forgive_amount = amount.min(credit_line.utilized_amount);
+    let interest_forgiven = forgive_amount.min(credit_line.accrued_interest);
 
-    let previous_status = credit_line.status;
+    credit_line.accrued_interest -= interest_forgiven;
+    credit_line.utilized_amount -= forgive_amount;
+
     persist_credit_line(
         &env,
         &borrower,
@@ -678,73 +646,6 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     );
 }
 
-/// Apply auction liquidation proceeds to a defaulted credit line (admin only).
-///
-/// This hook is accounting-only and intentionally performs no token transfer.
-/// Off-chain orchestration is responsible for ensuring auction proceeds are settled
-/// into protocol custody before this function is called.
-/// Apply auction liquidation proceeds to a defaulted credit line (admin only).
-///
-/// This is the **accounting half** of the cross-contract default-settlement
-/// handoff. It performs no token transfer; off-chain orchestration is
-/// responsible for ensuring auction proceeds are in protocol custody before
-/// this function is called.
-///
-/// # Partial liquidation (`close_factor_bps`)
-///
-/// Instead of forcing full liquidation, the caller supplies a `close_factor_bps`
-/// value (1–10 000, in basis points) that caps the fraction of the outstanding
-/// debt that may be recovered in a single settlement:
-///
-/// ```text
-/// max_recoverable = utilized_amount * close_factor_bps / 10_000
-/// ```
-///
-/// `recovered_amount` must be ≤ `max_recoverable`; exceeding it reverts with
-/// [`ContractError::OverLimit`]. The protocol-level maximum close factor is
-/// stored in `DataKey::CloseFactorBps` (default 10 000 = full liquidation);
-/// supplying a `close_factor_bps` larger than that maximum also reverts with
-/// [`ContractError::OverLimit`].
-///
-/// This design supports incremental liquidation (e.g. 50 % per round) and
-/// still allows full liquidation when `close_factor_bps == 10_000`.
-///
-/// # Replay protection
-///
-/// Every `(borrower, settlement_id)` pair may be used at most once. The
-/// function writes a `bool` marker to persistent storage under
-/// `liquidation_settlement_key(borrower, settlement_id)` and reverts with
-/// [`ContractError::AlreadyInitialized`] if the key already exists.
-///
-/// # Automatic close
-///
-/// When `utilized_amount` drops to `0` after applying `recovered_amount`,
-/// the credit line is transitioned to [`CreditStatus::Closed`] atomically
-/// and its repayment schedule is cleared.
-///
-/// # Parameters
-/// - `borrower`: The defaulted borrower's address.
-/// - `recovered_amount`: Amount recovered by the auction (must be > 0 and ≤ `max_recoverable`).
-/// - `settlement_id`: Caller-supplied replay-protection nonce; unique per settlement.
-/// - `close_factor_bps`: Fraction of debt closeable this round (1–10 000 bps).
-///
-/// # Panics
-/// - [`ContractError::InvalidAmount`] — `recovered_amount <= 0` or
-///   `close_factor_bps == 0 || close_factor_bps > 10_000`.
-/// - [`ContractError::OverLimit`] — `close_factor_bps` exceeds the
-///   protocol-configured maximum, or `recovered_amount > max_recoverable`.
-/// - [`ContractError::AlreadyInitialized`] — `(borrower, settlement_id)` already used.
-/// - [`ContractError::CreditLineNotFound`] — no line for `borrower`.
-/// - [`ContractError::CreditLineDefaulted`] — line is not in `Defaulted` status.
-/// - [`ContractError::Overflow`] — arithmetic overflow (should not occur in practice).
-///
-/// # Authorization
-/// Admin only.
-///
-/// # Events
-/// Always emits `("credit", "liq_setl")` [`DefaultLiquidationSettledEvent`].
-/// Also emits `("credit", "closed")` [`CreditLineEvent`] when the line is
-/// fully liquidated.
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
@@ -968,6 +869,104 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 /// # Authorization
 /// Requires admin authorization because the schedule controls delinquency and
 /// due-date state for the borrower.
+pub fn set_repayment_schedule(
+    env: &Env,
+    borrower: Address,
+    amount_per_period: i128,
+    period_seconds: u64,
+    first_due_ts: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    if amount_per_period <= 0 || period_seconds == 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    if !env.storage().persistent().has(&borrower) {
+        env.panic_with_error(ContractError::CreditLineNotFound);
+    }
+
+    let schedule = RepaymentSchedule {
+        amount_per_period,
+        period_seconds,
+        next_due_ts: first_due_ts,
+    };
+    storage_set_repayment_schedule(env, &borrower, &schedule);
+    // Setting a schedule is an interaction with the credit line, so keep the
+    // credit-line entry live as well (the schedule entry is bumped by the
+    // storage setter itself).
+    bump_credit_line_ttl(env, &borrower);
+}
+
+/// Advance a borrower's installment schedule after a repayment.
+///
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
+///
+/// ```text
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
+/// ```
+///
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
+pub fn advance_repayment_schedule_after_repay(
+    env: &Env,
+    borrower: &Address,
+    effective_repay: i128,
+    interest_repaid: i128,
+) {
+    let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
+        Some(principal) if principal > 0 => principal,
+        _ => return,
+    };
+
+    let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
+        return;
+    };
+
+    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
+        return;
+    }
+
+    let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
+    if installments_paid == 0 {
+        return;
+    }
+
+    // ── Late-fee surcharge ──────────────────────────────────────────────────
+    let late_fee = crate::storage::get_late_fee_flat(env);
+    if late_fee > 0 {
+        let now = env.ledger().timestamp();
+        for i in 0_u64..installments_paid {
+            let due_ts = schedule
+                .next_due_ts
+                .saturating_add(i.saturating_mul(schedule.period_seconds));
+            if now > due_ts {
+                crate::storage::add_treasury_balance(env, late_fee);
+                crate::events::publish_late_fee_charged_event(
+                    env,
+                    crate::events::LateFeeChargedEvent {
+                        borrower: borrower.clone(),
+                        fee: late_fee,
+                        installment_index: i.saturating_add(1),
+                    },
+                );
+            }
+        }
+    }
+
+    let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
+    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
+    storage_set_repayment_schedule(env, borrower, &schedule);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────
 

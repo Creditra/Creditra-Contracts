@@ -38,8 +38,8 @@ fn assert_admin_collateral_cooldown_active(result: std::thread::Result<()>, cont
     };
 
     assert!(
-        err_str.contains("Error(Contract, #54)"),
-        "{context}: expected AdminCollateralCooldownActive (#54), got {err_str:?}"
+        err_str.contains("Error(Contract, #56)"),
+        "{context}: expected AdminCollateralCooldownActive (#56), got {err_str:?}"
     );
 }
 

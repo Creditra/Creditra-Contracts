@@ -424,6 +424,63 @@ pub struct CollateralWithdrawnEvent {
     pub new_balance: i128,
 }
 
+/// Structured, unified lifecycle event covering every collateral state
+/// change (deposit, withdrawal, partial release, internal release).
+///
+/// Emitted **in addition to** the legacy per-action events
+/// ([`CollateralDepositedEvent`], [`CollateralWithdrawnEvent`],
+/// [`CollateralPartialReleasedEvent`]) so existing indexers keep working
+/// unmodified, while new integrators can subscribe to a single topic
+/// (`("credit", "col_lca")`) and disambiguate via [`crate::types::CollateralEventKind`]
+/// instead of tracking multiple topic strings.
+///
+/// # Field notes
+///
+/// - `token` is `None` for the single-token collateral path (`CollateralBalance`
+///   storage) and `Some(token)` for the multi-collateral, per-token path.
+/// - `ledger` / `timestamp` let off-chain consumers order and correlate
+///   events without a separate RPC round-trip to fetch ledger metadata.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralLifecycleEvent {
+    pub borrower: Address,
+    pub kind: crate::types::CollateralEventKind,
+    /// `None` for the single-token collateral balance; `Some(token)` for
+    /// the multi-collateral per-token path.
+    pub token: Option<Address>,
+    /// Amount moved by this action (always positive).
+    pub amount: i128,
+    /// Collateral balance remaining after this action.
+    pub new_balance: i128,
+    /// Ledger sequence at time of the action (for off-chain indexers).
+    pub ledger: u32,
+    /// Ledger timestamp at time of the action.
+    pub timestamp: u64,
+}
+
+/// Publish a [`CollateralLifecycleEvent`] under the unified `("credit", "col_lca")` topic.
+pub fn publish_collateral_lifecycle_event(
+    env: &Env,
+    borrower: &Address,
+    kind: crate::types::CollateralEventKind,
+    token: Option<Address>,
+    amount: i128,
+    new_balance: i128,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "col_lca")),
+        CollateralLifecycleEvent {
+            borrower: borrower.clone(),
+            kind,
+            token,
+            amount,
+            new_balance,
+            ledger: env.ledger().sequence(),
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
 pub fn publish_collateral_deposited_event(env: &Env, event: CollateralDepositedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_dep")), event);
