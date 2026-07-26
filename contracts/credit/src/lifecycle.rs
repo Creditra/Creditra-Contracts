@@ -614,7 +614,10 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
-    let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    let settlement_key = DataKey::DrawAudit(crate::storage::DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp: env.ledger().sequence() as u64,
+    });
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadySettled);
     }

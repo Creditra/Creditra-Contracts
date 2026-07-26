@@ -197,7 +197,10 @@ mod test {
         let borrower = Address::generate(&env);
         let token = Address::generate(&env);
         let balance_key =
-            DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+            DataKey::CollateralBalanceV2(crate::storage::CollateralBalanceV2Key {
+                borrower: borrower.clone(),
+                token: token.clone(),
+            });
 
         env.as_contract(&contract_id, || {
             crate::storage::set_collateral_balance_for_token(
@@ -233,7 +236,10 @@ mod test {
         let borrower = Address::generate(&env);
         let token = Address::generate(&env);
         let balance_key =
-            DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+            DataKey::CollateralBalanceV2(crate::storage::CollateralBalanceV2Key {
+                borrower: borrower.clone(),
+                token: token.clone(),
+            });
 
         env.as_contract(&contract_id, || {
             crate::storage::set_collateral_balance_for_token(

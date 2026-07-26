@@ -221,21 +221,16 @@ pub enum ContractError {
     AlreadySettled = 51,
     /// Collateral risk weight exceeds the maximum allowed (10 000 bps).
     InvalidRiskWeight = 52,
-    /// Admin attempted a critical query-affecting action before the configured
-    /// cooldown interval has elapsed since the last such action.
-    AdminQueryCooldownActive = 53,
-    /// Oracle address not found in the oracle registry.
-    OracleNotFound = 54,
-    /// Stored borrower address does not match the key used to load the credit line.
-    BorrowerMismatch = 55,
-    /// Liquidity reserve balance is below the requested draw amount.
-    InsufficientReserve = 56,
-    /// Borrower's token allowance is insufficient for the transfer.
-    InsufficientAllowance = 57,
-    /// Borrower's token balance is insufficient for the transfer.
-    InsufficientBalance = 58,
-    /// Credit line utilization must be zero before this action can proceed.
-    UtilizedNotZero = 59,
+    /// Attestation proof is invalid or no attestation batch has been committed.
+    InvalidAttestation = 53,
+    /// Critical borrower admin action attempted before the cooldown elapsed.
+    AdminCooldownActive = 54,
+    /// Per-borrower liquidation grace window has not yet elapsed.
+    LiquidationGraceActive = 55,
+    /// Per-borrower maximum exposure cap was exceeded during a draw.
+    BorrowerExposureCapExceeded = 56,
+    /// Admin freeze/unfreeze action attempted before the freeze cooldown elapsed.
+    FreezeCooldownActive = 57,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -371,6 +366,8 @@ impl ContractError {
             Self::TreasuryProposalExists => Misc,
             Self::OriginalDrawNotFound => Misc,
             Self::AttestationBatchNotFound => Misc,
+            // Limit (4) — continued
+            Self::BorrowerExposureCapExceeded => Limit,
         }
     }
 }
@@ -625,6 +622,41 @@ pub struct BorrowCapabilities {
     pub can_self_suspend: bool,
 }
 
+/// Read-only capabilities bitmap for the accrual (v7) subsystem.
+///
+/// Returned by [`crate::views::accrual_capabilities`] / the `capabilities()`
+/// entrypoint on the accrual contract. All fields are pure boolean flags
+/// derived from protocol and per-borrower state; no state is mutated.
+///
+/// # Bit semantics
+///
+/// | Field                    | `true` when …                                                          |
+/// |--------------------------|------------------------------------------------------------------------|
+/// | `can_accrue`             | `accrue_batch` will process the borrower (line exists, Active, utilization > 0, protocol not paused) |
+/// | `batch_open`             | protocol accepts new `accrue_batch` submissions (not paused, batch size < `ACCRUE_BATCH_MAX`) |
+/// | `penalty_rate_active`    | a penalty surcharge is configured and the borrower is currently delinquent |
+/// | `grace_waiver_active`    | a grace-period config exists and the borrower is within the grace window |
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccrualCapabilities {
+    /// `true` when `accrue_batch` will capitalize interest for this borrower:
+    /// the credit line exists, is `Active`, has `utilized_amount > 0`, and the
+    /// protocol is not paused.
+    pub can_accrue: bool,
+    /// `true` when the protocol is accepting new `accrue_batch` submissions
+    /// (i.e. the circuit breaker is not engaged).
+    pub batch_open: bool,
+    /// `true` when a positive `penalty_surcharge_bps` is configured and the
+    /// borrower is currently past their due date (delinquent). This means
+    /// the next accrual will apply the elevated penalty rate.
+    pub penalty_rate_active: bool,
+    /// `true` when a `GracePeriodConfig` is set and the current ledger
+    /// timestamp is within the borrower's grace window (i.e.
+    /// `now <= suspension_ts + grace_period_seconds`). Only meaningful when
+    /// the line is `Suspended`.
+    pub grace_waiver_active: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
@@ -684,3 +716,35 @@ pub struct PauseReason {
     pub actor: soroban_sdk::Address,
 }
 
+/// Error categories for client-side grouping of [`ContractError`] variants.
+///
+/// # Discriminant stability
+/// Discriminants are permanently pinned. New variants must be appended at the
+/// end with the next available integer.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authentication / authorization errors (Unauthorized, NotAdmin, AdminNotInitialized).
+    Auth = 1,
+    /// Credit line lifecycle state errors (Closed, Suspended, Defaulted, AlreadyInitialized).
+    Lifecycle = 2,
+    /// Numeric domain errors (InvalidAmount, NegativeLimit, Overflow, TimestampRegression, LimitOutOfBounds).
+    Numeric = 3,
+    /// Per-borrower limit enforcement (OverLimit, UtilizationNotZero, DrawExceedsMaxAmount, BorrowerExposureCapExceeded).
+    Limit = 4,
+    /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
+    Liquidity = 5,
+    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
+    Risk = 6,
+    /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
+    Oracle = 7,
+    /// Collateral ratio errors (CollateralRatioBelowMinimum, InsufficientCollateralBalance).
+    Collateral = 8,
+    /// Blocklist / freeze / draw-freeze errors (BorrowerBlocked, DrawsFrozen, BorrowerFrozen).
+    Block = 9,
+    /// Reentrancy guard trigger.
+    Reentrancy = 10,
+    /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
+    Misc = 11,
+}

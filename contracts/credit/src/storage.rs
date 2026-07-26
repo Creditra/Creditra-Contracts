@@ -64,6 +64,25 @@ use crate::types::{
 };
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
+/// Composite key for per-borrower draw audit entries.
+/// Wraps `(borrower, timestamp)` as a single `#[contracttype]` value
+/// because `#[contracttype]` enums do not support multi-field tuple variants.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawAuditKey {
+    pub borrower: Address,
+    pub timestamp: u64,
+}
+
+/// Composite key for per-borrower per-token collateral balance entries (v2).
+/// Wraps `(borrower, token)` for use as a single storage key.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralBalanceV2Key {
+    pub borrower: Address,
+    pub token: Address,
+}
+
 /// Storage keys used in instance and persistent storage.
 #[contracttype(export = false)]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -177,9 +196,9 @@ pub enum DataKey {
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
     /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
-    DrawAudit(Address, u64),
+    DrawAudit(DrawAuditKey),
     /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
-    DrawReversedAmount(Address, u64),
+    DrawReversedAmount(DrawAuditKey),
     /// Oracle circuit-breaker configuration.
     OracleConfig,
     /// Multi-oracle quorum configuration.
@@ -200,18 +219,18 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
-    /// Per-borrower collateral balance for a specific token.
-    CollateralBalanceV2(Address, Address),
-    /// List of allowlisted collateral tokens.
-    CollateralTokenAllowlist,
-    /// Minimum interval in seconds required between consecutive admin query
-    /// critical actions (update_risk_parameters, set_oracle_config,
-    /// set_oracle_quorum_config, set_rate_formula_config, set_grace_period_config).
-    /// When absent, no cooldown is enforced.
-    AdminQueryCooldownSeconds,
-    /// Ledger timestamp of the last admin query critical action.
-    /// Set atomically with the action; used to enforce `AdminQueryCooldownSeconds`.
-    AdminQueryLastActionTs,
+    /// Admin freeze cooldown duration in seconds.
+    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
+    /// by a minimum interval between successive calls.
+    FreezeCooldownSeconds,
+    /// Ledger timestamp of the last admin freeze or unfreeze action.
+    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
+    LastFreezeTimestamp,
+    /// Per-borrower liquidation grace period in seconds.
+    /// Specifies a grace window before a credit line can be defaulted or liquidated.
+    LiquidationGracePeriod(Address),
+    /// Per-borrower per-token collateral balance (v2, multi-token support).
+    CollateralBalanceV2(CollateralBalanceV2Key),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -1536,7 +1555,10 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 /// Return a borrower's balance for a specific collateral token and bump
 /// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let key = DataKey::CollateralBalanceV2(CollateralBalanceV2Key {
+        borrower: borrower.clone(),
+        token: token.clone(),
+    });
     if env.storage().persistent().has(&key) {
         bump_persistent_ttl(env, &key);
     }
@@ -1545,7 +1567,10 @@ pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
 pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let key = DataKey::CollateralBalanceV2(CollateralBalanceV2Key {
+        borrower: borrower.clone(),
+        token: token.clone(),
+    });
     let previous = get_collateral_balance_for_token(env, borrower, token);
     env.storage().persistent().set(&key, &balance);
     bump_persistent_ttl(env, &key);

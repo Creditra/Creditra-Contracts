@@ -4,20 +4,18 @@
 //! Creditra accrual v7 contract — re-exports the credit contract's accrual
 //! surface for error-stability testing, event indexer support, and compositional reuse.
 //!
-//! # Overview
+//! The accrual engine lives in [`creditra_credit::accrual`]; this crate is a
+//! thin wrapper that anchors the [`creditra_credit::types::ContractError`]
+//! discriminants relevant to the v7 accrual subsystem for CI stability
+//! guards. See [`tests/err_stab.rs`] for the pinning assertions.
 //!
-//! The accrual engine lives in [`creditra_credit::accrual`]. This crate serves as:
-//! 1. A thin wrapper anchoring [`creditra_credit::types::ContractError`] discriminants
-//!    relevant to the v7 interest-accrual subsystem for CI stability guards (see [`tests/err_stab.rs`]).
-//! 2. The canonical definition crate for versioned, structured accrual events
-//!    ([`events::AccrualBatchCompletedEvent`] and [`events::InterestAccruedEvent`]).
+//! ## Public surface (v7)
 //!
-//! # Public Surface
-//!
-//! - [`events`] — Structured event definitions and event publishing helpers.
-//! - Re-exported public functions and types from [`creditra_credit`].
+//! - [`views::accrual_capabilities`] — read-only capabilities bitmap for the
+//!   accrual subsystem. Returns an [`creditra_credit::types::AccrualCapabilities`]
+//!   with four boolean flags describing the current state of the accrual
+//!   engine for a given borrower. No auth, no mutations.
 
-pub mod events;
-
+pub mod views;
 pub use creditra_credit::*;
 

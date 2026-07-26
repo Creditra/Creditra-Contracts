@@ -100,7 +100,6 @@ mod handshake;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
-mod oracles;
 #[cfg(test)]
 mod amount_validation_tests;
 mod attestation;
@@ -117,25 +116,24 @@ mod fees;
 mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
-pub mod lifecycle;
-pub mod limits;
+mod lifecycle;
+mod limits;
+mod oracles;
 pub mod math_utils;
 mod penalties;
 #[cfg(test)]
 mod penalties_tests;
 mod query;
-mod query_admin;
 mod risk;
-mod views;
-pub use crate::penalties::LateFeeConfig;
-pub use crate::risk::compute_rate_from_score;
-pub use crate::types::FreezeReason;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
+pub mod views;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cross_chain;
 
+pub use crate::risk::compute_rate_from_score;
+pub use crate::types::FreezeReason;
 
 #[cfg(test)]
 mod boundary_tests;
@@ -154,53 +152,48 @@ mod views_tests;
 mod prorate_interest_proofs;
 
 use crate::attestation::AttestationBatch;
-use crate::types::ProofOfReserve;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
-    publish_oracle_quorum_price_set_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
-    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
-    InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
-    TreasuryWithdrawalProposedEvent,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::types::ProofOfReserve;
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::storage::{
-    assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
-    enforce_freeze_cooldown, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard, enforce_freeze_cooldown,
+    get_borrower_by_credit_line_id, get_borrower_frozen_until,
     get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
-    get_oracle_config, get_oracle_quorum_config,
-    get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    get_oracle_config, get_oracle_quorum_config, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_formula_key, set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, record_freeze_timestamp_if_cooldown,
-    set_oracle_config, set_oracle_quorum_config,
-    set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
-};
-use crate::storage::{
+    proposed_at_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
+    set_oracle_quorum_config, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps,
     clear_pending_treasury_withdrawal, get_pending_treasury_withdrawal,
     set_pending_treasury_withdrawal,
+    DataKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode,
-    OracleConfig, OracleQuorumConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, TreasuryWithdrawalProposal,
+    AccrualCapabilities, BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
+    ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    ProofOfReserve,
 };
 use soroban_sdk::{BytesN, Vec};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
-/// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 
 #[allow(dead_code)]
@@ -1546,6 +1539,23 @@ impl Credit {
         views::borrow_capabilities(env, borrower)
     }
 
+    /// Return the accrual-subsystem capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only view — no authentication required, no state mutations.
+    /// Evaluates the same pre-flight conditions that `accrue_batch` and
+    /// `apply_accrual` check, WITHOUT actually running accrual math or
+    /// writing any storage.
+    ///
+    /// # Returns
+    /// An [`AccrualCapabilities`] struct with four bool fields:
+    /// - `can_accrue`          — `accrue_batch` will process this borrower
+    /// - `batch_open`          — protocol accepts new batch submissions
+    /// - `penalty_rate_active` — delinquency surcharge will apply on next accrual
+    /// - `grace_waiver_active` — borrower is within their suspension grace window
+    pub fn capabilities(env: Env, borrower: Address) -> AccrualCapabilities {
+        views::accrual_capabilities(env, borrower)
+    }
+
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::deposit_collateral(&env, &borrower, amount);
     }
@@ -2354,12 +2364,18 @@ impl Credit {
         let original_draw: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::DrawAudit(borrower.clone(), original_ts))
+            .get(&DataKey::DrawAudit(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }))
             .unwrap_or_else(|| env.panic_with_error(ContractError::OriginalDrawNotFound));
         let already_reversed: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::DrawReversedAmount(borrower.clone(), original_ts))
+            .get(&DataKey::DrawReversedAmount(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }))
             .unwrap_or(0);
         let remaining_reversible = original_draw.saturating_sub(already_reversed);
         if amount > remaining_reversible {
@@ -2374,7 +2390,10 @@ impl Credit {
         credit_line.utilized_amount = new_utilized_amount;
         env.storage().persistent().set(&borrower, &credit_line);
         env.storage().persistent().set(
-            &DataKey::DrawReversedAmount(borrower.clone(), original_ts),
+            &DataKey::DrawReversedAmount(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }),
             &(already_reversed + amount),
         );
 
