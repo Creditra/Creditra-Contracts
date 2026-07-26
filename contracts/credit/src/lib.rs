@@ -116,6 +116,8 @@ mod freeze;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+#[path = "../../lifecycle/src/views.rs"]
+mod lifecycle_views;
 mod limits;
 pub mod math_utils;
 mod penalties;
@@ -182,9 +184,9 @@ use crate::storage::{
 };
 use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig, OracleQuorumConfig,
-    ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, TreasuryWithdrawalProposal,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
+    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
+    RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
@@ -1522,6 +1524,25 @@ impl Credit {
         views::borrow_capabilities(env, borrower)
     }
 
+    /// Return the lifecycle-transition capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only pre-flight check for every state-changing lifecycle
+    /// entrypoint (`suspend_credit_line`, `self_suspend_credit_line`,
+    /// `close_credit_line`, `default_credit_line`, `reinstate_credit_line`),
+    /// derived from the credit line's current status and the protocol pause
+    /// flag. Every field is `false` when no credit line exists for
+    /// `borrower`.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`LifecycleCapabilities`] bitmap. See its field docs for the exact
+    /// precondition each flag mirrors.
+    pub fn lifecycle_capabilities(env: Env, borrower: Address) -> LifecycleCapabilities {
+        lifecycle_views::capabilities(env, borrower)
+    }
+
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::deposit_collateral(&env, &borrower, amount);
     }
@@ -1774,7 +1795,7 @@ impl Credit {
     }
 
     pub fn self_suspend_credit_line(env: Env, borrower: Address) {
-        lifecycle::suspend_credit_line(env, borrower)
+        lifecycle::self_suspend_credit_line(env, borrower)
     }
 
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {

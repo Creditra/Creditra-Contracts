@@ -1,4 +1,5 @@
 use crate::collateral;
+use crate::lifecycle;
 use crate::events::{
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,

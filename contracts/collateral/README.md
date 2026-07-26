@@ -11,9 +11,9 @@ cool-off interval between mutations:
 
 | Entrypoint | Storage key | Notes |
 | --- | --- | --- |
-| `set_admin_collateral_cooldown_seconds(seconds)` | `AdminCollateralCooldownSeconds` | Admin only. `seconds = 0` disables the guard. Does **not** consume the cool-off clock. |
-| `get_admin_collateral_cooldown_seconds()` | — | Returns `Option<u64>`. |
-| `get_last_admin_collateral_critical_action_ts()` | `LastAdminCollateralCriticalActionTs` | Ledger timestamp of the last successful critical action. |
+| `set_col_admin_cooldown_secs(seconds)` | `AdminCollateralCooldownSeconds` | Admin only. `seconds = 0` disables the guard. Does **not** consume the cool-off clock. |
+| `get_col_admin_cooldown_secs()` | — | Returns `Option<u64>`. |
+| `get_last_col_admin_action_ts()` | `LastColAdminActionTs` | Ledger timestamp of the last successful critical action. |
 
 ## Enforcement
 
@@ -21,7 +21,7 @@ When `AdminCollateralCooldownSeconds` is set to a positive value, each critical
 action requires:
 
 ```text
-ledger.timestamp >= LastAdminCollateralCriticalActionTs + AdminCollateralCooldownSeconds
+ledger.timestamp >= LastColAdminActionTs + AdminCollateralCooldownSeconds
 ```
 
 Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActive` (`56`).

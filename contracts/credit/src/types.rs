@@ -694,7 +694,12 @@ pub struct CreditLineSnapshot {
     /// `utilized_amount == 0`.
     pub health_factor_bps: u32,
     /// The borrower's installment repayment schedule, if configured.
-    pub repayment_schedule: Option<RepaymentSchedule>,
+    /// Empty when no schedule is set; exactly one element when a schedule
+    /// is configured. Represented as a `Vec` rather than `Option<T>`
+    /// because the Soroban SDK's struct-field XDR codegen does not support
+    /// `Option<CustomStruct>` fields (`Option<T>` requires `T: Into<ScVal>`,
+    /// which `#[contracttype]`-derived UDTs only implement fallibly).
+    pub repayment_schedule: soroban_sdk::Vec<RepaymentSchedule>,
     /// `true` when the borrower is past the delinquency grace window.
     pub is_delinquent: bool,
 }
@@ -725,6 +730,45 @@ pub struct BorrowCapabilities {
     /// Whether the borrower can self-suspend their credit line. True
     /// only when the credit line exists and is currently Active.
     pub can_self_suspend: bool,
+}
+
+/// Read-only capabilities bitmap for a credit line's lifecycle transitions (v7).
+///
+/// Returned by the `lifecycle_capabilities` view to let off-chain clients and
+/// on-chain integrators inspect which lifecycle transitions are currently
+/// permitted for a borrower's credit line, without simulating the full
+/// entrypoint logic (state lookup + status checks + pause guard).
+///
+/// Every field is derived purely from the credit line's current
+/// [`CreditStatus`] and the protocol pause flag — no token CPIs, no auth
+/// checks, no mutation. See [`crate::lifecycle`] for the authoritative
+/// transition rules each field mirrors.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LifecycleCapabilities {
+    /// Whether an admin can suspend this line via `suspend_credit_line`.
+    /// True only when the line exists, the protocol is not paused, and the
+    /// status is [`CreditStatus::Active`].
+    pub can_suspend: bool,
+    /// Whether the borrower can self-suspend via `self_suspend_credit_line`.
+    /// Same precondition as `can_suspend` (only `Active` self-suspends).
+    pub can_self_suspend: bool,
+    /// Whether an admin can force-close this line via `close_credit_line`
+    /// unconditionally (any non-`Closed` status). False when the line does
+    /// not exist, the protocol is paused, or the status is already `Closed`.
+    pub can_close_admin: bool,
+    /// Whether the borrower can self-close via `close_credit_line`. Requires
+    /// the same preconditions as `can_close_admin` **plus**
+    /// `utilized_amount == 0`.
+    pub can_close_borrower: bool,
+    /// Whether an admin can move this line to `Defaulted` via
+    /// `default_credit_line`. True when the line exists, the protocol is not
+    /// paused, and the status is `Active`, `Restricted`, or `Suspended`.
+    pub can_default: bool,
+    /// Whether an admin can cure this line via `reinstate_credit_line`. True
+    /// only when the line exists, the protocol is not paused, and the status
+    /// is `Defaulted`.
+    pub can_reinstate: bool,
 }
 
 /// Proof-of-reserve view for the protocol treasury.

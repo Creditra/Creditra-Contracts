@@ -441,10 +441,8 @@ mod test {
 // - The stack buffer is bounded at compile time; gas consumption is O(n²)
 //   for sorting and O(n) for window scanning.
 
-use soroban_sdk::{Env, Vec};
-
 use crate::math_utils::compute_deviation_bps;
-use crate::types::{ContractError, OracleQuorumConfig};
+use crate::types::OracleQuorumConfig;
 
 /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
 ///
