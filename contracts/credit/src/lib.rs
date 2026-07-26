@@ -2314,12 +2314,18 @@ impl Credit {
         let original_draw: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::DrawAudit(borrower.clone(), original_ts))
+            .get(&DataKey::DrawAudit(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }))
             .unwrap_or_else(|| env.panic_with_error(ContractError::OriginalDrawNotFound));
         let already_reversed: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::DrawReversedAmount(borrower.clone(), original_ts))
+            .get(&DataKey::DrawReversedAmount(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }))
             .unwrap_or(0);
         let remaining_reversible = original_draw.saturating_sub(already_reversed);
         if amount > remaining_reversible {
@@ -2334,7 +2340,10 @@ impl Credit {
         credit_line.utilized_amount = new_utilized_amount;
         env.storage().persistent().set(&borrower, &credit_line);
         env.storage().persistent().set(
-            &DataKey::DrawReversedAmount(borrower.clone(), original_ts),
+            &DataKey::DrawReversedAmount(crate::storage::DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }),
             &(already_reversed + amount),
         );
 
