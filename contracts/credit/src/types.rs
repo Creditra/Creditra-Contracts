@@ -723,35 +723,6 @@ pub struct PauseReason {
 /// Error categories for client-side grouping of [`ContractError`] variants.
 ///
 /// # Discriminant stability
-/// Discriminants are permanently pinned. New variants must be appended at the
-/// end with the next available integer.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum ContractErrorCategory {
-    /// Authentication / authorization errors (Unauthorized, NotAdmin, AdminNotInitialized).
-    Auth = 1,
-    /// Credit line lifecycle state errors (Closed, Suspended, Defaulted, AlreadyInitialized).
-    Lifecycle = 2,
-    /// Numeric domain errors (InvalidAmount, NegativeLimit, Overflow, TimestampRegression, LimitOutOfBounds).
-    Numeric = 3,
-    /// Per-borrower limit enforcement (OverLimit, UtilizationNotZero, DrawExceedsMaxAmount, BorrowerExposureCapExceeded).
-    Limit = 4,
-    /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
-    Liquidity = 5,
-    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
-    Risk = 6,
-    /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
-    Oracle = 7,
-    /// Collateral ratio errors (CollateralRatioBelowMinimum, InsufficientCollateralBalance).
-    Collateral = 8,
-    /// Blocklist / freeze / draw-freeze errors (BorrowerBlocked, DrawsFrozen, BorrowerFrozen).
-    Block = 9,
-    /// Reentrancy guard trigger.
-    Reentrancy = 10,
-    /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
-    Misc = 11,
-}
 
 impl ContractError {
     /// Return the error category for this variant.
