@@ -126,98 +126,30 @@ fn liquidation_settlement_key(
 
 /// Set global credit limit bounds (admin only).
 ///
-/// Configures the minimum and maximum allowed credit limits for all credit lines.
-/// These bounds are enforced when opening new credit lines or increasing existing limits.
-///
-/// # Parameters
-/// - `env`: The Soroban environment.
-/// - `min`: Minimum allowed credit limit. Must be >= 0.
-/// - `max`: Maximum allowed credit limit. Must be >= min.
-///
-/// # Authorization
-/// Requires admin authorization via `require_admin_auth()`.
-///
-/// # Panics
-/// - `ContractError::InvalidAmount` if `min < 0`
-/// - `ContractError::LimitOutOfBounds` if `max < min`
-///
-/// # Storage
-/// - Writes `min` to instance storage under `DataKey::MinCreditLimit`
-/// - Writes `max` to instance storage under `DataKey::MaxCreditLimit`
-///
-/// # Example
-/// ```ignore
-/// set_credit_limit_bounds(env, 1_000, 1_000_000_000);
-/// // Now all credit lines must have limits between 1,000 and 1,000,000,000
-/// ```
-pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
-    assert_not_paused(&env);
-    require_admin_auth(&env);
-
-    // Validate minimum is non-negative
-    if min < 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    // Validate max >= min
-    if max < min {
-        env.panic_with_error(ContractError::LimitOutOfBounds);
-    }
-
-    // Store bounds in instance storage
-    set_min_credit_limit(&env, min);
-    set_max_credit_limit(&env, max);
-}
-
-/// Get the configured global credit limit bounds.
-///
-/// Returns the minimum and maximum allowed credit limits, if configured.
-///
-/// # Returns
-/// `(min_credit_limit, max_credit_limit)` tuple, or `(None, None)` if not configured.
-///
-/// # Storage
-/// - Reads from instance storage keys `DataKey::MinCreditLimit` and `DataKey::MaxCreditLimit`
+/// Returns `(Option<min>, Option<max>)` where `None` means the bound is not set.
 pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
-    let min = get_min_credit_limit(env);
-    let max = get_max_credit_limit(env);
+    let min = crate::storage::get_min_credit_limit(env);
+    let max = crate::storage::get_max_credit_limit(env);
     (min, max)
 }
 
-/// Validate that a credit limit falls within configured bounds.
-///
-/// # Parameters
-/// - `env`: The Soroban environment.
-/// - `credit_limit`: The credit limit to validate.
+/// Validate that a credit limit falls within the configured min/max bounds (if set).
 ///
 /// # Panics
-/// - `ContractError::LimitOutOfBounds` if the limit is outside configured bounds
-///
-/// # Behavior
-/// - If bounds are not configured, validation passes (no restrictions)
-/// - If only min is configured, validates `credit_limit >= min`
-/// - If only max is configured, validates `credit_limit <= max`
-/// - If both are configured, validates `min <= credit_limit <= max`
+/// - `ContractError::LimitOutOfBounds` if `credit_limit` is outside the configured range.
 pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
-    let min = get_min_credit_limit(env);
-    let max = get_max_credit_limit(env);
-
-    // Check minimum bound if configured
-    if let Some(min_limit) = min {
-        if credit_limit < min_limit {
+    let (min_limit, max_limit) = get_credit_limit_bounds(env);
+    if let Some(min) = min_limit {
+        if credit_limit < min {
             env.panic_with_error(ContractError::LimitOutOfBounds);
         }
     }
-
-    // Check maximum bound if configured
-    if let Some(max_limit) = max {
-        if credit_limit > max_limit {
+    if let Some(max) = max_limit {
+        if credit_limit > max {
             env.panic_with_error(ContractError::LimitOutOfBounds);
         }
     }
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
 
 fn suspend_credit_line_internal(env: &Env, borrower: Address) {
     // Bump TTL on read: this is a hot accrual read path, so an active
@@ -1018,7 +950,24 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     );
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ── repayment schedule helpers ───────────────────────────────────────────────
+
+/// Set or replace a borrower's installment repayment schedule (admin only).
+///
+/// # Parameters
+/// - `borrower`: Borrower whose credit line schedule is being configured.
+/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
+/// - `period_seconds`: Duration of each installment period in seconds; must be positive.
+/// - `first_due_ts`: Timestamp at which the first installment is due.
+///
+/// # Panics
+/// - [`ContractError::InvalidAmount`] when `amount_per_period <= 0` or
+///   `period_seconds == 0`.
+/// - [`ContractError::CreditLineNotFound`] when `borrower` has no credit line.
+///
+/// # Authorization
+/// Requires admin authorization because the schedule controls delinquency and
+/// due-date state for the borrower.
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────
 

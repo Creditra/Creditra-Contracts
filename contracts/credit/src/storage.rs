@@ -218,6 +218,11 @@ pub enum DataKey {
     OracleLastPriceTs,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
+    /// Pending treasury withdrawal proposal (at most one at a time).
+    /// Stored in instance storage; cleared after successful execution.
+    PendingTreasuryWithdrawal,
+    /// Protocol-level max close factor in basis points for partial liquidation settlements.
+    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,

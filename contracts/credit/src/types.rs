@@ -249,36 +249,14 @@ pub enum ContractError {
 /// for the full categorized reference.
 ///
 /// # Stability guarantee
-/// Discriminants are **permanent**. Never reorder or renumber existing
-/// variants — doing so would break deployed SDK clients. New categories
-/// must be appended at the end with the next available integer.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum ContractErrorCategory {
-    /// Authorization failures (wrong caller, missing admin).
-    Auth = 1,
-    /// Credit-line lifecycle state violations.
-    Lifecycle = 2,
-    /// Numeric validation or arithmetic errors.
-    Numeric = 3,
-    /// Credit limit and per-transaction cap violations.
-    Limit = 4,
-    /// Liquidity, reserve, and treasury availability failures.
-    Liquidity = 5,
-    /// Risk-score, rate, pause, and cooldown violations.
-    Risk = 6,
-    /// Oracle price-feed circuit-breaker failures.
-    Oracle = 7,
-    /// Collateral ratio or balance violations.
-    Collateral = 8,
-    /// Borrower-blocked or draw-freeze state.
-    Block = 9,
-    /// Reentrancy guard triggered.
-    Reentrancy = 10,
-    /// Miscellaneous errors that do not fit a specific category.
-    Misc = 11,
-}
+/// These discriminants are **permanent**. Never reorder or renumber existing
+/// variants — doing so would break deployed SDK clients that match on
+/// category codes. New variants must be appended at the end.
+///
+/// # Usage
+/// Use [`ContractError::category`] to map any error to its category at
+/// runtime. This allows SDK clients to group errors by category without
+/// matching on individual error codes.
 
 impl ContractError {
     /// Return the stable category for this error variant.
