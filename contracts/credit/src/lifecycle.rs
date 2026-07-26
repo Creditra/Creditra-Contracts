@@ -1033,6 +1033,7 @@ mod self_suspend {
 #[cfg(test)]
 mod installment {
     use crate::events::LateFeeChargedEvent;
+    use crate::types::CreditStatus;
     use crate::Credit;
     use crate::CreditClient;
     use soroban_sdk::{
@@ -1328,6 +1329,7 @@ mod installment {
             &recovered,
             &settlement_id,
             &5_000, // 50% close factor
+            &None,
         );
 
         let after = client.get_credit_line(&borrower).unwrap();
@@ -1366,6 +1368,7 @@ mod installment {
             &utilized_with_accrual,
             &settlement_id,
             &10_000, // 100% close factor
+            &None,
         );
 
         let after = client.get_credit_line(&borrower).unwrap();
@@ -1401,6 +1404,7 @@ mod installment {
             &before.utilized_amount, // Try to recover 100%
             &settlement_id,
             &10_000, // 100% close factor (exceeds protocol max of 50%)
+            &None,
         );
     }
 
@@ -1428,6 +1432,7 @@ mod installment {
             &60_000, // Try to recover $60k
             &settlement_id,
             &5_000, // Only 50% close factor (max recoverable is $50k)
+            &None,
         );
     }
 
@@ -1454,6 +1459,7 @@ mod installment {
             &10_000,
             &settlement_id,
             &0, // Invalid: zero close factor
+            &None,
         );
     }
 
@@ -1480,6 +1486,7 @@ mod installment {
             &100_000,
             &settlement_id,
             &10_001, // Invalid: exceeds max basis points
+            &None,
         );
     }
 
