@@ -690,3 +690,124 @@ pub struct PauseReason {
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
 }
+
+/// Error categories for client-side grouping of [`ContractError`] variants.
+///
+/// # Discriminant stability
+/// Discriminants are permanently pinned. New variants must be appended at the
+/// end with the next available integer.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authentication / authorization errors (Unauthorized, NotAdmin, AdminNotInitialized).
+    Auth = 1,
+    /// Credit line lifecycle state errors (Closed, Suspended, Defaulted, AlreadyInitialized).
+    Lifecycle = 2,
+    /// Numeric domain errors (InvalidAmount, NegativeLimit, Overflow, TimestampRegression, LimitOutOfBounds).
+    Numeric = 3,
+    /// Per-borrower limit enforcement (OverLimit, UtilizationNotZero, DrawExceedsMaxAmount, BorrowerExposureCapExceeded).
+    Limit = 4,
+    /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
+    Liquidity = 5,
+    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
+    Risk = 6,
+    /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
+    Oracle = 7,
+    /// Collateral ratio errors (CollateralRatioBelowMinimum, InsufficientCollateralBalance).
+    Collateral = 8,
+    /// Blocklist / freeze / draw-freeze errors (BorrowerBlocked, DrawsFrozen, BorrowerFrozen).
+    Block = 9,
+    /// Reentrancy guard trigger.
+    Reentrancy = 10,
+    /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Return the error category for this variant.
+    ///
+    /// Categories allow clients to group errors without matching on individual
+    /// discriminant values. Every variant maps to exactly one category.
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            ContractError::Unauthorized
+            | ContractError::NotAdmin
+            | ContractError::AdminNotInitialized => ContractErrorCategory::Auth,
+
+            ContractError::CreditLineClosed
+            | ContractError::AlreadyInitialized
+            | ContractError::CreditLineSuspended
+            | ContractError::CreditLineDefaulted
+            | ContractError::LiquidationGraceActive => ContractErrorCategory::Lifecycle,
+
+            ContractError::InvalidAmount
+            | ContractError::NegativeLimit
+            | ContractError::Overflow
+            | ContractError::TimestampRegression
+            | ContractError::LimitOutOfBounds => ContractErrorCategory::Numeric,
+
+            ContractError::OverLimit
+            | ContractError::UtilizationNotZero
+            | ContractError::LimitDecreaseRequiresRepayment
+            | ContractError::DrawExceedsMaxAmount
+            | ContractError::RepayExceedsMaxAmount
+            | ContractError::BorrowerExposureCapExceeded => ContractErrorCategory::Limit,
+
+            ContractError::MissingLiquidityToken
+            | ContractError::MissingLiquiditySource
+            | ContractError::InsufficientLiquidityReserve
+            | ContractError::LiquidityTokenCallFailed
+            | ContractError::InsufficientRepaymentAllowance
+            | ContractError::InsufficientRepaymentBalance
+            | ContractError::TreasuryNotSet
+            | ContractError::ExposureCapExceeded => ContractErrorCategory::Liquidity,
+
+            ContractError::RateTooHigh
+            | ContractError::ScoreTooHigh
+            | ContractError::Paused
+            | ContractError::DrawCooldownActive
+            | ContractError::AdminCooldownActive => ContractErrorCategory::Risk,
+
+            ContractError::OraclePriceInvalid
+            | ContractError::OraclePriceStale
+            | ContractError::OraclePriceDeviation => ContractErrorCategory::Oracle,
+
+            ContractError::CollateralRatioBelowMinimum
+            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+
+            ContractError::BorrowerBlocked
+            | ContractError::DrawsFrozen
+            | ContractError::BorrowerFrozen
+            | ContractError::FreezeCooldownActive => ContractErrorCategory::Block,
+
+            ContractError::Reentrancy => ContractErrorCategory::Reentrancy,
+
+            ContractError::CreditLineNotFound
+            | ContractError::AdminAcceptTooEarly
+            | ContractError::DrawReversalWindowExpired
+            | ContractError::OriginalDrawNotFound => ContractErrorCategory::Misc,
+        }
+    }
+}
+
+/// Full collateral state snapshot for a borrower, returned by `get_collateral_state`.
+///
+/// All fields are read-only; no authentication is required to call the view.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralState {
+    /// Borrower whose collateral is described.
+    pub borrower: soroban_sdk::Address,
+    /// Current collateral balance held by the contract for this borrower.
+    pub balance: i128,
+    /// Protocol-wide minimum collateral ratio in basis points (default 15 000 = 150 %).
+    /// Zero means the ratio check is disabled.
+    pub min_ratio_bps: u32,
+    /// Configured collateral token address, or `None` when not yet set.
+    pub collateral_token: Option<soroban_sdk::Address>,
+    /// Health factor expressed in basis points: `balance * 10_000 / utilized_amount`.
+    /// A value at or above `min_ratio_bps` indicates adequate collateralization.
+    /// `u32::MAX` when `utilized_amount == 0` (no outstanding debt).
+    pub health_factor_bps: u32,
+}

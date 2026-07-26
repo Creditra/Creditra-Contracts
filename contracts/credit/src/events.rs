@@ -301,5 +301,264 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
 #[allow(dead_code)]
 pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
     env.events()
-        .publish((symbol_short!("credit"), symbol_short!("blk_chg")), event);
+        .publish((symbol_short!("credit"), symbol_short!("col_dep")), event);
+}
+
+pub fn publish_collateral_partial_released_event(
+    env: &Env,
+    event: CollateralPartialReleasedEvent,
+) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "col_prel")), event);
+}
+
+pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenRescuedEvent {
+    pub token: Address,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+pub fn publish_token_rescued_event(env: &Env, event: TokenRescuedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tok_resc")),
+        event,
+    );
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUpgradedEvent {
+    pub old_wasm_hash: soroban_sdk::BytesN<32>,
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+}
+
+pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "upgraded")),
+        event,
+    );
+}
+
+pub fn publish_close_factor_bps_set_event(env: &Env, close_factor_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "clsfctr")),
+        close_factor_bps,
+    );
+}
+
+pub fn publish_oracle_config_set_event(env: &Env, max_deviation_bps: u32, max_age_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_cfg")),
+        (max_deviation_bps, max_age_seconds),
+    );
+}
+
+pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_price")),
+        (price, timestamp),
+    );
+}
+
+/// Emit when `set_oracle_quorum_config` is called.
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qcfg")),
+        (min_quorum_k, max_deviation_bps, max_age_seconds),
+    );
+}
+
+/// Emit when `submit_oracle_prices` successfully resolves a quorum price.
+///
+/// Data: `(resolved_price, min_quorum_k, timestamp)`.
+pub fn publish_oracle_quorum_price_set_event(
+    env: &Env,
+    price: i128,
+    quorum_k: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qprc")),
+        (price, quorum_k, timestamp),
+    );
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LateFeeChargedEvent {
+    pub borrower: Address,
+    pub fee: i128,
+    pub installment_index: u64,
+}
+
+/// Publish a late fee charged event when a missed installment is detected.
+pub fn publish_late_fee_charged_event(env: &Env, event: LateFeeChargedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("late_fee")), event);
+}
+
+/// Emitted when an admin forgives (writes off) a portion of a borrower's accrued interest.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebtForgivenEvent {
+    /// Borrower whose debt was forgiven.
+    pub borrower: Address,
+    /// Amount of accrued interest written off.
+    pub amount_forgiven: i128,
+    /// Remaining accrued interest after the write-off.
+    pub remaining_accrued_interest: i128,
+    /// Outstanding utilized amount after the write-off.
+    pub new_utilized_amount: i128,
+}
+
+/// Publish a debt forgiven event.
+pub fn publish_debt_forgiven_event(env: &Env, event: DebtForgivenEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "debt_frgv")),
+        event,
+    );
+}
+
+/// Structured borrow lifecycle event emitted at every state-changing borrow operation.
+///
+/// Complements the existing per-operation events (`drawn`, `repay`, `opened`, etc.)
+/// with a single unified payload that captures the full credit-line snapshot at the
+/// moment of the transition. Indexers can subscribe to `("credit", "borrow_lc")` to
+/// reconstruct the complete lifecycle history without joining multiple event streams.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowLifecycleEvent {
+    /// Borrower address.
+    pub borrower: Address,
+    /// Lifecycle phase that triggered this event.
+    pub phase: BorrowLifecyclePhase,
+    /// Credit-line status after the operation.
+    pub status: CreditStatus,
+    /// Outstanding utilized amount after the operation.
+    pub utilized_amount: i128,
+    /// Credit limit at the time of the event.
+    pub credit_limit: i128,
+    /// Effective interest rate in basis points.
+    pub interest_rate_bps: u32,
+    /// Ledger timestamp of the event.
+    pub timestamp: u64,
+}
+
+/// Discriminant for [`BorrowLifecycleEvent`] indicating which operation occurred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BorrowLifecyclePhase {
+    Opened,
+    Drawn,
+    Repaid,
+    Suspended,
+    Reinstated,
+    Defaulted,
+    Closed,
+    DebtForgiven,
+}
+
+/// Publish a structured borrow lifecycle event.
+///
+/// Topic: `("credit", "borrow_lc")`.
+pub fn publish_borrow_lifecycle_event(env: &Env, event: BorrowLifecycleEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "borrow_lc")),
+        event,
+    );
+}
+
+/// Publish a grace waiver receipt event when a suspended line's accrual uses the grace period.
+pub fn publish_grace_waiver_receipt_event(
+    env: &Env,
+    borrower: &Address,
+    waived_amount: i128,
+    mode: crate::types::GraceWaiverMode,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), symbol_short!("grace_wv")),
+        GraceWaiverReceiptEvent {
+            borrower: borrower.clone(),
+            waived_amount,
+            mode,
+        },
+    );
+}
+
+
+
+/// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalProposedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Snapshot of the treasury balance at proposal time.
+    pub amount: i128,
+    /// Admin who submitted the proposal.
+    pub proposer: Address,
+    /// Ledger timestamp when the proposal was created.
+    pub proposed_at: u64,
+    /// Earliest timestamp at which execution is permitted (proposed_at + 86_400).
+    pub execute_after: u64,
+}
+
+/// Emitted when a treasury withdrawal is executed via `execute_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalExecutedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Amount transferred.
+    pub amount: i128,
+    /// Admin who executed the withdrawal.
+    pub executor: Address,
+    /// Ledger timestamp at execution.
+    pub executed_at: u64,
+}
+
+/// Publish a treasury withdrawal proposed event.
+pub fn publish_treasury_withdrawal_proposed(env: &Env, event: TreasuryWithdrawalProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_prop")),
+        event,
+    );
+}
+
+/// Publish a treasury withdrawal executed event.
+pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawalExecutedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
+        event,
+    );
+}
+
+/// Payload emitted when an admin commits a new attestation batch for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    /// Borrower whose attestation batch was updated.
+    pub borrower: Address,
+    /// SHA-256 Merkle root of all leaf hashes in the committed batch.
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    /// Number of leaves in the batch (informational).
+    pub count: u32,
+}
+
+/// Publish an attestation batch committed event.
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "atst_bat")),
+        event,
+    );
 }
