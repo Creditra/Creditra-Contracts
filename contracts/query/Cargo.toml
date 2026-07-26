@@ -2,7 +2,7 @@
 name = "creditra-query"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra query (v7) error stability tests — freezes client-facing error codes for query entrypoints"
+description = "Creditra query (v7) structured events and error stability tests"
 license = "MIT"
 keywords = ["soroban", "stellar", "query", "credit", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
@@ -18,6 +18,10 @@ creditra-credit = { path = "../credit" }
 [[test]]
 name = "err_stab"
 path = "tests/err_stab.rs"
+
+[[test]]
+name = "events"
+path = "tests/events.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
