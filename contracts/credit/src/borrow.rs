@@ -307,13 +307,13 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
             let allowance = token_client.allowance(&borrower, &contract_address);
             if allowance < effective_repay {
                 clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::InsufficientAllowance);
+                env.panic_with_error(ContractError::InsufficientRepaymentAllowance);
             }
 
             let balance = token_client.balance(&borrower);
             if balance < effective_repay {
                 clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::InsufficientBalance);
+                env.panic_with_error(ContractError::InsufficientRepaymentBalance);
             }
 
             token_client.transfer_from(

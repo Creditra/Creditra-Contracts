@@ -694,7 +694,7 @@ mod tests {
     fn prorate_interest_full_year() {
         // 10% on 100_000 for exactly 1 year = 10_000
         assert_eq!(
-            prorate_interest(100_000, 1_000, 31_536_000, Rounding::Floor),
+            prorate_interest(100_000, 1_000, 31_557_600, Rounding::Floor),
             10_000
         );
     }

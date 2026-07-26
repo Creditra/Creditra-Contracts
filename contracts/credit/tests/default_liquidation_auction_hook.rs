@@ -1,7 +1,7 @@
 use creditra_credit::types::{ContractError, CreditStatus};
 use creditra_credit::{Credit, CreditClient};
 use gateway_auction::{Auction, AuctionClient, AuctionMode};
-use soroban_sdk::testutils::{Address as _, Events as _};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal, TryIntoVal};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -26,7 +26,7 @@ fn setup_auction(
         &0_u32,
         &None,
         &None,
-        &None,
+        &gateway_auction::DutchAuctionDecay::None,
         &None,
     );
 
@@ -164,6 +164,7 @@ fn settle_default_liquidation_requires_defaulted_status() {
             &borrower,
             &100_i128,
             &Symbol::new(&env, "auc_bad"),
+            &10_000_u32,
             &None,
         );
     }));

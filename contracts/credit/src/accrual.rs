@@ -190,9 +190,10 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         return line;
     }
 
-    // If there's no utilization, this is a read-only check — do not update
-    // `last_accrual_ts` here per requirements.
+    // If there's no utilization, we update the checkpoint to prevent retroactive interest accrual
+    // but do not compute any interest.
     if line.utilized_amount == 0 {
+        line.last_accrual_ts = now;
         return line;
     }
 

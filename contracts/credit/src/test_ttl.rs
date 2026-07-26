@@ -26,7 +26,7 @@ mod test {
         env.as_contract(contract_id, || env.storage().persistent().get_ttl(borrower))
     }
 
-    fn advance_ledger(env: &Env, contract_id: &Address) {
+    fn advance_ledger(env: &Env, contract_id: &Address, borrower: &Address) {
         env.as_contract(contract_id, || {
             env.storage().instance().extend_ttl(500_000, 500_000);
         });
@@ -126,12 +126,9 @@ mod test {
 
         // 8. reinstate_credit_line
         client.reinstate_credit_line(&borrower, &crate::types::CreditStatus::Active);
-        assert_eq!(
-            check_ttl(&env, &contract_id, &borrower),
-            CREDIT_LINE_TTL_EXTEND_TO
-        );
-
-        advance_ledger(&env, &contract_id);
+        assert_eq!(check_ttl(&env, &contract_id, &borrower), CREDIT_LINE_TTL_EXTEND_TO);
+        
+        advance_ledger(&env, &contract_id, &borrower);
 
         // 9. close_credit_line (by admin)
         client.close_credit_line(&borrower, &admin);

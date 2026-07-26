@@ -80,6 +80,7 @@ pub struct DrawnEvent {
     pub borrower: Address,
     pub amount: i128,
     pub new_utilized_amount: i128,
+    pub timestamp: u64,
 }
 
 #[contracttype]

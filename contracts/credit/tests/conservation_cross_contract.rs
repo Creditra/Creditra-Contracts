@@ -12,7 +12,7 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use gateway_auction::{Auction, AuctionClient};
+use gateway_auction::{Auction, AuctionClient, AuctionMode, AuctionState, DutchAuctionDecay};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, TryIntoVal};
@@ -86,14 +86,14 @@ fn run_auction(env: &Env, deployment: &Deployment, settlement_id: &Symbol, highe
     auction.set_factory_contract(&deployment.credit_id);
     auction.init_auction(
         settlement_id,
-        &gateway_auction::types::AuctionMode::English,
+        &AuctionMode::English,
         &start_time,
         &end_time,
         &MIN_BID,
         &0_u32,
         &None,
         &None,
-        &None,
+        &DutchAuctionDecay::None,
         &None,
     );
     auction.place_bid(settlement_id, &bidder, &(highest_bid / 2));
@@ -110,7 +110,7 @@ fn get_auction_state(
     env: &Env,
     auction_id: &Address,
     settlement_id: &Symbol,
-) -> gateway_auction::types::AuctionState {
+) -> AuctionState {
     env.as_contract(auction_id, || {
         env.storage().persistent().get(settlement_id).unwrap()
     })
@@ -168,14 +168,15 @@ fn run_conservation_test(env: &Env, draw_amount: i128, highest_bid: i128) {
     ));
 
     // Verify replay fails
-    let replay_result = std::panic::catch_unwind(|| {
+    let replay_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         credit.settle_default_liquidation(
             &deployment.borrower,
             &highest_bid,
             &settlement_id,
+            &10_000_u32,
             &None,
         );
-    });
+    }));
     assert!(replay_result.is_err(), "replay should panic");
 }
 

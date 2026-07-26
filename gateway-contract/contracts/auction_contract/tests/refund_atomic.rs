@@ -28,7 +28,7 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent,
+    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent, DutchAuctionDecay,
 };
 use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::token::StellarAssetClient;

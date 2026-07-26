@@ -100,6 +100,11 @@ pub fn deposit_collateral(env: &Env, borrower: &Address, amount: i128) {
 
 /// Withdraw collateral tokens to the borrower.
 /// Requires borrower authentication and ensures collateral ratio remains above minimum.
+///
+/// # Errors
+/// - Panics with [`ContractError::InvalidAmount`] if `amount <= 0`.
+/// - Panics with [`ContractError::InsufficientCollateralBalance`] (code `39`) if `amount` exceeds stored collateral balance.
+/// - Panics with [`ContractError::CollateralRatioBelowMinimum`] if post-withdrawal balance falls below required ratio floor.
 pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);

@@ -152,10 +152,13 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         .checked_mul(min_ratio_u128)
         .unwrap_or(u128::MAX);
 
-    // If the denominator overflowed to u128::MAX, the result will be small.
-    // We guard against division-by-zero: `utilized > 0` and `min_ratio_bps`
-    // defaults to 15_000, so `denominator` is always ≥ 1 here.
-    let health_bps = numerator / denominator;
+    // If the denominator is 0 (due to min_ratio_bps = 0), the position is infinitely healthy.
+    // We also guard against division-by-zero.
+    let health_bps = if denominator == 0 {
+        u128::from(u32::MAX)
+    } else {
+        numerator / denominator
+    };
 
     // Clamp to u32 range.  Values beyond u32::MAX are theoretically possible
     // with extreme collateral-to-debt ratios but serve the same keeper

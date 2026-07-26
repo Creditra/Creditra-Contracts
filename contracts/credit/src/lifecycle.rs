@@ -98,7 +98,7 @@ use crate::storage::{
     assert_not_paused, clear_repayment_schedule, get_repayment_schedule,
     persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD, DrawAuditKey,
+    CREDIT_LINE_TTL_THRESHOLD, clear_repayment_schedule, persist_credit_line,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{Address, Env, Symbol};
@@ -118,6 +118,54 @@ fn liquidation_settlement_key(
         borrower.clone(),
         settlement_id.clone(),
     )
+}
+
+fn liquidation_settlement_key(
+    borrower: &Address,
+    settlement_id: &Symbol,
+) -> (Symbol, Address, Symbol) {
+    (
+        symbol_short!("liq_seen"),
+        borrower.clone(),
+        settlement_id.clone(),
+    )
+}
+
+/// Set credit limit bounds (admin only, called through contractimpl).
+///
+/// These bounds are enforced by [`validate_credit_limit_bounds`] during
+/// `open_credit_line` and `update_risk_parameters`.
+pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
+    require_admin_auth(&env);
+    crate::storage::set_min_credit_limit(&env, min);
+    crate::storage::set_max_credit_limit(&env, max);
+}
+
+/// Get the current credit limit bounds, if configured.
+///
+/// Returns `(Option<min>, Option<max>)` where `None` means the bound is not set.
+pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
+    let min = crate::storage::get_min_credit_limit(env);
+    let max = crate::storage::get_max_credit_limit(env);
+    (min, max)
+}
+
+/// Validate that a credit limit falls within the configured min/max bounds (if set).
+///
+/// # Panics
+/// - `ContractError::LimitOutOfBounds` if `credit_limit` is outside the configured range.
+pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
+    let (min_limit, max_limit) = get_credit_limit_bounds(env);
+    if let Some(min) = min_limit {
+        if credit_limit < min {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+    if let Some(max) = max_limit {
+        if credit_limit > max {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
 }
 
 /// Open a new credit line for a borrower (admin only).
@@ -488,17 +536,21 @@ pub fn suspend_credit_line(env: Env, borrower: Address) {
     let mut credit_line =
         get_credit_line(&env, &borrower).unwrap_or_else(|| panic!("Credit line not found"));
 
+    // Apply interest accrual before any mutation.
+    credit_line = crate::accrual::apply_accrual(env, credit_line);
+
     if credit_line.status != CreditStatus::Active {
         env.panic_with_error(ContractError::CreditLineSuspended);
     }
 
+    let previous_utilized = credit_line.utilized_amount;
     credit_line.status = CreditStatus::Suspended;
-    env.storage().persistent().set(&borrower, &credit_line);
-    // Bump TTL: interacting with a suspended line keeps it live.
-    bump_credit_line_ttl(&env, &borrower);
+    credit_line.suspension_ts = env.ledger().timestamp();
+    credit_line.last_accrual_ts = env.ledger().timestamp();
+    persist_credit_line(env, &borrower, &credit_line, previous_utilized, Some(CreditStatus::Active));
 
     publish_credit_line_event(
-        &env,
+        env,
         (symbol_short!("credit"), symbol_short!("suspend")),
         CreditLineEvent {
             borrower: borrower.clone(),
@@ -926,6 +978,120 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     );
 }
 
+// ── repayment schedule helpers ───────────────────────────────────────────────
+
+/// Set or replace a borrower's installment repayment schedule (admin only).
+///
+/// # Parameters
+/// - `borrower`: Borrower whose credit line schedule is being configured.
+/// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
+/// - `period_seconds`: Duration of each installment period in seconds; must be positive.
+/// - `first_due_ts`: Timestamp at which the first installment is due.
+///
+/// # Panics
+/// - [`ContractError::InvalidAmount`] when `amount_per_period <= 0` or
+///   `period_seconds == 0`.
+/// - [`ContractError::CreditLineNotFound`] when `borrower` has no credit line.
+///
+/// # Authorization
+/// Requires admin authorization because the schedule controls delinquency and
+/// due-date state for the borrower.
+pub fn set_repayment_schedule(
+    env: &Env,
+    borrower: Address,
+    amount_per_period: i128,
+    period_seconds: u64,
+    first_due_ts: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    if amount_per_period <= 0 || period_seconds == 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    if !env.storage().persistent().has(&borrower) {
+        env.panic_with_error(ContractError::CreditLineNotFound);
+    }
+
+    let schedule = RepaymentSchedule {
+        amount_per_period,
+        period_seconds,
+        next_due_ts: first_due_ts,
+    };
+    storage_set_repayment_schedule(env, &borrower, &schedule);
+    // Setting a schedule is an interaction with the credit line, so keep the
+    // credit-line entry live as well (the schedule entry is bumped by the
+    // storage setter itself).
+    bump_credit_line_ttl(env, &borrower);
+}
+
+/// Advance a borrower's installment schedule after a repayment.
+///
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
+///
+/// ```text
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
+/// ```
+///
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
+pub fn advance_repayment_schedule_after_repay(
+    env: &Env,
+    borrower: &Address,
+    effective_repay: i128,
+    interest_repaid: i128,
+) {
+    let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
+        Some(principal) if principal > 0 => principal,
+        _ => return,
+    };
+
+    let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
+        return;
+    };
+
+    if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
+        return;
+    }
+
+    let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
+    if installments_paid == 0 {
+        return;
+    }
+
+    let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
+    schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
+    storage_set_repayment_schedule(env, borrower, &schedule);
+}
+
+/// Set the flat per-installment late fee surcharge (admin only).
+///
+/// # Parameters
+/// - `fee`: The fee amount. Set to `0` to disable flat late-fee charges.
+///
+/// # Panics
+/// - If `fee < 0` (negative fees not allowed).
+pub fn set_late_fee_flat(env: Env, fee: i128) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    if fee < 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    crate::storage::set_late_fee_flat(&env, fee);
+}
+
+/// Get the flat per-installment late fee surcharge.
+pub fn get_late_fee_flat(env: Env) -> i128 {
+    crate::storage::get_late_fee_flat(&env)
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1278,7 +1444,6 @@ mod installment {
         client.repay_credit(&borrower, &200_000);
 
         let treasury_after = client.get_protocol_summary().treasury_balance;
-        // Only 1 overdue installment × 30 = 30
         assert_eq!(treasury_after - treasury_before, 30);
     }
 
