@@ -819,3 +819,24 @@ impl ContractError {
         }
     }
 }
+
+/// Full collateral state snapshot for a borrower, returned by `get_collateral_state`.
+///
+/// All fields are read-only; no authentication is required to call the view.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralState {
+    /// Borrower whose collateral is described.
+    pub borrower: soroban_sdk::Address,
+    /// Current collateral balance held by the contract for this borrower.
+    pub balance: i128,
+    /// Protocol-wide minimum collateral ratio in basis points (default 15 000 = 150 %).
+    /// Zero means the ratio check is disabled.
+    pub min_ratio_bps: u32,
+    /// Configured collateral token address, or `None` when not yet set.
+    pub collateral_token: Option<soroban_sdk::Address>,
+    /// Health factor expressed in basis points: `balance * 10_000 / utilized_amount`.
+    /// A value at or above `min_ratio_bps` indicates adequate collateralization.
+    /// `u32::MAX` when `utilized_amount == 0` (no outstanding debt).
+    pub health_factor_bps: u32,
+}

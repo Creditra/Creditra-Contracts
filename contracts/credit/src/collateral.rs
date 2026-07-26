@@ -57,7 +57,7 @@ use crate::storage::{
     get_collateral_balance, get_collateral_risk_weight_bps, get_collateral_token,
     get_credit_line, get_min_collateral_ratio_bps, set_collateral_balance,
 };
-use crate::types::ContractError;
+use crate::types::{CollateralState, ContractError};
 use soroban_sdk::{token, Address, Env};
 
 /// Deposit collateral tokens from the borrower into the contract.
@@ -156,6 +156,53 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 /// Read‑only getter for a borrower's collateral balance.
 pub fn get_collateral(env: &Env, borrower: &Address) -> i128 {
     get_collateral_balance(env, borrower)
+}
+
+/// Return a full collateral state snapshot for `borrower`.
+///
+/// Reads the borrower's collateral balance, the protocol-wide minimum
+/// collateral ratio, the configured collateral token, and computes the
+/// current health factor — all in a single read-only call.
+///
+/// # Health factor
+///
+/// ```text
+/// health_factor_bps = balance * 10_000 / utilized_amount
+/// ```
+///
+/// A value at or above `min_ratio_bps` indicates the position is adequately
+/// collateralized. Returns `u32::MAX` when `utilized_amount == 0` (no
+/// outstanding debt).
+///
+/// # Authentication
+///
+/// None required — this is a pure read.
+pub fn get_collateral_state(env: &Env, borrower: &Address) -> CollateralState {
+    let balance = get_collateral_balance(env, borrower);
+    let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+    let collateral_token = get_collateral_token(env);
+
+    let utilized_amount = get_credit_line(env, borrower)
+        .map(|l| l.utilized_amount)
+        .unwrap_or(0);
+
+    let health_factor_bps: u32 = if utilized_amount == 0 {
+        u32::MAX
+    } else {
+        let hf = balance
+            .checked_mul(10_000_i128)
+            .unwrap_or(i128::MAX)
+            / utilized_amount;
+        u32::try_from(hf).unwrap_or(u32::MAX)
+    };
+
+    CollateralState {
+        borrower: borrower.clone(),
+        balance,
+        min_ratio_bps,
+        collateral_token,
+        health_factor_bps,
+    }
 }
 
 /// Allow a borrower to release a portion of their collateral while keeping

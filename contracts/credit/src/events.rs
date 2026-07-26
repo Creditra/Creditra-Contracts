@@ -575,6 +575,77 @@ pub fn publish_late_fee_charged_event(env: &Env, event: LateFeeChargedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("late_fee")), event);
 }
 
+/// Emitted when an admin forgives (writes off) a portion of a borrower's accrued interest.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebtForgivenEvent {
+    /// Borrower whose debt was forgiven.
+    pub borrower: Address,
+    /// Amount of accrued interest written off.
+    pub amount_forgiven: i128,
+    /// Remaining accrued interest after the write-off.
+    pub remaining_accrued_interest: i128,
+    /// Outstanding utilized amount after the write-off.
+    pub new_utilized_amount: i128,
+}
+
+/// Publish a debt forgiven event.
+pub fn publish_debt_forgiven_event(env: &Env, event: DebtForgivenEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "debt_frgv")),
+        event,
+    );
+}
+
+/// Structured borrow lifecycle event emitted at every state-changing borrow operation.
+///
+/// Complements the existing per-operation events (`drawn`, `repay`, `opened`, etc.)
+/// with a single unified payload that captures the full credit-line snapshot at the
+/// moment of the transition. Indexers can subscribe to `("credit", "borrow_lc")` to
+/// reconstruct the complete lifecycle history without joining multiple event streams.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowLifecycleEvent {
+    /// Borrower address.
+    pub borrower: Address,
+    /// Lifecycle phase that triggered this event.
+    pub phase: BorrowLifecyclePhase,
+    /// Credit-line status after the operation.
+    pub status: CreditStatus,
+    /// Outstanding utilized amount after the operation.
+    pub utilized_amount: i128,
+    /// Credit limit at the time of the event.
+    pub credit_limit: i128,
+    /// Effective interest rate in basis points.
+    pub interest_rate_bps: u32,
+    /// Ledger timestamp of the event.
+    pub timestamp: u64,
+}
+
+/// Discriminant for [`BorrowLifecycleEvent`] indicating which operation occurred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BorrowLifecyclePhase {
+    Opened,
+    Drawn,
+    Repaid,
+    Suspended,
+    Reinstated,
+    Defaulted,
+    Closed,
+    DebtForgiven,
+}
+
+/// Publish a structured borrow lifecycle event.
+///
+/// Topic: `("credit", "borrow_lc")`.
+pub fn publish_borrow_lifecycle_event(env: &Env, event: BorrowLifecycleEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "borrow_lc")),
+        event,
+    );
+}
+
 /// Publish a grace waiver receipt event when a suspended line's accrual uses the grace period.
 pub fn publish_grace_waiver_receipt_event(
     env: &Env,

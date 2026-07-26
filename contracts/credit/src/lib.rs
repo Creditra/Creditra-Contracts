@@ -186,6 +186,8 @@ use crate::events::{
     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
     TreasuryWithdrawalProposedEvent,
+    publish_borrow_lifecycle_event, publish_debt_forgiven_event,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, DebtForgivenEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::storage::{
@@ -570,9 +572,21 @@ impl Credit {
         publish_drawn_event(
             &env,
             DrawnEvent {
-                borrower,
+                borrower: borrower.clone(),
                 amount,
                 new_utilized_amount: updated_utilized,
+            },
+        );
+        publish_borrow_lifecycle_event(
+            &env,
+            BorrowLifecycleEvent {
+                borrower: borrower.clone(),
+                phase: BorrowLifecyclePhase::Drawn,
+                status: credit_line.status,
+                utilized_amount: updated_utilized,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                timestamp,
             },
         );
         clear_reentrancy_guard(&env);
@@ -722,6 +736,18 @@ impl Credit {
                 borrower: borrower.clone(),
                 amount: effective_repay,
                 new_utilized_amount: new_utilized,
+            },
+        );
+        publish_borrow_lifecycle_event(
+            &env,
+            BorrowLifecycleEvent {
+                borrower: borrower.clone(),
+                phase: BorrowLifecyclePhase::Repaid,
+                status: credit_line.status,
+                utilized_amount: new_utilized,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                timestamp: env.ledger().timestamp(),
             },
         );
 
@@ -1574,6 +1600,20 @@ impl Credit {
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
+
+    /// Return a full collateral state snapshot for `borrower`.
+    ///
+    /// Reads balance, minimum collateral ratio, collateral token, and computed
+    /// health factor in a single read-only call. No authentication required.
+    ///
+    /// # Returns
+    /// [`crate::types::CollateralState`] — see field docs for semantics.
+    pub fn get_collateral_state(
+        env: Env,
+        borrower: Address,
+    ) -> crate::types::CollateralState {
+        crate::collateral::get_collateral_state(&env, &borrower)
+    }
     
     /// Set the risk weight for a collateral asset, in basis points (admin only).
     ///
@@ -1855,10 +1895,51 @@ impl Credit {
     }
 
     /// Forgive outstanding debt without transferring tokens (admin only).
+    ///
+    /// Reduces `accrued_interest` (and `utilized_amount`) by up to `amount`.
+    /// Emits [`DebtForgivenEvent`] and [`BorrowLifecycleEvent`] on success.
     pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
         require_admin_auth(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
-        lifecycle::forgive_debt(env, borrower, amount)
+
+        if amount <= 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+
+        let mut credit_line: CreditLineData =
+            crate::storage::get_credit_line(&env, &borrower).unwrap_or_else(|| {
+                env.panic_with_error(ContractError::CreditLineNotFound)
+            });
+
+        let forgiven = amount.min(credit_line.accrued_interest);
+        let previous_utilized = credit_line.utilized_amount;
+        credit_line.accrued_interest = credit_line.accrued_interest.saturating_sub(forgiven);
+        credit_line.utilized_amount = credit_line.utilized_amount.saturating_sub(forgiven);
+
+        persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
+
+        let timestamp = env.ledger().timestamp();
+        publish_debt_forgiven_event(
+            &env,
+            DebtForgivenEvent {
+                borrower: borrower.clone(),
+                amount_forgiven: forgiven,
+                remaining_accrued_interest: credit_line.accrued_interest,
+                new_utilized_amount: credit_line.utilized_amount,
+            },
+        );
+        publish_borrow_lifecycle_event(
+            &env,
+            BorrowLifecycleEvent {
+                borrower: borrower.clone(),
+                phase: BorrowLifecyclePhase::DebtForgiven,
+                status: credit_line.status,
+                utilized_amount: credit_line.utilized_amount,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                timestamp,
+            },
+        );
     }
 
     /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
