@@ -76,34 +76,11 @@ pub enum ContractError {
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
 
-    /// Arithmetic overflow occurred.
-    #[error("Overflow")]
-    Overflow,
+    #[error("TreasuryAddressNotSet")]
+    TreasuryAddressNotSet,
 
-    /// Late-fee configuration is invalid (e.g., negative flat amount or
-    /// surcharge > 10_000 bps).
-    #[error("LateFeeConfigInvalid")]
-    LateFeeConfigInvalid,
-}
-
-impl ContractError {
-    /// Return the high-level [`ContractErrorCategory`] for this error variant.
-    pub fn category(&self) -> ContractErrorCategory {
-        match self {
-            ContractError::Std(_) => ContractErrorCategory::Std,
-            ContractError::CreditLineNotFound(_) | ContractError::DrawNotFound(..) => {
-                ContractErrorCategory::NotFound
-            }
-            ContractError::Unauthorized => ContractErrorCategory::Auth,
-            ContractError::CollateralInsufficient
-            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
-            ContractError::InvalidAmount => ContractErrorCategory::Validation,
-            ContractError::AlreadySettled => ContractErrorCategory::State,
-            ContractError::OraclePriceInvalid | ContractError::OracleQuorumNotMet => {
-                ContractErrorCategory::Oracle
-            }
-        }
-    }
+    #[error("BountyAddressNotSet")]
+    BountyAddressNotSet,
 }
 
 #[cfg(test)]
@@ -286,18 +263,18 @@ mod tests {
     }
 
     #[test]
-    fn overflow_display_and_equality() {
-        let err = ContractError::Overflow;
-        assert_eq!(err.to_string(), "Overflow");
-        assert_eq!(err, ContractError::Overflow);
+    fn treasury_address_not_set_display_and_equality() {
+        let err = ContractError::TreasuryAddressNotSet;
+        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
+        assert_eq!(err, ContractError::TreasuryAddressNotSet);
         assert_ne!(err, ContractError::Unauthorized);
     }
 
     #[test]
-    fn late_fee_config_invalid_display_and_equality() {
-        let err = ContractError::LateFeeConfigInvalid;
-        assert_eq!(err.to_string(), "LateFeeConfigInvalid");
-        assert_eq!(err, ContractError::LateFeeConfigInvalid);
-        assert_ne!(err, ContractError::Overflow);
+    fn bounty_address_not_set_display_and_equality() {
+        let err = ContractError::BountyAddressNotSet;
+        assert_eq!(err.to_string(), "BountyAddressNotSet");
+        assert_eq!(err, ContractError::BountyAddressNotSet);
+        assert_ne!(err, ContractError::Unauthorized);
     }
 }
