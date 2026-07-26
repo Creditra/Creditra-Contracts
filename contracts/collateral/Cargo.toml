@@ -2,27 +2,16 @@
 name = "creditra-collateral"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra collateral v7 admin cooldown tests"
+description = "Creditra stable ContractError catalog for collateral operations."
 license = "MIT"
-keywords = ["soroban", "stellar", "collateral", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "collateral", "error-catalog", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
-readme = "../../README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
-creditra-credit = { path = "../credit" }
-
-[[test]]
-name = "admin_cooldown"
-path = "tests/admin_cooldown.rs"
-
-[[test]]
-name = "auth_snap"
-path = "tests/auth_snap.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-creditra-credit = { path = "../credit", features = [] }
