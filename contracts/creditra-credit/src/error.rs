@@ -51,6 +51,14 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// Rate or surcharge exceeds the protocol maximum (10 000 bps = 100 %).
+    #[error("RateTooHigh")]
+    RateTooHigh,
+
+    /// Arithmetic overflow detected in checked computation.
+    #[error("Overflow")]
+    Overflow,
 }
 
 #[cfg(test)]

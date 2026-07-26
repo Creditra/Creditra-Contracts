@@ -10,7 +10,7 @@ use crate::oracles;
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
     CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
-    ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
+    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
 
@@ -77,6 +77,9 @@ pub fn execute(
         } => execute_set_oracle_quorum_config(deps, info, min_quorum_k, max_deviation_bps, max_age_seconds),
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
+        }
+        ExecuteMsg::SetLateFeeConfig { config } => {
+            execute_set_late_fee_config(deps, info, config)
         }
     }
 }
@@ -349,6 +352,38 @@ pub fn execute_submit_oracle_prices(
         .add_attribute("timestamp", now.to_string()))
 }
 
+/// Set or update the structured late-fee configuration (admin only).
+///
+/// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed
+/// installment, or `Some(LateFeeConfig::AprBased(…))` for an additive
+/// basis-point surcharge.  Pass `None` to remove the config.
+///
+/// # Errors
+/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
+/// - [`ContractError::InvalidAmount`] if the flat amount is zero.
+/// - [`ContractError::RateTooHigh`] if the APR surcharge exceeds 10 000 bps.
+fn execute_set_late_fee_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    config: Option<crate::penalties::LateFeeConfig>,
+) -> Result<Response, ContractError> {
+    let contract_config = CONFIG.load(deps.storage)?;
+    if info.sender != contract_config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+
+    if let Some(ref cfg) = config {
+        crate::penalties::validate_late_fee_config(cfg)?;
+    }
+
+    match config {
+        Some(cfg) => LATE_FEE_CONFIG.save(deps.storage, &cfg)?,
+        None => LATE_FEE_CONFIG.remove(deps.storage),
+    }
+
+    Ok(Response::default().add_attribute("action", "set_late_fee_config"))
+}
+
 fn append_audit_entry(
     deps: DepsMut,
     env: Env,
@@ -415,6 +450,13 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                 price: record.as_ref().map(|r| r.price),
                 timestamp: record.as_ref().map(|r| r.timestamp),
             };
+            to_json_binary(&resp)
+        }
+        QueryMsg::GetLateFeeConfig {} => {
+            let config = LATE_FEE_CONFIG
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::LateFeeConfigResponse { config };
             to_json_binary(&resp)
         }
     }
