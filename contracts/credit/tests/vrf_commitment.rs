@@ -12,8 +12,8 @@ use creditra_credit::types::ContractError;
 use soroban_sdk::testutils::{Address as _, BytesN as _};
 use soroban_sdk::{Address, BytesN, Env};
 
-fn create_test_contract(env: &Env) -> creditra_credit::CreditClient<'_> {
-    creditra_credit::CreditClient::new(
+fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
+    creditra_credit::ContractClient::new(
         env,
         &env.register(creditra_credit::Credit, ()),
     )

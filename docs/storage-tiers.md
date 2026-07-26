@@ -110,7 +110,7 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `UtilizationCapBps(Address)` | `u32` | none (direct `persistent().set`) | Written on cap set/clear; **no explicit TTL bump** | `set_utilization_cap_bps` ← `set_utilization_cap`; `get_utilization_cap_bps` ← `draw_credit` |
 | `RateFloorBps(Address)` | `u32` | none (direct `persistent().set`) | Written on floor set/clear; **no explicit TTL bump** | `set_borrower_rate_floor` ← `set_borrower_rate_floor` entrypoint; `get_borrower_rate_floor` ← interest rate computation |
 | `RateCeilingBps(Address)` | `u32` | none (direct `persistent().set`) | Written on ceiling set/clear; **no explicit TTL bump** | `set_borrower_rate_ceiling` ← `set_borrower_rate_ceiling` entrypoint; `get_borrower_rate_ceiling` ← interest rate computation |
-| `RepaymentSchedule(Address)` | `RepaymentSchedule` struct | none (direct `persistent().set`) | Written on schedule set/clear; **no explicit TTL bump** | `set_repayment_schedule` ← `set_repayment_schedule` entrypoint; `get_repayment_schedule` ← delinquency checks; `clear_repayment_schedule` ← `close_credit_line` |
+| `RepaymentSchedule(Address)` | `RepaymentSchedule` struct | `bump_persistent_ttl` | Bumped on **every read and write** via `storage::get_repayment_schedule` / `storage::set_repayment_schedule`; `set_repayment_schedule` also bumps the credit-line entry | `set_repayment_schedule` ← `set_repayment_schedule` entrypoint; `get_repayment_schedule` ← getter + delinquency checks; `clear_repayment_schedule` ← `close_credit_line` |
 | `CollateralBalance(Address)` | `i128` | none (direct `persistent().set`) | Written on deposit/withdraw; **no explicit TTL bump** | `set_collateral_balance` ← collateral deposit/withdraw entrypoints; `get_collateral_balance` ← collateral ratio checks, `settle_default_liquidation` |
 | `DrawAudit(Address, u64)` | `i128` | none (direct `persistent().set`) | Written on draw; **no explicit TTL bump** | Written in `reverse_draw` (read at line 1393 of `lib.rs`); `get` ← `reverse_draw` |
 | `DrawReversedAmount(Address, u64)` | `i128` | none (direct `persistent().set`) | Accumulated on each partial reversal; **no explicit TTL bump** | `persistent().set` ← `reverse_draw` (line 1413 of `lib.rs`); `get` ← `reverse_draw` (line 1398) |
@@ -166,7 +166,7 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `UtilizationCapBps(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
 | `RateFloorBps(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
 | `RateCeilingBps(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
-| `RepaymentSchedule(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
+| `RepaymentSchedule(Address)` | Persistent | ✅ | `bump_persistent_ttl` on every `storage::get_repayment_schedule` / `set_repayment_schedule` read/write |
 | `CollateralBalance(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
 | `DrawAudit(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |
 | `DrawReversedAmount(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |

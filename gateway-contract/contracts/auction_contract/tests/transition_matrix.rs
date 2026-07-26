@@ -28,9 +28,12 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay,
+    Auction, AuctionClient, AuctionError, AuctionMode, AuctionState, AuctionStatus,
+    DutchAuctionDecay,
 };
-use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Ledger as _;
+use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{Address, Env, Symbol};
 /// Entrypoints that can attempt an `AuctionStatus` transition.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -165,6 +168,8 @@ fn read_status(env: &Env, contract_id: &Address, auction_id: &Symbol) -> Auction
 }
 
 fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMode) {
+    let factory = Address::generate(&client.env);
+    client.set_factory_contract(&factory);
     match mode {
         AuctionMode::English => {
             client.init_auction(
@@ -176,7 +181,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &None,
                 &None,
-                &DutchAuctionDecay::None,
+                &Some(gateway_auction::DutchAuctionDecay::None),
                 &None,
             );
         }
@@ -190,7 +195,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &DutchAuctionDecay::None,
+                &Some(DutchAuctionDecay::None),
                 &None,
             );
             client.env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -208,20 +213,23 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
     let winner = Address::generate(&env);
     let auction_id = Symbol::new(&env, "transition_matrix");
 
-    client.init_auction(
-        &auction_id,
-        &AuctionMode::English,
-        &0,
-        &u64::MAX,
-        &1_i128,
-        &0_u32,
-        &None,
-        &None,
-        &DutchAuctionDecay::None,
-        &None,
-    );
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let bid_token = token_id.address();
+    let sac = StellarAssetClient::new(&env, &bid_token);
+    sac.mint(&contract_id, &1_000_000_i128);
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "bid_token"), &bid_token);
+    });
 
-    match (mode, from) {
+    let factory = Address::generate(&env);
+    client.set_factory_contract(&factory);
+
+    init_auction(&client, &auction_id, mode);
+
+    match (mode, from.clone()) {
         (_, AuctionStatus::Open) => {}
         (AuctionMode::English, AuctionStatus::Closed) => {
             client.place_bid(&auction_id, &winner, &100_i128);
@@ -233,9 +241,11 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
             client.claim_auction(&auction_id);
         }
         (AuctionMode::Dutch, AuctionStatus::Closed) => {
+            client.env.ledger().with_mut(|li| li.timestamp = 1_000);
             client.place_bid(&auction_id, &winner, &500_i128);
         }
         (AuctionMode::Dutch, AuctionStatus::Claimed) => {
+            client.env.ledger().with_mut(|li| li.timestamp = 1_000);
             client.place_bid(&auction_id, &winner, &500_i128);
             client.claim_auction(&auction_id);
         }
@@ -277,7 +287,7 @@ fn invoke_entrypoint(
 fn run_matrix(mode: AuctionMode) {
     for case in transition_matrix(mode) {
         let from = case.from.clone();
-        let (env, contract_id, auction_id, _winner) = setup_auction(mode.clone(), from);
+        let (env, contract_id, auction_id, _winner) = setup_auction(mode, from);
         let client = AuctionClient::new(&env, &contract_id);
         let status_before = read_status(&env, &contract_id, &auction_id);
 
@@ -341,7 +351,7 @@ fn dutch_auction_status_transition_matrix() {
 #[test]
 fn illegal_transition_count_is_six_per_mode() {
     for mode in [AuctionMode::English, AuctionMode::Dutch] {
-        let illegal = transition_matrix(mode.clone())
+        let illegal = transition_matrix(mode)
             .into_iter()
             .filter(|c| !c.expect_ok)
             .count();
@@ -355,7 +365,7 @@ fn illegal_transition_count_is_six_per_mode() {
 #[test]
 fn legal_transition_count_is_three_per_mode() {
     for mode in [AuctionMode::English, AuctionMode::Dutch] {
-        let legal = transition_matrix(mode.clone())
+        let legal = transition_matrix(mode)
             .into_iter()
             .filter(|c| c.expect_ok)
             .count();

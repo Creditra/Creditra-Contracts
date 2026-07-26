@@ -3,13 +3,23 @@ use crate::events::{
     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
     InterestAccruedEvent, RepaymentEvent,
 };
-use crate::math_utils::{mul_div, Rounding};
+use crate::math_utils::{apply_bps, mul_div, Rounding};
 use crate::storage::{
-    clear_reentrancy_guard, get_collateral_balance, persist_credit_line, set_reentrancy_guard,
-    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
+    persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
+
+pub fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
+    match status {
+        CreditStatus::Active | CreditStatus::Restricted => None,
+        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
+        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
+        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
+    }
+}
 
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     set_reentrancy_guard(&env);
@@ -17,7 +27,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 
     if amount <= 0 {
         clear_reentrancy_guard(&env);
-        panic!("amount must be positive");
+        env.panic_with_error(ContractError::InvalidAmount);
     }
 
     let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
@@ -27,10 +37,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         .get(&DataKey::LiquiditySource)
         .unwrap_or_else(|| env.current_contract_address());
 
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
         .unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineNotFound)
@@ -41,24 +48,9 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         panic!("Borrower mismatch for credit line");
     }
 
-    if credit_line.status == CreditStatus::Closed {
+    if let Some(status_error) = draw_status_error(credit_line.status) {
         clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::CreditLineClosed);
-    }
-
-    if credit_line.status == CreditStatus::Suspended {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is suspended");
-    }
-
-    if credit_line.status == CreditStatus::Defaulted {
-        clear_reentrancy_guard(&env);
-        panic!("credit line is defaulted");
-    }
-
-    if credit_line.status != CreditStatus::Active {
-        clear_reentrancy_guard(&env);
-        env.panic_with_error(ContractError::InvalidAmount);
+        env.panic_with_error(status_error);
     }
 
     let updated_utilized = credit_line
@@ -88,17 +80,18 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
     credit_line.utilized_amount = updated_utilized;
     env.storage().persistent().set(&borrower, &credit_line);
     // Bump TTL: every draw is an interaction that resets the expiry window.
-    env.storage()
-        .persistent()
-        .extend_ttl(&borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
-    let timestamp = env.ledger().timestamp();
+    env.storage().persistent().extend_ttl(
+        &borrower,
+        CREDIT_LINE_TTL_THRESHOLD,
+        CREDIT_LINE_TTL_EXTEND_TO,
+    );
+
     publish_drawn_event(
         &env,
         DrawnEvent {
             borrower,
             amount,
             new_utilized_amount: updated_utilized,
-            timestamp,
         },
     );
     clear_reentrancy_guard(&env);
@@ -120,6 +113,7 @@ pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
 /// - `credit_line.accrued_interest -= interest_repaid`
 /// - `credit_line.utilized_amount -= effective_repay`
 /// - Persists the credit line via [`persist_credit_line`]
+/// - Advances the installment schedule by principal installments only
 /// - Emits [`InterestAccruedEvent`] and [`RepaymentEvent`]
 pub(crate) fn repay_credit_internal(
     env: &Env,
@@ -141,7 +135,19 @@ pub(crate) fn repay_credit_internal(
         .max(0);
     credit_line.utilized_amount = new_utilized;
 
-    persist_credit_line(env, borrower, credit_line, previous_utilized, Some(previous_status));
+    persist_credit_line(
+        env,
+        borrower,
+        credit_line,
+        previous_utilized,
+        Some(previous_status),
+    );
+    lifecycle::advance_repayment_schedule_after_repay(
+        env,
+        borrower,
+        effective_repay,
+        interest_repaid,
+    );
 
     publish_interest_accrued_event(
         env,
@@ -170,10 +176,7 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
         .unwrap_or_else(|| {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineNotFound)
@@ -193,8 +196,7 @@ pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
     let interest_repaid = effective_repay.min(credit_line.accrued_interest);
 
     if effective_repay > 0 {
-        let token_address: Option<Address> =
-            env.storage().instance().get(&DataKey::LiquidityToken);
+        let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
 
         if let Some(token_address) = token_address {
             let reserve_address: Address = env
@@ -272,14 +274,14 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .unwrap_or_else(|| {
-            clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::CreditLineNotFound)
-        });
+    let mut credit_line: CreditLineData =
+        env.storage()
+            .persistent()
+            .get(&borrower)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::CreditLineNotFound)
+            });
 
     if credit_line.status == CreditStatus::Closed {
         clear_reentrancy_guard(&env);
@@ -299,8 +301,7 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
 
     // --- Token transfer (repayment) ---
     if effective_repay > 0 {
-        let token_address: Option<Address> =
-            env.storage().instance().get(&DataKey::LiquidityToken);
+        let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
 
         if let Some(token_address) = token_address {
             let reserve_address: Address = env
@@ -324,12 +325,29 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
                 panic!("Insufficient balance");
             }
 
-            token_client.transfer_from(
-                &contract_address,
-                &borrower,
-                &reserve_address,
-                &effective_repay,
-            );
+            // Compute protocol fee on the total repayment amount.
+            let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let mut fee: i128 = 0;
+            if fee_bps > 0 && effective_repay > 0 {
+                fee = apply_bps(effective_repay as u128, fee_bps, Rounding::Floor) as i128;
+            }
+
+            // Transfer fee portion into contract (treasury accumulator), then
+            // transfer remaining amount into the reserve.
+            if fee > 0 {
+                token_client.transfer_from(&contract_address, &borrower, &contract_address, &fee);
+                crate::fees::accrue_protocol_fee(&env, &borrower, fee);
+            }
+
+            let reserve_amount = effective_repay.saturating_sub(fee);
+            if reserve_amount > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &reserve_address,
+                    &reserve_amount,
+                );
+            }
         }
     }
 
@@ -368,16 +386,3 @@ pub fn repay_and_release_collateral(env: Env, borrower: Address, amount: i128) {
     clear_reentrancy_guard(&env);
 }
 
-/// Map a credit-line status to the draw-time error, if any.
-///
-/// Restricted is intentionally allowed to reach the numeric limit check in
-/// `draw_credit`; that keeps the status distinct from terminal states while
-/// still preventing fresh borrowing until the line is cured.
-pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
-    match status {
-        CreditStatus::Active | CreditStatus::Restricted => None,
-        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
-        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
-        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
-    }
-}

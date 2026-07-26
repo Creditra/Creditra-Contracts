@@ -17,12 +17,12 @@
 //! single-element `("blk_chg",)` topic for borrower blocklist changes.
 //!
 //! **Canonical schema and versioning policy:**
-//! See [`docs/events-schema.md`](../../../docs/events-schema.md) for the full
+//! See [`docs/EVENTS_CATALOG.md`](../../../docs/EVENTS_CATALOG.md) for the full
 //! authoritative event catalog, topic versions, and payload field orders.
 //!
 //! # How
 //!
-//! All topic strings are encoded with `symbol_short!` (≤ 9 characters) so
+//! All topic strings are encoded with `symbol_short!` (? 9 characters) so
 //! the on-chain encoding is the cheap `SCV_SYMBOL` variant. Payload structs
 //! use plain Soroban host types (`Address`, `i128`, `u32`, `u64`,
 //! `CreditStatus`) so off-chain indexers can decode them with just the
@@ -37,7 +37,7 @@
 //! with a version suffix (e.g., `("credit","drawn_v2")`).
 //!
 //! See [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for the
-//! end-to-end event topology, [`docs/events-schema.md`](../../../docs/events-schema.md)
+//! end-to-end event topology, [`docs/EVENTS_CATALOG.md`](../../../docs/EVENTS_CATALOG.md)
 //! for the canonical catalog and versioning rules, and
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
 //! per-entrypoint event-emission table.
@@ -210,7 +210,7 @@ pub struct PenaltyRateExitedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GraceWaiverAppliedEvent {
+pub struct GraceWaiverReceiptEvent {
     pub borrower: Address,
     pub waived_amount: i128,
     pub mode: crate::types::GraceWaiverMode,
@@ -441,6 +441,25 @@ pub struct CollateralDepositedEvent {
     pub new_balance: i128,
 }
 
+/// Event emitted by [`crate::collateral::partial_release_collateral`].
+///
+/// Distinct from [`CollateralWithdrawnEvent`] so indexers can distinguish a
+/// borrower-initiated partial release (health-factor gated) from a generic
+/// withdrawal or an atomic repay-and-release.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralPartialReleasedEvent {
+    /// Borrower whose collateral is being partially released.
+    pub borrower: Address,
+    /// Token amount returned to the borrower.
+    pub amount_released: i128,
+    /// Collateral balance remaining in the contract after the release.
+    pub new_balance: i128,
+    /// Health factor (collateral * 10_000 / utilized) after the release.
+    /// `u32::MAX` when `utilized_amount == 0` (fully repaid / unconstrained).
+    pub health_factor_bps: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CollateralWithdrawnEvent {
@@ -452,6 +471,14 @@ pub struct CollateralWithdrawnEvent {
 pub fn publish_collateral_deposited_event(env: &Env, event: CollateralDepositedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_dep")), event);
+}
+
+pub fn publish_collateral_partial_released_event(
+    env: &Env,
+    event: CollateralPartialReleasedEvent,
+) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "col_prel")), event);
 }
 
 pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnEvent) {
@@ -507,6 +534,34 @@ pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u6
     );
 }
 
+/// Emit when `set_oracle_quorum_config` is called.
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qcfg")),
+        (min_quorum_k, max_deviation_bps, max_age_seconds),
+    );
+}
+
+/// Emit when `submit_oracle_prices` successfully resolves a quorum price.
+///
+/// Data: `(resolved_price, min_quorum_k, timestamp)`.
+pub fn publish_oracle_quorum_price_set_event(
+    env: &Env,
+    price: i128,
+    quorum_k: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qprc")),
+        (price, quorum_k, timestamp),
+    );
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LateFeeChargedEvent {
@@ -521,8 +576,8 @@ pub fn publish_late_fee_charged_event(env: &Env, event: LateFeeChargedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("late_fee")), event);
 }
 
-/// Publish a grace waiver applied event when a suspended line's accrual uses the grace period.
-pub fn publish_grace_waiver_applied_event(
+/// Publish a grace waiver receipt event when a suspended line's accrual uses the grace period.
+pub fn publish_grace_waiver_receipt_event(
     env: &Env,
     borrower: &Address,
     waived_amount: i128,
@@ -530,13 +585,15 @@ pub fn publish_grace_waiver_applied_event(
 ) {
     env.events().publish(
         (symbol_short!("credit"), symbol_short!("grace_wv")),
-        GraceWaiverAppliedEvent {
+        GraceWaiverReceiptEvent {
             borrower: borrower.clone(),
             waived_amount,
             mode,
         },
     );
 }
+
+
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]
@@ -569,10 +626,7 @@ pub struct TreasuryWithdrawalExecutedEvent {
 }
 
 /// Publish a treasury withdrawal proposed event.
-pub fn publish_treasury_withdrawal_proposed(
-    env: &Env,
-    event: TreasuryWithdrawalProposedEvent,
-) {
+pub fn publish_treasury_withdrawal_proposed(env: &Env, event: TreasuryWithdrawalProposedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "tre_prop")),
         event,
@@ -580,10 +634,7 @@ pub fn publish_treasury_withdrawal_proposed(
 }
 
 /// Publish a treasury withdrawal executed event.
-pub fn publish_treasury_withdrawal_executed(
-    env: &Env,
-    event: TreasuryWithdrawalExecutedEvent,
-) {
+pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawalExecutedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
         event,

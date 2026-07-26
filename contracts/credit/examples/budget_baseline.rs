@@ -163,6 +163,22 @@ fn main() {
         );
     }
 
+    // ── partial_release_collateral ────────────────────────────────────────────
+    {
+        let (env, credit, _token, _adm, borrower) = setup_credit_harness();
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&borrower, &200_000_i128);
+        let sample = BudgetSample::measure(&env, || {
+            credit.partial_release_collateral(&borrower, &50_000_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::PARTIAL_RELEASE_COLLATERAL,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
     // ── withdraw_collateral ──────────────────────────────────────────────────
     {
         let (env, credit, _token, _adm, borrower) = setup_credit_harness();
@@ -205,8 +221,8 @@ fn main() {
 
     // ── freeze_draws ──────────────────────────────────────────────────────
     {
-        let (env, credit, ..) = setup();
-        let (cpu, mem) = measure(&env, || {
+        let (env, credit, ..) = setup_credit_harness();
+        let sample = BudgetSample::measure(&env, || {
             credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
         });
         push(
@@ -219,9 +235,9 @@ fn main() {
 
     // ── unfreeze_draws ────────────────────────────────────────────────────
     {
-        let (env, credit, ..) = setup();
+        let (env, credit, ..) = setup_credit_harness();
         credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
-        let (cpu, mem) = measure(&env, || {
+        let sample = BudgetSample::measure(&env, || {
             credit.unfreeze_draws();
         });
         push(

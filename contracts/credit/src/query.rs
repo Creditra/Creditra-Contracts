@@ -1,5 +1,5 @@
-use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, grace_period_key};
-use crate::types::{CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule};
+use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+use crate::types::{CreditLineData, ProtocolSummary, RepaymentSchedule, CreditStatus, GracePeriodConfig};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -38,11 +38,13 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
     }
 }
 
+
 /// Return the configured installment repayment schedule for `borrower`, if any.
+///
+/// Delegates to [`crate::storage::get_repayment_schedule`], which bumps the
+/// schedule entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&crate::storage::DataKey::RepaymentSchedule(borrower))
+    crate::storage::get_repayment_schedule(&env, &borrower)
 }
 
 /// Return the collateral-aware health factor for a borrower, expressed in basis
@@ -171,9 +173,13 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     };
 
-    let grace_cfg: Option<GracePeriodConfig> =
-        env.storage().instance().get(&grace_period_key(&env));
-    let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
+    let per_borrower_grace = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
+    let grace_seconds = if per_borrower_grace > 0 {
+        per_borrower_grace
+    } else {
+        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
+        grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0)
+    };
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
     env.ledger().timestamp() > delinquent_after

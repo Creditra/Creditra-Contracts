@@ -59,16 +59,19 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::NoPendingTreasuryWithdrawal as u32, 42);
     assert_eq!(ContractError::TreasuryTimelockActive as u32, 43);
     assert_eq!(ContractError::TreasuryProposalExists as u32, 44);
-    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 45);
-    assert_eq!(ContractError::OriginalDrawNotFound as u32, 46);
-    assert_eq!(ContractError::AttestationBatchNotFound as u32, 47);
-    assert_eq!(ContractError::CloseFactorAboveMax as u32, 48);
-    assert_eq!(ContractError::CreditLineFrozen as u32, 49);
+    assert_eq!(ContractError::CloseFactorAboveMax as u32, 45);
+    assert_eq!(ContractError::CreditLineFrozen as u32, 46);
+    assert_eq!(ContractError::DrawReversalWindowExpired as u32, 47);
+    assert_eq!(ContractError::OriginalDrawNotFound as u32, 48);
+    assert_eq!(ContractError::AttestationBatchNotFound as u32, 49);
+    assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
+    assert_eq!(ContractError::AlreadySettled as u32, 51);
+    assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
+    assert_eq!(ContractError::InvalidAttestation as u32, 53);
+    assert_eq!(ContractError::AdminCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
-/// This is a compile-time guarantee via `#[repr(u32)]`, but we make it
-/// explicit here so the intent is documented and visible in test output.
 #[test]
 fn no_duplicate_discriminants() {
     use std::collections::HashSet;
@@ -118,11 +121,16 @@ fn no_duplicate_discriminants() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
         ContractError::AttestationBatchNotFound as u32,
-        ContractError::CloseFactorAboveMax as u32,
-        ContractError::CreditLineFrozen as u32,
+        ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::AdminCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -134,11 +142,9 @@ fn no_duplicate_discriminants() {
 }
 
 /// Verify the total variant count matches expectations.
-/// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 49 variants as of this writing (added 45-49 for restored compilation fixes).
-    const EXPECTED_VARIANT_COUNT: usize = 49;
+    const EXPECTED_VARIANT_COUNT: usize = 54;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -185,11 +191,16 @@ fn variant_count_is_known() {
         ContractError::NoPendingTreasuryWithdrawal as u32,
         ContractError::TreasuryTimelockActive as u32,
         ContractError::TreasuryProposalExists as u32,
+        ContractError::CloseFactorAboveMax as u32,
+        ContractError::CreditLineFrozen as u32,
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
         ContractError::AttestationBatchNotFound as u32,
-        ContractError::CloseFactorAboveMax as u32,
-        ContractError::CreditLineFrozen as u32,
+        ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::AdminCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -276,60 +287,241 @@ fn category_variant_count_is_known() {
 #[test]
 fn category_mappings_are_stable() {
     // Auth
-    assert_eq!(ContractError::Unauthorized.category(), ContractErrorCategory::Auth);
-    assert_eq!(ContractError::NotAdmin.category(), ContractErrorCategory::Auth);
-    assert_eq!(ContractError::AdminNotInitialized.category(), ContractErrorCategory::Auth);
+    assert_eq!(
+        ContractError::Unauthorized.category(),
+        ContractErrorCategory::Auth
+    );
+    assert_eq!(
+        ContractError::NotAdmin.category(),
+        ContractErrorCategory::Auth
+    );
+    assert_eq!(
+        ContractError::AdminNotInitialized.category(),
+        ContractErrorCategory::Auth
+    );
     // Lifecycle
-    assert_eq!(ContractError::CreditLineClosed.category(), ContractErrorCategory::Lifecycle);
-    assert_eq!(ContractError::AlreadyInitialized.category(), ContractErrorCategory::Lifecycle);
-    assert_eq!(ContractError::CreditLineSuspended.category(), ContractErrorCategory::Lifecycle);
-    assert_eq!(ContractError::CreditLineDefaulted.category(), ContractErrorCategory::Lifecycle);
+    assert_eq!(
+        ContractError::CreditLineClosed.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::AlreadyInitialized.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::CreditLineSuspended.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::CreditLineDefaulted.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::AlreadySettled.category(),
+        ContractErrorCategory::Lifecycle
+    );
     // Numeric
-    assert_eq!(ContractError::InvalidAmount.category(), ContractErrorCategory::Numeric);
-    assert_eq!(ContractError::NegativeLimit.category(), ContractErrorCategory::Numeric);
-    assert_eq!(ContractError::Overflow.category(), ContractErrorCategory::Numeric);
-    assert_eq!(ContractError::TimestampRegression.category(), ContractErrorCategory::Numeric);
-    assert_eq!(ContractError::LimitOutOfBounds.category(), ContractErrorCategory::Numeric);
+    assert_eq!(
+        ContractError::InvalidAmount.category(),
+        ContractErrorCategory::Numeric
+    );
+    assert_eq!(
+        ContractError::NegativeLimit.category(),
+        ContractErrorCategory::Numeric
+    );
+    assert_eq!(
+        ContractError::Overflow.category(),
+        ContractErrorCategory::Numeric
+    );
+    assert_eq!(
+        ContractError::TimestampRegression.category(),
+        ContractErrorCategory::Numeric
+    );
+    assert_eq!(
+        ContractError::LimitOutOfBounds.category(),
+        ContractErrorCategory::Numeric
+    );
+    assert_eq!(
+        ContractError::InvalidRiskWeight.category(),
+        ContractErrorCategory::Numeric
+    );
     // Limit
-    assert_eq!(ContractError::OverLimit.category(), ContractErrorCategory::Limit);
-    assert_eq!(ContractError::UtilizationNotZero.category(), ContractErrorCategory::Limit);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), ContractErrorCategory::Limit);
-    assert_eq!(ContractError::DrawExceedsMaxAmount.category(), ContractErrorCategory::Limit);
-    assert_eq!(ContractError::RepayExceedsMaxAmount.category(), ContractErrorCategory::Limit);
+    assert_eq!(
+        ContractError::OverLimit.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::UtilizationNotZero.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::LimitDecreaseRequiresRepayment.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::DrawExceedsMaxAmount.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::RepayExceedsMaxAmount.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::CloseFactorAboveMax.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::DrawReversalWindowExpired.category(),
+        ContractErrorCategory::Limit
+    );
     // Liquidity
-    assert_eq!(ContractError::MissingLiquidityToken.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::MissingLiquiditySource.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::InsufficientLiquidityReserve.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::LiquidityTokenCallFailed.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentAllowance.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentBalance.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::TreasuryNotSet.category(), ContractErrorCategory::Liquidity);
-    assert_eq!(ContractError::ExposureCapExceeded.category(), ContractErrorCategory::Liquidity);
+    assert_eq!(
+        ContractError::MissingLiquidityToken.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::MissingLiquiditySource.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientLiquidityReserve.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::LiquidityTokenCallFailed.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentAllowance.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentBalance.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::TreasuryNotSet.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::ExposureCapExceeded.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::BountyNotSet.category(),
+        ContractErrorCategory::Liquidity
+    );
     // Risk
-    assert_eq!(ContractError::RateTooHigh.category(), ContractErrorCategory::Risk);
-    assert_eq!(ContractError::ScoreTooHigh.category(), ContractErrorCategory::Risk);
-    assert_eq!(ContractError::Paused.category(), ContractErrorCategory::Risk);
-    assert_eq!(ContractError::DrawCooldownActive.category(), ContractErrorCategory::Risk);
+    assert_eq!(
+        ContractError::RateTooHigh.category(),
+        ContractErrorCategory::Risk
+    );
+    assert_eq!(
+        ContractError::ScoreTooHigh.category(),
+        ContractErrorCategory::Risk
+    );
+    assert_eq!(
+        ContractError::Paused.category(),
+        ContractErrorCategory::Risk
+    );
+    assert_eq!(
+        ContractError::DrawCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
+    assert_eq!(
+        ContractError::AdminCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
     // Oracle
-    assert_eq!(ContractError::OraclePriceInvalid.category(), ContractErrorCategory::Oracle);
-    assert_eq!(ContractError::OraclePriceStale.category(), ContractErrorCategory::Oracle);
-    assert_eq!(ContractError::OraclePriceDeviation.category(), ContractErrorCategory::Oracle);
+    assert_eq!(
+        ContractError::OraclePriceInvalid.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OraclePriceStale.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OraclePriceDeviation.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OracleQuorumNotMet.category(),
+        ContractErrorCategory::Oracle
+    );
     // Collateral
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), ContractErrorCategory::Collateral);
-    assert_eq!(ContractError::InsufficientCollateralBalance.category(), ContractErrorCategory::Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        ContractErrorCategory::Collateral
+    );
+    assert_eq!(
+        ContractError::InsufficientCollateralBalance.category(),
+        ContractErrorCategory::Collateral
+    );
     // Block
-    assert_eq!(ContractError::BorrowerBlocked.category(), ContractErrorCategory::Block);
-    assert_eq!(ContractError::DrawsFrozen.category(), ContractErrorCategory::Block);
-    assert_eq!(ContractError::BorrowerFrozen.category(), ContractErrorCategory::Block);
+    assert_eq!(
+        ContractError::BorrowerBlocked.category(),
+        ContractErrorCategory::Block
+    );
+    assert_eq!(
+        ContractError::DrawsFrozen.category(),
+        ContractErrorCategory::Block
+    );
+    assert_eq!(
+        ContractError::BorrowerFrozen.category(),
+        ContractErrorCategory::Block
+    );
+    assert_eq!(
+        ContractError::CreditLineFrozen.category(),
+        ContractErrorCategory::Block
+    );
     // Reentrancy
-    assert_eq!(ContractError::Reentrancy.category(), ContractErrorCategory::Reentrancy);
+    assert_eq!(
+        ContractError::Reentrancy.category(),
+        ContractErrorCategory::Reentrancy
+    );
     // Misc
-    assert_eq!(ContractError::CreditLineNotFound.category(), ContractErrorCategory::Misc);
-    assert_eq!(ContractError::AdminAcceptTooEarly.category(), ContractErrorCategory::Misc);
+    assert_eq!(
+        ContractError::CreditLineNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::AdminAcceptTooEarly.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryTimelockActive.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryProposalExists.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::OriginalDrawNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::AttestationBatchNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::InvalidAttestation.category(),
+        ContractErrorCategory::Misc
+    );
+    // Block (9)
+    assert_eq!(
+        ContractError::FreezeCooldownActive.category(),
+        ContractErrorCategory::Block
+    );
 }
 
-/// Verify every ContractError variant's category matches its discriminant table.
-/// This catches accidental miscategorization when new variants are added.
+/// Verify every ContractError variant has a known category and that all 11
+/// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
     use std::collections::HashSet;
@@ -364,6 +556,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
+        ContractError::AdminCollateralCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),
@@ -375,11 +568,29 @@ fn every_variant_has_known_category() {
         ContractError::OraclePriceDeviation.category(),
         ContractError::InsufficientCollateralBalance.category(),
         ContractError::BorrowerFrozen.category(),
+        ContractError::BountyNotSet.category(),
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractError::TreasuryTimelockActive.category(),
+        ContractError::TreasuryProposalExists.category(),
+        ContractError::CloseFactorAboveMax.category(),
+        ContractError::CreditLineFrozen.category(),
+        ContractError::DrawReversalWindowExpired.category(),
+        ContractError::OriginalDrawNotFound.category(),
+        ContractError::AttestationBatchNotFound.category(),
+        ContractError::OracleQuorumNotMet.category(),
+        ContractError::AlreadySettled.category(),
+        ContractError::InvalidRiskWeight.category(),
+        ContractError::InvalidAttestation.category(),
+        ContractError::FreezeCooldownActive.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
-    assert_eq!(unique.len(), 11, "Not all 11 categories are covered by variant mappings");
-    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+    assert_eq!(
+        unique.len(),
+        11,
+        "Not all 11 categories are covered by variant mappings"
+    );
+    assert_eq!(all_variants.len(), 54, "Expected 54 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -391,7 +602,7 @@ fn every_variant_has_known_category() {
 
 #[cfg(test)]
 mod error_path_tests {
-use creditra_credit::types::ContractError;
+    use creditra_credit::types::ContractError;
     use creditra_credit::{Credit, CreditClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
@@ -442,7 +653,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when admin not initialized");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::AdminNotInitialized.into(),
+            err.unwrap(),
+            ContractError::AdminNotInitialized.into(),
             "Expected AdminNotInitialized error"
         );
     }
@@ -463,7 +675,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on draw"
         );
     }
@@ -484,7 +697,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on repay"
         );
     }
@@ -505,7 +719,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on close"
         );
     }
@@ -526,7 +741,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on suspend"
         );
     }
@@ -547,7 +763,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on default"
         );
     }
@@ -568,7 +785,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when credit line not found");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::CreditLineNotFound.into(),
+            err.unwrap(),
+            ContractError::CreditLineNotFound.into(),
             "Expected CreditLineNotFound error on risk update"
         );
     }
@@ -600,7 +818,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected overflow error");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::Overflow.into(),
+            err.unwrap(),
+            ContractError::Overflow.into(),
             "Expected Overflow error on utilization add"
         );
     }
@@ -657,7 +876,8 @@ use creditra_credit::types::ContractError;
         );
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::MissingLiquidityToken.into(),
+            err.unwrap(),
+            ContractError::MissingLiquidityToken.into(),
             "Expected MissingLiquidityToken error"
         );
     }
@@ -686,7 +906,8 @@ use creditra_credit::types::ContractError;
         );
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::MissingLiquiditySource.into(),
+            err.unwrap(),
+            ContractError::MissingLiquiditySource.into(),
             "Expected MissingLiquiditySource error"
         );
     }
@@ -705,7 +926,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::TreasuryNotSet.into(),
+            err.unwrap(),
+            ContractError::TreasuryNotSet.into(),
             "Expected TreasuryNotSet error"
         );
     }
@@ -739,7 +961,8 @@ use creditra_credit::types::ContractError;
         if result.is_err() {
             let err = result.err().unwrap();
             assert_eq!(
-                err.unwrap(), ContractError::Overflow.into(),
+                err.unwrap(),
+                ContractError::Overflow.into(),
                 "Expected Overflow error on cap calculation"
             );
         }
@@ -777,7 +1000,8 @@ use creditra_credit::types::ContractError;
         assert!(result.is_err(), "Expected error when exposure cap exceeded");
         let err = result.err().unwrap();
         assert_eq!(
-            err.unwrap(), ContractError::ExposureCapExceeded.into(),
+            err.unwrap(),
+            ContractError::ExposureCapExceeded.into(),
             "Expected ExposureCapExceeded error"
         );
     }
@@ -821,5 +1045,49 @@ use creditra_credit::types::ContractError;
             // Could be TimestampRegression or another validation error
             assert!(err.is_ok() || err.unwrap() == ContractError::TimestampRegression.into());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 16: AlreadySettled - replay of same settlement_id
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_settlement_replay_returns_already_settled() {
+        let (env, client, _contract_id, _admin, _token) = setup_with_token();
+
+        let borrower = Address::generate(&env);
+
+        // Open and default a credit line
+        client.open_credit_line(&borrower, &2000_i128, &500_u32, &50_u32);
+        client.default_credit_line(&borrower);
+
+        let settlement_id = soroban_sdk::Symbol::new(&env, "test_replay");
+
+        // First settlement should succeed
+        client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
+
+        // Replay with the same settlement_id must fail with AlreadySettled
+        let result = client.try_settle_default_liquidation(
+            &borrower,
+            &200_i128,
+            &settlement_id,
+            &10_000_u32,
+            &None,
+        );
+
+        assert!(result.is_err(), "Replay of settlement_id must fail");
+        let err = result.err().unwrap();
+        assert_eq!(
+            err.unwrap(),
+            ContractError::AlreadySettled,
+            "Expected AlreadySettled error on settlement replay"
+        );
+
+        // Verify state was not mutated by the replay attempt
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(
+            line.utilized_amount, 1500_i128,
+            "State must not change after replay attempt"
+        );
     }
 }

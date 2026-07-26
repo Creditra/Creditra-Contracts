@@ -156,12 +156,7 @@ pub fn compute_root(env: &Env, leaf: BytesN<32>, proof: &Vec<BytesN<32>>) -> Byt
 /// # Errors
 /// - `ContractError::Paused` if the protocol is paused.
 /// - Auth panic if caller is not admin.
-pub fn commit_attestation_batch(
-    env: Env,
-    borrower: Address,
-    merkle_root: BytesN<32>,
-    count: u32,
-) {
+pub fn commit_attestation_batch(env: Env, borrower: Address, merkle_root: BytesN<32>, count: u32) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -202,7 +197,7 @@ pub fn commit_attestation_batch(
 /// `true` if the recomputed root matches the stored root; `false` otherwise.
 ///
 /// # Errors
-/// - `ContractError::AttestationBatchNotFound` if no batch has been committed
+/// - `ContractError::InvalidAttestation` if no batch has been committed
 ///   for this borrower.
 pub fn verify_attestation_proof(
     env: Env,
@@ -215,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
 
     // Bump TTL on read.
     env.storage()
@@ -447,11 +442,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Error(Contract, #53)")]
     fn verify_no_batch_panics() {
         let env = Env::default();
         let (client, _admin, borrower) = setup(&env);
         let l = leaf(&env, 0xDD);
-        client.verify_attestation_proof(&borrower, &l, &vec![&env]);
+        // No batch committed — must panic with InvalidAttestation.
+        verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
     }
 }

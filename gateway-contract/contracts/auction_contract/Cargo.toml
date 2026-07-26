@@ -17,3 +17,4 @@ soroban-sdk = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 proptest = "1.0"
+insta = "1.34"

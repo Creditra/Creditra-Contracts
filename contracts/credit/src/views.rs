@@ -1,17 +1,86 @@
 // SPDX-License-Identifier: MIT
 
-//! Read-only query views for specialized campaign indexing.
+//! Read-only query views for the Creditra credit contract.
 //!
-//! Provides the protocol summary view requested for the GrantFox campaign
-//! and the proof-of-reserve view for protocol treasury transparency.
+//! Each function is a pure storage read — no state mutations, no token CPIs,
+//! no authentication required. TTL may be bumped by `get_credit_line` via the
+//! storage layer when the persistent entry nears expiry.
 
-use crate::types::{ProofOfReserve, ProtocolSummaryView};
-use soroban_sdk::Env;
+use crate::storage::{
+    get_borrower_by_credit_line_id, get_credit_line, is_borrower_blocked, is_borrower_frozen,
+    is_paused, MAX_ENUMERATION_LIMIT,
+};
+use crate::types::{BorrowCapabilities, CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
+use soroban_sdk::{Address, Env, Vec};
 
-/// Return protocol-level dashboard aggregates including ActiveLineCount.
+// ── Borrow capabilities view ─────────────────────────────────────────────────
+
+/// Return a borrower's current capabilities bitmap.
 ///
-/// This reads aggregate storage slots to return TotalUtilized, TotalCollateral,
-/// and ActiveLineCount without iterating through individual borrower records.
+/// This is a read-only, no-auth view that reports which operations are
+/// currently permitted for a given borrower. It evaluates the same
+/// pre-flight checks that `draw_credit`, `repay_credit`, and
+/// `self_suspend_credit_line` perform, EXCEPT for amount-dependent
+/// checks (credit limit, collateral ratio, cooldown, exposure caps)
+/// because this view does not know the intended draw/repay amount.
+///
+/// # Parameters
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+/// A [`BorrowCapabilities`] struct with three bool fields:
+/// - `can_draw` — draw pre-flight checks pass
+/// - `can_repay` — repay pre-flight checks pass
+/// - `can_self_suspend` — self-suspend pre-flight checks pass
+///
+/// # Security
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state. TTL may be bumped if the borrower's
+/// persistent entry is near expiry, but this does not change logical state.
+pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
+    let credit_line = get_credit_line(&env, &borrower);
+
+    let can_draw = credit_line
+        .as_ref()
+        .map(|line| {
+            // Credit status must allow draws
+            crate::borrow::draw_status_error(line.status).is_none()
+                // Protocol must not be paused
+                && !is_paused(&env)
+                // Global draws must not be frozen
+                && !crate::freeze::is_draws_frozen(&env)
+                // Borrower must not be blocked
+                && !is_borrower_blocked(&env, &borrower)
+                // Borrower must not be temporarily frozen
+                && !is_borrower_frozen(&env, &borrower)
+                // Credit line must not be admin-frozen
+                && !crate::freeze::is_credit_line_frozen(&env, &borrower)
+        })
+        .unwrap_or(false);
+
+    let can_repay = credit_line
+        .as_ref()
+        .map(|line| line.status != crate::types::CreditStatus::Closed)
+        .unwrap_or(false);
+
+    let can_self_suspend = credit_line
+        .as_ref()
+        .map(|line| line.status == crate::types::CreditStatus::Active)
+        .unwrap_or(false);
+
+    BorrowCapabilities {
+        can_draw,
+        can_repay,
+        can_self_suspend,
+    }
+}
+
+// ── Protocol-level views ─────────────────────────────────────────────────────
+
+/// Return protocol-level dashboard aggregates including `active_line_count`.
+///
+/// Reads aggregate instance-storage slots only; does not touch per-borrower
+/// records and does not bump persistent-entry TTL.
 pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
     ProtocolSummaryView {
         total_utilized: crate::storage::get_total_utilized(&env),
@@ -23,8 +92,8 @@ pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
 /// Return proof-of-reserve balances for the protocol treasury.
 ///
 /// Exposes the accumulated treasury and bounty pool reserves held in the
-/// contract as a result of protocol fee collection. This is a pure
-/// storage read — no token CPIs or borrower records are touched.
+/// contract as a result of protocol fee collection. A pure storage read —
+/// no token CPIs or borrower records are touched.
 ///
 /// Callers can compare `treasury_balance + bounty_balance` against the
 /// on-chain token balance of the contract to verify reserve integrity.
@@ -32,5 +101,103 @@ pub fn get_proof_of_reserve(env: Env) -> ProofOfReserve {
     ProofOfReserve {
         treasury_balance: crate::storage::get_treasury_balance(&env),
         bounty_balance: crate::storage::get_bounty_balance(&env),
+    }
+}
+
+/// Return a paginated view of credit lines for off-chain reporting.
+///
+/// Uses cursor-based pagination where the cursor is the stable numeric ID
+/// assigned to each borrower. This allows efficient, stateless navigation
+/// through large sets of credit lines without offset-based limitations.
+///
+/// # Parameters
+///
+/// - `cursor`: Optional starting cursor (numeric ID). Pass `None` for the first page.
+/// - `limit`: Maximum number of credit lines to return. Must be <= `MAX_ENUMERATION_LIMIT`.
+///
+/// # Returns
+///
+/// A [`CreditLinesPage`] containing:
+/// - `credit_lines`: Vector of credit line data for this page.
+/// - `next_cursor`: Cursor for the next page, or `None` if this is the last page.
+///
+/// # Behavior
+///
+/// - Starts enumeration from `cursor.unwrap_or(0)`.
+/// - Returns at most `limit` credit lines.
+/// - Iterates through stable numeric IDs in ascending order.
+/// - Skips IDs that have no corresponding borrower (gaps in the sequence).
+/// - Bumps TTL for each credit line entry that is loaded.
+///
+/// # Errors
+///
+/// - Panics with [`ContractError::Overflow`] if `limit` exceeds `MAX_ENUMERATION_LIMIT`.
+///
+/// # Example
+///
+/// ```text
+/// // First page
+/// let page1 = get_credit_lines_paginated(env, None, 10);
+///
+/// // Second page
+/// if let Some(cursor) = page1.next_cursor {
+///     let page2 = get_credit_lines_paginated(env, Some(cursor), 10);
+/// }
+/// ```
+///
+/// # Security
+///
+/// This is a read-only function with no authentication requirement. It only
+/// reads storage and does not mutate any state. The TTL bump on loaded entries
+/// is a side effect but does not change the logical state of the contract.
+pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> CreditLinesPage {
+    // Enforce maximum limit to prevent unbounded gas consumption
+    if limit > MAX_ENUMERATION_LIMIT {
+        env.panic_with_error(crate::types::ContractError::Overflow);
+    }
+
+    let total_count = crate::storage::get_credit_line_count(&env);
+    let start_id = cursor.unwrap_or(0);
+
+    // Clamp start_id to valid range
+    if start_id >= total_count {
+        return CreditLinesPage {
+            credit_lines: Vec::new(&env),
+            next_cursor: None,
+        };
+    }
+
+    let mut credit_lines = Vec::new(&env);
+    let mut next_cursor: Option<u32> = None;
+    let mut current_id = start_id;
+    let end_id = total_count.saturating_sub(1);
+
+    // Iterate through IDs until we collect enough results or reach the end
+    while credit_lines.len() < limit as u32 && current_id <= end_id {
+        if let Some(borrower) = get_borrower_by_credit_line_id(&env, current_id) {
+            if let Some(line) = get_credit_line(&env, &borrower) {
+                credit_lines.push_back(line);
+            }
+        }
+
+        // Prepare next cursor if we might have more results
+        if credit_lines.len() < limit as u32 && current_id < end_id {
+            next_cursor = Some(current_id.saturating_add(1));
+        } else if current_id < end_id {
+            // We've filled the page but there are more results
+            next_cursor = Some(current_id.saturating_add(1));
+        }
+
+        current_id = current_id.saturating_add(1);
+    }
+
+    // If we didn't fill the page, there are no more results
+    if credit_lines.len() < limit as u32 {
+        next_cursor = None;
+    }
+
+    CreditLinesPage {
+        credit_lines,
+        next_cursor,
     }
 }

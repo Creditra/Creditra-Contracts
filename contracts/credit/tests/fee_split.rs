@@ -99,7 +99,7 @@ fn fee_split_default_is_all_treasury() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 10);
+    assert_eq!(summary.treasury_balance, 110);
     assert_eq!(summary.bounty_balance, 0);
 }
 
@@ -122,8 +122,8 @@ fn fee_split_even_ratio_splits_fee_between_pools() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 5);
-    assert_eq!(summary.bounty_balance, 5);
+    assert_eq!(summary.treasury_balance, 55);
+    assert_eq!(summary.bounty_balance, 55);
 }
 
 #[test]
@@ -145,9 +145,9 @@ fn fee_split_remainder_goes_to_bounty_on_rounding() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 3);
-    assert_eq!(summary.bounty_balance, 7);
-    assert_eq!(summary.treasury_balance + summary.bounty_balance, 10);
+    assert_eq!(summary.treasury_balance, 36);
+    assert_eq!(summary.bounty_balance, 74);
+    assert_eq!(summary.treasury_balance + summary.bounty_balance, 110);
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn fee_split_all_bounty_when_share_is_zero() {
 
     let summary = client.get_protocol_summary();
     assert_eq!(summary.treasury_balance, 0);
-    assert_eq!(summary.bounty_balance, 10);
+    assert_eq!(summary.bounty_balance, 110);
 }
 
 #[test]
@@ -193,11 +193,11 @@ fn withdraw_bounty_transfers_accumulated_balance() {
 
     let token_client = token::Client::new(&env, &token_address);
     assert_eq!(token_client.balance(&bounty), 0);
-    assert_eq!(client.get_protocol_summary().bounty_balance, 10);
+    assert_eq!(client.get_protocol_summary().bounty_balance, 110);
 
     client.withdraw_bounty(&admin);
 
-    assert_eq!(token_client.balance(&bounty), 10);
+    assert_eq!(token_client.balance(&bounty), 110);
     assert_eq!(client.get_protocol_summary().bounty_balance, 0);
 }
 
@@ -222,8 +222,7 @@ fn withdraw_bounty_without_address_reverts() {
 #[test]
 fn set_treasury_fee_share_bps_rejects_above_max() {
     let env = Env::default();
-    let (_contract_id, _token_address, _admin, _borrower, _treasury, _bounty, client) =
-        setup(&env);
+    let (_contract_id, _token_address, _admin, _borrower, _treasury, _bounty, client) = setup(&env);
 
     let result = client.try_set_treasury_fee_share_bps(&10_001_u32);
     assert!(result.is_err());
@@ -236,7 +235,6 @@ fn set_treasury_fee_share_bps_rejects_above_max() {
 #[test]
 fn get_bounty_returns_configured_address() {
     let env = Env::default();
-    let (_contract_id, _token_address, _admin, _borrower, _treasury, bounty, client) =
-        setup(&env);
+    let (_contract_id, _token_address, _admin, _borrower, _treasury, bounty, client) = setup(&env);
     assert_eq!(client.get_bounty(), Some(bounty));
 }

@@ -7,8 +7,9 @@
 //! paths so that active credit lines are not silently archived by the network.
 
 use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
+use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::storage::Persistent as _;
+use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env};
 
@@ -33,6 +34,14 @@ fn ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
     key: &K,
 ) -> u32 {
     env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
+}
+
+fn instance_ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    contract_id: &Address,
+    key: &K,
+) -> u32 {
+    env.as_contract(contract_id, || env.storage().instance().get_ttl(key))
 }
 
 #[test]
@@ -110,4 +119,112 @@ fn utilization_cap_and_last_draw_keys_bump_persistent_ttl() {
     );
 
     let _ = admin;
+}
+
+#[test]
+fn set_repayment_schedule_bumps_schedule_and_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    // Drain the credit-line TTL to just below the refresh threshold so the
+    // next interaction must perform a real bump.
+    let line_ttl_initial = ttl_for_key(&env, &contract_id, &borrower);
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, line_ttl_initial.saturating_sub(target_remaining));
+
+    // Setting a schedule is a credit-line interaction: it must bump both the
+    // credit-line entry and the schedule entry.
+    client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+
+    let line_ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        line_ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on set_repayment_schedule: {line_ttl_after}"
+    );
+
+    let schedule_key = DataKey::RepaymentSchedule(borrower.clone());
+    let schedule_ttl = ttl_for_key(&env, &contract_id, &schedule_key);
+    assert!(
+        schedule_ttl >= LEDGER_BUMP_AMOUNT,
+        "schedule TTL not extended on write: {schedule_ttl}"
+    );
+}
+
+#[test]
+fn get_repayment_schedule_bumps_schedule_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+
+    let schedule_key = DataKey::RepaymentSchedule(borrower.clone());
+    let schedule_ttl_initial = ttl_for_key(&env, &contract_id, &schedule_key);
+
+    // Advance to just below the refresh threshold, then read via the getter.
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, schedule_ttl_initial.saturating_sub(target_remaining));
+
+    let schedule = client.get_repayment_schedule(&borrower);
+    assert!(schedule.is_some(), "schedule should exist");
+
+    let schedule_ttl_after = ttl_for_key(&env, &contract_id, &schedule_key);
+    assert!(
+        schedule_ttl_after >= LEDGER_BUMP_AMOUNT,
+        "schedule TTL not bumped on read: initial={schedule_ttl_initial} after={schedule_ttl_after}"
+    );
+}
+
+#[test]
+fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.set_penalty_surcharge_bps(&100_u32);
+
+    let grace_cfg = GracePeriodConfig {
+        grace_period_seconds: 60,
+        waiver_mode: GraceWaiverMode::FullWaiver,
+        reduced_rate_bps: 0,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&creditra_credit::storage::grace_period_key(&env), &grace_cfg);
+    });
+
+    let grace_key = creditra_credit::storage::grace_period_key(&env);
+    let initial_ttl = instance_ttl_for_key(&env, &contract_id, &grace_key);
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    let delta = initial_ttl.saturating_sub(target_remaining);
+    advance_ledgers(&env, delta);
+
+    env.as_contract(&contract_id, || {
+        let line = CreditLineData {
+            borrower: borrower.clone(),
+            credit_limit: 1_000,
+            utilized_amount: 100,
+            interest_rate_bps: 300,
+            risk_score: 70,
+            status: CreditStatus::Active,
+            last_rate_update_ts: 0,
+            accrued_interest: 0,
+            last_accrual_ts: 0,
+            suspension_ts: 0,
+        };
+        env.storage().persistent().set(&borrower, &line);
+    });
+
+    env.ledger().set_timestamp(100);
+    client.update_risk_parameters(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    let ttl_after = instance_ttl_for_key(&env, &contract_id, &grace_key);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "instance TTL not extended for accrual reads: initial={initial_ttl} after={ttl_after}"
+    );
 }
