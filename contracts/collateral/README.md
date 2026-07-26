@@ -27,3 +27,12 @@ ledger.timestamp >= LastAdminCollateralCriticalActionTs + AdminCollateralCooldow
 Otherwise the contract reverts with `ContractError::AdminCollateralCooldownActive` (`54`).
 
 Implementation: [`src/admin.rs`](./src/admin.rs) (compiled into `creditra-credit`).
+
+## Fuzzing
+
+This module includes a stateful fuzz target that verifies the strict cool-off enforcement and proper administrative math. 
+To run the fuzz tests:
+
+```bash
+cargo fuzz run --manifest-path contracts/collateral/fuzz/Cargo.toml main
+```
