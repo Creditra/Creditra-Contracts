@@ -532,48 +532,18 @@ mod test {
                 env.panic_with_error(ContractError::OracleQuorumNotMet);
             }
 
-            // Copy prices into a fixed stack buffer and validate positivity.
-            let mut buf = [0i128; MAX_ORACLE_FEEDS as usize];
-            for i in 0..n {
-                let p = prices.get(i).unwrap();
-                if p <= 0 {
-                    env.panic_with_error(ContractError::OraclePriceInvalid);
-                }
-                buf[i as usize] = p;
-            }
-            let slice = &mut buf[..n as usize];
-
-            // Selection sort — O(n²), safe and predictable for n ≤ MAX_ORACLE_FEEDS.
-            let len = slice.len();
-            for i in 0..len {
-                let mut min_idx = i;
-                for j in (i + 1)..len {
-                    if slice[j] < slice[min_idx] {
-                        min_idx = j;
-                    }
-                }
-                slice.swap(i, min_idx);
-            }
-
-            // Scan every consecutive K-wide window in sorted order.
-            // A window qualifies when the deviation of its highest element from its
-            // lowest is within cfg.max_deviation_bps. Return the lower-median of the
-            // first qualifying window.
-            let kk = k as usize;
-            for i in 0..=(len - kk) {
-                let lo = slice[i];
-                let hi = slice[i + kk - 1];
-                // lo > 0 is guaranteed; compute_deviation_bps returns None only for
-                // non-positive last_price, which cannot happen here.
-                let dev = compute_deviation_bps(hi, lo).unwrap_or(u32::MAX);
-                if dev <= cfg.max_deviation_bps {
-                    // Lower-median: index (kk-1)/2 within the window.
-                    let median_idx = i + (kk - 1) / 2;
-                    return slice[median_idx];
-                }
-            }
-
-            env.panic_with_error(ContractError::OracleQuorumNotMet)
+    // Copy prices into a fixed stack buffer and validate positivity.
+    // Use `unwrap_or_else` rather than a bare `.unwrap()` so that an
+    // unexpected `None` (e.g. if the Soroban SDK Vec contract ever behaves
+    // differently from its current bounds semantics) produces a typed
+    // `ContractError::OraclePriceInvalid` instead of an opaque host trap.
+    let mut buf = [0i128; MAX_ORACLE_FEEDS as usize];
+    for i in 0..n {
+        let p = prices.get(i).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid)
+        });
+        if p <= 0 {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
         }
 
         // ── Unit tests ────────────────────────────────────────────────────────────────
