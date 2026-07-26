@@ -51,6 +51,23 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// A proposed interest rate exceeds the borrower's configured rate ceiling.
+    ///
+    /// Raised by the per-borrower rate-ceiling enforcement in
+    /// [`crate::limits`] when the requested rate (in basis points) is greater
+    /// than the effective ceiling for that borrower.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+
+    /// An arithmetic operation overflowed its integer type.
+    ///
+    /// Raised by overflow-safe math (e.g. interest accrual in
+    /// [`crate::accrual`]) when an intermediate product would exceed
+    /// `Uint128::MAX`, so the contract reverts deterministically instead of
+    /// wrapping or panicking.
+    #[error("Overflow")]
+    Overflow,
 }
 
 #[cfg(test)]
@@ -105,6 +122,24 @@ mod tests {
         assert_eq!(err, ContractError::InsufficientCollateralBalance);
         assert_ne!(err, ContractError::CollateralInsufficient);
         assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn rate_ceiling_exceeded_display_and_equality() {
+        let err = ContractError::RateCeilingExceeded;
+        assert_eq!(err.to_string(), "RateCeilingExceeded");
+        assert_eq!(err, ContractError::RateCeilingExceeded);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn overflow_display_and_equality() {
+        let err = ContractError::Overflow;
+        assert_eq!(err.to_string(), "Overflow");
+        assert_eq!(err, ContractError::Overflow);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::RateCeilingExceeded);
     }
 
     #[test]
