@@ -67,6 +67,8 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
+    assert_eq!(ContractError::InvalidAttestation as u32, 53);
+    assert_eq!(ContractError::AdminCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -127,6 +129,8 @@ fn no_duplicate_discriminants() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::AdminCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -140,7 +144,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 52;
+    const EXPECTED_VARIANT_COUNT: usize = 54;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -195,6 +199,8 @@ fn variant_count_is_known() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::AdminCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -422,6 +428,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawCooldownActive.category(),
         ContractErrorCategory::Risk
     );
+    assert_eq!(
+        ContractError::AdminCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
     // Oracle
     assert_eq!(
         ContractError::OraclePriceInvalid.category(),
@@ -498,6 +508,15 @@ fn category_mappings_are_stable() {
     assert_eq!(
         ContractError::AttestationBatchNotFound.category(),
         ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::InvalidAttestation.category(),
+        ContractErrorCategory::Misc
+    );
+    // Block (9)
+    assert_eq!(
+        ContractError::FreezeCooldownActive.category(),
+        ContractErrorCategory::Block
     );
 }
 
@@ -609,6 +628,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
+        ContractError::AdminCollateralCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),
@@ -632,6 +652,8 @@ fn every_variant_has_known_category() {
         ContractError::OracleQuorumNotMet.category(),
         ContractError::AlreadySettled.category(),
         ContractError::InvalidRiskWeight.category(),
+        ContractError::InvalidAttestation.category(),
+        ContractError::FreezeCooldownActive.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -640,7 +662,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 52, "Expected 52 ContractError variants");
+    assert_eq!(all_variants.len(), 54, "Expected 54 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

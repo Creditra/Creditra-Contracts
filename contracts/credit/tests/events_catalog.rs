@@ -260,7 +260,7 @@ fn penalty_rate_exited_shape() {
 fn grace_waiver_event_shape() {
     let (env, borrower, _admin) = env_and_addresses();
 
-    publish_grace_waiver_applied_event(
+    publish_grace_waiver_receipt_event(
         &env,
         &borrower,
         10,
@@ -378,6 +378,24 @@ fn collateral_withdrawn_shape() {
 }
 
 #[test]
+fn collateral_partial_released_shape() {
+    let (env, borrower, _admin) = env_and_addresses();
+
+    publish_collateral_partial_released_event(
+        &env,
+        CollateralPartialReleasedEvent {
+            borrower: borrower.clone(),
+            amount_released: 200,
+            new_balance: 300,
+            health_factor_bps: 12_000,
+        },
+    );
+
+    assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
+    assert_eq!(second_topic(&env, 0), Symbol::new(&env, "col_prel"));
+}
+
+#[test]
 fn token_rescued_shape() {
     let (env, _borrower, admin) = env_and_addresses();
 
@@ -468,10 +486,12 @@ fn raw_value_events_shape() {
     publish_protocol_fee_bounds_set_event(&env, 100, 2_000);
     publish_close_factor_bps_set_event(&env, 5_000);
     publish_oracle_config_set_event(&env, 500, 3_600);
+    publish_oracle_quorum_config_set_event(&env, 3, 500, 3_600);
+    publish_oracle_quorum_price_set_event(&env, 1_000_000, 3, 1_000);
     publish_oracle_price_accepted_event(&env, 1_000_000, 1_000);
 
     let events = env.events().all();
-    assert_eq!(events.len(), 8);
+    assert_eq!(events.len(), 10);
 
     let topics = [
         ("credit", "rate_form"),
@@ -481,6 +501,8 @@ fn raw_value_events_shape() {
         ("credit", "fee_bnd"),
         ("credit", "clsfctr"),
         ("credit", "orc_cfg"),
+        ("credit", "orc_qcfg"),
+        ("credit", "orc_qprc"),
         ("credit", "orc_price"),
     ];
 
@@ -669,7 +691,7 @@ fn all_credit_event_structs_instantiate() {
         previous_rate_bps: 700,
         new_rate_bps: 500,
     };
-    let _ = GraceWaiverAppliedEvent {
+    let _ = GraceWaiverReceiptEvent {
         borrower: borrower.clone(),
         waived_amount: 5,
         mode: creditra_credit::types::GraceWaiverMode::FullWaiver,
@@ -683,6 +705,12 @@ fn all_credit_event_structs_instantiate() {
         borrower: borrower.clone(),
         amount: 200,
         new_balance: 300,
+    };
+    let _ = CollateralPartialReleasedEvent {
+        borrower: borrower.clone(),
+        amount_released: 200,
+        new_balance: 300,
+        health_factor_bps: 12_000,
     };
     let _ = TokenRescuedEvent {
         token: admin.clone(),

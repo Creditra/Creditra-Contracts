@@ -1,0 +1,29 @@
+[package]
+name = "creditra-accrual"
+version = "0.1.0"
+edition = "2021"
+description = "Creditra accrual v7 error stability tests"
+license = "MIT"
+keywords = ["soroban", "stellar", "accrual", "credit", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "../../README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+creditra-credit = { path = "../credit" }
+
+[[test]]
+name = "err_stab"
+path = "tests/err_stab.rs"
+
+[[test]]
+name = "gas_snap"
+path = "tests/gas_snap.rs"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+creditra-credit = { path = "../credit", features = [] }
+proptest = "1.4"

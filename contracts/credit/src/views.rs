@@ -6,9 +6,74 @@
 //! no authentication required. TTL may be bumped by `get_credit_line` via the
 //! storage layer when the persistent entry nears expiry.
 
-use crate::storage::{get_borrower_by_credit_line_id, get_credit_line, MAX_ENUMERATION_LIMIT};
-use crate::types::{CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
-use soroban_sdk::{Env, Vec};
+use crate::storage::{
+    get_borrower_by_credit_line_id, get_credit_line, is_borrower_blocked, is_borrower_frozen,
+    is_paused, MAX_ENUMERATION_LIMIT,
+};
+use crate::types::{BorrowCapabilities, CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
+use soroban_sdk::{Address, Env, Vec};
+
+// ── Borrow capabilities view ─────────────────────────────────────────────────
+
+/// Return a borrower's current capabilities bitmap.
+///
+/// This is a read-only, no-auth view that reports which operations are
+/// currently permitted for a given borrower. It evaluates the same
+/// pre-flight checks that `draw_credit`, `repay_credit`, and
+/// `self_suspend_credit_line` perform, EXCEPT for amount-dependent
+/// checks (credit limit, collateral ratio, cooldown, exposure caps)
+/// because this view does not know the intended draw/repay amount.
+///
+/// # Parameters
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+/// A [`BorrowCapabilities`] struct with three bool fields:
+/// - `can_draw` — draw pre-flight checks pass
+/// - `can_repay` — repay pre-flight checks pass
+/// - `can_self_suspend` — self-suspend pre-flight checks pass
+///
+/// # Security
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state. TTL may be bumped if the borrower's
+/// persistent entry is near expiry, but this does not change logical state.
+pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
+    let credit_line = get_credit_line(&env, &borrower);
+
+    let can_draw = credit_line
+        .as_ref()
+        .map(|line| {
+            // Credit status must allow draws
+            crate::borrow::draw_status_error(line.status).is_none()
+                // Protocol must not be paused
+                && !is_paused(&env)
+                // Global draws must not be frozen
+                && !crate::freeze::is_draws_frozen(&env)
+                // Borrower must not be blocked
+                && !is_borrower_blocked(&env, &borrower)
+                // Borrower must not be temporarily frozen
+                && !is_borrower_frozen(&env, &borrower)
+                // Credit line must not be admin-frozen
+                && !crate::freeze::is_credit_line_frozen(&env, &borrower)
+        })
+        .unwrap_or(false);
+
+    let can_repay = credit_line
+        .as_ref()
+        .map(|line| line.status != crate::types::CreditStatus::Closed)
+        .unwrap_or(false);
+
+    let can_self_suspend = credit_line
+        .as_ref()
+        .map(|line| line.status == crate::types::CreditStatus::Active)
+        .unwrap_or(false);
+
+    BorrowCapabilities {
+        can_draw,
+        can_repay,
+        can_self_suspend,
+    }
+}
 
 // ── Protocol-level views ─────────────────────────────────────────────────────
 

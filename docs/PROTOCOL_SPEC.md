@@ -8,12 +8,12 @@
 This document is the per-module contract surface specification. It is the
 reference a protocol integrator or auditor consults to answer:
 
-- *What entrypoints exist, and exactly what arguments do they take?*
-- *What storage is touched by each entrypoint, and at which TTL tier?*
-- *What invariants is each module responsible for upholding?*
-- *Which `ContractError` variants can each entrypoint return, and what do they
-  mean semantically?*
-- *What is the upgrade path?*
+- _What entrypoints exist, and exactly what arguments do they take?_
+- _What storage is touched by each entrypoint, and at which TTL tier?_
+- _What invariants is each module responsible for upholding?_
+- _Which `ContractError` variants can each entrypoint return, and what do they
+  mean semantically?_
+- _What is the upgrade path?_
 
 Every signature, error, and constant in this document is taken directly from
 the source. File paths use the form
@@ -56,26 +56,27 @@ The contract struct is `Credit` (`contracts/credit/src/lib.rs:91`). All
 entrypoints are inside a single `#[contractimpl]` block at
 `contracts/credit/src/lib.rs:93`. Constants of note:
 
-| Constant | Value | Location | Meaning |
-|---|---|---|---|
-| `CONTRACT_API_VERSION` | `(1, 0, 0)` | `lib.rs:60` | Major.minor.patch ABI version |
-| `MAX_PROTOCOL_FEE_BPS` | `1_000` | `lib.rs:63` | 10 % cap on protocol fee |
-| `BULK_BLOCK_MAX` | `50` | `lib.rs:74` | Bulk-blocklist batch cap |
-| `ACCRUE_BATCH_MAX` | `50` | `lib.rs:78` | Keeper accrual batch cap |
-| `MAX_INTEREST_RATE_BPS` | `10_000` | `risk.rs:24` | 100 % APR cap |
-| `MAX_RISK_SCORE` | `100` | `risk.rs:27` | Score is 0..=100 |
-| `MAX_ENUMERATION_LIMIT` | `100` | `storage.rs:102` | Page cap on enumeration |
-| `LEDGER_BUMP_AMOUNT` | `3_110_400` | `storage.rs:122` | ~6 months at 5s/ledger |
-| `LEDGER_BUMP_THRESHOLD` | `1_555_200` | `storage.rs:123` | ~3 months bump trigger |
-| `INSTANCE_BUMP_AMOUNT/THRESHOLD` | mirror of above | `storage.rs:126-127` | |
-| `SECONDS_PER_YEAR` (accrual) | `31_536_000` | `accrual.rs:60` | dead-code, legacy |
-| `SECONDS_PER_YEAR` (math) | `31_557_600` | `math_utils.rs:60` | Julian — live |
-| `BPS_DENOMINATOR` | `10_000` | `math_utils.rs:57` | |
-| `BPS_YEAR_DENOM` | `315_576_000_000` | `math_utils.rs:66` | precomputed |
+| Constant                         | Value             | Location             | Meaning                       |
+| -------------------------------- | ----------------- | -------------------- | ----------------------------- |
+| `CONTRACT_API_VERSION`           | `(1, 0, 0)`       | `lib.rs:60`          | Major.minor.patch ABI version |
+| `MAX_PROTOCOL_FEE_BPS`           | `1_000`           | `lib.rs:63`          | 10 % cap on protocol fee      |
+| `BULK_BLOCK_MAX`                 | `50`              | `lib.rs:74`          | Bulk-blocklist batch cap      |
+| `ACCRUE_BATCH_MAX`               | `50`              | `lib.rs:78`          | Keeper accrual batch cap      |
+| `MAX_INTEREST_RATE_BPS`          | `10_000`          | `risk.rs:24`         | 100 % APR cap                 |
+| `MAX_RISK_SCORE`                 | `100`             | `risk.rs:27`         | Score is 0..=100              |
+| `MAX_ENUMERATION_LIMIT`          | `100`             | `storage.rs:102`     | Page cap on enumeration       |
+| `LEDGER_BUMP_AMOUNT`             | `3_110_400`       | `storage.rs:122`     | ~6 months at 5s/ledger        |
+| `LEDGER_BUMP_THRESHOLD`          | `1_555_200`       | `storage.rs:123`     | ~3 months bump trigger        |
+| `INSTANCE_BUMP_AMOUNT/THRESHOLD` | mirror of above   | `storage.rs:126-127` |                               |
+| `SECONDS_PER_YEAR` (accrual)     | `31_536_000`      | `accrual.rs:60`      | dead-code, legacy             |
+| `SECONDS_PER_YEAR` (math)        | `31_557_600`      | `math_utils.rs:60`   | Julian — live                 |
+| `BPS_DENOMINATOR`                | `10_000`          | `math_utils.rs:57`   |                               |
+| `BPS_YEAR_DENOM`                 | `315_576_000_000` | `math_utils.rs:66`   | precomputed                   |
 
 ### 2.1 Initialization & admin rotation
 
 #### `init(env: Env, admin: Address)`
+
 `config.rs:20`. Writes `admin_key`, `LiquiditySource = current_contract_address`,
 `CreditLineCount = 0`, `TotalUtilized = 0`, `SchemaVersion = 1`,
 `MinCollateralRatioBps = 15_000`. Guards on existing `admin_key`.
@@ -91,18 +92,23 @@ entrypoints are inside a single `#[contractimpl]` block at
   Instance.
 
 #### `get_contract_version() -> (u32, u32, u32)`
+
 `lib.rs:99`. Returns `CONTRACT_API_VERSION = (1, 0, 0)`. Used by indexers and
 clients to gate breaking event-schema changes (see
 `docs/indexer-integration.md`).
 
 #### `propose_admin(env, new_admin: Address, delay_seconds: u64)`
+
 `lib.rs:103`. Admin only.
+
 - Writes `Symbol("proposed_admin") = new_admin`,
   `Symbol("proposed_at") = now`.
 - Emits `AdminRotationProposedEvent` on topic `("credit","admin_prop")`.
 
 #### `accept_admin(env)`
+
 `lib.rs:117`. Must be called by the proposed admin.
+
 - Checks `now >= proposed_at + delay`.
 - **Errors:** `Unauthorized` (caller not proposed), `AdminAcceptTooEarly`
   (delay not elapsed).
@@ -112,7 +118,9 @@ clients to gate breaking event-schema changes (see
 ### 2.2 Credit line CRUD
 
 #### `open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)`
+
 `lib.rs:181` → `lifecycle::open_credit_line` (`lifecycle.rs:247`).
+
 - **Auth:** admin (`require_admin_auth`), pause check.
 - **Validation order:**
   1. `assert_not_paused`
@@ -129,6 +137,7 @@ clients to gate breaking event-schema changes (see
 - **Events:** `CreditLineEvent` on `("credit","opened")`.
 
 #### `draw_credit(env, borrower, amount)`
+
 `lib.rs:261`. **The canonical borrower entrypoint.** Reentrancy-guarded.
 Pause-gated.
 
@@ -152,7 +161,7 @@ The full ordered validation chain is documented in `docs/ARCHITECTURE.md`
 12. `utilized + amount` via `checked_add` (else `Overflow`)
 13. Updated utilized `<= credit_limit` (else `OverLimit`)
 14. Collateral ratio: `utilized * MinCollateralRatioBps / 10_000 <=
-    CollateralBalance(borrower)` (else `CollateralRatioBelowMinimum`)
+CollateralBalance(borrower)` (else `CollateralRatioBelowMinimum`)
 15. Per-borrower utilization cap:
     `updated_utilized <= credit_limit * cap_bps / 10_000`
 16. Global cap: `TotalUtilized + amount <= MaxTotalExposure`
@@ -175,6 +184,7 @@ attempting to re-enter `draw_credit` reverts with `Reentrancy`. State persist
 safe.
 
 #### `repay_credit(env, borrower, amount)`
+
 `lib.rs:437`. Reentrancy-guarded. **Not pause-gated** — users must always be
 able to deleverage during emergencies.
 
@@ -187,8 +197,8 @@ able to deleverage during emergencies.
 7. Status != `Closed` (else `CreditLineClosed`)
 8. `effective_repay = min(amount, utilized_amount)`
 9. Interest-first split:
-    - `interest_repaid = min(effective_repay, accrued_interest)`
-    - `principal_repaid = effective_repay - interest_repaid`
+   - `interest_repaid = min(effective_repay, accrued_interest)`
+   - `principal_repaid = effective_repay - interest_repaid`
 10. Compute `fee = interest_repaid * protocol_fee_bps / 10_000` (floor),
     `reserve_amount = effective_repay - fee`
 11. `token::Client::transfer_from(borrower, contract_address, fee)`
@@ -206,14 +216,14 @@ able to deleverage during emergencies.
 
 ### 2.3 Lifecycle transitions
 
-| Entrypoint | File | Auth | Pause | Notes |
-|---|---|---|---|---|
-| `suspend_credit_line(borrower)` | `lib.rs:918` → `lifecycle.rs:147` | admin | yes | Apply accrual; `Active→Suspended`; set `suspension_ts` monotonically. |
-| `self_suspend_credit_line(borrower)` | `lib.rs:922` → `lifecycle.rs:342` | borrower | yes | Same effect, borrower-initiated. |
-| `close_credit_line(borrower, closer)` | `lib.rs:926` → `lifecycle.rs:385` | admin OR borrower if `utilized==0` | yes | Idempotent on `Closed`. |
-| `default_credit_line(borrower)` | `lib.rs:930` → `lifecycle.rs:450` | admin | yes | Emits `("credit","liq_req")`. |
-| `forgive_debt(borrower, amount)` | `lifecycle.rs:499` | admin | yes | Caps to `utilized_amount`; reduces `accrued_interest` first. |
-| `reinstate_credit_line(borrower, target_status)` | `lib.rs:940` → `lifecycle.rs:630` | admin | yes | `target ∈ {Active, Restricted}`; current must be `Defaulted`. Clears `suspension_ts`. |
+| Entrypoint                                       | File                              | Auth                               | Pause | Notes                                                                                 |
+| ------------------------------------------------ | --------------------------------- | ---------------------------------- | ----- | ------------------------------------------------------------------------------------- |
+| `suspend_credit_line(borrower)`                  | `lib.rs:918` → `lifecycle.rs:147` | admin                              | yes   | Apply accrual; `Active→Suspended`; set `suspension_ts` monotonically.                 |
+| `self_suspend_credit_line(borrower)`             | `lib.rs:922` → `lifecycle.rs:342` | borrower                           | yes   | Same effect, borrower-initiated.                                                      |
+| `close_credit_line(borrower, closer)`            | `lib.rs:926` → `lifecycle.rs:385` | admin OR borrower if `utilized==0` | yes   | Idempotent on `Closed`.                                                               |
+| `default_credit_line(borrower)`                  | `lib.rs:930` → `lifecycle.rs:450` | admin                              | yes   | Emits `("credit","liq_req")`.                                                         |
+| `forgive_debt(borrower, amount)`                 | `lifecycle.rs:499`                | admin                              | yes   | Caps to `utilized_amount`; reduces `accrued_interest` first.                          |
+| `reinstate_credit_line(borrower, target_status)` | `lib.rs:940` → `lifecycle.rs:630` | admin                              | yes   | `target ∈ {Active, Restricted}`; current must be `Defaulted`. Clears `suspension_ts`. |
 
 All transitions invoke `apply_accrual` first and persist via
 `persist_credit_line` with the captured `previous_utilized` so the global
@@ -222,6 +232,7 @@ All transitions invoke `apply_accrual` first and persist via
 ### 2.4 Risk parameters
 
 #### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
+
 `lib.rs:559` → `risk.rs:207`. Admin + pause.
 
 1. `assert_not_paused`, `require_admin_auth`
@@ -236,75 +247,83 @@ All transitions invoke `apply_accrual` first and persist via
 8. Apply per-borrower `RateFloorBps` (max of effective_rate and floor)
 9. Apply per-borrower `RateCeilingBps` (min of floor-adjusted rate and ceiling)
 10. If `RateChangeConfig` set:
-   - `|new_rate - old_rate| <= max_rate_change_bps` (else `RateTooHigh`)
-   - `now - last_rate_update_ts >= rate_change_min_interval`
-     (else `TimestampRegression`)
+
+- `|new_rate - old_rate| <= max_rate_change_bps` (else `RateTooHigh`)
+- `now - last_rate_update_ts >= rate_change_min_interval`
+  (else `TimestampRegression`)
+
 11. `effective_rate <= MAX_INTEREST_RATE_BPS` (sanity)
 12. If `utilized_amount > new credit_limit`: status → `Restricted`
 13. Persist; emit `RiskParametersUpdatedEvent` on `("credit","risk_upd")`.
 
 #### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
+
 `lib.rs:569`. Admin + pause. Writes `Symbol("rate_cfg")`.
 
 #### `set_borrower_rate_floor(env, borrower, floor_bps: Option<u32>)`
+
 `lib.rs:578`. Admin. Asserts `floor <= 10_000` and rejects
 `floor > RateCeilingBps(borrower)` when a ceiling is configured. `None`
 clears.
 
 #### `set_borrower_rate_ceiling(env, borrower, ceiling_bps: Option<u32>)`
+
 `lib.rs:775`. Admin. Asserts `ceiling <= 10_000` and rejects
 `ceiling < RateFloorBps(borrower)` when a floor is configured. `None`
 clears. The value is applied during `update_risk_parameters` after any
 per-borrower floor and before rate-change guardrails.
 
 #### `set_penalty_surcharge_bps(env, bps)`
+
 `lib.rs:587`. Admin + pause. Surcharge added to base rate (and clamped to
 `MAX_INTEREST_RATE_BPS`) when `is_delinquent` is true.
 
 #### `set_rate_formula_config(env, base_rate_bps, slope_bps_per_score, min_rate_bps, max_rate_bps)`
+
 `lib.rs:1159`. Admin + pause. Validates `min_rate <= max_rate <= 10_000` and
 emits `("credit","rate_form")` with `true`.
 
 #### `clear_rate_formula_config(env)`
+
 `lib.rs:1189`. Admin. Emits `("credit","rate_form")` with `false`.
 
 ### 2.5 Caps, limits, schedule
 
-| Entrypoint | File | Storage | Notes |
-|---|---|---|---|
-| `set_max_draw_amount(amount)` | `lib.rs:699` | `DataKey::MaxDrawAmount` (Instance) | `amount > 0`. |
-| `set_max_repay_amount(amount)` | `lib.rs:714` | `DataKey::MaxRepayAmount` | |
-| `set_draw_min_interval(seconds)` | `lib.rs:731` | `DataKey::DrawMinIntervalSeconds` | `0` disables cooldown. |
-| `set_utilization_cap(borrower, cap_bps)` | `lib.rs:607` | `DataKey::UtilizationCapBps(borrower)` (Persistent) | `cap_bps ∈ 1..=10000`; `0` clears. |
-| `set_max_total_exposure(amount)` | `lib.rs:827` | `DataKey::MaxTotalExposure` | `0` removes the cap. |
-| `set_credit_limit_bounds(min, max)` | `lib.rs:862` | `MinCreditLimit`, `MaxCreditLimit` | `min >= 0`, `max >= min`. |
+| Entrypoint                                                                          | File               | Storage                                             | Notes                                                                                             |
+| ----------------------------------------------------------------------------------- | ------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `set_max_draw_amount(amount)`                                                       | `lib.rs:699`       | `DataKey::MaxDrawAmount` (Instance)                 | `amount > 0`.                                                                                     |
+| `set_max_repay_amount(amount)`                                                      | `lib.rs:714`       | `DataKey::MaxRepayAmount`                           |                                                                                                   |
+| `set_draw_min_interval(seconds)`                                                    | `lib.rs:731`       | `DataKey::DrawMinIntervalSeconds`                   | `0` disables cooldown.                                                                            |
+| `set_utilization_cap(borrower, cap_bps)`                                            | `lib.rs:607`       | `DataKey::UtilizationCapBps(borrower)` (Persistent) | `cap_bps ∈ 1..=10000`; `0` clears.                                                                |
+| `set_max_total_exposure(amount)`                                                    | `lib.rs:827`       | `DataKey::MaxTotalExposure`                         | `0` removes the cap.                                                                              |
+| `set_credit_limit_bounds(min, max)`                                                 | `lib.rs:862`       | `MinCreditLimit`, `MaxCreditLimit`                  | `min >= 0`, `max >= min`.                                                                         |
 | `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | `amount_per_period` is principal-only; interest repayments do not advance `next_due_ts`. All > 0. |
-| `set_grace_period_config(grace_period_seconds, waiver_mode, reduced_rate_bps)` | `lib.rs:646` | `Symbol("grace_cfg")` (Instance) | `reduced_rate <= 10000`. |
+| `set_grace_period_config(grace_period_seconds, waiver_mode, reduced_rate_bps)`      | `lib.rs:646`       | `Symbol("grace_cfg")` (Instance)                    | `reduced_rate <= 10000`.                                                                          |
 
 ### 2.6 Collateral
 
-| Entrypoint | File | Effect |
-|---|---|---|
-| `deposit_collateral(borrower, amount)` | `lib.rs:805` → `collateral.rs:34` | `token::transfer` borrower → contract; `CollateralBalance += amount`. Emits `CollateralDepositedEvent`. |
-| `withdraw_collateral(borrower, amount)` | `lib.rs:809` → `collateral.rs:69` | Compute `post_balance`; require `utilized * MinCollateralRatioBps / 10000 <= post_balance` else `CollateralRatioBelowMinimum`; transfer out; persist; emit. |
-| `partial_release_collateral(borrower, amount)` | `lib.rs` → `collateral.rs` | Borrower-only entrypoint. Releases `amount` collateral back to borrower provided the health-factor invariant holds after the release: `post_balance >= utilized * MinCollateralRatioBps / 10_000`. Ratio check skipped when `utilized == 0`. Emits `CollateralPartialReleasedEvent` on topic `("credit","col_prel")` with `amount_released`, `new_balance`, and `health_factor_bps` (`u32::MAX` when no debt). Errors: `InvalidAmount(5)`, `InsufficientCollateralBalance(39)`, `CollateralRatioBelowMinimum(35)`, `MissingLiquidityToken(22)`, `Overflow(12)`. |
-| `get_collateral(borrower) -> i128` | `lib.rs:813` → `collateral.rs:124` | Read-only. |
+| Entrypoint                                     | File                               | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deposit_collateral(borrower, amount)`         | `lib.rs:805` → `collateral.rs:34`  | `token::transfer` borrower → contract; `CollateralBalance += amount`. Emits `CollateralDepositedEvent`.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `withdraw_collateral(borrower, amount)`        | `lib.rs:809` → `collateral.rs:69`  | Compute `post_balance`; require `utilized * MinCollateralRatioBps / 10000 <= post_balance` else `CollateralRatioBelowMinimum`; transfer out; persist; emit.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `partial_release_collateral(borrower, amount)` | `lib.rs` → `collateral.rs`         | Borrower-only entrypoint. Releases `amount` collateral back to borrower provided the health-factor invariant holds after the release: `post_balance >= utilized * MinCollateralRatioBps / 10_000`. Ratio check skipped when `utilized == 0`. Emits `CollateralPartialReleasedEvent` on topic `("credit","col_prel")` with `amount_released`, `new_balance`, and `health_factor_bps` (`u32::MAX` when no debt). Errors: `InvalidAmount(5)`, `InsufficientCollateralBalance(39)`, `CollateralRatioBelowMinimum(35)`, `MissingLiquidityToken(22)`, `Overflow(12)`. |
+| `get_collateral(borrower) -> i128`             | `lib.rs:813` → `collateral.rs:124` | Read-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 `InsufficientRepaymentBalance` is intentionally reused for over-withdraw
 (see `collateral.rs:78-83` comment). Clients should disambiguate by entrypoint.
 
 ### 2.7 Treasury, bounty pool & protocol fee
 
-| Entrypoint | Effect |
-|---|---|
-| `set_protocol_fee_bps(bps)` | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded. |
+| Entrypoint                        | Effect                                                                                                                              |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `set_protocol_fee_bps(bps)`       | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded.                                                       |
 | `set_treasury_fee_share_bps(bps)` | Admin; treasury share of skimmed fees in `0..=10_000`. Bounty pool receives the remainder. Default unset = 10_000 (100 % treasury). |
-| `get_treasury_fee_share_bps()` | Returns configured share or `None` when unset. |
-| `set_treasury(admin, treasury)` | Double-auth (admin arg + `require_admin_auth`). |
-| `withdraw_treasury(admin)` | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
-| `set_bounty(admin, bounty)` | Double-auth; configures bounty pool withdrawal address. |
-| `get_bounty()` | Returns configured bounty address, if any. |
-| `withdraw_bounty(admin)` | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`. |
+| `get_treasury_fee_share_bps()`    | Returns configured share or `None` when unset.                                                                                      |
+| `set_treasury(admin, treasury)`   | Double-auth (admin arg + `require_admin_auth`).                                                                                     |
+| `withdraw_treasury(admin)`        | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`.  |
+| `set_bounty(admin, bounty)`       | Double-auth; configures bounty pool withdrawal address.                                                                             |
+| `get_bounty()`                    | Returns configured bounty address, if any.                                                                                          |
+| `withdraw_bounty(admin)`          | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`.                      |
 
 On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
 `TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
@@ -313,6 +332,7 @@ See `contracts/credit/src/fees.rs`.
 ### 2.8 Settlement & oracle
 
 #### `settle_default_liquidation(env, borrower, recovered_amount, settlement_id: Symbol, oracle_price: Option<i128>)`
+
 `lib.rs:953`. Admin + pause + reentrancy guard.
 
 1. `set_reentrancy_guard`
@@ -327,6 +347,7 @@ See `contracts/credit/src/fees.rs`.
    During an oracle outage, callers may resubmit the last accepted price to
    continue settlement operations as long as the stored price remains within the
    configured `max_age_seconds` freshness window.
+
 3. If `AuctionContract` is set, call
    `AuctionClient::settle_default_liquidation(settlement_id, contract, borrower) -> i128`
    and assert returned == `recovered_amount` (else `InvalidAmount`)
@@ -341,49 +362,51 @@ See `contracts/credit/src/fees.rs`.
 5. `clear_reentrancy_guard`
 
 #### `set_oracle_config(env, max_deviation_bps, max_age_seconds)`
+
 `lib.rs:1055`. Admin + pause. Validates `deviation in 1..=10_000` (else
 `InvalidAmount`), `max_age_seconds > 0`. Emits `("credit","orc_cfg")`.
 
 ### 2.9 Operational controls
 
-| Entrypoint | Effect |
-|---|---|
-| `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
-| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
-| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
-| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
-| `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
-| `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
-| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
+| Entrypoint                                                                                                                                | Effect                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `freeze_draws(env, reason)` / `unfreeze_draws(env)`                                                                                       | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`.                                                          |
+| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)`                                                       | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`.                                            |
+| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state.                                                                                                                                |
+| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers`                                                           | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`.                                                         |
+| `accrue_batch(borrowers)`                                                                                                                 | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook.                                                                                   |
+| `reverse_draw(borrower, amount, original_ts, reason_code)`                                                                                | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
+| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ)                                                                  | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`.                                                                  |
 
 ### 2.10 Read-only queries
 
-| Entrypoint | Returns |
-|---|---|
-| `get_credit_line(borrower)` | `Option<CreditLineData>` |
-| `get_credit_line_summary(borrower)` | `Option<CreditLineData>` (alias) |
-| `get_credit_line_count()` | `u32` |
-| `enumerate_credit_lines(start_after, limit)` | `Vec<(u32, CreditLineData)>`, `limit <= 100` |
-| `get_total_utilized()` | `i128` |
-| `get_repayment_schedule(borrower)` | `Option<RepaymentSchedule>` |
-| `is_delinquent(borrower)` | `bool` (see `query.rs:57`) |
-| `get_protocol_config()` | `ProtocolConfig { liquidity_token, liquidity_source }` |
-| `get_liquidity_source()` | `Address` |
-| `get_oracle_config()` | `Option<OracleConfig>` |
-| `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
-| `get_rate_change_limits()` | `Option<RateChangeConfig>` |
-| `get_borrower_rate_floor(borrower)` | `Option<u32>` |
-| `get_borrower_rate_ceiling(borrower)` | `Option<u32>` |
-| `get_grace_period_config()` | `Option<GracePeriodConfig>` |
-| `get_penalty_surcharge_bps()` | `u32` |
-| `get_max_total_exposure()` | `Option<i128>` |
-| `get_credit_limit_bounds()` | `(Option<i128>, Option<i128>)` |
-| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars |
-| `get_auction_contract()` | `Option<Address>` |
-| `get_treasury()` | `Option<Address>` |
-| `get_protocol_fee_bps()` | `Option<u32>` |
-| `get_collateral(borrower)` | `i128` |
-| `get_health_factor(borrower)` | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| Entrypoint                                                       | Returns                                                                                                  |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `get_credit_line(borrower)`                                      | `Option<CreditLineData>`                                                                                 |
+| `get_credit_line_summary(borrower)`                              | `Option<CreditLineData>` (alias)                                                                         |
+| `get_credit_line_count()`                                        | `u32`                                                                                                    |
+| `enumerate_credit_lines(start_after, limit)`                     | `Vec<(u32, CreditLineData)>`, `limit <= 100`                                                             |
+| `get_total_utilized()`                                           | `i128`                                                                                                   |
+| `get_repayment_schedule(borrower)`                               | `Option<RepaymentSchedule>`                                                                              |
+| `is_delinquent(borrower)`                                        | `bool` (see `query.rs:57`)                                                                               |
+| `get_protocol_config()`                                          | `ProtocolConfig { liquidity_token, liquidity_source }`                                                   |
+| `get_liquidity_source()`                                         | `Address`                                                                                                |
+| `get_oracle_config()`                                            | `Option<OracleConfig>`                                                                                   |
+| `get_rate_formula_config()`                                      | `Option<RateFormulaConfig>`                                                                              |
+| `get_rate_change_limits()`                                       | `Option<RateChangeConfig>`                                                                               |
+| `get_borrower_rate_floor(borrower)`                              | `Option<u32>`                                                                                            |
+| `get_borrower_rate_ceiling(borrower)`                            | `Option<u32>`                                                                                            |
+| `get_grace_period_config()`                                      | `Option<GracePeriodConfig>`                                                                              |
+| `get_penalty_surcharge_bps()`                                    | `u32`                                                                                                    |
+| `get_max_total_exposure()`                                       | `Option<i128>`                                                                                           |
+| `get_credit_limit_bounds()`                                      | `(Option<i128>, Option<i128>)`                                                                           |
+| `get_max_draw_amount/get_max_repay_amount/get_draw_min_interval` | scalars                                                                                                  |
+| `get_auction_contract()`                                         | `Option<Address>`                                                                                        |
+| `get_treasury()`                                                 | `Option<Address>`                                                                                        |
+| `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
+| `get_collateral(borrower)`                                       | `i128`                                                                                                   |
+| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).
@@ -391,7 +414,9 @@ but cheap and idempotent — see `storage.rs:146`).
 ### 2.11 Upgrade
 
 #### `upgrade(env, new_wasm_hash: BytesN<32>)`
+
 `lib.rs:1330`. Admin + pause.
+
 1. `require_admin_auth`; `assert_not_paused`
 2. Read `old_wasm_hash` (for the event)
 3. Bump `DataKey::SchemaVersion`
@@ -430,54 +455,54 @@ audit trail), and the `(borrower, settlement_id)` replay marker.
 (Source: `contracts/credit/src/storage.rs:31-98`. The tier-per-variant
 table is also reflected in `docs/storage-layout.md`.)
 
-| Variant | Tier | Notes |
-|---|---|---|
-| `LiquidityToken` | Instance | SAC / token contract address |
-| `LiquiditySource` | Instance | Reserve address funding draws |
-| `DrawsFrozen` | Instance | Global draw kill-switch (`bool`) |
-| `SchemaVersion` | Instance | Storage schema version (`u32`) |
-| `CreditLineCount` | Instance | Monotonic borrower count |
-| `CreditLineIdByBorrower(Address)` | Persistent | Borrower → id |
-| `CreditLineBorrowerById(u32)` | Persistent | Id → borrower (enumeration) |
-| `TotalUtilized` | Instance | Sum of all `utilized_amount` |
-| `MaxDrawAmount` | Instance | Per-tx draw cap (`i128`) |
-| `MaxRepayAmount` | Instance | Per-tx repay cap |
-| `DrawMinIntervalSeconds` | Instance | Per-borrower cooldown (`u64`) |
-| `LastDrawTs(Address)` | Persistent | Last successful draw timestamp |
-| `BlockedBorrower(Address)` | Persistent | Blocklist flag |
-| `UtilizationCapBps(Address)` | Persistent | Per-borrower utilization cap |
-| `RateFloorBps(Address)` | Persistent | Per-borrower rate floor |
-| `RateCeilingBps(Address)` | Persistent | Per-borrower rate ceiling |
-| `RepaymentSchedule(Address)` | Persistent | `RepaymentSchedule` payload |
-| `MinCreditLimit` | Instance | Lower bound on new lines |
-| `MaxCreditLimit` | Instance | Upper bound on new lines |
-| `PenaltySurchargeBps` | Instance | Delinquency surcharge |
-| `AuctionContract` | Instance | Auction hook address |
-| `MaxTotalExposure` | Instance | Global exposure cap |
-| `ProtocolFeeBps` | Instance | Fee on interest portion |
-| `TreasuryAddress` | Instance | Withdrawal recipient |
-| `TreasuryBalance` | Instance | Accrued fees |
-| `CollateralBalance(Address)` | Persistent | Per-borrower collateral |
-| `MinCollateralRatioBps` | Instance | Collateral floor (default 15000) |
-| `DrawAudit(Address, u64)` | Persistent | `(borrower, ts) → original draw amount` |
-| `DrawReversedAmount(Address, u64)` | Persistent | Reversed total so far |
-| `OracleConfig` | Instance | `(max_deviation_bps, max_age_seconds)` |
-| `OracleLastPrice` | Instance | Last accepted price |
-| `OracleLastPriceTs` | Instance | Last accepted ts |
+| Variant                            | Tier       | Notes                                   |
+| ---------------------------------- | ---------- | --------------------------------------- |
+| `LiquidityToken`                   | Instance   | SAC / token contract address            |
+| `LiquiditySource`                  | Instance   | Reserve address funding draws           |
+| `DrawsFrozen`                      | Instance   | Global draw kill-switch (`bool`)        |
+| `SchemaVersion`                    | Instance   | Storage schema version (`u32`)          |
+| `CreditLineCount`                  | Instance   | Monotonic borrower count                |
+| `CreditLineIdByBorrower(Address)`  | Persistent | Borrower → id                           |
+| `CreditLineBorrowerById(u32)`      | Persistent | Id → borrower (enumeration)             |
+| `TotalUtilized`                    | Instance   | Sum of all `utilized_amount`            |
+| `MaxDrawAmount`                    | Instance   | Per-tx draw cap (`i128`)                |
+| `MaxRepayAmount`                   | Instance   | Per-tx repay cap                        |
+| `DrawMinIntervalSeconds`           | Instance   | Per-borrower cooldown (`u64`)           |
+| `LastDrawTs(Address)`              | Persistent | Last successful draw timestamp          |
+| `BlockedBorrower(Address)`         | Persistent | Blocklist flag                          |
+| `UtilizationCapBps(Address)`       | Persistent | Per-borrower utilization cap            |
+| `RateFloorBps(Address)`            | Persistent | Per-borrower rate floor                 |
+| `RateCeilingBps(Address)`          | Persistent | Per-borrower rate ceiling               |
+| `RepaymentSchedule(Address)`       | Persistent | `RepaymentSchedule` payload             |
+| `MinCreditLimit`                   | Instance   | Lower bound on new lines                |
+| `MaxCreditLimit`                   | Instance   | Upper bound on new lines                |
+| `PenaltySurchargeBps`              | Instance   | Delinquency surcharge                   |
+| `AuctionContract`                  | Instance   | Auction hook address                    |
+| `MaxTotalExposure`                 | Instance   | Global exposure cap                     |
+| `ProtocolFeeBps`                   | Instance   | Fee on interest portion                 |
+| `TreasuryAddress`                  | Instance   | Withdrawal recipient                    |
+| `TreasuryBalance`                  | Instance   | Accrued fees                            |
+| `CollateralBalance(Address)`       | Persistent | Per-borrower collateral                 |
+| `MinCollateralRatioBps`            | Instance   | Collateral floor (default 15000)        |
+| `DrawAudit(Address, u64)`          | Persistent | `(borrower, ts) → original draw amount` |
+| `DrawReversedAmount(Address, u64)` | Persistent | Reversed total so far                   |
+| `OracleConfig`                     | Instance   | `(max_deviation_bps, max_age_seconds)`  |
+| `OracleLastPrice`                  | Instance   | Last accepted price                     |
+| `OracleLastPriceTs`                | Instance   | Last accepted ts                        |
 
 **Instance Symbol keys** (small, hot, low-allocation; see
 `storage.rs:269-302`):
 
-| Symbol | Meaning |
-|---|---|
-| `"admin"` | Admin address |
-| `"proposed_admin"` | Pending admin rotation |
-| `"proposed_at"` | Timestamp the rotation was proposed |
-| `"reentrancy"` | Boolean guard |
-| `"rate_cfg"` | `RateChangeConfig` |
-| `"rate_form"` | `RateFormulaConfig` |
-| `"paused"` | Circuit-breaker flag |
-| `"grace_cfg"` | `GracePeriodConfig` |
+| Symbol             | Meaning                             |
+| ------------------ | ----------------------------------- |
+| `"admin"`          | Admin address                       |
+| `"proposed_admin"` | Pending admin rotation              |
+| `"proposed_at"`    | Timestamp the rotation was proposed |
+| `"reentrancy"`     | Boolean guard                       |
+| `"rate_cfg"`       | `RateChangeConfig`                  |
+| `"rate_form"`      | `RateFormulaConfig`                 |
+| `"paused"`         | Circuit-breaker flag                |
+| `"grace_cfg"`      | `GracePeriodConfig`                 |
 
 **Persistent Symbol tuple:**
 `(symbol_short!("liq_seen"), borrower, settlement_id)` — settlement replay
@@ -490,10 +515,13 @@ and, if it is below `LEDGER_BUMP_THRESHOLD ≈ 3 months`, extends it to
 `LEDGER_BUMP_AMOUNT ≈ 6 months`
 (`contracts/credit/src/storage.rs:122-127`). This means an active borrower's
 data is automatically refreshed every time they (or a keeper) touch the
-contract. A dormant borrower's data expires after ~6 months; recovery
-requires admin republish from off-chain state. The `accrue_batch` entrypoint
-(`lib.rs:1133`) exists primarily to let an indexer-driven keeper re-bump
-dormant lines cheaply.
+contract. The accrual hot path also refreshes the instance-storage TTL for
+configuration reads (penalty surcharge and grace-period config) before it
+computes delinquency-sensitive interest, so keeper-driven accrual keeps the
+protocol config live without a separate write. A dormant borrower's data
+expires after ~6 months; recovery requires admin republish from off-chain
+state. The `accrue_batch` entrypoint (`lib.rs:1133`) exists primarily to let
+an indexer-driven keeper re-bump dormant lines cheaply.
 
 The auction contract uses shorter TTLs:
 `PERSISTENT_BUMP_AMOUNT = 518_400` (~30 d) and
@@ -511,8 +539,8 @@ Invariants the contract maintains, by module.
 - **`TotalUtilized` conservation.**
   `TotalUtilized == Σ over all open credit lines of utilized_amount`. Enforced
   by routing every credit-line mutation through `persist_credit_line(env,
-  borrower, line, previous_utilized)` (`storage.rs:257`), which atomically
-  updates the line *and* the accumulator using `adjust_total_utilized`
+borrower, line, previous_utilized)` (`storage.rs:257`), which atomically
+  updates the line _and_ the accumulator using `adjust_total_utilized`
   (`storage.rs:239`). Test: `tests/total_utilized_invariant.rs`.
 
 - **No overflow.** Every arithmetic operation that can grow beyond `i128::MAX`
@@ -588,46 +616,46 @@ The full enum (38 variants, `#[repr(u32)]`, discriminants stable ABI). The
 table also appears in `docs/contract-errors.md` and is the source of truth
 for off-chain decoders.
 
-| Code | Variant | Semantic |
-|---|---|---|
-| 1 | `Unauthorized` | Caller fails an auth check (not admin / not borrower) |
-| 2 | `NotAdmin` | Caller lacks admin privilege specifically |
-| 3 | `CreditLineNotFound` | Borrower has no credit line in storage |
-| 4 | `CreditLineClosed` | Line is in terminal `Closed` state |
-| 5 | `InvalidAmount` | Amount is zero, negative, or out-of-range |
-| 6 | `OverLimit` | Draw would exceed `credit_limit` |
-| 7 | `NegativeLimit` | Credit limit < 0 |
-| 8 | `RateTooHigh` | Rate delta exceeds cap, or rate > 10_000 |
-| 9 | `ScoreTooHigh` | Risk score > 100 |
-| 10 | `UtilizationNotZero` | Operation requires zero utilization |
-| 11 | `Reentrancy` | Reentrancy detected |
-| 12 | `Overflow` | Arithmetic overflow |
-| 13 | `LimitDecreaseRequiresRepayment` | Lower limit blocked by current utilization |
-| 14 | `AlreadyInitialized` | `init` already ran, or `(borrower, settlement_id)` replay |
-| 15 | `AdminAcceptTooEarly` | Rotation delay not elapsed |
-| 16 | `BorrowerBlocked` | Borrower on blocklist |
-| 17 | `DrawExceedsMaxAmount` | Per-tx draw cap |
-| 18 | `Paused` | Circuit breaker active |
-| 19 | `DrawsFrozen` | Global draws frozen |
-| 20 | `CreditLineSuspended` | Line suspended |
-| 21 | `CreditLineDefaulted` | Line defaulted |
-| 22 | `MissingLiquidityToken` | Liquidity token unset |
-| 23 | `MissingLiquiditySource` | Liquidity source unset |
-| 24 | `InsufficientLiquidityReserve` | Reserve balance insufficient |
-| 25 | `LiquidityTokenCallFailed` | Token call failed observably |
-| 26 | `InsufficientRepaymentAllowance` | Allowance below repay amount |
-| 27 | `InsufficientRepaymentBalance` | Balance below repay amount (also collateral over-withdraw) |
-| 28 | `RepayExceedsMaxAmount` | Per-tx repay cap |
-| 29 | `DrawCooldownActive` | Draw cooldown not elapsed |
-| 30 | `TreasuryNotSet` | Treasury address unset |
-| 31 | `ExposureCapExceeded` | Global exposure cap |
-| 32 | `AdminNotInitialized` | Admin missing from instance storage |
-| 33 | `TimestampRegression` | Timestamp moved backwards |
-| 34 | `LimitOutOfBounds` | Outside min/max credit-limit bounds |
-| 35 | `CollateralRatioBelowMinimum` | Under-collateralized |
-| 36 | `OraclePriceInvalid` | Oracle price ≤ 0 or malformed |
-| 37 | `OraclePriceStale` | Exceeds `max_age_seconds` |
-| 38 | `OraclePriceDeviation` | Exceeds `max_deviation_bps` |
+| Code | Variant                          | Semantic                                                   |
+| ---- | -------------------------------- | ---------------------------------------------------------- |
+| 1    | `Unauthorized`                   | Caller fails an auth check (not admin / not borrower)      |
+| 2    | `NotAdmin`                       | Caller lacks admin privilege specifically                  |
+| 3    | `CreditLineNotFound`             | Borrower has no credit line in storage                     |
+| 4    | `CreditLineClosed`               | Line is in terminal `Closed` state                         |
+| 5    | `InvalidAmount`                  | Amount is zero, negative, or out-of-range                  |
+| 6    | `OverLimit`                      | Draw would exceed `credit_limit`                           |
+| 7    | `NegativeLimit`                  | Credit limit < 0                                           |
+| 8    | `RateTooHigh`                    | Rate delta exceeds cap, or rate > 10_000                   |
+| 9    | `ScoreTooHigh`                   | Risk score > 100                                           |
+| 10   | `UtilizationNotZero`             | Operation requires zero utilization                        |
+| 11   | `Reentrancy`                     | Reentrancy detected                                        |
+| 12   | `Overflow`                       | Arithmetic overflow                                        |
+| 13   | `LimitDecreaseRequiresRepayment` | Lower limit blocked by current utilization                 |
+| 14   | `AlreadyInitialized`             | `init` already ran, or `(borrower, settlement_id)` replay  |
+| 15   | `AdminAcceptTooEarly`            | Rotation delay not elapsed                                 |
+| 16   | `BorrowerBlocked`                | Borrower on blocklist                                      |
+| 17   | `DrawExceedsMaxAmount`           | Per-tx draw cap                                            |
+| 18   | `Paused`                         | Circuit breaker active                                     |
+| 19   | `DrawsFrozen`                    | Global draws frozen                                        |
+| 20   | `CreditLineSuspended`            | Line suspended                                             |
+| 21   | `CreditLineDefaulted`            | Line defaulted                                             |
+| 22   | `MissingLiquidityToken`          | Liquidity token unset                                      |
+| 23   | `MissingLiquiditySource`         | Liquidity source unset                                     |
+| 24   | `InsufficientLiquidityReserve`   | Reserve balance insufficient                               |
+| 25   | `LiquidityTokenCallFailed`       | Token call failed observably                               |
+| 26   | `InsufficientRepaymentAllowance` | Allowance below repay amount                               |
+| 27   | `InsufficientRepaymentBalance`   | Balance below repay amount (also collateral over-withdraw) |
+| 28   | `RepayExceedsMaxAmount`          | Per-tx repay cap                                           |
+| 29   | `DrawCooldownActive`             | Draw cooldown not elapsed                                  |
+| 30   | `TreasuryNotSet`                 | Treasury address unset                                     |
+| 31   | `ExposureCapExceeded`            | Global exposure cap                                        |
+| 32   | `AdminNotInitialized`            | Admin missing from instance storage                        |
+| 33   | `TimestampRegression`            | Timestamp moved backwards                                  |
+| 34   | `LimitOutOfBounds`               | Outside min/max credit-limit bounds                        |
+| 35   | `CollateralRatioBelowMinimum`    | Under-collateralized                                       |
+| 36   | `OraclePriceInvalid`             | Oracle price ≤ 0 or malformed                              |
+| 37   | `OraclePriceStale`               | Exceeds `max_age_seconds`                                  |
+| 38   | `OraclePriceDeviation`           | Exceeds `max_deviation_bps`                                |
 
 Auction errors (`AuctionError`, 12 variants, see
 `gateway-contract/contracts/auction_contract/src/errors.rs`):
@@ -673,10 +701,11 @@ state (instance, but reset by the upgrade pause cycle), wasm-side runtime
 state.
 
 **Migration model:** additive only.
+
 - New `DataKey` variants are safe to add (existing discriminants stable).
 - New `ContractError` variants must be appended (CI guards against reorder).
 - New event topics are safe.
-- *Breaking* storage migrations require a one-shot `migrate()` entrypoint
+- _Breaking_ storage migrations require a one-shot `migrate()` entrypoint
   shipped as the first call against the new WASM; none required in v1.
 
 **Schema version bump:** `upgrade` increments `SchemaVersion` so off-chain
@@ -696,17 +725,17 @@ unpaused (`assert_not_paused`). A safe upgrade procedure is therefore:
 
 ## 8. Cross-references
 
-| Concept | Location |
-|---|---|
-| State machine | `docs/state-machine.md`, `WHITEPAPER.md` §4 |
-| Risk pricing | `docs/risk-based-rate-formula.md`, `docs/RISK_PRICING.md` |
-| Accrual | `docs/interest-accrual.md`, `docs/interest-accrual-design.md` |
-| Storage layout | `docs/storage-layout.md` |
-| Threat model | `docs/threat-model.md`, `docs/SECURITY.md` |
-| Liquidation handoff | `docs/default-liquidation-auction-hook.md` |
-| Oracle (price) | `WHITEPAPER.md` §7.1 |
-| Oracle (default signal, staged) | `docs/default-oracle.md` |
-| Upgrade policy | `docs/upgrade-policy.md` |
-| Event catalog | `docs/EVENTS_CATALOG.md` |
-| Deployment | `docs/deploy.md` |
-| Test catalog | `docs/EXECUTION_QUALITY.md` |
+| Concept                         | Location                                                      |
+| ------------------------------- | ------------------------------------------------------------- |
+| State machine                   | `docs/state-machine.md`, `WHITEPAPER.md` §4                   |
+| Risk pricing                    | `docs/risk-based-rate-formula.md`, `docs/RISK_PRICING.md`     |
+| Accrual                         | `docs/interest-accrual.md`, `docs/interest-accrual-design.md` |
+| Storage layout                  | `docs/storage-layout.md`                                      |
+| Threat model                    | `docs/threat-model.md`, `docs/SECURITY.md`                    |
+| Liquidation handoff             | `docs/default-liquidation-auction-hook.md`                    |
+| Oracle (price)                  | `WHITEPAPER.md` §7.1                                          |
+| Oracle (default signal, staged) | `docs/default-oracle.md`                                      |
+| Upgrade policy                  | `docs/upgrade-policy.md`                                      |
+| Event catalog                   | `docs/EVENTS_CATALOG.md`                                      |
+| Deployment                      | `docs/deploy.md`                                              |
+| Test catalog                    | `docs/EXECUTION_QUALITY.md`                                   |

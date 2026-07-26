@@ -51,7 +51,7 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracterror, contracttype, Address, Symbol};
 
 /// Status of a borrower's credit line.
 ///
@@ -163,7 +163,10 @@ pub enum CreditStatus {
 /// | 50   | `OracleQuorumNotMet`           | Oracle        | Oracle quorum condition not satisfied |
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
-#[soroban_sdk::contracterror]
+/// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
+/// | 54   | `AdminCooldownActive`          | Risk          | Critical borrower admin action attempted before cooldown elapsed |
+/// | 55   | `LiquidationGraceActive`       | Lifecycle     | Per-borrower liquidation grace window has not yet elapsed |
+#[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
@@ -277,6 +280,12 @@ pub enum ContractError {
     AlreadySettled = 51,
     /// The collateral risk weight exceeds the maximum allowed value.
     InvalidRiskWeight = 52,
+    /// Attestation proof is invalid or no attestation batch has been committed.
+    InvalidAttestation = 53,
+    /// Critical borrower admin action attempted before the cooldown elapsed.
+    AdminCooldownActive = 54,
+    /// Per-borrower liquidation grace window has not yet elapsed.
+    LiquidationGraceActive = 55,
 }
 
 /// ABI-stable category label for [`ContractError`] variants.
@@ -346,6 +355,7 @@ impl ContractError {
             Self::CreditLineSuspended => Lifecycle,
             Self::CreditLineDefaulted => Lifecycle,
             Self::AlreadySettled => Lifecycle,
+            Self::LiquidationGraceActive => Lifecycle,
             // Numeric (3)
             Self::InvalidAmount => Numeric,
             Self::NegativeLimit => Numeric,
@@ -353,6 +363,8 @@ impl ContractError {
             Self::TimestampRegression => Numeric,
             Self::LimitOutOfBounds => Numeric,
             Self::InvalidRiskWeight => Numeric,
+            // Misc (11)
+            Self::InvalidAttestation => Misc,
             // Limit (4)
             Self::OverLimit => Limit,
             Self::UtilizationNotZero => Limit,
@@ -376,6 +388,7 @@ impl ContractError {
             Self::ScoreTooHigh => Risk,
             Self::Paused => Risk,
             Self::DrawCooldownActive => Risk,
+            Self::AdminCooldownActive => Risk,
             // Oracle (7)
             Self::OraclePriceInvalid => Oracle,
             Self::OraclePriceStale => Oracle,
@@ -389,6 +402,7 @@ impl ContractError {
             Self::DrawsFrozen => Block,
             Self::BorrowerFrozen => Block,
             Self::CreditLineFrozen => Block,
+            Self::FreezeCooldownActive => Block,
             // Reentrancy (10)
             Self::Reentrancy => Reentrancy,
             // Misc (11)
@@ -612,6 +626,46 @@ pub struct ProtocolSummaryView {
     pub active_line_count: u32,
 }
 
+/// Paginated list of credit lines returned by `get_credit_lines_paginated`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Credit lines included in this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for fetching the next page, if more items exist.
+    pub next_cursor: Option<u32>,
+    /// `true` if there are additional lines beyond this page.
+    pub has_more: bool,
+}
+
+/// Read-only capabilities bitmap for a borrower's credit line.
+///
+/// Returned by `borrow_capabilities` to let off-chain clients and
+/// on-chain integrators inspect which operations are currently
+/// permitted for a borrower, without needing to simulate the full
+/// entrypoint logic.
+///
+/// Each `bool` field represents a single operation; `true` means the
+/// operation should succeed assuming valid parameters (amount, etc.).
+/// Amount-dependent checks (credit limit, collateral ratio, draw
+/// cooldown, exposure caps) are NOT evaluated because this view does
+/// not know the intended draw amount.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowCapabilities {
+    /// Whether the borrower can draw credit. False when the credit line
+    /// does not exist, the protocol is paused, draws are frozen, the
+    /// borrower is blocked/frozen, or the credit-line status is not
+    /// draw-allowed (Active/Restricted).
+    pub can_draw: bool,
+    /// Whether the borrower can repay credit. False when the credit line
+    /// does not exist or is permanently Closed.
+    pub can_repay: bool,
+    /// Whether the borrower can self-suspend their credit line. True
+    /// only when the credit line exists and is currently Active.
+    pub can_self_suspend: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
@@ -689,7 +743,7 @@ pub enum ContractErrorCategory {
     Limit = 4,
     /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
     Liquidity = 5,
-    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, DrawCooldownActive).
+    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
     Risk = 6,
     /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
     Oracle = 7,
@@ -717,7 +771,8 @@ impl ContractError {
             ContractError::CreditLineClosed
             | ContractError::AlreadyInitialized
             | ContractError::CreditLineSuspended
-            | ContractError::CreditLineDefaulted => ContractErrorCategory::Lifecycle,
+            | ContractError::CreditLineDefaulted
+            | ContractError::LiquidationGraceActive => ContractErrorCategory::Lifecycle,
 
             ContractError::InvalidAmount
             | ContractError::NegativeLimit
@@ -744,7 +799,8 @@ impl ContractError {
             ContractError::RateTooHigh
             | ContractError::ScoreTooHigh
             | ContractError::Paused
-            | ContractError::DrawCooldownActive => ContractErrorCategory::Risk,
+            | ContractError::DrawCooldownActive
+            | ContractError::AdminCooldownActive => ContractErrorCategory::Risk,
 
             ContractError::OraclePriceInvalid
             | ContractError::OraclePriceStale
@@ -755,7 +811,8 @@ impl ContractError {
 
             ContractError::BorrowerBlocked
             | ContractError::DrawsFrozen
-            | ContractError::BorrowerFrozen => ContractErrorCategory::Block,
+            | ContractError::BorrowerFrozen
+            | ContractError::FreezeCooldownActive => ContractErrorCategory::Block,
 
             ContractError::Reentrancy => ContractErrorCategory::Reentrancy,
 

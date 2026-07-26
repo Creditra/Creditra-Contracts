@@ -59,8 +59,8 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, GracePeriodConfig,
+    RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
@@ -129,6 +129,10 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
+    /// Minimum interval in seconds between critical admin actions for one borrower.
+    BorrowAdminCooldownSeconds,
+    /// Last timestamp at which a critical admin action mutated a borrower.
+    LastBorrowAdminActionTs(Address),
     /// Per-borrower interest rate floor in basis points.
     /// When set, the effective interest rate must be >= floor.
     RateFloorBps(Address),
@@ -185,6 +189,10 @@ pub enum DataKey {
     CollateralBalance(Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
+    /// Minimum ledger seconds between critical collateral admin actions (v7).
+    AdminCollateralCooldownSeconds,
+    /// Ledger timestamp of the last critical collateral admin action (v7).
+    LastAdminCollateralCriticalActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
@@ -215,6 +223,16 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
+    /// Admin freeze cooldown duration in seconds.
+    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
+    /// by a minimum interval between successive calls.
+    FreezeCooldownSeconds,
+    /// Ledger timestamp of the last admin freeze or unfreeze action.
+    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
+    LastFreezeTimestamp,
+    /// Per-borrower liquidation grace period in seconds.
+    /// Specifies a grace window before a credit line can be defaulted or liquidated.
+    LiquidationGracePeriod(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -241,14 +259,8 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
+/// TTL policy used by per-borrower credit-line entries.
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
@@ -475,20 +487,36 @@ pub fn persist_credit_line(
     }
 }
 
-/// Return a borrower's collateral balance without bumping unrelated TTL.
+/// Return a borrower's collateral balance and bump its persistent TTL.
+///
+/// The collateral balance is stored in a separate persistent entry from the
+/// credit line, so its TTL must be independently refreshed on every read path
+/// (deposit, withdraw, partial release, draw-credit ratio check, and the
+/// `get_collateral` query). Without a bump the entry would be archived
+/// independently of the credit-line entry, causing the borrower's collateral
+/// to appear as zero.
 pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CollateralBalance(borrower.clone()))
-        .unwrap_or(0)
+    let key = DataKey::CollateralBalance(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower collateral balance and update the global accumulator.
+///
+/// Bumps the TTL of the persistent `CollateralBalance(borrower)` entry so an
+/// active borrower's collateral is never archived independently of the credit
+/// line.
+///
+/// Note: the previous balance is read directly from storage (not via
+/// [`get_collateral_balance`]) to avoid a redundant TTL bump on the read
+/// path; the write path bumps TTL immediately after the set.
 pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
-    let previous_balance = get_collateral_balance(env, borrower);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CollateralBalance(borrower.clone()), &balance);
+    let key = DataKey::CollateralBalance(borrower.clone());
+    let previous_balance = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &balance);
+    bump_persistent_ttl(env, &key);
     adjust_total_collateral(env, previous_balance, balance);
 }
 
@@ -512,6 +540,34 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
     env.storage()
         .instance()
         .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+
+/// Get the configured admin collateral cool-off interval, if set.
+pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminCollateralCooldownSeconds)
+}
+
+/// Set the admin collateral cool-off interval (admin only, enforced by caller).
+pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCollateralCooldownSeconds, &seconds);
+}
+
+/// Get the ledger timestamp of the last critical collateral admin action, if any.
+pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastAdminCollateralCriticalActionTs)
+}
+
+/// Record the ledger timestamp of the last critical collateral admin action.
+pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastAdminCollateralCriticalActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this
@@ -727,6 +783,35 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Instance storage key for the grace period configuration.
 pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
+}
+
+/// Return the configured grace-period policy and refresh instance TTL.
+pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
+    bump_instance_ttl(env);
+    env.storage().instance().get(&grace_period_key(env))
+}
+
+/// Return the per-borrower liquidation grace period in seconds (0 if not configured).
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> u64 {
+    bump_persistent_ttl(env, borrower);
+    env.storage()
+        .persistent()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+        .unwrap_or(0)
+}
+
+/// Set or remove (if 0) the per-borrower liquidation grace period in seconds.
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, seconds: u64) {
+    bump_persistent_ttl(env, borrower);
+    if seconds == 0 {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LiquidationGracePeriod(borrower.clone()));
+    } else {
+        env.storage()
+            .persistent()
+            .set(&DataKey::LiquidationGracePeriod(borrower.clone()), &seconds);
+    }
 }
 
 /// Persistent storage key that acts as a replay guard for a default liquidation settlement.
@@ -1014,6 +1099,34 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
         .set(&DataKey::DrawMinIntervalSeconds, &seconds);
 }
 
+/// Get the configured per-borrower admin action cooldown, if set.
+pub fn get_borrow_admin_cooldown(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::BorrowAdminCooldownSeconds)
+}
+
+/// Set the per-borrower admin action cooldown. A zero value disables it.
+pub fn set_borrow_admin_cooldown(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::BorrowAdminCooldownSeconds, &seconds);
+}
+
+/// Return the last critical admin-action timestamp for a borrower, if any.
+pub fn get_last_borrow_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastBorrowAdminActionTs(borrower.clone()))
+}
+
+/// Store the last critical admin-action timestamp for a borrower.
+pub fn set_last_borrow_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
+    let key = DataKey::LastBorrowAdminActionTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
 /// Check if the protocol is paused.
 pub fn is_paused(env: &Env) -> bool {
     env.storage()
@@ -1158,6 +1271,7 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::PenaltySurchargeBps)
@@ -1316,13 +1430,14 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 
 // ── Multi-collateral (per-borrower, per-token) ────────────────────────────────
 
-/// Return a borrower's balance for a specific collateral token.
+/// Return a borrower's balance for a specific collateral token and bump
+/// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
     let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
@@ -1352,4 +1467,68 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Addre
 /// Return `true` when `token` is in the collateral allowlist.
 pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
+}
+
+// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+
+/// Get the configured freeze cooldown duration in seconds.
+///
+/// Returns `None` when not configured, meaning no cooldown is enforced.
+/// A value of `0` also means the cooldown is disabled.
+pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::FreezeCooldownSeconds)
+        .filter(|&secs: &u64| secs > 0)
+}
+
+/// Set the freeze cooldown duration in seconds.
+///
+/// Pass `0` or `None`-equivalent behaviour: remove the key entirely,
+/// effectively disabling the cooldown.
+pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FreezeCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+    }
+}
+
+/// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastFreezeTimestamp)
+}
+
+/// Record a freeze/unfreeze action timestamp, but only when a cooldown is
+/// configured. When no cooldown is set, this is a no-op so that timestamps
+/// recorded before cooldown was enabled never retroactively block actions.
+pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
+    if get_freeze_cooldown_seconds(env).is_some() {
+        set_last_freeze_timestamp(env, env.ledger().timestamp());
+    }
+}
+
+/// Check and enforce the admin freeze cooldown.
+///
+/// If a cooldown is configured and the last freeze action was less than
+/// `cooldown_seconds` ago, this function reverts with
+/// [`crate::types::ContractError::FreezeCooldownActive`].
+///
+/// Call this at the start of every admin freeze/unfreeze entrypoint.
+pub fn enforce_freeze_cooldown(env: &Env) {
+    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+        return;
+    };
+    if let Some(last_ts) = get_last_freeze_timestamp(env) {
+        let now = env.ledger().timestamp();
+        if now < last_ts.saturating_add(cooldown_secs) {
+            env.panic_with_error(crate::types::ContractError::FreezeCooldownActive);
+        }
+    }
 }

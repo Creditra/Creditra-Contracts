@@ -74,6 +74,8 @@ See the [category enum reference](#contracterrorcategory) below.
 | 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied. |
 | 51 | `AlreadySettled` | Lifecycle | Liquidation for this (borrower, id) already processed. |
 | 52 | `InvalidRiskWeight` | Numeric | Collateral risk weight exceeds 10 000 bps. |
+| 53 | `InvalidAttestation` | Misc | Attestation proof is invalid or no attestation batch has been committed. |
+| 54 | `AdminCollateralCooldownActive` | Risk | Critical collateral admin action attempted before cool-off elapsed. |
 
 ## `ContractErrorCategory`
 
@@ -88,12 +90,12 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 | 3  | Numeric | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds`, `InvalidRiskWeight` |
 | 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired` |
 | 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
-| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive` |
+| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `AdminCollateralCooldownActive` |
 | 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet` |
 | 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance` |
 | 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen` |
 | 10 | Reentrancy | `Reentrancy` |
-| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound` |
+| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation` |
 
 ## Taxonomy
 

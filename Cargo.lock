@@ -360,6 +360,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "creditra-accrual"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "creditra-credit"
 version = "0.1.0"
 dependencies = [
@@ -369,6 +377,14 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "creditra-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
  "soroban-sdk",
 ]
 
