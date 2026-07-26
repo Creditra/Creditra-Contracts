@@ -76,25 +76,13 @@ pub enum ContractError {
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
 
-    /// Treasury fee share in basis points exceeds the maximum (10_000).
-    #[error("InvalidFeeShareBps")]
-    InvalidFeeShareBps,
+    /// Rate or surcharge exceeds the protocol maximum (10 000 bps = 100 %).
+    #[error("RateTooHigh")]
+    RateTooHigh,
 
-    /// Treasury balance is insufficient for the requested withdrawal.
-    #[error("InsufficientTreasuryBalance")]
-    InsufficientTreasuryBalance,
-
-    /// Bounty pool balance is insufficient for the requested withdrawal.
-    #[error("InsufficientBountyBalance")]
-    InsufficientBountyBalance,
-
-    /// Treasury address has not been configured.
-    #[error("TreasuryAddressNotSet")]
-    TreasuryAddressNotSet,
-
-    /// Bounty address has not been configured.
-    #[error("BountyAddressNotSet")]
-    BountyAddressNotSet,
+    /// Arithmetic overflow detected in checked computation.
+    #[error("Overflow")]
+    Overflow,
 }
 
 #[cfg(test)]

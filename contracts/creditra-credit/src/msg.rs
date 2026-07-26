@@ -47,44 +47,13 @@ pub enum ExecuteMsg {
     SubmitOraclePrices {
         prices: Vec<i128>,
     },
-    /// Set the treasury address where withdrawn treasury fees are sent (admin only).
-    SetTreasuryAddress {
-        address: String,
-    },
-    /// Set the bounty address where withdrawn bounty fees are sent (admin only).
-    SetBountyAddress {
-        address: String,
-    },
-    /// Set the default treasury fee share in basis points (admin only).
-    /// 0 = all to bounty, 10_000 = all to treasury.
-    SetDefaultFeeShareBps {
-        bps: u32,
-    },
-    /// Set the per-market treasury fee share in basis points (admin only).
-    /// Overrides the default for the specified market denomination.
-    SetMarketFeeShareBps {
-        market_denom: String,
-        bps: u32,
-    },
-    /// Remove a per-market fee share override, reverting to the default (admin only).
-    RemoveMarketFeeShareBps {
-        market_denom: String,
-    },
-    /// Accrue a protocol fee for a given market denomination (admin only).
-    /// Splits the fee between treasury and bounty per the configured ratio.
-    AccrueProtocolFee {
-        market_denom: String,
-        amount: String,
-    },
-    /// Withdraw accumulated treasury fees for a market (admin only).
-    WithdrawTreasury {
-        market_denom: String,
-        amount: String,
-    },
-    /// Withdraw accumulated bounty fees for a market (admin only).
-    WithdrawBounty {
-        market_denom: String,
-        amount: String,
+    /// Set or update the structured late-fee configuration (admin only).
+    ///
+    /// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per
+    /// missed installment, or `Some(LateFeeConfig::AprBased(…))` for an
+    /// additive basis-point surcharge.  Pass `None` to remove the config.
+    SetLateFeeConfig {
+        config: Option<LateFeeConfig>,
     },
 }
 
@@ -104,30 +73,8 @@ pub enum QueryMsg {
     GetOracleQuorumConfig {},
     #[returns(OraclePriceResponse)]
     GetOraclePrice {},
-    /// Query the treasury address.
-    #[returns(TreasuryAddressResponse)]
-    GetTreasuryAddress {},
-    /// Query the bounty address.
-    #[returns(BountyAddressResponse)]
-    GetBountyAddress {},
-    /// Query the default treasury fee share in basis points.
-    #[returns(DefaultFeeShareBpsResponse)]
-    GetDefaultFeeShareBps {},
-    /// Query the per-market treasury fee share in basis points.
-    #[returns(MarketFeeShareBpsResponse)]
-    GetMarketFeeShareBps { market_denom: String },
-    /// Query the treasury balance for a given market denomination.
-    #[returns(TreasuryBalanceResponse)]
-    GetTreasuryBalance { market_denom: String },
-    /// Query the bounty balance for a given market denomination.
-    #[returns(BountyBalanceResponse)]
-    GetBountyBalance { market_denom: String },
-    /// Preview a fee split for a given market and amount (read-only).
-    #[returns(FeeSplitPreviewResponse)]
-    GetFeeSplitPreview {
-        market_denom: String,
-        amount: String,
-    },
+    #[returns(LateFeeConfigResponse)]
+    GetLateFeeConfig {},
 }
 
 #[cw_serde]
@@ -197,51 +144,9 @@ pub struct OraclePriceResponse {
     pub timestamp: Option<u64>,
 }
 
-/// Response for treasury address query.
+/// Response for the late-fee configuration query.
 #[cw_serde]
-pub struct TreasuryAddressResponse {
-    pub address: Option<String>,
-}
-
-/// Response for bounty address query.
-#[cw_serde]
-pub struct BountyAddressResponse {
-    pub address: Option<String>,
-}
-
-/// Response for default fee share query.
-#[cw_serde]
-pub struct DefaultFeeShareBpsResponse {
-    pub bps: u32,
-}
-
-/// Response for per-market fee share query.
-#[cw_serde]
-pub struct MarketFeeShareBpsResponse {
-    pub market_denom: String,
-    pub bps: Option<u32>,
-}
-
-/// Response for treasury balance query.
-#[cw_serde]
-pub struct TreasuryBalanceResponse {
-    pub market_denom: String,
-    pub balance: Uint128,
-}
-
-/// Response for bounty balance query.
-#[cw_serde]
-pub struct BountyBalanceResponse {
-    pub market_denom: String,
-    pub balance: Uint128,
-}
-
-/// Response for fee split preview query.
-#[cw_serde]
-pub struct FeeSplitPreviewResponse {
-    pub market_denom: String,
-    pub total_fee: Uint128,
-    pub treasury_share_bps: u32,
-    pub treasury_amount: Uint128,
-    pub bounty_amount: Uint128,
+pub struct LateFeeConfigResponse {
+    /// The currently configured late-fee config, or `None` if unset.
+    pub config: Option<LateFeeConfig>,
 }

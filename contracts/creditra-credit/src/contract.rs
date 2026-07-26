@@ -12,8 +12,7 @@ use crate::penalties::LateFeeConfig;
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
     CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
-    ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG, DEFAULT_FEE_SHARE_BPS, MARKET_FEE_SHARE_BPS,
-    TREASURY_ADDRESS, BOUNTY_ADDRESS, TREASURY_BALANCE, BOUNTY_BALANCE,
+    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
 use crate::fees;
@@ -88,34 +87,9 @@ pub fn execute(
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
-        ExecuteMsg::SetTreasuryAddress { address } => {
-            execute_set_treasury_address(deps, info, address)
+        ExecuteMsg::SetLateFeeConfig { config } => {
+            execute_set_late_fee_config(deps, info, config)
         }
-        ExecuteMsg::SetBountyAddress { address } => {
-            execute_set_bounty_address(deps, info, address)
-        }
-        ExecuteMsg::SetDefaultFeeShareBps { bps } => {
-            execute_set_default_fee_share_bps(deps, info, bps)
-        }
-        ExecuteMsg::SetMarketFeeShareBps {
-            market_denom,
-            bps,
-        } => execute_set_market_fee_share_bps(deps, info, market_denom, bps),
-        ExecuteMsg::RemoveMarketFeeShareBps { market_denom } => {
-            execute_remove_market_fee_share_bps(deps, info, market_denom)
-        }
-        ExecuteMsg::AccrueProtocolFee {
-            market_denom,
-            amount,
-        } => execute_accrue_protocol_fee(deps, info, market_denom, amount),
-        ExecuteMsg::WithdrawTreasury {
-            market_denom,
-            amount,
-        } => execute_withdraw_treasury(deps, info, market_denom, amount),
-        ExecuteMsg::WithdrawBounty {
-            market_denom,
-            amount,
-        } => execute_withdraw_bounty(deps, info, market_denom, amount),
     }
 }
 
@@ -445,198 +419,36 @@ pub fn execute_submit_oracle_prices(
         .add_attribute("timestamp", now.to_string()))
 }
 
-/// Set the treasury address (admin only).
-pub fn execute_set_treasury_address(
+/// Set or update the structured late-fee configuration (admin only).
+///
+/// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed
+/// installment, or `Some(LateFeeConfig::AprBased(…))` for an additive
+/// basis-point surcharge.  Pass `None` to remove the config.
+///
+/// # Errors
+/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
+/// - [`ContractError::InvalidAmount`] if the flat amount is zero.
+/// - [`ContractError::RateTooHigh`] if the APR surcharge exceeds 10 000 bps.
+fn execute_set_late_fee_config(
     deps: DepsMut,
     info: MessageInfo,
-    address: String,
+    config: Option<crate::penalties::LateFeeConfig>,
 ) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
+    let contract_config = CONFIG.load(deps.storage)?;
+    if info.sender != contract_config.owner {
         return Err(ContractError::Unauthorized);
     }
 
-    let addr = deps.api.addr_validate(&address)?;
-    TREASURY_ADDRESS.save(deps.storage, &addr)?;
-
-    Ok(Response::default()
-        .add_attribute("action", "set_treasury_address")
-        .add_attribute("treasury", address))
-}
-
-/// Set the bounty address (admin only).
-pub fn execute_set_bounty_address(
-    deps: DepsMut,
-    info: MessageInfo,
-    address: String,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
-        return Err(ContractError::Unauthorized);
+    if let Some(ref cfg) = config {
+        crate::penalties::validate_late_fee_config(cfg)?;
     }
 
-    let addr = deps.api.addr_validate(&address)?;
-    BOUNTY_ADDRESS.save(deps.storage, &addr)?;
-
-    Ok(Response::default()
-        .add_attribute("action", "set_bounty_address")
-        .add_attribute("bounty", address))
-}
-
-/// Set the default treasury fee share in basis points (admin only).
-pub fn execute_set_default_fee_share_bps(
-    deps: DepsMut,
-    info: MessageInfo,
-    bps: u32,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
-        return Err(ContractError::Unauthorized);
+    match config {
+        Some(cfg) => LATE_FEE_CONFIG.save(deps.storage, &cfg)?,
+        None => LATE_FEE_CONFIG.remove(deps.storage),
     }
 
-    if bps > crate::fees::MAX_FEE_SHARE_BPS {
-        return Err(ContractError::InvalidFeeShareBps);
-    }
-
-    DEFAULT_FEE_SHARE_BPS.save(deps.storage, &bps)?;
-
-    Ok(Response::default()
-        .add_attribute("action", "set_default_fee_share_bps")
-        .add_attribute("bps", bps.to_string()))
-}
-
-/// Set the per-market treasury fee share in basis points (admin only).
-pub fn execute_set_market_fee_share_bps(
-    deps: DepsMut,
-    info: MessageInfo,
-    market_denom: String,
-    bps: u32,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
-        return Err(ContractError::Unauthorized);
-    }
-
-    if bps > crate::fees::MAX_FEE_SHARE_BPS {
-        return Err(ContractError::InvalidFeeShareBps);
-    }
-
-    MARKET_FEE_SHARE_BPS.save(deps.storage, &market_denom, &bps)?;
-
-    Ok(Response::default()
-        .add_attribute("action", "set_market_fee_share_bps")
-        .add_attribute("market_denom", &market_denom)
-        .add_attribute("bps", bps.to_string()))
-}
-
-/// Remove a per-market fee share override (admin only).
-pub fn execute_remove_market_fee_share_bps(
-    deps: DepsMut,
-    info: MessageInfo,
-    market_denom: String,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
-        return Err(ContractError::Unauthorized);
-    }
-
-    MARKET_FEE_SHARE_BPS.remove(deps.storage, &market_denom);
-
-    Ok(Response::default()
-        .add_attribute("action", "remove_market_fee_share_bps")
-        .add_attribute("market_denom", &market_denom))
-}
-
-/// Accrue a protocol fee for a given market (admin only).
-pub fn execute_accrue_protocol_fee(
-    mut deps: DepsMut,
-    info: MessageInfo,
-    market_denom: String,
-    amount: String,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.owner {
-        return Err(ContractError::Unauthorized);
-    }
-
-    let fee_amount: cosmwasm_std::Uint128 = amount.parse().map_err(|_| {
-        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
-    })?;
-
-    let split = crate::fees::accrue_protocol_fee(&mut deps, &market_denom, fee_amount)?;
-
-    Ok(Response::default()
-        .add_attribute("action", "accrue_protocol_fee")
-        .add_attribute("market_denom", &market_denom)
-        .add_attribute("fee_amount", fee_amount.to_string())
-        .add_attribute("treasury_amount", split.treasury_amount.to_string())
-        .add_attribute("bounty_amount", split.bounty_amount.to_string()))
-}
-
-/// Withdraw treasury fees for a given market (admin only).
-pub fn execute_withdraw_treasury(
-    mut deps: DepsMut,
-    info: MessageInfo,
-    market_denom: String,
-    amount: String,
-) -> Result<Response, ContractError> {
-    let withdraw_amount: cosmwasm_std::Uint128 = amount.parse().map_err(|_| {
-        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
-    })?;
-
-    let treasury_addr = TREASURY_ADDRESS
-        .may_load(deps.storage)?
-        .ok_or(ContractError::TreasuryAddressNotSet)?;
-
-    crate::fees::withdraw_treasury(&mut deps, &info.sender, &market_denom, withdraw_amount)?;
-
-    let bank_msg = cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-        to_address: treasury_addr.to_string(),
-        amount: vec![cosmwasm_std::Coin {
-            denom: market_denom.clone(),
-            amount: withdraw_amount,
-        }],
-    });
-
-    Ok(Response::default()
-        .add_message(bank_msg)
-        .add_attribute("action", "withdraw_treasury")
-        .add_attribute("market_denom", &market_denom)
-        .add_attribute("amount", withdraw_amount.to_string())
-        .add_attribute("recipient", treasury_addr.to_string()))
-}
-
-/// Withdraw bounty fees for a given market (admin only).
-pub fn execute_withdraw_bounty(
-    mut deps: DepsMut,
-    info: MessageInfo,
-    market_denom: String,
-    amount: String,
-) -> Result<Response, ContractError> {
-    let withdraw_amount: cosmwasm_std::Uint128 = amount.parse().map_err(|_| {
-        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
-    })?;
-
-    let bounty_addr = BOUNTY_ADDRESS
-        .may_load(deps.storage)?
-        .ok_or(ContractError::BountyAddressNotSet)?;
-
-    crate::fees::withdraw_bounty(&mut deps, &info.sender, &market_denom, withdraw_amount)?;
-
-    let bank_msg = cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-        to_address: bounty_addr.to_string(),
-        amount: vec![cosmwasm_std::Coin {
-            denom: market_denom.clone(),
-            amount: withdraw_amount,
-        }],
-    });
-
-    Ok(Response::default()
-        .add_message(bank_msg)
-        .add_attribute("action", "withdraw_bounty")
-        .add_attribute("market_denom", &market_denom)
-        .add_attribute("amount", withdraw_amount.to_string())
-        .add_attribute("recipient", bounty_addr.to_string()))
+    Ok(Response::default().add_attribute("action", "set_late_fee_config"))
 }
 
 fn append_audit_entry(
@@ -707,79 +519,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             };
             to_json_binary(&resp)
         }
-        QueryMsg::GetTreasuryAddress {} => {
-            let addr = TREASURY_ADDRESS
+        QueryMsg::GetLateFeeConfig {} => {
+            let config = LATE_FEE_CONFIG
                 .may_load(deps.storage)
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
-            let resp = crate::msg::TreasuryAddressResponse {
-                address: addr.map(|a| a.to_string()),
-            };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetBountyAddress {} => {
-            let addr = BOUNTY_ADDRESS
-                .may_load(deps.storage)
-                .map_err(|e| StdError::generic_err(e.to_string()))?;
-            let resp = crate::msg::BountyAddressResponse {
-                address: addr.map(|a| a.to_string()),
-            };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetDefaultFeeShareBps {} => {
-            let bps = DEFAULT_FEE_SHARE_BPS
-                .may_load(deps.storage)
-                .map_err(|e| StdError::generic_err(e.to_string()))?
-                .unwrap_or(crate::fees::DEFAULT_TREASURY_FEE_SHARE_BPS);
-            let resp = crate::msg::DefaultFeeShareBpsResponse { bps };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetMarketFeeShareBps { market_denom } => {
-            let bps = MARKET_FEE_SHARE_BPS
-                .may_load(deps.storage, &market_denom)
-                .map_err(|e| StdError::generic_err(e.to_string()))?;
-            let resp = crate::msg::MarketFeeShareBpsResponse { market_denom, bps };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetTreasuryBalance { market_denom } => {
-            let balance = TREASURY_BALANCE
-                .may_load(deps.storage, &market_denom)
-                .map_err(|e| StdError::generic_err(e.to_string()))?
-                .unwrap_or(cosmwasm_std::Uint128::zero());
-            let resp = crate::msg::TreasuryBalanceResponse {
-                market_denom,
-                balance,
-            };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetBountyBalance { market_denom } => {
-            let balance = BOUNTY_BALANCE
-                .may_load(deps.storage, &market_denom)
-                .map_err(|e| StdError::generic_err(e.to_string()))?
-                .unwrap_or(cosmwasm_std::Uint128::zero());
-            let resp = crate::msg::BountyBalanceResponse {
-                market_denom,
-                balance,
-            };
-            to_json_binary(&resp)
-        }
-        QueryMsg::GetFeeSplitPreview {
-            market_denom,
-            amount,
-        } => {
-            let fee_amount: cosmwasm_std::Uint128 = amount.parse().map_err(|_| {
-                StdError::generic_err(format!("Invalid amount: {}", amount))
-            })?;
-            let treasury_share_bps =
-                crate::fees::get_treasury_fee_share_bps(deps, &market_denom);
-            let split = crate::fees::split_protocol_fee(fee_amount, treasury_share_bps)
-                .map_err(|e| StdError::generic_err(e.to_string()))?;
-            let resp = crate::msg::FeeSplitPreviewResponse {
-                market_denom,
-                total_fee: fee_amount,
-                treasury_share_bps,
-                treasury_amount: split.treasury_amount,
-                bounty_amount: split.bounty_amount,
-            };
+            let resp = crate::msg::LateFeeConfigResponse { config };
             to_json_binary(&resp)
         }
     }
