@@ -67,13 +67,8 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
-    assert_eq!(ContractError::AdminQueryCooldownActive as u32, 53);
-    assert_eq!(ContractError::OracleNotFound as u32, 54);
-    assert_eq!(ContractError::BorrowerMismatch as u32, 55);
-    assert_eq!(ContractError::InsufficientReserve as u32, 56);
-    assert_eq!(ContractError::InsufficientAllowance as u32, 57);
-    assert_eq!(ContractError::InsufficientBalance as u32, 58);
-    assert_eq!(ContractError::UtilizedNotZero as u32, 59);
+    assert_eq!(ContractError::InvalidAttestation as u32, 53);
+    assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -134,13 +129,8 @@ fn no_duplicate_discriminants() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
-        ContractError::AdminQueryCooldownActive as u32,
-        ContractError::OracleNotFound as u32,
-        ContractError::BorrowerMismatch as u32,
-        ContractError::InsufficientReserve as u32,
-        ContractError::InsufficientAllowance as u32,
-        ContractError::InsufficientBalance as u32,
-        ContractError::UtilizedNotZero as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -209,13 +199,8 @@ fn variant_count_is_known() {
         ContractError::OracleQuorumNotMet as u32,
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
-        ContractError::AdminQueryCooldownActive as u32,
-        ContractError::OracleNotFound as u32,
-        ContractError::BorrowerMismatch as u32,
-        ContractError::InsufficientReserve as u32,
-        ContractError::InsufficientAllowance as u32,
-        ContractError::InsufficientBalance as u32,
-        ContractError::UtilizedNotZero as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -464,7 +449,7 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Risk
     );
     assert_eq!(
-        ContractError::AdminQueryCooldownActive.category(),
+        ContractError::RiskAdminCooldownActive.category(),
         ContractErrorCategory::Risk
     );
     // Oracle
@@ -693,13 +678,8 @@ fn every_variant_has_known_category() {
         ContractError::OracleQuorumNotMet.category(),
         ContractError::AlreadySettled.category(),
         ContractError::InvalidRiskWeight.category(),
-        ContractError::AdminQueryCooldownActive.category(),
-        ContractError::OracleNotFound.category(),
-        ContractError::BorrowerMismatch.category(),
-        ContractError::InsufficientReserve.category(),
-        ContractError::InsufficientAllowance.category(),
-        ContractError::InsufficientBalance.category(),
-        ContractError::UtilizedNotZero.category(),
+        ContractError::InvalidAttestation.category(),
+        ContractError::RiskAdminCooldownActive.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();

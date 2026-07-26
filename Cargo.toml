@@ -3,8 +3,8 @@ resolver = "2"
 
 members = [
     "contracts/credit",
-    "contracts/collateral",
-    "contracts/borrow",
+    "contracts/accrual",
+    "contracts/risk",
     "gateway-contract/contracts/auction_contract",
 ]
 

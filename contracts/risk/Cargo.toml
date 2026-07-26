@@ -2,9 +2,9 @@
 name = "creditra-risk"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra risk v7 capabilities view tests"
+description = "Creditra risk admin cooldown contract for GrantFox FWC26 campaign"
 license = "MIT"
-keywords = ["soroban", "stellar", "risk", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "risk", "admin", "cooldown"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "../../README.md"
 
@@ -13,12 +13,19 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
-creditra-credit = { path = "../credit" }
+serde = { version = "1.0", optional = true, default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", optional = true, default-features = false }
+
+[features]
+instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
 
 [[test]]
-name = "capabilities"
-path = "tests/capabilities.rs"
+name = "risk_admin_cooldown"
+path = "tests/risk_admin_cooldown.rs"
+required-features = ["instrument"]
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-creditra-credit = { path = "../credit", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+proptest = "1.4"

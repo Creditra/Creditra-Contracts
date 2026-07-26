@@ -8,7 +8,7 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 40-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 54-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. See
 //!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
@@ -153,14 +153,8 @@ pub enum CreditStatus {
 /// | 51   | `AlreadySettled`               | Lifecycle     | Liquidation settlement already processed for this (borrower, id) pair |
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
-/// | 54   | `AdminCooldownActive`          | Risk          | Critical borrower admin action attempted before cooldown elapsed |
-/// | 55   | `LiquidationGraceActive`       | Lifecycle     | Per-borrower liquidation grace window has not yet elapsed |
-// `export = false`: this enum has grown past the 50-case limit that the
-// Soroban contract-spec XDR format (`SCSpecUdtErrorEnumV0.cases<50>`)
-// allows for exported error specs. Discriminants and `From<Error>` /
-// `InvokeError` conversions are unaffected; only the on-chain metadata
-// blob (used by client-generation tooling) is skipped.
-#[contracterror(export = false)]
+/// | 54   | `RiskAdminCooldownActive`      | Risk          | Risk admin cooldown has not yet elapsed since the last mutation |
+#[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
@@ -276,17 +270,8 @@ pub enum ContractError {
     InvalidRiskWeight = 52,
     /// Attestation proof is invalid or no attestation batch has been committed.
     InvalidAttestation = 53,
-    /// Critical borrower admin action attempted before the cooldown elapsed.
-    AdminCooldownActive = 54,
-    /// Per-borrower liquidation grace window has not yet elapsed.
-    LiquidationGraceActive = 55,
-    /// Critical collateral admin action attempted before the configured
-    /// cool-off elapsed. See [`crate::collateral_admin`].
-    AdminCollateralCooldownActive = 56,
-    /// Per-borrower absolute exposure cap ([`crate::limits`]) was exceeded.
-    BorrowerExposureCapExceeded = 57,
-    /// Admin freeze/unfreeze action attempted before the configured cool-off elapsed.
-    FreezeCooldownActive = 58,
+    /// Risk admin cooldown has not yet elapsed since the last mutation.
+    RiskAdminCooldownActive = 54,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -333,6 +318,7 @@ impl ContractError {
             Self::InvalidRiskWeight => Numeric,
             // Misc (11)
             Self::InvalidAttestation => Misc,
+            Self::RiskAdminCooldownActive => Risk,
             // Limit (4)
             Self::OverLimit => Limit,
             Self::UtilizationNotZero => Limit,
@@ -386,6 +372,15 @@ impl ContractError {
         }
     }
 }
+
+/// Configuration emitted when the risk admin cooldown is set or changed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskAdminCooldownConfig {
+    /// New cooldown duration in seconds. `0` means disabled.
+    pub cooldown_seconds: u64,
+}
+
 
 /// Stored credit line data for a borrower.
 #[contracttype]

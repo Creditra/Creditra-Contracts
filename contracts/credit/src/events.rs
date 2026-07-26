@@ -569,3 +569,87 @@ pub fn publish_grace_waiver_applied_event(
         },
     );
 }
+
+
+
+/// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalProposedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Snapshot of the treasury balance at proposal time.
+    pub amount: i128,
+    /// Admin who submitted the proposal.
+    pub proposer: Address,
+    /// Ledger timestamp when the proposal was created.
+    pub proposed_at: u64,
+    /// Earliest timestamp at which execution is permitted (proposed_at + 86_400).
+    pub execute_after: u64,
+}
+
+/// Emitted when a treasury withdrawal is executed via `execute_treasury_withdrawal`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryWithdrawalExecutedEvent {
+    /// Treasury recipient address.
+    pub recipient: Address,
+    /// Amount transferred.
+    pub amount: i128,
+    /// Admin who executed the withdrawal.
+    pub executor: Address,
+    /// Ledger timestamp at execution.
+    pub executed_at: u64,
+}
+
+/// Publish a treasury withdrawal proposed event.
+pub fn publish_treasury_withdrawal_proposed(env: &Env, event: TreasuryWithdrawalProposedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_prop")),
+        event,
+    );
+}
+
+/// Publish a treasury withdrawal executed event.
+pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawalExecutedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
+        event,
+    );
+}
+
+/// Payload emitted when an admin commits a new attestation batch for a borrower.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationBatchCommittedEvent {
+    /// Borrower whose attestation batch was updated.
+    pub borrower: Address,
+    /// SHA-256 Merkle root of all leaf hashes in the committed batch.
+    pub merkle_root: soroban_sdk::BytesN<32>,
+    /// Number of leaves in the batch (informational).
+    pub count: u32,
+}
+
+/// Publish an attestation batch committed event.
+pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "atst_bat")),
+        event,
+    );
+}
+
+/// Payload emitted when the risk admin cooldown is configured.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskAdminCooldownConfiguredEvent {
+    /// New cooldown duration in seconds. `0` means disabled.
+    pub cooldown_seconds: u64,
+}
+
+/// Publish a risk admin cooldown configured event.
+pub fn publish_risk_admin_cooldown_configured(env: &Env, cooldown_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "rad_cooldown")),
+        RiskAdminCooldownConfiguredEvent { cooldown_seconds },
+    );
+}

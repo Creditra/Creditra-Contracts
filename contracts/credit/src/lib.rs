@@ -110,7 +110,6 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
-mod limits;
 pub mod math_utils;
 mod query;
 mod risk;
@@ -119,6 +118,48 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
+
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+};
+
+use crate::auth::require_admin_auth;
+use crate::attestation::AttestationBatch;
+use crate::events::{
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
+    publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event,
+    publish_token_rescued_event, publish_treasury_withdrawal_executed,
+    publish_treasury_withdrawal_proposed, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
+    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+};
+use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::storage::{
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
+    clear_pending_treasury_withdrawal, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
+    get_oracle_config, get_oracle_quorum_config, get_pending_treasury_withdrawal,
+    get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    is_borrower_blocked as storage_is_borrower_blocked,
+    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
+    set_borrower_frozen_until, set_borrower_unblocked,
+    set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
+    set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
+};
+use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
+use crate::types::{
+    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig,
+    GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
+    ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+};
 
 #[cfg(test)]
 mod boundary_tests;
@@ -133,48 +174,6 @@ mod views_tests;
 #[cfg(kani)]
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
-
-use crate::auth::{require_admin, require_admin_auth};
-use crate::attestation::AttestationBatch;
-use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
-    publish_oracle_quorum_price_set_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
-};
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
-use crate::penalties::LateFeeConfig;
-use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
-    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
-    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
-    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
-    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
-};
-use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, OracleConfig, OracleQuorumConfig,
-    ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig,
-    RateFormulaConfig, TreasuryWithdrawalProposal,
-};
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -741,6 +740,85 @@ impl Credit {
 
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
         risk::get_rate_change_limits(env)
+    }
+
+    /// Set the risk admin cooldown duration in seconds (admin only).
+    pub fn set_risk_admin_cooldown(env: Env, seconds: u64) {
+        risk::set_risk_admin_cooldown(env, seconds)
+    }
+
+    /// Get the configured risk admin cooldown duration in seconds.
+    pub fn get_risk_admin_cooldown(env: Env) -> u64 {
+        risk::get_risk_admin_cooldown(env)
+    }
+
+    /// Set a per-borrower interest rate floor (admin only).
+    ///
+    /// When set, `update_risk_parameters` will ensure the effective rate
+    /// is at least `floor_bps` for this borrower.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower.
+    /// - `floor_bps`: Minimum rate in basis points. Pass `None` to clear.
+    pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u32>) {
+        risk::set_borrower_rate_floor(env, borrower, floor_bps)
+    }
+
+    /// Get the per-borrower interest rate floor, if set.
+    pub fn get_borrower_rate_floor(env: Env, borrower: Address) -> Option<u32> {
+        crate::storage::get_borrower_rate_floor(&env, &borrower)
+    }
+
+    /// Set a per-borrower interest rate ceiling (admin only).
+    ///
+    /// When set, `update_risk_parameters` will cap the effective rate
+    /// at `ceiling_bps` for this borrower.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower.
+    /// - `ceiling_bps`: Maximum rate in basis points. Pass `None` to clear.
+    pub fn set_borrower_rate_ceiling(env: Env, borrower: Address, ceiling_bps: Option<u32>) {
+        risk::set_borrower_rate_ceiling(env, borrower, ceiling_bps)
+    }
+
+    /// Adds or updates an oracle's weight in the registry.
+    /// Admin only.
+    pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
+        oracles::add_oracle(env, oracle, weight)
+    }
+
+    /// Removes an oracle from the registry.
+    /// Admin only.
+    pub fn remove_oracle(env: Env, oracle: Address) {
+        oracles::remove_oracle(env, oracle)
+    }
+
+    /// Sets the quorum threshold weight.
+    /// Admin only.
+    pub fn set_quorum_threshold(env: Env, threshold: u32) {
+        oracles::set_quorum_threshold(env, threshold)
+    }
+
+    /// Sets the reporting freshness window in seconds.
+    /// Admin only.
+    pub fn set_reporting_window(env: Env, window_seconds: u64) {
+        oracles::set_reporting_window(env, window_seconds)
+    }
+
+    /// Oracles report their observed value.
+    /// Requires reporting oracle's auth.
+    pub fn report_value(env: Env, oracle: Address, value: u128) {
+        oracles::report_value(env, oracle, value)
+    }
+
+    /// Computes the weighted median of the latest fresh reports from approved oracles.
+    /// Returns error if quorum threshold is not met.
+    pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
+        oracles::get_median_value(env)
+    }
+    /// Get the per-borrower interest rate ceiling, if set.
+    pub fn get_borrower_rate_ceiling(env: Env, borrower: Address) -> Option<u32> {
+        crate::storage::get_borrower_rate_ceiling(&env, &borrower)
     }
 
     /// Set a per-borrower utilization cap in basis points (admin only).

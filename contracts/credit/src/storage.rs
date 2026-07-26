@@ -58,8 +58,11 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use crate::types::{
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
+    TreasuryWithdrawalProposal,
+};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
 ///
@@ -293,6 +296,8 @@ pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
+pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
+pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
@@ -1404,73 +1409,59 @@ pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
 }
 
-// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+// ── Risk admin cooldown helpers ─────────────────────────────────────────────
 
-/// Get the configured freeze cooldown duration in seconds.
-///
-/// Returns `None` when not configured, meaning no cooldown is enforced.
-/// A value of `0` also means the cooldown is disabled.
-pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+/// Get the configured risk admin cooldown duration in seconds.
+/// Returns `0` when the cooldown is disabled (default).
+pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
+    let key = symbol_short!("rad_cool");
     env.storage()
         .instance()
-        .get(&DataKey::FreezeCooldownSeconds)
-        .filter(|&secs: &u64| secs > 0)
+        .get(&key)
+        .unwrap_or(0)
 }
 
-/// Set the freeze cooldown duration in seconds.
-///
-/// Pass `0` or `None`-equivalent behaviour: remove the key entirely,
-/// effectively disabling the cooldown.
-pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
-    if seconds == 0 {
-        env.storage()
-            .instance()
-            .remove(&DataKey::FreezeCooldownSeconds);
-    } else {
-        env.storage()
-            .instance()
-            .set(&DataKey::FreezeCooldownSeconds, &seconds);
-    }
-}
-
-/// Return the ledger timestamp of the last admin freeze/unfreeze action, if any.
-pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+/// Set the risk admin cooldown duration in seconds.
+pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
+    let key = symbol_short!("rad_cool");
     env.storage()
         .instance()
-        .get(&DataKey::LastFreezeTimestamp)
+        .set(&key, &seconds);
 }
 
-/// Set the ledger timestamp of the last admin freeze/unfreeze action.
-fn set_last_freeze_timestamp(env: &Env, ts: u64) {
+/// Get the timestamp of the last risk admin action.
+/// Returns `0` when no action has been recorded yet.
+pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
+    let key = symbol_short!("rad_last");
     env.storage()
         .instance()
-        .set(&DataKey::LastFreezeTimestamp, &ts);
+        .get(&key)
+        .unwrap_or(0)
 }
 
-/// Record a freeze/unfreeze action timestamp, but only when a cooldown is
-/// configured. When no cooldown is set, this is a no-op so that timestamps
-/// recorded before cooldown was enabled never retroactively block actions.
-pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
-    if get_freeze_cooldown_seconds(env).is_some() {
-        set_last_freeze_timestamp(env, env.ledger().timestamp());
-    }
+/// Set the timestamp of the last risk admin action.
+pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
+    let key = symbol_short!("rad_last");
+    env.storage()
+        .instance()
+        .set(&key, &ts);
 }
 
-/// Check and enforce the admin freeze cooldown.
-///
-/// If a cooldown is configured and the last freeze action was less than
-/// `cooldown_seconds` ago, this function reverts with
-/// [`crate::types::ContractError::FreezeCooldownActive`].
-///
-/// Call this at the start of every admin freeze/unfreeze entrypoint.
-pub fn enforce_freeze_cooldown(env: &Env) {
-    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+/// Assert that the risk admin cooldown has elapsed since the last action.
+/// Panics with `RiskAdminCooldownActive` if the cooldown has not yet elapsed.
+/// When `last_ts` is `0` (no prior action recorded), the cooldown is not
+/// enforced so the first call always succeeds.
+pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
+    let cooldown = get_risk_admin_cooldown_seconds(env);
+    if cooldown == 0 {
         return;
-    };
-    if let Some(last_ts) = get_last_freeze_timestamp(env) {
-        let now = env.ledger().timestamp();
-        if now < last_ts.saturating_add(cooldown_secs) {
-            env.panic_with_error(crate::types::ContractError::FreezeCooldownActive);
-        }
+    }
+    let last_ts = get_last_risk_admin_action_ts(env);
+    if last_ts == 0 {
+        return;
+    }
+    let now = env.ledger().timestamp();
+    if now < last_ts.saturating_add(cooldown) {
+        env.panic_with_error(ContractError::RiskAdminCooldownActive);
     }
 }
