@@ -486,9 +486,15 @@ pub fn resolve_quorum_price(env: &Env, prices: &Vec<i128>, cfg: &OracleQuorumCon
     }
 
     // Copy prices into a fixed stack buffer and validate positivity.
+    // Use `unwrap_or_else` rather than a bare `.unwrap()` so that an
+    // unexpected `None` (e.g. if the Soroban SDK Vec contract ever behaves
+    // differently from its current bounds semantics) produces a typed
+    // `ContractError::OraclePriceInvalid` instead of an opaque host trap.
     let mut buf = [0i128; MAX_ORACLE_FEEDS as usize];
     for i in 0..n {
-        let p = prices.get(i).unwrap();
+        let p = prices.get(i).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid)
+        });
         if p <= 0 {
             env.panic_with_error(ContractError::OraclePriceInvalid);
         }

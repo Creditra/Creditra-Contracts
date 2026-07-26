@@ -38,7 +38,7 @@ fn test_deposit_and_withdraw_collateral() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #31)")] // CollateralRatioBelowMinimum
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
 fn test_withdraw_breaches_min_ratio() {
     let env = Env::default();
     let (client, _, borrower, _) = setup(&env);
@@ -52,7 +52,7 @@ fn test_withdraw_breaches_min_ratio() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #31)")] // CollateralRatioBelowMinimum
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
 fn test_draw_credit_breaches_min_ratio() {
     let env = Env::default();
     let (client, _, borrower, _) = setup(&env);
