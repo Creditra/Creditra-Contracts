@@ -181,7 +181,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &None,
                 &None,
-                &gateway_auction::DutchAuctionDecay::None,
+                &Some(gateway_auction::DutchAuctionDecay::None),
                 &None,
             );
         }
@@ -195,7 +195,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &DutchAuctionDecay::None,
+                &Some(DutchAuctionDecay::None),
                 &None,
             );
             client.env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -227,7 +227,7 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
     let factory = Address::generate(&env);
     client.set_factory_contract(&factory);
 
-    init_auction(&client, &auction_id, mode.clone());
+    init_auction(&client, &auction_id, mode);
 
     match (mode, from.clone()) {
         (_, AuctionStatus::Open) => {}
@@ -287,7 +287,7 @@ fn invoke_entrypoint(
 fn run_matrix(mode: AuctionMode) {
     for case in transition_matrix(mode) {
         let from = case.from.clone();
-        let (env, contract_id, auction_id, _winner) = setup_auction(mode.clone(), from);
+        let (env, contract_id, auction_id, _winner) = setup_auction(mode, from);
         let client = AuctionClient::new(&env, &contract_id);
         let status_before = read_status(&env, &contract_id, &auction_id);
 
@@ -351,7 +351,7 @@ fn dutch_auction_status_transition_matrix() {
 #[test]
 fn illegal_transition_count_is_six_per_mode() {
     for mode in [AuctionMode::English, AuctionMode::Dutch] {
-        let illegal = transition_matrix(mode.clone())
+        let illegal = transition_matrix(mode)
             .into_iter()
             .filter(|c| !c.expect_ok)
             .count();
@@ -365,7 +365,7 @@ fn illegal_transition_count_is_six_per_mode() {
 #[test]
 fn legal_transition_count_is_three_per_mode() {
     for mode in [AuctionMode::English, AuctionMode::Dutch] {
-        let legal = transition_matrix(mode.clone())
+        let legal = transition_matrix(mode)
             .into_iter()
             .filter(|c| c.expect_ok)
             .count();

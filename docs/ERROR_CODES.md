@@ -239,6 +239,7 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 | 51   | `AlreadySettled` | Liquidation settlement already processed | Replay of the same `(borrower, settlement_id)` pair |
 | 52   | `InvalidRiskWeight` | Collateral risk weight exceeds 10 000 bps | `set_collateral_risk_weight` |
 | 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed | `verify_attestation_proof` with an invalid proof or missing batch |
+| 55   | `LiquidationGraceActive` | Per-borrower liquidation grace window active | `default_credit_line` called before grace period expiry |
 
 **SDK recovery:**
 - `CreditLineNotFound`: Create a credit line first via `open_credit_line`.

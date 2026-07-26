@@ -203,10 +203,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     // Compute accrued interest using the audited prorate helper with floor rounding.
     let accrued_u: u128 = if line.status == CreditStatus::Suspended {
-        let grace_cfg: Option<GracePeriodConfig> = env
-            .storage()
-            .instance()
-            .get(&crate::storage::grace_period_key(env));
+        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(env);
 
         match grace_cfg {
             Some(cfg) if cfg.grace_period_seconds > 0 => {

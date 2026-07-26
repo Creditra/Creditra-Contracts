@@ -51,7 +51,7 @@
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
 //! `(1, 0, 0)`).
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracterror, contracttype, Address, Symbol};
 
 /// Status of a borrower's credit line.
 ///
@@ -346,6 +346,7 @@ impl ContractError {
             Self::CreditLineSuspended => Lifecycle,
             Self::CreditLineDefaulted => Lifecycle,
             Self::AlreadySettled => Lifecycle,
+            Self::LiquidationGraceActive => Lifecycle,
             // Numeric (3)
             Self::InvalidAmount => Numeric,
             Self::NegativeLimit => Numeric,
@@ -379,6 +380,7 @@ impl ContractError {
             Self::ScoreTooHigh => Risk,
             Self::Paused => Risk,
             Self::DrawCooldownActive => Risk,
+            Self::AdminCooldownActive => Risk,
             // Oracle (7)
             Self::OraclePriceInvalid => Oracle,
             Self::OraclePriceStale => Oracle,
@@ -392,6 +394,7 @@ impl ContractError {
             Self::DrawsFrozen => Block,
             Self::BorrowerFrozen => Block,
             Self::CreditLineFrozen => Block,
+            Self::FreezeCooldownActive => Block,
             // Reentrancy (10)
             Self::Reentrancy => Reentrancy,
             // Misc (11)
@@ -622,6 +625,46 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Paginated list of credit lines returned by `get_credit_lines_paginated`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Credit lines included in this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for fetching the next page, if more items exist.
+    pub next_cursor: Option<u32>,
+    /// `true` if there are additional lines beyond this page.
+    pub has_more: bool,
+}
+
+/// Read-only capabilities bitmap for a borrower's credit line.
+///
+/// Returned by `borrow_capabilities` to let off-chain clients and
+/// on-chain integrators inspect which operations are currently
+/// permitted for a borrower, without needing to simulate the full
+/// entrypoint logic.
+///
+/// Each `bool` field represents a single operation; `true` means the
+/// operation should succeed assuming valid parameters (amount, etc.).
+/// Amount-dependent checks (credit limit, collateral ratio, draw
+/// cooldown, exposure caps) are NOT evaluated because this view does
+/// not know the intended draw amount.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowCapabilities {
+    /// Whether the borrower can draw credit. False when the credit line
+    /// does not exist, the protocol is paused, draws are frozen, the
+    /// borrower is blocked/frozen, or the credit-line status is not
+    /// draw-allowed (Active/Restricted).
+    pub can_draw: bool,
+    /// Whether the borrower can repay credit. False when the credit line
+    /// does not exist or is permanently Closed.
+    pub can_repay: bool,
+    /// Whether the borrower can self-suspend their credit line. True
+    /// only when the credit line exists and is currently Active.
+    pub can_self_suspend: bool,
 }
 
 /// Proof-of-reserve view for the protocol treasury.

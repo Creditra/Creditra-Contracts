@@ -71,7 +71,7 @@ fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
         &0_u32,
         &None,
         &None,
-        &gateway_auction::DutchAuctionDecay::None,
+        &Some(gateway_auction::DutchAuctionDecay::None),
         &None,
     );
 }

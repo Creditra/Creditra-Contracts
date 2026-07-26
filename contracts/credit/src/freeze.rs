@@ -29,7 +29,9 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::{publish_credit_line_freeze_event, publish_draws_frozen_event};
-use crate::storage::{get_credit_line, DataKey};
+use crate::storage::{
+    enforce_freeze_cooldown, get_credit_line, record_freeze_timestamp_if_cooldown, DataKey,
+};
 use crate::types::{ContractError, DrawsFreezeState, FreezeReason};
 use soroban_sdk::{Address, Env};
 
@@ -46,6 +48,7 @@ use soroban_sdk::{Address, Env};
 /// Emits [`DrawsFrozenEvent`] with `frozen = true` and the supplied `reason`.
 pub fn freeze_draws(env: Env, reason: FreezeReason) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     env.storage().instance().set(
         &DataKey::DrawsFrozen,
         &DrawsFreezeState {
@@ -54,6 +57,7 @@ pub fn freeze_draws(env: Env, reason: FreezeReason) {
         },
     );
     publish_draws_frozen_event(&env, true, reason);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Unfreeze draws globally (admin only).
@@ -65,6 +69,7 @@ pub fn freeze_draws(env: Env, reason: FreezeReason) {
 /// (defaults to [`FreezeReason::LiquidityReserve`] when never frozen before).
 pub fn unfreeze_draws(env: Env) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     let reason = get_draws_freeze_state(&env)
         .map(|state| state.reason)
         .unwrap_or(FreezeReason::LiquidityReserve);
@@ -76,6 +81,7 @@ pub fn unfreeze_draws(env: Env) {
         },
     );
     publish_draws_frozen_event(&env, false, reason);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Returns `true` when draws are globally frozen.
@@ -104,6 +110,7 @@ pub fn get_draws_freeze_reason(env: &Env) -> Option<FreezeReason> {
 /// Emits [`CreditLineFreezeEvent`] on `("credit", "line_frz")` with `frozen = true`.
 pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     if get_credit_line(&env, &borrower).is_none() {
         env.panic_with_error(ContractError::CreditLineNotFound);
     }
@@ -111,6 +118,7 @@ pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
         .persistent()
         .set(&DataKey::CreditLineFreeze(borrower.clone()), &reason);
     publish_credit_line_freeze_event(&env, &borrower, reason, true);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Lift a per-credit-line draw freeze (admin only).
@@ -121,6 +129,7 @@ pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
 /// Emits [`CreditLineFreezeEvent`] with `frozen = false` when a freeze record existed.
 pub fn unfreeze_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     let key = DataKey::CreditLineFreeze(borrower.clone());
     let Some(reason) = env
         .storage()
@@ -131,6 +140,7 @@ pub fn unfreeze_credit_line(env: Env, borrower: Address) {
     };
     env.storage().persistent().remove(&key);
     publish_credit_line_freeze_event(&env, &borrower, reason, false);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Returns `true` when a credit line has an active admin freeze.

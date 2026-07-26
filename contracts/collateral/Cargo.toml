@@ -1,10 +1,10 @@
 [package]
-name = "creditra-accrual"
+name = "creditra-collateral"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra accrual v7 error stability tests"
+description = "Creditra collateral v7 admin cooldown tests"
 license = "MIT"
-keywords = ["soroban", "stellar", "accrual", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "collateral", "credit", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "../../README.md"
 
@@ -16,14 +16,9 @@ soroban-sdk = { workspace = true }
 creditra-credit = { path = "../credit" }
 
 [[test]]
-name = "err_stab"
-path = "tests/err_stab.rs"
-
-[[test]]
-name = "gas_snap"
-path = "tests/gas_snap.rs"
+name = "admin_cooldown"
+path = "tests/admin_cooldown.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 creditra-credit = { path = "../credit", features = [] }
-proptest = "1.4"
