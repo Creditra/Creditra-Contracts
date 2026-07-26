@@ -68,6 +68,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
     assert_eq!(ContractError::InvalidAttestation as u32, 53);
+    assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -129,6 +130,7 @@ fn no_duplicate_discriminants() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -142,7 +144,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 53;
+    const EXPECTED_VARIANT_COUNT: usize = 54;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -198,6 +200,7 @@ fn variant_count_is_known() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -425,6 +428,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawCooldownActive.category(),
         ContractErrorCategory::Risk
     );
+    assert_eq!(
+        ContractError::RiskAdminCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
     // Oracle
     assert_eq!(
         ContractError::OraclePriceInvalid.category(),
@@ -568,6 +575,7 @@ fn every_variant_has_known_category() {
         ContractError::AlreadySettled.category(),
         ContractError::InvalidRiskWeight.category(),
         ContractError::InvalidAttestation.category(),
+        ContractError::RiskAdminCooldownActive.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -576,7 +584,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 53, "Expected 53 ContractError variants");
+    assert_eq!(all_variants.len(), 54, "Expected 54 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
