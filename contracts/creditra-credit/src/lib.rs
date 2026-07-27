@@ -6,6 +6,7 @@ pub mod errors;
 pub mod fees;
 pub mod handshake;
 pub mod key;
+pub mod math_utils;
 pub mod migrate;
 pub mod msg;
 pub mod oracles;
