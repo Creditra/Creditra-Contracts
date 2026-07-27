@@ -83,6 +83,66 @@ pub enum ContractError {
     /// Arithmetic overflow detected in checked computation.
     #[error("Overflow")]
     Overflow,
+
+    /// Late-fee configuration is invalid (e.g. negative flat amount or surcharge > 10 000 bps).
+    #[error("LateFeeConfigInvalid")]
+    LateFeeConfigInvalid,
+
+    /// Rate exceeds the governance-imposed ceiling.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+
+    /// Fee-share basis points out of the valid 0–10 000 range.
+    #[error("InvalidFeeShareBps")]
+    InvalidFeeShareBps,
+
+    /// Treasury balance is insufficient for the requested withdrawal.
+    #[error("InsufficientTreasuryBalance")]
+    InsufficientTreasuryBalance,
+
+    /// Bounty pool balance is insufficient for the requested withdrawal.
+    #[error("InsufficientBountyBalance")]
+    InsufficientBountyBalance,
+
+    /// Protocol fee bps exceeds the governance maximum.
+    #[error("ProtocolFeeBpsExceeded")]
+    ProtocolFeeBpsExceeded,
+
+    /// Treasury address has not been configured.
+    #[error("TreasuryAddressNotSet")]
+    TreasuryAddressNotSet,
+
+    /// Bounty address has not been configured.
+    #[error("BountyAddressNotSet")]
+    BountyAddressNotSet,
+}
+
+impl ContractError {
+    /// Return the high-level domain category for this error variant.
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            ContractError::Std(_) => ContractErrorCategory::Std,
+            ContractError::CreditLineNotFound(_)
+            | ContractError::DrawNotFound(_, _) => ContractErrorCategory::NotFound,
+            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::CollateralInsufficient
+            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::InvalidAmount
+            | ContractError::LateFeeConfigInvalid
+            | ContractError::RateCeilingExceeded
+            | ContractError::InvalidFeeShareBps
+            | ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
+            ContractError::AlreadySettled
+            | ContractError::InsufficientTreasuryBalance
+            | ContractError::InsufficientBountyBalance
+            | ContractError::TreasuryAddressNotSet
+            | ContractError::BountyAddressNotSet
+            | ContractError::Overflow => ContractErrorCategory::State,
+            ContractError::OraclePriceInvalid
+            | ContractError::OracleQuorumNotMet
+            | ContractError::RateTooHigh => ContractErrorCategory::Oracle,
+        }
+    }
 }
 
 #[cfg(test)]

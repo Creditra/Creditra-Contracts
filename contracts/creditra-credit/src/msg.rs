@@ -55,6 +55,8 @@ pub enum ExecuteMsg {
     SetLateFeeConfig {
         config: Option<LateFeeConfig>,
     },
+    /// Set the governance-controlled protocol fee bps (admin only).
+    SetProtocolFeeBps { bps: u32 },
 }
 
 #[cw_serde]
@@ -75,6 +77,8 @@ pub enum QueryMsg {
     GetOraclePrice {},
     #[returns(LateFeeConfigResponse)]
     GetLateFeeConfig {},
+    #[returns(ProtocolFeeBpsResponse)]
+    GetProtocolFeeBps {},
 }
 
 #[cw_serde]
@@ -149,4 +153,11 @@ pub struct OraclePriceResponse {
 pub struct LateFeeConfigResponse {
     /// The currently configured late-fee config, or `None` if unset.
     pub config: Option<LateFeeConfig>,
+}
+
+/// Response for the protocol fee bps query.
+#[cw_serde]
+pub struct ProtocolFeeBpsResponse {
+    /// The currently configured protocol fee bps, or `None` if unset.
+    pub bps: Option<u32>,
 }

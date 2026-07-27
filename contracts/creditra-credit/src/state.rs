@@ -135,3 +135,18 @@ pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
 ///
 /// When absent the contract has no late-fee penalty configured.
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
+
+/// Governance-set protocol fee in basis points applied to every repay.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
+
+/// Default treasury fee-share ratio in basis points (10 000 = 100%).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("dfs");
+
+/// Per-market treasury fee-share override in basis points.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mfs");
+
+/// Accumulated protocol fee owed to treasury per market denom.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("tb");
+
+/// Accumulated protocol fee owed to bounty pool per market denom.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bb");

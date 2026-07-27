@@ -1,11 +1,10 @@
 use cosmwasm_std::{
     entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult,
+    StdResult, Uint128,
 };
 
 use crate::error::ContractError;
 use crate::handshake::{self, ProtocolVersion};
-use crate::limits;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::oracles;
 use crate::penalties::LateFeeConfig;
@@ -89,6 +88,9 @@ pub fn execute(
         }
         ExecuteMsg::SetLateFeeConfig { config } => {
             execute_set_late_fee_config(deps, info, config)
+        }
+        ExecuteMsg::SetProtocolFeeBps { bps } => {
+            execute_set_protocol_fee_bps(deps, info, bps)
         }
     }
 }
@@ -218,14 +220,16 @@ pub fn execute_repay_draw(
         return Err(ContractError::Unauthorized);
     }
 
-    let fee_bps = fees::PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
+    let fee_bps = crate::state::PROTOCOL_FEE_BPS
+        .may_load(deps.storage)?
+        .unwrap_or(0);
     let mut fee_amount = Uint128::zero();
     if fee_bps > 0 && !draw.amount.is_zero() {
         fee_amount = draw.amount.multiply_ratio(fee_bps, 10_000u32);
     }
 
     if !fee_amount.is_zero() {
-        fees::accrue_protocol_fee(deps.branch(), &draw.denom, fee_amount)?;
+        fees::accrue_protocol_fee(&mut deps.branch(), &draw.denom, fee_amount)?;
     }
 
     draw.repaid = true;
@@ -321,10 +325,8 @@ pub fn execute_set_late_fee_config(
 
     if let Some(ref c) = config {
         match c {
-            LateFeeConfig::Flat(flat) => {
-                if flat.amount < 0 {
-                    return Err(ContractError::LateFeeConfigInvalid);
-                }
+            LateFeeConfig::Flat(_flat) => {
+                // Uint128 is unsigned; any value is valid.
             }
             LateFeeConfig::AprBased(apr) => {
                 if apr.surcharge_bps > 10_000 {
@@ -419,36 +421,17 @@ pub fn execute_submit_oracle_prices(
         .add_attribute("timestamp", now.to_string()))
 }
 
-/// Set or update the structured late-fee configuration (admin only).
-///
-/// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed
-/// installment, or `Some(LateFeeConfig::AprBased(…))` for an additive
-/// basis-point surcharge.  Pass `None` to remove the config.
-///
-/// # Errors
-/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
-/// - [`ContractError::InvalidAmount`] if the flat amount is zero.
-/// - [`ContractError::RateTooHigh`] if the APR surcharge exceeds 10 000 bps.
-fn execute_set_late_fee_config(
+/// Set the governance-controlled protocol fee in basis points (admin only).
+pub fn execute_set_protocol_fee_bps(
     deps: DepsMut,
     info: MessageInfo,
-    config: Option<crate::penalties::LateFeeConfig>,
+    bps: u32,
 ) -> Result<Response, ContractError> {
-    let contract_config = CONFIG.load(deps.storage)?;
-    if info.sender != contract_config.owner {
-        return Err(ContractError::Unauthorized);
-    }
+    fees::set_protocol_fee_bps(deps, &info.sender, bps)?;
 
-    if let Some(ref cfg) = config {
-        crate::penalties::validate_late_fee_config(cfg)?;
-    }
-
-    match config {
-        Some(cfg) => LATE_FEE_CONFIG.save(deps.storage, &cfg)?,
-        None => LATE_FEE_CONFIG.remove(deps.storage),
-    }
-
-    Ok(Response::default().add_attribute("action", "set_late_fee_config"))
+    Ok(Response::default()
+        .add_attribute("action", "set_protocol_fee_bps")
+        .add_attribute("bps", bps.to_string()))
 }
 
 fn append_audit_entry(
@@ -526,6 +509,13 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let resp = crate::msg::LateFeeConfigResponse { config };
             to_json_binary(&resp)
         }
+        QueryMsg::GetProtocolFeeBps {} => {
+            let bps = crate::state::PROTOCOL_FEE_BPS
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::ProtocolFeeBpsResponse { bps };
+            to_json_binary(&resp)
+        }
     }
 }
 
@@ -590,7 +580,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
             let stored = query_late_fee_config(&deps);
@@ -616,7 +606,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 50 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });
             set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert!(query_late_fee_config(&deps).is_some());
 
@@ -630,20 +620,24 @@ mod tests {
             setup(&mut deps);
             let unauth = non_admin(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             let err = set_late_fee_config(&mut deps, &unauth, Some(config)).unwrap_err();
             assert_eq!(err, ContractError::Unauthorized);
         }
 
         #[test]
-        fn negative_flat_amount_rejected() {
+        fn max_flat_amount_accepted() {
             let mut deps = mock_dependencies();
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: -1 });
-            let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
-            assert_eq!(err, ContractError::LateFeeConfigInvalid);
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::MAX,
+            });
+            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
+
+            let stored = query_late_fee_config(&deps);
+            assert_eq!(stored, Some(config));
         }
 
         #[test]
@@ -687,7 +681,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 200 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(200) });
             let resp = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert_eq!(resp.attributes[0].key, "action");
             assert_eq!(resp.attributes[0].value, "set_late_fee_config");
@@ -712,7 +706,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             let apr = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 });
 
             set_late_fee_config(&mut deps, &admin, Some(flat)).unwrap();
@@ -728,11 +722,91 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 0 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(0) });
             set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
             let stored = query_late_fee_config(&deps);
             assert_eq!(stored, Some(config));
+        }
+    }
+
+    mod set_protocol_fee_bps {
+        use super::*;
+
+        fn query_protocol_fee_bps(
+            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        ) -> Option<u32> {
+            let env = mock_env();
+            let msg = QueryMsg::GetProtocolFeeBps {};
+            let raw = query(deps.as_ref(), env, msg).unwrap();
+            let resp: crate::msg::ProtocolFeeBpsResponse = from_json(&raw).unwrap();
+            resp.bps
+        }
+
+        fn set_protocol_fee_bps_exec(
+            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+            sender: &Addr,
+            bps: u32,
+        ) -> Result<Response, ContractError> {
+            let env = mock_env();
+            let info = message_info(sender, &[]);
+            let msg = ExecuteMsg::SetProtocolFeeBps { bps };
+            execute(deps.as_mut(), env, info, msg)
+        }
+
+        #[test]
+        fn admin_can_set_valid_bps() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            set_protocol_fee_bps_exec(&mut deps, &admin, 500).unwrap();
+            assert_eq!(query_protocol_fee_bps(&deps), Some(500));
+        }
+
+        #[test]
+        fn non_admin_is_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let unauth = non_admin(&deps);
+
+            let err = set_protocol_fee_bps_exec(&mut deps, &unauth, 100).unwrap_err();
+            assert_eq!(err, ContractError::Unauthorized);
+        }
+
+        #[test]
+        fn bps_above_max_is_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let err =
+                set_protocol_fee_bps_exec(&mut deps, &admin, fees::MAX_PROTOCOL_FEE_BPS + 1)
+                    .unwrap_err();
+            assert_eq!(err, ContractError::ProtocolFeeBpsExceeded);
+        }
+
+        #[test]
+        fn query_returns_set_value() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            assert_eq!(query_protocol_fee_bps(&deps), None);
+
+            set_protocol_fee_bps_exec(&mut deps, &admin, 250).unwrap();
+            assert_eq!(query_protocol_fee_bps(&deps), Some(250));
+
+            set_protocol_fee_bps_exec(&mut deps, &admin, 750).unwrap();
+            assert_eq!(query_protocol_fee_bps(&deps), Some(750));
+        }
+
+        #[test]
+        fn default_is_unset() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            assert_eq!(query_protocol_fee_bps(&deps), None);
         }
     }
 }
