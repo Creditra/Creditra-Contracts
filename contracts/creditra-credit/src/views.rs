@@ -82,8 +82,10 @@ pub fn query_proof_of_reserve(
 
             if cl_matches {
                 total_credit_lines = total_credit_lines.saturating_add(1);
+            }
 
-                if cl.active {
+            if cl.active {
+                if cl_matches {
                     active_credit_lines = active_credit_lines.saturating_add(1);
 
                     total_collateral =
@@ -113,22 +115,6 @@ pub fn query_proof_of_reserve(
                         )?;
                     }
 
-                    // Include multi-collateral per-token balances for this borrower.
-                    let multi = collateral::query_borrower_collateral(deps, &cl.borrower);
-                    for (m_denom, m_amount) in &multi {
-                        if filter.is_none() || filter == Some(m_denom) {
-                            add_to_denom_collateral(&mut denom_map, m_denom, *m_amount)?;
-                        }
-                        if filter.is_none() || filter == Some(m_denom) {
-                            total_collateral =
-                                total_collateral.checked_add(*m_amount).map_err(|_| {
-                                    ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                        "Collateral overflow",
-                                    ))
-                                })?;
-                        }
-                    }
-
                     if filter.is_none() || filter == Some(&cl.credit_denom) {
                         let entry = denom_map.entry(cl.credit_denom.clone()).or_insert_with(|| {
                             DenomReserve {
@@ -146,6 +132,22 @@ pub fn query_proof_of_reserve(
                             .map_err(|_| {
                                 ContractError::Std(cosmwasm_std::StdError::generic_err(
                                     "Credit limit overflow",
+                                ))
+                            })?;
+                    }
+                }
+
+                // Include multi-collateral per-token balances for this borrower.
+                // This runs regardless of cl_matches because multi-collateral tokens
+                // may differ from the credit line's collateral_denom/credit_denom.
+                let multi = collateral::query_borrower_collateral(deps, &cl.borrower);
+                for (m_denom, m_amount) in &multi {
+                    if filter.is_none() || filter == Some(m_denom) {
+                        add_to_denom_collateral(&mut denom_map, m_denom, *m_amount)?;
+                        total_collateral =
+                            total_collateral.checked_add(*m_amount).map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Collateral overflow",
                                 ))
                             })?;
                     }
