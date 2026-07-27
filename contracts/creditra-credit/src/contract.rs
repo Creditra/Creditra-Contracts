@@ -249,7 +249,7 @@ pub fn execute_repay_draw(
     }
 
     if !fee_amount.is_zero() {
-        fees::accrue_protocol_fee(deps.branch(), &draw.denom, fee_amount)?;
+        fees::accrue_protocol_fee(&mut deps.branch(), &draw.denom, fee_amount)?;
     }
 
     draw.repaid = true;
@@ -329,10 +329,6 @@ pub fn execute_update_protocol_version(
 }
 
 /// Configure the late-fee penalty model (admin only).
-///
-/// Sets the active [`LateFeeConfig`] — either a flat amount per missed
-/// installment or an APR-based surcharge applied during delinquency.
-/// Pass `None` to clear the config (disables late fees).
 pub fn execute_set_late_fee_config(
     deps: DepsMut,
     info: MessageInfo,
@@ -344,30 +340,17 @@ pub fn execute_set_late_fee_config(
     }
 
     if let Some(ref c) = config {
-        match c {
-            LateFeeConfig::Flat(flat) => {
-                if flat.amount < 0 {
-                    return Err(ContractError::LateFeeConfigInvalid);
-                }
-            }
-            LateFeeConfig::AprBased(apr) => {
-                if apr.surcharge_bps > 10_000 {
-                    return Err(ContractError::LateFeeConfigInvalid);
-                }
-            }
-        }
+        crate::penalties::validate_late_fee_config(c)?;
     }
 
-    let has_config = config.is_some();
-    if let Some(ref c) = config {
-        LATE_FEE_CONFIG.save(deps.storage, c)?;
-    } else {
-        LATE_FEE_CONFIG.remove(deps.storage);
+    match config {
+        Some(c) => LATE_FEE_CONFIG.save(deps.storage, &c)?,
+        None => LATE_FEE_CONFIG.remove(deps.storage),
     }
 
     Ok(Response::default()
         .add_attribute("action", "set_late_fee_config")
-        .add_attribute("has_config", has_config.to_string()))
+        .add_attribute("has_config", config.is_some().to_string()))
 }
 
 /// Configure the multi-oracle quorum parameters (admin only).
@@ -441,38 +424,6 @@ pub fn execute_submit_oracle_prices(
         .add_attribute("canonical_price", canonical_price.to_string())
         .add_attribute("min_quorum_k", qcfg.min_quorum_k.to_string())
         .add_attribute("timestamp", now.to_string()))
-}
-
-/// Set or update the structured late-fee configuration (admin only).
-///
-/// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed
-/// installment, or `Some(LateFeeConfig::AprBased(…))` for an additive
-/// basis-point surcharge.  Pass `None` to remove the config.
-///
-/// # Errors
-/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
-/// - [`ContractError::InvalidAmount`] if the flat amount is zero.
-/// - [`ContractError::RateTooHigh`] if the APR surcharge exceeds 10 000 bps.
-fn execute_set_late_fee_config(
-    deps: DepsMut,
-    info: MessageInfo,
-    config: Option<crate::penalties::LateFeeConfig>,
-) -> Result<Response, ContractError> {
-    let contract_config = CONFIG.load(deps.storage)?;
-    if info.sender != contract_config.owner {
-        return Err(ContractError::Unauthorized);
-    }
-
-    if let Some(ref cfg) = config {
-        crate::penalties::validate_late_fee_config(cfg)?;
-    }
-
-    match config {
-        Some(cfg) => LATE_FEE_CONFIG.save(deps.storage, &cfg)?,
-        None => LATE_FEE_CONFIG.remove(deps.storage),
-    }
-
-    Ok(Response::default().add_attribute("action", "set_late_fee_config"))
 }
 
 /// Deposit a collateral token on behalf of a borrower (admin only).
@@ -698,7 +649,7 @@ fn query_collateral_balance(
             let raw = collateral::query_borrower_collateral(deps, &borrower_addr);
             raw.into_iter()
                 .map(|(denom, amount)| CollateralEntryResponse {
-                    denom,
+                    denom: denom.clone(),
                     amount,
                     risk_weight_bps: collateral::collateral_risk_weight_bps(deps, &denom),
                 })
@@ -784,7 +735,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
 
             let stored = query_late_fee_config(&deps);
@@ -810,7 +761,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 50 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });
             set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert!(query_late_fee_config(&deps).is_some());
 
@@ -824,20 +775,20 @@ mod tests {
             setup(&mut deps);
             let unauth = non_admin(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             let err = set_late_fee_config(&mut deps, &unauth, Some(config)).unwrap_err();
             assert_eq!(err, ContractError::Unauthorized);
         }
 
         #[test]
-        fn negative_flat_amount_rejected() {
+        fn zero_flat_amount_rejected() {
             let mut deps = mock_dependencies();
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: -1 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(0) });
             let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
-            assert_eq!(err, ContractError::LateFeeConfigInvalid);
+            assert_eq!(err, ContractError::InvalidAmount);
         }
 
         #[test]
@@ -848,7 +799,7 @@ mod tests {
 
             let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 10_001 });
             let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
-            assert_eq!(err, ContractError::LateFeeConfigInvalid);
+            assert_eq!(err, ContractError::RateTooHigh);
         }
 
         #[test]
@@ -881,7 +832,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 200 });
+            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(200) });
             let resp = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert_eq!(resp.attributes[0].key, "action");
             assert_eq!(resp.attributes[0].value, "set_late_fee_config");
@@ -906,7 +857,7 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: 100 });
+            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
             let apr = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 });
 
             set_late_fee_config(&mut deps, &admin, Some(flat)).unwrap();
@@ -916,18 +867,6 @@ mod tests {
             assert_eq!(stored, Some(apr));
         }
 
-        #[test]
-        fn zero_flat_amount_accepted() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = creator(&deps);
-
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 0 });
-            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
-
-            let stored = query_late_fee_config(&deps);
-            assert_eq!(stored, Some(config));
-        }
     }
 
     mod collateral {

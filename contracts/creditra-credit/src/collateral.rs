@@ -63,11 +63,11 @@ pub fn deposit_collateral(
     COLLATERAL_BALANCES.save(deps.storage, key, &new_balance)?;
 
     let mut tokens = BORROWER_COLLATERAL_TOKENS
-        .may_load(deps.storage, borrower.clone())?
+        .may_load(deps.storage, borrower)?
         .unwrap_or_default();
     if !tokens.contains(&denom.to_string()) {
         tokens.push(denom.to_string());
-        BORROWER_COLLATERAL_TOKENS.save(deps.storage, borrower.clone(), &tokens)?;
+        BORROWER_COLLATERAL_TOKENS.save(deps.storage, borrower, &tokens)?;
     }
 
     Ok(Response::default()
@@ -114,10 +114,10 @@ pub fn withdraw_collateral(
     if new_balance.is_zero() {
         COLLATERAL_BALANCES.remove(deps.storage, key);
         let mut tokens = BORROWER_COLLATERAL_TOKENS
-            .may_load(deps.storage, borrower.clone())?
+            .may_load(deps.storage, borrower)?
             .unwrap_or_default();
         tokens.retain(|t| t != denom);
-        BORROWER_COLLATERAL_TOKENS.save(deps.storage, borrower.clone(), &tokens)?;
+        BORROWER_COLLATERAL_TOKENS.save(deps.storage, borrower, &tokens)?;
     } else {
         COLLATERAL_BALANCES.save(deps.storage, key, &new_balance)?;
     }
@@ -148,7 +148,7 @@ pub fn query_borrower_collateral(
     borrower: &Addr,
 ) -> Vec<(String, Uint128)> {
     let tokens = BORROWER_COLLATERAL_TOKENS
-        .may_load(deps.storage, borrower.clone())
+        .may_load(deps.storage, borrower)
         .unwrap_or_default()
         .unwrap_or_default();
 
