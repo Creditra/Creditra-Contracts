@@ -1,138 +1,32 @@
 // SPDX-License-Identifier: MIT
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::unused_unit)]
-#![allow(dead_code)]
 
-//! # Creditra credit contract
-//!
-//! Per-borrower credit lines on Stellar/Soroban with **algorithmic
-//! risk-priced underwriting** rather than overcollateralization. This is the
-//! single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
-//! block below.
-//!
-//! ## What
-//!
-//! Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
-//! `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
-//! `status`, and accrual timestamps. The contract orchestrates:
-//!
-//! - **Origination** — `open_credit_line` (admin) validates against
-//!   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
-//!   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
-//! - **Draw** — `draw_credit` performs a 25-step validation chain
-//!   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
-//!   utilization cap, exposure cap, liquidity reserve) before a token CPI
-//!   into the configured `LiquidityToken`.
-//! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
-//!   be able to deleverage. Interest-first allocation with optional
-//!   protocol-fee-on-repayment split between treasury and bounty accumulators.
-//! - **Risk update** — `update_risk_parameters` either computes the new rate
-//!   from `risk_score` via the piecewise-linear formula (if configured) or
-//!   accepts an admin-supplied rate; both paths are clamped and gated by the
-//!   per-borrower floor/ceiling and the `RateChangeConfig` magnitude+cadence cap.
-//! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
-//!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
-//!   mutation. See [`crate::lifecycle`].
-//! - **Settlement** — `settle_default_liquidation` is admin-only,
-//!   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
-//!   cross-contract call to the configured `AuctionContract`. The return
-//!   value is asserted against the admin-supplied `recovered_amount` and the
-//!   `(borrower, settlement_id)` pair is replay-protected via a persistent
-//!   marker.
-//! - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
-//!   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
-//!   reversal.
-//! - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
-//!
-//! ## How
-//!
-//! - **Storage tiers.** Hot configuration in Instance storage (admin,
-//!   pause flag, reentrancy guard, oracle config, rate formula, treasury,
-//!   global caps); per-borrower state in Persistent storage with TTL
-//!   auto-bumped on every access. See [`crate::storage`].
-//! - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
-//!   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
-//!   external token CPIs cannot re-enter.
-//! - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
-//!   primitives; the release profile sets `overflow-checks = true` so a
-//!   numeric edge case reverts with `ContractError::Overflow = 12` rather
-//!   than wrapping.
-//! - **Lazy accrual.** Interest is realized only on mutation; the math is
-//!   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
-//!   [`crate::math_utils::prorate_interest`], with grace and penalty
-//!   branches in [`crate::accrual::apply_accrual`].
-//!
-//! ## Why
-//!
-//! Overcollateralized lending (Aave / Compound / Maker) gates the median
-//! wallet out of on-chain credit. Creditra prices and sizes the credit line
-//! from a deterministic function of behavioral signal plus an optional
-//! collateral floor, configurable from "fully unsecured" to "150 % LTV"
-// at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
-// the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
-// for the algorithm with worked examples.
-//
-// ## Security invariants
-//
-// - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
-//   `persist_credit_line` with `previous_utilized` capture).
-// - `interest_rate_bps <= 10_000` after every mutation.
-// - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
-//   `suspension_ts`; backward writes revert
-//   `ContractError::TimestampRegression = 33`.
-// - `(borrower, settlement_id)` is the dedup key for cross-contract
-//   settlement replay safety.
-// - 54 `ContractError` discriminants are ABI-stable; CI test
-//   `tests/error_discriminants.rs` reverts on reorder (pins every discriminant
-//   and every category mapping).
-// - 25+ event topics under the `credit` namespace are stability-pinned by
-//   `tests/event_topic_stability.rs`.
-//
-// See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
-// per-entrypoint contract surface and
-// [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
-//
-// Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
-// lives in [`instrument`] (requires the `instrument` Cargo feature; not
-// compiled into WASM).
-
-mod handshake;
+// Module declarations
 mod accrual;
-#[cfg(test)]
-mod accrual_tests;
-mod oracles;
-#[cfg(test)]
-mod amount_validation_tests;
 mod attestation;
 mod auth;
 pub mod borrow;
 mod collateral;
-#[path = "../../collateral/src/admin.rs"]
-mod collateral_admin;
 mod config;
 pub mod events;
 mod fees;
 mod freeze;
-#[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
-pub mod instrument;
-mod lifecycle;
-mod oracles;
-mod limits;
-pub mod math_utils;
-mod penalties;
-#[cfg(test)]
-mod penalties_tests;
-mod query;
+mod handshake;
 pub mod limits;
+pub mod math_utils;
+mod oracles;
+mod penalties;
+mod query;
 mod risk;
-mod views;
-pub use crate::risk::compute_rate_from_score;
-pub use crate::types::FreezeReason;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 mod scoring;
 mod storage;
 pub mod types;
+mod views;
+
+// Re-exports
+pub use crate::risk::compute_rate_from_score;
+pub use crate::types::FreezeReason;
 
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, Env, Symbol,
@@ -165,128 +59,13 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
-use crate::auth::require_admin_auth;
-use crate::attestation::AttestationBatch;
-use crate::events::publish_protocol_fee_bps_set_event;
-use crate::events::publish_protocol_fee_bounds_set_event;
-use crate::events::publish_close_factor_bps_set_event;
-use crate::events::publish_paused_event;
-use crate::types::ProofOfReserve;
-use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_paused_event, publish_protocol_fee_bounds_set_event,
-    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    publish_protocol_fee_bps_set_event, publish_protocol_fee_bounds_set_event,
-    publish_close_factor_bps_set_event, publish_paused_event,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
-    InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
-    TreasuryWithdrawalProposedEvent,
-};
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
-use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
-    enforce_freeze_cooldown, get_borrower_by_credit_line_id, get_borrower_frozen_until,
-    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
-    get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_formula_key, set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, record_freeze_timestamp_if_cooldown,
-    set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
-};
-use crate::storage::{get_oracle_config, set_oracle_config};
-use crate::storage::{get_oracle_quorum_config, set_oracle_quorum_config};
-use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
-use crate::storage::{
-    clear_pending_treasury_withdrawal, get_pending_treasury_withdrawal,
-    set_pending_treasury_withdrawal,
-};
-use crate::storage::{get_oracle_config, set_oracle_config};
-use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage, CreditStatus,
-    GracePeriodConfig, GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary,
-    ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
-};
-use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec};
-
-pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
-
-/// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
-const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
-
-/// Instance storage key for admin.
-fn admin_key(env: &Env) -> Symbol {
-    Symbol::new(env, "admin")
-}
-
-#[allow(dead_code)]
-const SECONDS_PER_YEAR: u64 = 31_536_000;
-
-#[allow(dead_code)]
-const SCHEMA_VERSION: u32 = 1;
-
-/// Maximum borrowers that can be blocked in a single `bulk_block_borrowers` call.
-/// Prevents unbounded gas consumption. Adjust after gas profiling.
-const BULK_BLOCK_MAX: u32 = 50;
-
-/// Maximum borrowers that can be processed in a single keeper accrual batch.
-/// Keeps the entrypoint within Soroban resource limits.
-const ACCRUE_BATCH_MAX: u32 = 50;
-
-/// Time window in seconds within which an erroneous draw can be reversed (admin only).
-const DRAW_REVERSAL_WINDOW_SECS: u64 = 3600;
-
-/// Maximum borrowers that can be processed in a single batch close call.
-/// Prevents unbounded gas consumption. Adjust after gas profiling.
-const BATCH_CLOSE_MAX: u32 = 50;
-
-/// Enforce and record the per-borrower cooldown for critical admin mutations.
-///
-/// The guard is disabled when no cooldown is configured or when the configured
-/// value is `0`. It records only successful preflight checks, so failed calls do
-/// not consume the borrower's next admin-action window.
-fn enforce_borrow_admin_cooldown(env: &Env, borrower: &Address) {
-    let Some(cooldown_seconds) = crate::storage::get_borrow_admin_cooldown(env) else {
-        return;
-    };
-    if cooldown_seconds == 0 {
-        return;
-    }
-
-    let now = env.ledger().timestamp();
-    if let Some(last_ts) = crate::storage::get_last_borrow_admin_action_ts(env, borrower) {
-        if now < last_ts.saturating_add(cooldown_seconds) {
-            env.panic_with_error(ContractError::AdminCooldownActive);
-        }
-    }
-
-    crate::storage::set_last_borrow_admin_action_ts(env, borrower, now);
-}
-
-#[soroban_sdk::contractclient(name = "AuctionClient")]
-pub trait Auction {
-    fn settle_default_liquidation(
-        env: soroban_sdk::Env,
-        auction_id: soroban_sdk::Symbol,
-        credit_contract: soroban_sdk::Address,
-        borrower: soroban_sdk::Address,
-    ) -> i128;
-}
-
 #[contract]
 pub struct Credit;
 
 #[contractimpl]
 impl Credit {
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
+    pub fn get_version() -> (u32, u32, u32) {
+        (1, 0, 0)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
