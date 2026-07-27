@@ -21,9 +21,11 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Build WASM
-        run: cargo build --release -p creditra-credit --target wasm32-unknown-unknown
+        working-directory: ./contracts/creditra-credit
+        run: cargo build --release --target wasm32-unknown-unknown
 
       - name: Verify WASM size threshold
+        working-directory: ./contracts/creditra-credit
         run: |
           set -euo pipefail
           WASM_PATH="target/wasm32-unknown-unknown/release/creditra_credit.wasm"

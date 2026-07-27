@@ -131,6 +131,28 @@ pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg")
 /// Storage key for the last resolved oracle price record.
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
 
+/// Default treasury fee share when no per-market override is configured.
+///
+/// Stored as basis points (10_000 = 100 % to treasury). When absent the
+/// runtime default [`DEFAULT_TREASURY_FEE_SHARE_BPS`] (10_000) applies.
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("dfsb");
+
+/// Per-market treasury fee-share override.
+///
+/// Maps market denomination → treasury share in basis points.
+/// Overrides [`DEFAULT_FEE_SHARE_BPS`] for that market when present.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mfsb");
+
+/// Accumulated treasury balance per market denomination.
+///
+/// Credited during `accrue_protocol_fee` and debited by `withdraw_treasury`.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("trb");
+
+/// Accumulated bounty balance per market denomination.
+///
+/// Credited during `accrue_protocol_fee` and debited by `withdraw_bounty`.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bnb");
+
 /// Storage key for the structured late-fee configuration.
 ///
 /// When absent the contract has no late-fee penalty configured.

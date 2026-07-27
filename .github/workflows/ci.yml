@@ -118,7 +118,8 @@ jobs:
             ${{ runner.os }}-cargo-wasm-
 
       - name: Build contract (WASM)
-        run: cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+        working-directory: ./contracts/creditra-credit
+        run: cargo build --release --target wasm32-unknown-unknown
 
       - name: Verify WASM size threshold
         run: |

@@ -6,7 +6,6 @@ use cosmwasm_std::{
 use crate::collateral;
 use crate::error::ContractError;
 use crate::handshake::{self, ProtocolVersion};
-use crate::limits;
 use crate::msg::{
     CollateralAllowlistResponse, CollateralBalanceResponse, CollateralEntryResponse,
     ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
