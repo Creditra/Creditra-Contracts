@@ -801,4 +801,3 @@ pub struct PauseReason {
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
 }
-

@@ -110,8 +110,11 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod oracles;
+
 #[path = "../../lifecycle/src/views.rs"]
 mod lifecycle_views;
+
 mod limits;
 pub mod math_utils;
 mod query;
@@ -166,6 +169,11 @@ use crate::types::{
     GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
     ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
+
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
+use auth::require_admin_auth;
+
 
 #[cfg(test)]
 mod boundary_tests;
