@@ -1,4 +1,5 @@
 pub mod accrual;
+pub mod collateral;
 pub mod contract;
 pub mod error;
 pub mod errors;

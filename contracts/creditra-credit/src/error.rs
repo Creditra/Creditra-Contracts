@@ -84,42 +84,42 @@ pub enum ContractError {
     #[error("Overflow")]
     Overflow,
 
-    /// Invalid structured late-fee configuration (e.g. negative flat amount
-    /// or APR basis points exceeding 10 000).
-    #[error("LateFeeConfigInvalid")]
-    LateFeeConfigInvalid,
+    /// The collateral token denomination is not in the allowlist.
+    #[error("CollateralTokenNotAllowed")]
+    CollateralTokenNotAllowed,
 
-    /// Fee-share basis points exceed 10 000 (100 %).
+    /// Rate exceeds the configured ceiling for this borrower.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+
+    /// The fee share basis-point value is invalid (out of range).
     #[error("InvalidFeeShareBps")]
     InvalidFeeShareBps,
 
-    /// Treasury balance is less than the requested withdrawal amount.
+    /// Treasury balance is insufficient to cover the requested withdrawal.
     #[error("InsufficientTreasuryBalance")]
     InsufficientTreasuryBalance,
 
-    /// Bounty-pool balance is less than the requested withdrawal amount.
+    /// Bounty balance is insufficient to cover the requested withdrawal.
     #[error("InsufficientBountyBalance")]
     InsufficientBountyBalance,
 
-    /// Treasury destination address has not been configured.
+    /// Treasury address has not been configured.
     #[error("TreasuryAddressNotSet")]
     TreasuryAddressNotSet,
 
-    /// Bounty destination address has not been configured.
+    /// Bounty address has not been configured.
     #[error("BountyAddressNotSet")]
     BountyAddressNotSet,
 
-    /// Rate or ceiling exceeds the absolute protocol maximum.
-    #[error("RateCeilingExceeded")]
-    RateCeilingExceeded,
+    /// Late-fee configuration is invalid.
+    #[error("LateFeeConfigInvalid")]
+    LateFeeConfigInvalid,
 }
 
 impl ContractError {
-    /// Classify this error into a high-level [`ContractErrorCategory`].
-    ///
-    /// Useful for generic callers that only care about the error family
-    /// (e.g. routing auth failures differently from validation issues).
-    pub const fn category(&self) -> ContractErrorCategory {
+    /// Return the high-level category for this error variant.
+    pub fn category(&self) -> ContractErrorCategory {
         match self {
             ContractError::Std(_) => ContractErrorCategory::Std,
             ContractError::CreditLineNotFound(_) => ContractErrorCategory::NotFound,
@@ -127,19 +127,20 @@ impl ContractError {
             ContractError::Unauthorized => ContractErrorCategory::Auth,
             ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
             ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::CollateralTokenNotAllowed => ContractErrorCategory::Collateral,
             ContractError::InvalidAmount => ContractErrorCategory::Validation,
             ContractError::AlreadySettled => ContractErrorCategory::State,
             ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
             ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
             ContractError::RateTooHigh => ContractErrorCategory::Validation,
-            ContractError::Overflow => ContractErrorCategory::Validation,
-            ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
+            ContractError::Overflow => ContractErrorCategory::State,
+            ContractError::RateCeilingExceeded => ContractErrorCategory::Validation,
             ContractError::InvalidFeeShareBps => ContractErrorCategory::Validation,
             ContractError::InsufficientTreasuryBalance => ContractErrorCategory::Collateral,
             ContractError::InsufficientBountyBalance => ContractErrorCategory::Collateral,
             ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
-            ContractError::RateCeilingExceeded => ContractErrorCategory::Validation,
+            ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
         }
     }
 }
@@ -361,5 +362,14 @@ mod tests {
         assert_eq!(err.to_string(), "BountyAddressNotSet");
         assert_eq!(err, ContractError::BountyAddressNotSet);
         assert_ne!(err, ContractError::TreasuryAddressNotSet);
+    }
+
+    #[test]
+    fn collateral_token_not_allowed_display_and_equality() {
+        let err = ContractError::CollateralTokenNotAllowed;
+        assert_eq!(err.to_string(), "CollateralTokenNotAllowed");
+        assert_eq!(err, ContractError::CollateralTokenNotAllowed);
+        assert_ne!(err, ContractError::InsufficientCollateralBalance);
+        assert_ne!(err, ContractError::Unauthorized);
     }
 }

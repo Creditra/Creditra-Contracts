@@ -12,7 +12,8 @@
 //! The treasury share is computed with floor rounding; the bounty pool receives
 //! the remainder so no tokens are lost to integer division.
 
-use cosmwasm_std::{Addr, Deps, DepsMut, Uint128};
+use cosmwasm_std::{Deps, DepsMut, Uint128};
+use cw_storage_plus::Item;
 
 use crate::error::ContractError;
 use crate::state::{
@@ -26,8 +27,10 @@ pub const MAX_FEE_SHARE_BPS: u32 = 10_000;
 /// Default treasury share when unset: 100% to treasury (backward compatible).
 pub const DEFAULT_TREASURY_FEE_SHARE_BPS: u32 = 10_000;
 
-/// Maximum protocol fee in basis points (10% = 1_000 bps).
-pub const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
+/// Protocol fee in basis points charged on draw repayment.
+///
+/// When absent no fee is charged. Stored as an `Item<u32>` in instance storage.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
 
 /// Result of splitting a protocol fee between treasury and bounty accumulators.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,8 +54,9 @@ pub struct FeeSplitAmounts {
 /// # Examples
 ///
 /// ```
-/// use creditra_credit::fees::split_protocol_fee;
-/// use cosmwasm_std::Uint128;
+/// # use cosmwasm_std::Uint128;
+/// # use creditra_credit::fees::split_protocol_fee;
+/// // 50/50 split
 /// let split = split_protocol_fee(Uint128::new(100), 5_000).unwrap();
 /// assert_eq!(split.treasury_amount, Uint128::new(50));
 /// assert_eq!(split.bounty_amount, Uint128::new(50));
