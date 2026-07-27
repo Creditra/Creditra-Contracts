@@ -83,6 +83,10 @@ pub enum ContractError {
     /// Arithmetic overflow detected in checked computation.
     #[error("Overflow")]
     Overflow,
+
+    /// The collateral token denomination is not in the allowlist.
+    #[error("CollateralTokenNotAllowed")]
+    CollateralTokenNotAllowed,
 }
 
 #[cfg(test)]
@@ -302,5 +306,14 @@ mod tests {
         assert_eq!(err.to_string(), "BountyAddressNotSet");
         assert_eq!(err, ContractError::BountyAddressNotSet);
         assert_ne!(err, ContractError::TreasuryAddressNotSet);
+    }
+
+    #[test]
+    fn collateral_token_not_allowed_display_and_equality() {
+        let err = ContractError::CollateralTokenNotAllowed;
+        assert_eq!(err.to_string(), "CollateralTokenNotAllowed");
+        assert_eq!(err, ContractError::CollateralTokenNotAllowed);
+        assert_ne!(err, ContractError::InsufficientCollateralBalance);
+        assert_ne!(err, ContractError::Unauthorized);
     }
 }
