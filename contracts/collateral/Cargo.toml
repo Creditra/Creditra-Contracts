@@ -1,7 +1,20 @@
-[[test]]
-name = "admin_cooldown"
-path = "tests/admin_cooldown.rs"
+[package]
+name = "creditra-collateral"
+version = "0.1.0"
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+creditra-credit = { path = "../credit" }
 
 [[test]]
-name = "views_capabilities"
-path = "tests/views_capabilities.rs"
+name = "gas_snap"
+path = "tests/gas_snap.rs"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+creditra-credit = { path = "../credit" }
+proptest = "1.4"
