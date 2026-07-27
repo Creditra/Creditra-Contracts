@@ -99,9 +99,13 @@ mod accrual;
 mod accrual_tests;
 #[cfg(test)]
 mod amount_validation_tests;
+mod attestation;
 mod auth;
 mod borrow;
+mod penalties;
 mod collateral;
+#[path = "../../collateral/src/admin.rs"]
+mod collateral_admin;
 mod config;
 pub mod events;
 mod fees;
@@ -117,6 +121,7 @@ mod lifecycle_views;
 
 mod limits;
 pub mod math_utils;
+mod oracles;
 mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
@@ -127,34 +132,38 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
+mod views;
 
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
 };
 
-use crate::auth::require_admin_auth;
+use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event,
-    publish_token_rescued_event, publish_treasury_withdrawal_executed,
-    publish_treasury_withdrawal_proposed, ContractUpgradedEvent, CreditLineEvent,
-    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
+    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
+    publish_contract_upgraded_event, publish_credit_line_event,
+    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
+    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
+    publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
+    publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
+    publish_repayment_event, publish_token_rescued_event,
+    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
+    CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::penalties::LateFeeConfig;
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
-    clear_pending_treasury_withdrawal, get_borrower_by_credit_line_id, get_borrower_frozen_until,
-    get_credit_line as storage_get_credit_line, get_last_draw_ts as storage_get_last_draw_ts,
-    get_oracle_config, get_oracle_quorum_config, get_pending_treasury_withdrawal,
-    get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    clear_pending_treasury_withdrawal, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
+    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
     proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
@@ -273,7 +282,7 @@ fn enforce_borrow_admin_cooldown(env: &Env, borrower: &Address) {
     let now = env.ledger().timestamp();
     if let Some(last_ts) = crate::storage::get_last_borrow_admin_action_ts(env, borrower) {
         if now < last_ts.saturating_add(cooldown_seconds) {
-            env.panic_with_error(ContractError::AdminCooldownActive);
+            env.panic_with_error(ContractError::RiskAdminCooldownActive);
         }
     }
 
@@ -296,7 +305,7 @@ fn enforce_accrual_admin_cooldown(env: &Env, borrower: &Address) {
     let now = env.ledger().timestamp();
     if let Some(last_ts) = crate::storage::get_last_accrual_admin_action_ts(env, borrower) {
         if now < last_ts.saturating_add(cooldown_seconds) {
-            env.panic_with_error(ContractError::AdminCooldownActive);
+            env.panic_with_error(ContractError::RiskAdminCooldownActive);
         }
     }
 
@@ -405,10 +414,6 @@ impl Credit {
         crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
     }
 
-    /// Gets the minimum collateral ratio in basis points.
-    pub fn get_min_collateral_ratio_bps(env: Env) -> Option<u32> {
-        crate::storage::get_min_collateral_ratio_bps(&env)
-    }
 
     /// Open a new credit line for a borrower (admin only).
     pub fn open_credit_line(
@@ -760,7 +765,7 @@ impl Credit {
             previous_utilized,
             Some(previous_status),
         );
-        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay);
+        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
 
         let _timestamp = env.ledger().timestamp();
         publish_interest_accrued_event(
@@ -4861,7 +4866,7 @@ mod test_mock_liquidity_token_extended {
         let _ = ContractError::UtilizationNotZero;
         let _ = ContractError::Reentrancy;
         let _ = ContractError::Overflow;
-        let _ = ContractError::LimitDecreaseRequiresRepayment;
+
         let _ = ContractError::AlreadyInitialized;
         let _ = ContractError::DrawsFrozen;
     }

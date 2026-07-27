@@ -137,6 +137,7 @@ pub struct DefaultLiquidationSettledEvent {
     pub recovered_amount: i128,
     pub remaining_utilized_amount: i128,
     pub status: CreditStatus,
+    pub close_factor_bps: u32,
 }
 
 #[contracttype]
@@ -178,6 +179,7 @@ pub struct DrawReversedEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DrawsFrozenEvent {
     pub frozen: bool,
+    pub reason: crate::types::FreezeReason,
 }
 
 #[contracttype]
@@ -185,6 +187,7 @@ pub struct DrawsFrozenEvent {
 pub struct BorrowerBlockedEvent {
     pub borrower: Address,
     pub blocked: bool,
+    pub ledger: u32,
 }
 
 #[contracttype]
@@ -295,10 +298,10 @@ pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
 }
 
-pub fn publish_draws_frozen_event(env: &Env, frozen: bool) {
+pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types::FreezeReason) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "drw_freeze")),
-        DrawsFrozenEvent { frozen },
+        DrawsFrozenEvent { frozen, reason },
     );
 }
 
@@ -651,5 +654,56 @@ pub fn publish_risk_admin_cooldown_configured(env: &Env, cooldown_seconds: u64) 
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "rad_cooldown")),
         RiskAdminCooldownConfiguredEvent { cooldown_seconds },
+    );
+}
+
+/// Borrow lifecycle phases.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BorrowLifecyclePhase {
+    Opened,
+    Drawn,
+    Repaid,
+    Suspended,
+    Reinstated,
+    Defaulted,
+    Closed,
+    DebtForgiven,
+}
+
+/// Event emitted during borrow lifecycle changes (draw, repay, forgive).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowLifecycleEvent {
+    pub borrower: Address,
+    pub phase: BorrowLifecyclePhase,
+    pub status: CreditStatus,
+    pub utilized_amount: i128,
+    pub credit_limit: i128,
+    pub interest_rate_bps: u32,
+    pub timestamp: u64,
+}
+
+/// Event emitted when debt is forgiven by the admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebtForgivenEvent {
+    pub borrower: Address,
+    pub amount_forgiven: i128,
+    pub remaining_accrued_interest: i128,
+    pub new_utilized_amount: i128,
+}
+
+pub fn publish_borrow_lifecycle_event(env: &Env, event: BorrowLifecycleEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "borrow_lc")),
+        event,
+    );
+}
+
+pub fn publish_debt_forgiven_event(env: &Env, event: DebtForgivenEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "debt_frgv")),
+        event,
     );
 }
