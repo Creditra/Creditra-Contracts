@@ -142,7 +142,7 @@ use events::{
     publish_credit_line_event, publish_drawn_event, publish_repayment_event,
     CreditLineEvent, DrawnEvent, RepaymentEvent,
 };
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, BorrowStateSnapshot};
 use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
 use auth::require_admin_auth;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1561,6 +1561,25 @@ impl Credit {
     /// - `can_self_suspend` — self-suspend pre-flight checks pass
     pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
         views::borrow_capabilities(env, borrower)
+    }
+
+    /// Return a full state snapshot for a borrower's credit line.
+    ///
+    /// Read-only view that returns a comprehensive snapshot of the borrower's
+    /// current state including credit line data, collateral balance, and borrow
+    /// capabilities. This is useful for off-chain monitoring, risk dashboards,
+    /// and debugging.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`BorrowStateSnapshot`] struct containing:
+    /// - `credit_line` — The full [`CreditLineData`] if it exists, or `None`.
+    /// - `collateral_balance` — The borrower's collateral balance.
+    /// - `capabilities` — The borrower's current [`BorrowCapabilities`].
+    pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
+        views::get_borrow_state(env, borrower)
     }
 
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
