@@ -1,6 +1,7 @@
 use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
 use std::collections::BTreeMap;
 
+use crate::collateral;
 use crate::error::ContractError;
 use crate::msg::{
     BorrowerHealthFactorResponse, CreditLineHealthResponse, DenomReserve, DrawAuditTrailResponse,
@@ -81,8 +82,10 @@ pub fn query_proof_of_reserve(
 
             if cl_matches {
                 total_credit_lines = total_credit_lines.saturating_add(1);
+            }
 
-                if cl.active {
+            if cl.active {
+                if cl_matches {
                     active_credit_lines = active_credit_lines.saturating_add(1);
 
                     total_collateral =
@@ -102,26 +105,14 @@ pub fn query_proof_of_reserve(
                                 ))
                             })?;
 
+                    // Include per-credit-line collateral.
+                    let cl_collateral = cl.collateral_amount;
                     if filter.is_none() || filter == Some(&cl.collateral_denom) {
-                        let entry =
-                            denom_map
-                                .entry(cl.collateral_denom.clone())
-                                .or_insert_with(|| DenomReserve {
-                                    denom: cl.collateral_denom.clone(),
-                                    collateral_amount: Uint128::zero(),
-                                    credit_limit: Uint128::zero(),
-                                    drawn_amount: Uint128::zero(),
-                                    repaid_amount: Uint128::zero(),
-                                    net_outstanding: Uint128::zero(),
-                                });
-                        entry.collateral_amount = entry
-                            .collateral_amount
-                            .checked_add(cl.collateral_amount)
-                            .map_err(|_| {
-                                ContractError::Std(cosmwasm_std::StdError::generic_err(
-                                    "Collateral overflow",
-                                ))
-                            })?;
+                        add_to_denom_collateral(
+                            &mut denom_map,
+                            &cl.collateral_denom,
+                            cl_collateral,
+                        )?;
                     }
 
                     if filter.is_none() || filter == Some(&cl.credit_denom) {
@@ -141,6 +132,22 @@ pub fn query_proof_of_reserve(
                             .map_err(|_| {
                                 ContractError::Std(cosmwasm_std::StdError::generic_err(
                                     "Credit limit overflow",
+                                ))
+                            })?;
+                    }
+                }
+
+                // Include multi-collateral per-token balances for this borrower.
+                // This runs regardless of cl_matches because multi-collateral tokens
+                // may differ from the credit line's collateral_denom/credit_denom.
+                let multi = collateral::query_borrower_collateral(deps, &cl.borrower);
+                for (m_denom, m_amount) in &multi {
+                    if filter.is_none() || filter == Some(m_denom) {
+                        add_to_denom_collateral(&mut denom_map, m_denom, *m_amount)?;
+                        total_collateral =
+                            total_collateral.checked_add(*m_amount).map_err(|_| {
+                                ContractError::Std(cosmwasm_std::StdError::generic_err(
+                                    "Collateral overflow",
                                 ))
                             })?;
                     }
@@ -251,14 +258,20 @@ pub fn query_borrower_health_factor(
                     }
                 }
 
-                // Compute health factor
+                // Aggregate credit-line collateral + multi-collateral (risk-weighted).
+                let multi_total = collateral::weighted_collateral_total(deps, &cl.borrower)?;
+                let effective_collateral = cl
+                    .collateral_amount
+                    .checked_add(multi_total)
+                    .map_err(StdError::from)?;
+
+                // Compute health factor based on effective collateral.
                 let health_factor_bps = if utilized_amount.is_zero() {
                     u32::MAX
-                } else if cl.collateral_amount.is_zero() || cl.credit_amount.is_zero() {
+                } else if effective_collateral.is_zero() || cl.credit_amount.is_zero() {
                     0
                 } else {
-                    let numerator = cl
-                        .credit_amount
+                    let numerator = effective_collateral
                         .checked_mul(Uint128::from(10_000u32))
                         .map_err(StdError::from)?;
                     let result = numerator
@@ -320,6 +333,28 @@ fn build_response(
         repaid: draw.repaid,
         events,
     })
+}
+
+/// Add `amount` to a denomination's collateral accumulator in the denom map.
+fn add_to_denom_collateral(
+    denom_map: &mut BTreeMap<String, DenomReserve>,
+    denom: &str,
+    amount: Uint128,
+) -> Result<(), ContractError> {
+    let entry = denom_map.entry(denom.to_string()).or_insert_with(|| {
+        DenomReserve {
+            denom: denom.to_string(),
+            collateral_amount: Uint128::zero(),
+            credit_limit: Uint128::zero(),
+            drawn_amount: Uint128::zero(),
+            repaid_amount: Uint128::zero(),
+            net_outstanding: Uint128::zero(),
+        }
+    });
+    entry.collateral_amount = entry.collateral_amount.checked_add(amount).map_err(|_| {
+        ContractError::Std(cosmwasm_std::StdError::generic_err("Collateral overflow"))
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -758,8 +793,9 @@ mod tests {
             let resp = query_health(&deps, &borrower_str);
             assert_eq!(resp.credit_lines.len(), 1);
             assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(100u128));
-            // health = limit * 10_000 / utilized = 500 * 10_000 / 100 = 50_000 bps
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
+            // health = effective_collateral * 10_000 / utilized
+            //        = 1000 * 10_000 / 100 = 100_000 bps
+            assert_eq!(resp.credit_lines[0].health_factor_bps, 100_000);
         }
 
         #[test]
@@ -774,8 +810,8 @@ mod tests {
             let borrower_str = borrower(&deps).to_string();
             let resp = query_health(&deps, &borrower_str);
             assert_eq!(resp.credit_lines[0].utilized_amount, Uint128::from(300u128));
-            // health = 500 * 10_000 / 300 = 16_666 bps
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 16_666);
+            // health = collateral * 10_000 / utilized = 1000 * 10_000 / 300 = 33_333 bps
+            assert_eq!(resp.credit_lines[0].health_factor_bps, 33_333);
 
             // Repay first draw
             repay_draw(&mut deps, 0, 0);
@@ -785,16 +821,16 @@ mod tests {
                 resp2.credit_lines[0].utilized_amount,
                 Uint128::from(200u128)
             );
-            // health = 500 * 10_000 / 200 = 25_000 bps
-            assert_eq!(resp2.credit_lines[0].health_factor_bps, 25_000);
+            // health = 1000 * 10_000 / 200 = 50_000 bps
+            assert_eq!(resp2.credit_lines[0].health_factor_bps, 50_000);
         }
 
         #[test]
         fn handles_multiple_credit_lines_for_same_borrower() {
             let mut deps = mock_dependencies();
             setup_contract(&mut deps);
-            create_credit_line(&mut deps); // cl 0
-            create_credit_line(&mut deps); // cl 1
+            create_credit_line(&mut deps); // cl 0, collateral 1000
+            create_credit_line(&mut deps); // cl 1, collateral 1000
 
             create_draw(&mut deps, 0, "100");
             create_draw(&mut deps, 1, "250");
@@ -803,17 +839,19 @@ mod tests {
             let resp = query_health(&deps, &borrower_str);
             assert_eq!(resp.credit_lines.len(), 2);
             assert_eq!(resp.credit_lines[0].credit_line_id, 0);
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
+            // health = 1000 * 10_000 / 100 = 100_000
+            assert_eq!(resp.credit_lines[0].health_factor_bps, 100_000);
             assert_eq!(resp.credit_lines[1].credit_line_id, 1);
-            assert_eq!(resp.credit_lines[1].health_factor_bps, 20_000);
+            // health = 1000 * 10_000 / 250 = 40_000
+            assert_eq!(resp.credit_lines[1].health_factor_bps, 40_000);
         }
 
         #[test]
         fn excludes_inactive_credit_lines() {
             let mut deps = mock_dependencies();
             setup_contract(&mut deps);
-            create_credit_line(&mut deps); // cl 0
-            create_credit_line(&mut deps); // cl 1
+            create_credit_line(&mut deps); // cl 0, collateral 1000
+            create_credit_line(&mut deps); // cl 1, collateral 1000
 
             create_draw(&mut deps, 0, "100");
             create_draw(&mut deps, 1, "250");
@@ -826,7 +864,8 @@ mod tests {
             let resp = query_health(&deps, &borrower_str);
             assert_eq!(resp.credit_lines.len(), 1);
             assert_eq!(resp.credit_lines[0].credit_line_id, 0);
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 50_000);
+            // health = 1000 * 10_000 / 100 = 100_000
+            assert_eq!(resp.credit_lines[0].health_factor_bps, 100_000);
         }
 
         #[test]

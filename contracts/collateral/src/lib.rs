@@ -61,31 +61,16 @@
 //!
 //! [`CollateralError`]: errors::CollateralError
 
-#![cfg_attr(not(test), no_std)]
 
-mod errors;
+pub mod views;
+pub use views::*;
 
-// Re-export the catalog at the crate root for SDK consumers.
 pub use errors::CollateralError;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Soroban contract root placeholder.
-//
-// This crate currently publishes only the [`CollateralError`] catalog.
-// The [`Collateral`] placeholder below guarantees downstream tooling
-// (`scripts/build_wasm.sh`, `soroban contract build`, the CI wasm-size
-// gate) finds a valid Soroban contract root and can size the wasm
-// correctly. Future PRs that implement actual collateral entrypoints
-// will add `#[contractimpl]` blocks here; the [`CollateralError`] ABI
-// surface is unchanged regardless.
-// ═══════════════════════════════════════════════════════════════════════════
 
 use soroban_sdk::contract;
 
 /// Soroban contract root for the collateral domain.
-///
-/// Methods are added in subsequent PRs that implement collateral deposit,
-/// withdrawal, and ratio-check logic. The [`CollateralError`] catalog
-/// is reusable from this contract's methods without any additional wiring.
+
 #[contract]
 pub struct Collateral;
+

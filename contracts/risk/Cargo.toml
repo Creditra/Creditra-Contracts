@@ -24,6 +24,10 @@ name = "risk_admin_cooldown"
 path = "tests/risk_admin_cooldown.rs"
 required-features = ["instrument"]
 
+[[test]]
+name = "rustdoc_risk_tests"
+path = "tests/rustdoc_risk_tests.rs"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 serde = { version = "1.0", features = ["derive"] }

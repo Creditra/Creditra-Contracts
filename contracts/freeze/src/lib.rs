@@ -8,3 +8,6 @@
 //! per-entrypoint authorization boundary tests under `tests/auth_boundary.rs`.
 
 pub use creditra_credit::*;
+
+pub mod errors;
+pub use errors::*;

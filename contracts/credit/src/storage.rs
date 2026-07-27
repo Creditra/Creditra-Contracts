@@ -211,6 +211,8 @@ pub enum DataKey {
     BountyBalance,
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
+    /// Per-borrower per-token collateral balance (multi-token support).
+    CollateralBalanceV2(Address, Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
     /// Minimum ledger seconds between critical collateral admin actions (v7).

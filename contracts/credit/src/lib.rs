@@ -114,13 +114,19 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod oracles;
+
 #[path = "../../lifecycle/src/views.rs"]
 mod lifecycle_views;
+
 mod limits;
 pub mod math_utils;
 mod oracles;
 mod query;
+#[path = "../../query/src/views.rs"]
+mod query_views;
 mod risk;
+mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 mod scoring;
@@ -173,6 +179,11 @@ use crate::types::{
     ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 
+use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
+use auth::require_admin_auth;
+
+
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
@@ -187,7 +198,47 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
-
+use crate::auth::{require_admin, require_admin_auth};
+use crate::attestation::AttestationBatch;
+use crate::events::{
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
+    publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
+    publish_oracle_quorum_price_set_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
+    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+};
+use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::penalties::LateFeeConfig;
+use crate::storage::{
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
+    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
+    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    is_borrower_blocked as storage_is_borrower_blocked,
+    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
+    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
+};
+use crate::types::{
+    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
+    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
+    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+};
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -348,6 +399,20 @@ impl Credit {
         config::set_liquidity_source(env, reserve_address)
     }
 
+    /// Sets the minimum collateral ratio in basis points (admin only).
+    /// Set the minimum collateral ratio required for borrowing (admin only).
+    ///
+    /// # Arguments
+    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
+    ///
+    /// # Errors
+    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
+    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
+        require_admin_auth(&env);
+        assert_not_paused(&env);
+        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
+    }
 
 
     /// Open a new credit line for a borrower (admin only).
@@ -1375,14 +1440,36 @@ impl Credit {
         lifecycle_views::capabilities(env, borrower)
     }
 
+    /// Deposit collateral tokens from the borrower into the contract.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    ///
+    /// # Errors
+    /// * `ContractError::InvalidAmount` if `amount <= 0`
+    /// * `ContractError::MissingLiquidityToken` if collateral token not configured
+    /// * `ContractError::Overflow` on arithmetic overflow
     pub fn deposit_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::deposit_collateral(&env, &borrower, amount);
     }
 
+    /// Withdraw collateral tokens to the borrower.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    ///
+    /// # Errors
+    /// * `ContractError::InvalidAmount` if `amount <= 0`
+    /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
+    /// * `ContractError::CollateralRatioBelowMinimum` if withdrawal would violate ratio
     pub fn withdraw_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::withdraw_collateral(&env, &borrower, amount);
     }
 
+    /// Get the current collateral balance for a borrower.
+    ///
+    /// # Returns
+    /// The collateral balance in the native token (as `i128`).
     pub fn get_collateral(env: Env, borrower: Address) -> i128 {
         crate::collateral::get_collateral(&env, &borrower)
     }
@@ -1399,6 +1486,14 @@ impl Credit {
     ///   configured admin collateral cool-off has not elapsed since the last
     ///   critical collateral admin action.
     /// - Reverts if caller is not the configured admin.
+    /// Set the risk weight for a collateral asset (admin only).
+    ///
+    /// # Arguments
+    /// * `asset` - The collateral asset address
+    /// * `weight_bps` - Risk weight in basis points
+    ///
+    /// # Errors
+    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
     pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
         collateral_admin::set_collateral_risk_weight(&env, &asset, weight_bps);
     }
@@ -1410,6 +1505,14 @@ impl Credit {
     /// # Errors
     /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
     ///   configured admin collateral cool-off has not elapsed.
+    /// Set the minimum collateral ratio required for borrowing (admin only).
+    ///
+    /// # Arguments
+    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
+    ///
+    /// # Errors
+    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
     pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
         collateral_admin::set_min_collateral_ratio_bps(&env, ratio_bps);
     }
@@ -1475,6 +1578,15 @@ impl Credit {
     ///
     /// Emits `("credit", "col_prel")` → [`crate::events::CollateralPartialReleasedEvent`]
     /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
+    /// Allow a borrower to release a portion of their collateral while keeping health factor above threshold.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    ///
+    /// # Errors
+    /// * `ContractError::InvalidAmount` if `amount <= 0`
+    /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
+    /// * `ContractError::CollateralRatioBelowMinimum` if release would violate ratio
     pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::partial_release_collateral(&env, &borrower, amount);
     }
@@ -1490,11 +1602,22 @@ impl Credit {
     /// # Errors
     /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
     ///   configured admin collateral cool-off has not elapsed.
+    /// Set the list of allowed collateral tokens (admin only).
+    ///
+    /// # Arguments
+    /// * `tokens` - Vector of token addresses to allow
+    ///
+    /// # Errors
+    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
     pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
         collateral_admin::set_collateral_token_allowlist(&env, &tokens);
     }
 
     /// Query: return the current collateral token allowlist.
+    /// Get the list of allowed collateral tokens.
+    ///
+    /// # Returns
+    /// Vector of allowed token addresses.
     pub fn get_collateral_tokens(env: Env) -> soroban_sdk::Vec<Address> {
         crate::storage::get_collateral_token_allowlist(&env)
     }
@@ -1503,6 +1626,15 @@ impl Credit {
     ///
     /// Requires borrower `require_auth`. Reverts with `MissingLiquidityToken` if
     /// `token` is not on the allowlist.
+    /// Deposit a specific allowed collateral token into the contract.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    ///
+    /// # Errors
+    /// * `ContractError::InvalidAmount` if `amount <= 0`
+    /// * `ContractError::MissingLiquidityToken` if token not allowed
+    /// * `ContractError::Overflow` on arithmetic overflow
     pub fn deposit_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::deposit_collateral_token(&env, &borrower, &token, amount);
     }
@@ -1511,11 +1643,24 @@ impl Credit {
     ///
     /// Requires borrower `require_auth`. Reverts with `InsufficientCollateralBalance`
     /// if the borrower's balance for `token` is below `amount`.
+    /// Withdraw a specific allowed collateral token to the borrower.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    ///
+    /// # Errors
+    /// * `ContractError::InvalidAmount` if `amount <= 0`
+    /// * `ContractError::MissingLiquidityToken` if token not allowed
+    /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
     pub fn withdraw_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::withdraw_collateral_token(&env, &borrower, &token, amount);
     }
 
     /// Query: return a borrower's balance for a specific collateral token.
+    /// Get the balance of a specific collateral token for a borrower.
+    ///
+    /// # Returns
+    /// The collateral balance for the specified token (as `i128`).
     pub fn get_collateral_for_token(env: Env, borrower: Address, token: Address) -> i128 {
         crate::collateral::get_collateral_for_token(&env, &borrower, &token)
     }

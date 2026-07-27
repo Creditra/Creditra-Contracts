@@ -2,11 +2,11 @@
 name = "creditra-query"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra query (v7) structured events and error stability tests"
+description = "Creditra query (v7) structured events, capabilities view, and error stability tests"
 license = "MIT"
 keywords = ["soroban", "stellar", "query", "credit", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
-readme = "../../README.md"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -22,6 +22,10 @@ path = "tests/err_stab.rs"
 [[test]]
 name = "events"
 path = "tests/events.rs"
+
+[[test]]
+name = "capabilities"
+path = "tests/capabilities.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
