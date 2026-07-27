@@ -820,7 +820,9 @@ mod tests {
 
             let mut inactive = CREDIT_LINES.load(deps.as_ref().storage, 1).unwrap();
             inactive.active = false;
-            CREDIT_LINES.save(deps.as_mut().storage, 1, &inactive).unwrap();
+            CREDIT_LINES
+                .save(deps.as_mut().storage, 1, &inactive)
+                .unwrap();
 
             let borrower_str = borrower(&deps).to_string();
             let resp = query_health(&deps, &borrower_str);

@@ -54,7 +54,6 @@ pub fn is_price_stale(
     current_timestamp.saturating_sub(record.timestamp) > cfg.max_age_seconds
 }
 
-
 /// Resolve a single canonical price from N submitted oracle prices using
 /// the quorum-of-K sliding-window algorithm.
 ///
@@ -78,7 +77,10 @@ pub fn is_price_stale(
 /// - `min_quorum_k < 2` (a single feed is not a meaningful quorum).
 /// - `min_quorum_k > n` (cannot form a window larger than the input).
 /// - No K-wide window in the sorted array satisfies the deviation bound.
-pub fn resolve_quorum_price(prices: &[i128], cfg: &OracleQuorumConfig) -> Result<i128, ContractError> {
+pub fn resolve_quorum_price(
+    prices: &[i128],
+    cfg: &OracleQuorumConfig,
+) -> Result<i128, ContractError> {
     let n = prices.len();
 
     if n == 0 || n > MAX_ORACLE_FEEDS {
@@ -144,7 +146,7 @@ fn compute_deviation_bps(price: i128, last_price: i128) -> Option<u32> {
     let diff = price.abs_diff(last_price);
     // Use u128 intermediate to avoid overflow: diff * 10_000 fits in u128
     // for any i128 price.
-    let bps = (diff as u128)
+    let bps = diff
         .checked_mul(10_000)?
         .checked_add(last_price as u128 - 1)? // ceiling division
         .checked_div(last_price as u128)?;
@@ -343,10 +345,7 @@ mod tests {
     #[test]
     fn exactly_max_oracle_feeds_ok() {
         let prices = vec![1_000i128; MAX_ORACLE_FEEDS];
-        assert_eq!(
-            resolve_quorum_price(&prices, &cfg(2, 0)).unwrap(),
-            1_000
-        );
+        assert_eq!(resolve_quorum_price(&prices, &cfg(2, 0)).unwrap(), 1_000);
     }
 
     #[test]
@@ -370,4 +369,3 @@ mod tests {
         assert!(is_price_stale(&record, &qcfg, 9_999));
     }
 }
-

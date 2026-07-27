@@ -83,6 +83,48 @@ pub enum ContractError {
     /// Arithmetic overflow detected in checked computation.
     #[error("Overflow")]
     Overflow,
+
+    /// A configured interest rate exceeds the applicable ceiling.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+
+    /// A fee-share ratio (in basis points) exceeds [`crate::fees::MAX_FEE_SHARE_BPS`].
+    #[error("InvalidFeeShareBps")]
+    InvalidFeeShareBps,
+
+    /// Requested treasury withdrawal exceeds the accumulated treasury balance.
+    #[error("InsufficientTreasuryBalance")]
+    InsufficientTreasuryBalance,
+
+    /// Requested bounty withdrawal exceeds the accumulated bounty balance.
+    #[error("InsufficientBountyBalance")]
+    InsufficientBountyBalance,
+}
+
+impl ContractError {
+    /// Return the [`ContractErrorCategory`] this error belongs to.
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            ContractError::Std(_) => ContractErrorCategory::Std,
+            ContractError::CreditLineNotFound(_) | ContractError::DrawNotFound(_, _) => {
+                ContractErrorCategory::NotFound
+            }
+            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::CollateralInsufficient
+            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::InvalidAmount
+            | ContractError::RateTooHigh
+            | ContractError::RateCeilingExceeded
+            | ContractError::InvalidFeeShareBps => ContractErrorCategory::Validation,
+            ContractError::AlreadySettled
+            | ContractError::InsufficientTreasuryBalance
+            | ContractError::InsufficientBountyBalance
+            | ContractError::Overflow => ContractErrorCategory::State,
+            ContractError::OraclePriceInvalid | ContractError::OracleQuorumNotMet => {
+                ContractErrorCategory::Oracle
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -286,21 +328,5 @@ mod tests {
         assert_eq!(err.to_string(), "InsufficientBountyBalance");
         assert_eq!(err, ContractError::InsufficientBountyBalance);
         assert_ne!(err, ContractError::InsufficientTreasuryBalance);
-    }
-
-    #[test]
-    fn treasury_address_not_set_display_and_equality() {
-        let err = ContractError::TreasuryAddressNotSet;
-        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
-        assert_eq!(err, ContractError::TreasuryAddressNotSet);
-        assert_ne!(err, ContractError::BountyAddressNotSet);
-    }
-
-    #[test]
-    fn bounty_address_not_set_display_and_equality() {
-        let err = ContractError::BountyAddressNotSet;
-        assert_eq!(err.to_string(), "BountyAddressNotSet");
-        assert_eq!(err, ContractError::BountyAddressNotSet);
-        assert_ne!(err, ContractError::TreasuryAddressNotSet);
     }
 }

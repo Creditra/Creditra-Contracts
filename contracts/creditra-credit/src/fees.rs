@@ -13,12 +13,21 @@
 //! the remainder so no tokens are lost to integer division.
 
 use cosmwasm_std::{Deps, DepsMut, Uint128};
+use cw_storage_plus::Item;
 
 use crate::error::ContractError;
 use crate::state::{
-    Config, CONFIG, DEFAULT_FEE_SHARE_BPS, MARKET_FEE_SHARE_BPS, TREASURY_BALANCE,
-    BOUNTY_BALANCE,
+    Config, BOUNTY_BALANCE, CONFIG, DEFAULT_FEE_SHARE_BPS, MARKET_FEE_SHARE_BPS, TREASURY_BALANCE,
 };
+
+/// Maximum protocol fee rate chargeable on a repayment (10% == 1_000 bps).
+pub const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
+
+/// Total protocol fee rate (in basis points) skimmed from each repayment.
+///
+/// Distinct from [`DEFAULT_FEE_SHARE_BPS`]/[`MARKET_FEE_SHARE_BPS`], which
+/// only govern how this fee is split between the treasury and bounty pools.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pf_bps");
 
 /// Maximum basis points for a fee-share ratio (100%).
 pub const MAX_FEE_SHARE_BPS: u32 = 10_000;
@@ -84,11 +93,7 @@ pub fn split_protocol_fee(
 
     let treasury_amount = total_fee
         .checked_mul(Uint128::from(treasury_share_bps))
-        .map_err(|_| {
-            ContractError::Std(cosmwasm_std::StdError::generic_err(
-                "Fee split overflow",
-            ))
-        })?
+        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::generic_err("Fee split overflow")))?
         .checked_div(Uint128::from(MAX_FEE_SHARE_BPS))
         .map_err(|_| {
             ContractError::Std(cosmwasm_std::StdError::generic_err(
@@ -349,11 +354,11 @@ mod tests {
     fn split_large_fee_no_overflow() {
         let large = Uint128::new(u128::MAX / 10_001);
         let split = split_protocol_fee(large, 5_000).unwrap();
-        assert_eq!(split.treasury_amount, large * Uint128::new(5_000) / Uint128::new(10_000));
         assert_eq!(
-            split.treasury_amount + split.bounty_amount,
-            large
+            split.treasury_amount,
+            large * Uint128::new(5_000) / Uint128::new(10_000)
         );
+        assert_eq!(split.treasury_amount + split.bounty_amount, large);
     }
 
     // ── get_treasury_fee_share_bps tests ────────────────────────────────
@@ -378,8 +383,7 @@ mod tests {
     #[test]
     fn accrue_full_treasury_split() {
         let mut deps = mock_dependencies();
-        let split =
-            accrue_protocol_fee(&mut deps.as_mut(), "ucredit", Uint128::new(1000)).unwrap();
+        let split = accrue_protocol_fee(&mut deps.as_mut(), "ucredit", Uint128::new(1000)).unwrap();
         assert_eq!(split.treasury_amount, Uint128::new(1000));
         assert_eq!(split.bounty_amount, Uint128::zero());
 
@@ -437,9 +441,8 @@ mod tests {
             .save(deps.as_mut().storage, "ucredit", &Uint128::new(50))
             .unwrap();
 
-        let err =
-            withdraw_treasury(&mut deps.as_mut(), &owner, "ucredit", Uint128::new(100))
-                .unwrap_err();
+        let err = withdraw_treasury(&mut deps.as_mut(), &owner, "ucredit", Uint128::new(100))
+            .unwrap_err();
         assert_eq!(err, ContractError::InsufficientTreasuryBalance);
     }
 
@@ -562,8 +565,7 @@ mod tests {
             .save(deps.as_mut().storage, "ustable", &5_000)
             .unwrap();
 
-        let split =
-            accrue_protocol_fee(&mut deps.as_mut(), "ustable", Uint128::new(200)).unwrap();
+        let split = accrue_protocol_fee(&mut deps.as_mut(), "ustable", Uint128::new(200)).unwrap();
         assert_eq!(split.treasury_amount, Uint128::new(100));
         assert_eq!(split.bounty_amount, Uint128::new(100));
 

@@ -135,3 +135,22 @@ pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
 ///
 /// When absent the contract has no late-fee penalty configured.
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
+
+// ── Per-market fee split storage ─────────────────────────────────────────────
+
+/// Default treasury fee share in basis points (0..=10_000).
+/// When unset, defaults to 10_000 (100% treasury, backward compatible).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("default_fee_share");
+
+/// Per-market treasury fee share override in basis points (0..=10_000).
+/// Keyed by market denomination (the `credit_denom` of a credit line).
+/// When absent for a market, the [`DEFAULT_FEE_SHARE_BPS`] applies.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mkt_fee_share");
+
+/// Per-market accumulated treasury balance held in contract (fees collected).
+/// Keyed by market denomination.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("treasury_bal");
+
+/// Per-market accumulated bounty pool balance held in contract (fee share).
+/// Keyed by market denomination.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bounty_bal");
