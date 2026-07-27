@@ -117,7 +117,6 @@ mod freeze;
 pub mod instrument;
 mod lifecycle;
 mod oracles;
-mod limits;
 pub mod math_utils;
 mod penalties;
 #[cfg(test)]
@@ -145,8 +144,6 @@ use events::{
 use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
 use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
 use auth::require_admin_auth;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cross_chain;
 
 
 #[cfg(test)]

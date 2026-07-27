@@ -7,4 +7,8 @@
 //! `contracts/collateral/src/admin.rs` (compiled into the credit crate).
 //! This crate anchors focused integration tests for the v7 admin cooldown guard.
 
+pub mod views;
+pub use views::*;
+
 pub use creditra_credit::*;
+
