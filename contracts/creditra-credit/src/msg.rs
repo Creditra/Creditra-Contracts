@@ -43,6 +43,19 @@ pub enum ExecuteMsg {
         max_deviation_bps: u32,
         max_age_seconds: u64,
     },
+    /// Add an authorized oracle and its weight (admin only).
+    AddOracle {
+        oracle: String,
+        weight: u32,
+    },
+    /// Remove an authorized oracle (admin only).
+    RemoveOracle {
+        oracle: String,
+    },
+    /// Submit an oracle report value.
+    ReportValue {
+        value: i128,
+    },
     /// Submit N oracle prices and resolve a quorum canonical price (admin only).
     SubmitOraclePrices {
         prices: Vec<i128>,

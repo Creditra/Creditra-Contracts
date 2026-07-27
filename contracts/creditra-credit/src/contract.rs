@@ -161,6 +161,11 @@ pub fn execute(
             max_deviation_bps,
             max_age_seconds,
         ),
+        ExecuteMsg::AddOracle { oracle, weight } => {
+            execute_add_oracle(deps, info, oracle, weight)
+        }
+        ExecuteMsg::RemoveOracle { oracle } => execute_remove_oracle(deps, info, oracle),
+        ExecuteMsg::ReportValue { value } => execute_report_value(deps, env, info, value),
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
@@ -780,52 +785,46 @@ pub fn execute_set_oracle_quorum_config(
         .add_attribute("max_age_seconds", max_age_seconds.to_string()))
 }
 
-/// Admin: submit N observed oracle prices and resolve a canonical quorum price.
-///
-/// Delegates to [`oracles::resolve_quorum_price`] to outlier-trim the input
-/// `prices` slice using the stored [`OracleQuorumConfig`], then persists the
-/// winning canonical value plus the current block timestamp to
-/// [`ORACLE_PRICE_RECORD`] for downstream queries (`GetOraclePrice`).
-///
-/// # Parameters
-///
-/// - `deps` — Mutable storage; reads [`ORACLE_QUORUM_CONFIG`]; writes
-///   [`ORACLE_PRICE_RECORD`] singleton record.
-/// - `env` — `env.block.time.seconds()` is recorded as the `timestamp`
-///   on the persisted [`OraclePriceRecord`] for downstream freshness checks.
-/// - `info` — `info.sender` **must** equal the contract owner.  In
-///   production the admin SHOULD be a multi-sig or a dedicated keeper
-///   contract that has already verified each feed's attestation signature.
-/// - `prices` — Slice of raw observed values.  Length is capped by
-///   [`crate::state::MAX_ORACLE_FEEDS`]; submissions above that cap revert
-///   to prevent unbounded gas usage.
-///
-/// # Response attributes
-///
-/// | Key | Value |
-/// |---|---|
-/// | `"action"` | `"submit_oracle_prices"` |
-/// | `"canonical_price"` | resolved quorum price (decimal i128) |
-/// | `"min_quorum_k"` | effective quorum size used (echo back for indexers) |
-/// | `"timestamp"` | record timestamp in seconds |
-///
-/// # Errors
-///
-/// | Variant | When |
-/// |---|---|
-/// | [`ContractError::Unauthorized`] | `info.sender != CONFIG.owner` |
-/// | [`ContractError::OraclePriceInvalid`] | no stored quorum config, too many feeds, or quorum resolution failure |
-///
-/// # @notice
-/// This is a **single-shot** submission — there is no per-feed replay
-/// protection in v7.  The admin pipeline is responsible for deduping
-/// submissions before invoking this entrypoint; the canonical record
-/// is always overwritten with the latest successful call.
-///
-/// # @dev
-/// Quorum resolution is deterministic: for the same `prices` + `config`
-/// inputs the output is byte-for-byte identical, which enables
-/// reproducible off-chain preflight checks before on-chain submission.
+pub fn execute_add_oracle(
+    deps: DepsMut,
+    info: MessageInfo,
+    oracle: String,
+    weight: u32,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let oracle_addr = deps.api.addr_validate(&oracle)?;
+    oracles::add_oracle(deps, oracle_addr, weight)?;
+    Ok(Response::default().add_attribute("action", "add_oracle").add_attribute("oracle", oracle))
+}
+
+pub fn execute_remove_oracle(
+    deps: DepsMut,
+    info: MessageInfo,
+    oracle: String,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let oracle_addr = deps.api.addr_validate(&oracle)?;
+    oracles::remove_oracle(deps, oracle_addr)?;
+    Ok(Response::default().add_attribute("action", "remove_oracle").add_attribute("oracle", oracle))
+}
+
+pub fn execute_report_value(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    value: i128,
+) -> Result<Response, ContractError> {
+    oracles::report_value(deps, env, info, value)?;
+    Ok(Response::default().add_attribute("action", "report_value").add_attribute("value", value.to_string()))
+}
+
+/// Submit N oracle prices and resolve a quorum canonical price (admin only).
 pub fn execute_submit_oracle_prices(
     deps: DepsMut,
     env: Env,
