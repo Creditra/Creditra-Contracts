@@ -1,13 +1,16 @@
 [workspace]
 resolver = "2"
-
 members = [
     "contracts/credit",
     "contracts/accrual",
     "contracts/collateral",
     "contracts/lifecycle",
+    "contracts/borrow",
     "gateway-contract/contracts/auction_contract",
 ]
+
+[workspace.package]
+edition = "2021"
 
 [workspace.dependencies]
 soroban-sdk = "22"

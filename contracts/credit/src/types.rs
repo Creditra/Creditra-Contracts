@@ -158,120 +158,56 @@ pub enum CreditStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
-    /// Caller is not authorized to perform the requested action.
     Unauthorized = 1,
-    /// Caller does not have admin privileges for this entrypoint.
     NotAdmin = 2,
-    /// The requested borrower does not have an open credit line.
     CreditLineNotFound = 3,
-    /// The credit line is permanently closed and cannot accept new activity.
     CreditLineClosed = 4,
-    /// The requested amount is zero, negative, or otherwise invalid for this operation.
     InvalidAmount = 5,
-    /// The requested draw would exceed the available credit line limit.
     OverLimit = 6,
-    /// The proposed credit limit cannot be negative.
     NegativeLimit = 7,
-    /// The requested rate exceeds the maximum allowed delta for the borrower.
     RateTooHigh = 8,
-    /// The supplied risk score is above the acceptable maximum threshold.
     ScoreTooHigh = 9,
-    /// The requested transition requires zero outstanding utilization first.
     UtilizationNotZero = 10,
-    /// Reentrant execution was detected during a state-changing call.
     Reentrancy = 11,
-    /// An arithmetic operation overflowed or underflowed during contract logic.
     Overflow = 12,
-    /// Lowering the credit limit would leave outstanding debt above the new cap.
-    LimitDecreaseRequiresRepayment = 13,
-    /// The contract has already been initialized and cannot be initialized twice.
     AlreadyInitialized = 14,
-    /// The oracle quorum requirement was not satisfied for the requested operation.
-    QuorumNotMet = 15,
-    /// The referenced oracle has not been registered in the configured registry.
-    OracleNotFound = 16,
-    /// The referenced oracle is already registered and cannot be re-added.
-    OracleAlreadyExists = 17,
-    /// Admin role acceptance was attempted before the required delay window elapsed.
     AdminAcceptTooEarly = 15,
-    /// The borrower is blocked from drawing credit.
-    BorrowerBlocked = 16,
-    /// The requested draw exceeds the configured per-transaction maximum.
     DrawExceedsMaxAmount = 17,
-    /// The protocol is currently paused and the requested action is blocked.
     Paused = 18,
-    /// Global draws are temporarily frozen by admin for the protocol.
     DrawsFrozen = 19,
-    /// The credit line is suspended and cannot accept the requested action.
     CreditLineSuspended = 20,
-    /// The credit line is in default and requires cure or liquidation.
     CreditLineDefaulted = 21,
-    /// The liquidity token address has not been configured for the contract.
     MissingLiquidityToken = 22,
-    /// The liquidity source address has not been configured for the contract.
     MissingLiquiditySource = 23,
-    /// The configured reserve balance cannot cover the requested draw.
     InsufficientLiquidityReserve = 24,
-    /// The liquidity token call failed in a way that the contract could observe.
-    LiquidityTokenCallFailed = 25,
-    /// The borrower's token allowance is below the effective repayment amount.
-    InsufficientRepaymentAllowance = 26,
-    /// The borrower's token balance is below the effective repayment amount.
-    InsufficientRepaymentBalance = 27,
-    /// The repayment amount exceeds the configured per-transaction maximum.
     RepayExceedsMaxAmount = 28,
-    /// The borrower attempted to draw again before the cooldown interval elapsed.
     DrawCooldownActive = 29,
-    /// The treasury address is not configured for the requested withdrawal flow.
     TreasuryNotSet = 30,
-    /// The requested draw would exceed the global protocol exposure cap.
     ExposureCapExceeded = 31,
-    /// The admin address has not been initialized in contract storage.
     AdminNotInitialized = 32,
-    /// A timestamp write regressed relative to the previously stored value.
     TimestampRegression = 33,
-    /// The proposed credit limit falls outside the configured min/max bounds.
     LimitOutOfBounds = 34,
-    /// The collateral ratio is below the minimum required threshold.
     CollateralRatioBelowMinimum = 35,
-    /// The oracle price is zero, negative, or malformed and cannot be used.
     OraclePriceInvalid = 36,
-    /// The oracle price is older than the configured freshness window.
     OraclePriceStale = 37,
-    /// The oracle price deviates beyond the configured threshold.
     OraclePriceDeviation = 38,
-    /// The borrower's collateral balance is insufficient for the requested operation.
     InsufficientCollateralBalance = 39,
-    /// The borrower is temporarily frozen from drawing until the expiry timestamp.
     BorrowerFrozen = 40,
-    /// Bounty pool address is not configured when attempting a bounty withdrawal.
     BountyNotSet = 41,
-    /// No pending treasury withdrawal proposal exists when attempting execution.
     NoPendingTreasuryWithdrawal = 42,
-    /// The 24-hour treasury withdrawal timelock has not yet elapsed.
-    TreasuryTimelockActive = 43,
-    /// A treasury withdrawal proposal already exists; cancel or execute it first.
-    TreasuryProposalExists = 44,
-    /// The supplied close_factor_bps exceeds the protocol-configured maximum.
-    CloseFactorAboveMax = 45,
-    /// Credit line draws are frozen by admin (compliance or investigation hold).
     CreditLineFrozen = 46,
-    /// Draw reversal attempted after the allowed reversal window has expired.
     DrawReversalWindowExpired = 47,
-    /// Original draw audit record not found when attempting a reversal.
     OriginalDrawNotFound = 48,
-    /// No attestation batch has been committed for the specified borrower.
     AttestationBatchNotFound = 49,
-    /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     OracleQuorumNotMet = 50,
-    /// Liquidation settlement already processed for this (borrower, settlement_id) pair.
     AlreadySettled = 51,
-    /// Collateral risk weight exceeds the maximum allowed (10 000 bps).
     InvalidRiskWeight = 52,
-    /// Attestation proof is invalid or no attestation batch has been committed.
     InvalidAttestation = 53,
-    /// Risk admin cooldown has not yet elapsed since the last mutation.
     RiskAdminCooldownActive = 54,
+    OracleNotFound = 55,
+    FreezeCooldownActive = 57,
+    AdminCollateralCooldownActive = 58,
+    LiquidationGraceActive = 59,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -292,84 +228,71 @@ pub enum ContractError {
 
 impl ContractError {
     /// Return the stable category for this error variant.
-    ///
-    /// Clients can use this to group errors for UI display, analytics,
-    /// or recovery heuristics without hard-coding variant-to-category
-    /// mappings.
     pub fn category(&self) -> ContractErrorCategory {
+        use ContractErrorCategory::*;
         match self {
-            // Auth (1)
-            Self::Unauthorized => Auth,
-            Self::NotAdmin => Auth,
-            Self::AdminNotInitialized => Auth,
-            // Lifecycle (2)
-            Self::CreditLineClosed => Lifecycle,
-            Self::AlreadyInitialized => Lifecycle,
-            Self::CreditLineSuspended => Lifecycle,
-            Self::CreditLineDefaulted => Lifecycle,
-            Self::AlreadySettled => Lifecycle,
-            Self::LiquidationGraceActive => Lifecycle,
-            // Numeric (3)
-            Self::InvalidAmount => Numeric,
-            Self::NegativeLimit => Numeric,
-            Self::Overflow => Numeric,
-            Self::TimestampRegression => Numeric,
-            Self::LimitOutOfBounds => Numeric,
-            Self::InvalidRiskWeight => Numeric,
-            // Misc (11)
-            Self::InvalidAttestation => Misc,
-            Self::RiskAdminCooldownActive => Risk,
-            // Limit (4)
-            Self::OverLimit => Limit,
-            Self::UtilizationNotZero => Limit,
-            Self::LimitDecreaseRequiresRepayment => Limit,
-            Self::DrawExceedsMaxAmount => Limit,
-            Self::RepayExceedsMaxAmount => Limit,
-            Self::CloseFactorAboveMax => Limit,
-            Self::DrawReversalWindowExpired => Limit,
-            Self::BorrowerExposureCapExceeded => Limit,
-            // Liquidity (5)
-            Self::MissingLiquidityToken => Liquidity,
-            Self::MissingLiquiditySource => Liquidity,
-            Self::InsufficientLiquidityReserve => Liquidity,
-            Self::LiquidityTokenCallFailed => Liquidity,
-            Self::InsufficientRepaymentAllowance => Liquidity,
-            Self::InsufficientRepaymentBalance => Liquidity,
-            Self::TreasuryNotSet => Liquidity,
-            Self::ExposureCapExceeded => Liquidity,
-            Self::BountyNotSet => Liquidity,
-            // Risk (6)
-            Self::RateTooHigh => Risk,
-            Self::ScoreTooHigh => Risk,
-            Self::Paused => Risk,
-            Self::DrawCooldownActive => Risk,
-            Self::AdminCooldownActive => Risk,
-            // Oracle (7)
-            Self::OraclePriceInvalid => Oracle,
-            Self::OraclePriceStale => Oracle,
-            Self::OraclePriceDeviation => Oracle,
-            Self::OracleQuorumNotMet => Oracle,
-            // Collateral (8)
-            Self::CollateralRatioBelowMinimum => Collateral,
-            Self::InsufficientCollateralBalance => Collateral,
-            Self::AdminCollateralCooldownActive => Collateral,
-            // Block (9)
-            Self::BorrowerBlocked => Block,
-            Self::DrawsFrozen => Block,
-            Self::BorrowerFrozen => Block,
-            Self::CreditLineFrozen => Block,
-            Self::FreezeCooldownActive => Block,
-            // Reentrancy (10)
+            Self::Unauthorized
+            | Self::NotAdmin
+            | Self::AdminNotInitialized => Auth,
+
+            Self::CreditLineClosed
+            | Self::AlreadyInitialized
+            | Self::CreditLineSuspended
+            | Self::CreditLineDefaulted
+            | Self::AlreadySettled
+            | Self::LiquidationGraceActive => Lifecycle,
+
+            Self::InvalidAmount
+            | Self::NegativeLimit
+            | Self::Overflow
+            | Self::TimestampRegression
+            | Self::LimitOutOfBounds
+            | Self::InvalidRiskWeight => Numeric,
+
+            Self::OverLimit
+            | Self::UtilizationNotZero
+            | Self::DrawExceedsMaxAmount
+            | Self::RepayExceedsMaxAmount
+            | Self::DrawReversalWindowExpired => Limit,
+
+            Self::MissingLiquidityToken
+            | Self::MissingLiquiditySource
+            | Self::InsufficientLiquidityReserve
+            | Self::TreasuryNotSet
+            | Self::ExposureCapExceeded
+            | Self::BountyNotSet => Liquidity,
+
+            Self::RateTooHigh
+            | Self::ScoreTooHigh
+            | Self::Paused
+            | Self::DrawCooldownActive
+            | Self::RiskAdminCooldownActive => Risk,
+
+            Self::OraclePriceInvalid
+            | Self::OraclePriceStale
+            | Self::OraclePriceDeviation
+            | Self::OracleQuorumNotMet
+            | Self::OracleNotFound => Oracle,
+
+            Self::CollateralRatioBelowMinimum
+            | Self::InsufficientCollateralBalance
+            | Self::AdminCollateralCooldownActive => Collateral,
+
+            Self::DrawsFrozen
+            | Self::BorrowerFrozen
+            | Self::CreditLineFrozen
+            | Self::FreezeCooldownActive => Block,
+
             Self::Reentrancy => Reentrancy,
-            // Misc (11)
-            Self::CreditLineNotFound => Misc,
-            Self::AdminAcceptTooEarly => Misc,
-            Self::NoPendingTreasuryWithdrawal => Misc,
-            Self::TreasuryTimelockActive => Misc,
-            Self::TreasuryProposalExists => Misc,
-            Self::OriginalDrawNotFound => Misc,
-            Self::AttestationBatchNotFound => Misc,
+
+            Self::CreditLineNotFound
+            | Self::AdminAcceptTooEarly
+            | Self::NoPendingTreasuryWithdrawal
+            | Self::OriginalDrawNotFound
+            | Self::AttestationBatchNotFound => Misc,
         }
+    }
+}
     }
 }
 
@@ -774,3 +697,37 @@ pub struct PauseReason {
     pub actor: soroban_sdk::Address,
 }
 
+
+
+/// Error categories for client-side grouping of [ContractError] variants.
+///
+/// # Discriminant stability
+/// Discriminants are permanently pinned. New variants must be appended at the
+/// end with the next available integer.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Authentication / authorization errors (Unauthorized, NotAdmin, AdminNotInitialized).
+    Auth = 1,
+    /// Credit line lifecycle state errors (Closed, Suspended, Defaulted, AlreadyInitialized).
+    Lifecycle = 2,
+    /// Numeric domain errors (InvalidAmount, NegativeLimit, Overflow, TimestampRegression, LimitOutOfBounds).
+    Numeric = 3,
+    /// Per-borrower limit enforcement (OverLimit, UtilizationNotZero, DrawExceedsMaxAmount, BorrowerExposureCapExceeded).
+    Limit = 4,
+    /// Liquidity / reserve / exposure errors (MissingLiquidityToken, ExposureCapExceeded, TreasuryNotSet, etc.).
+    Liquidity = 5,
+    /// Risk / rate / score / circuit-breaker errors (RateTooHigh, ScoreTooHigh, Paused, cooldowns).
+    Risk = 6,
+    /// Oracle price-feed errors (OraclePriceInvalid, OraclePriceStale, OraclePriceDeviation).
+    Oracle = 7,
+    /// Collateral ratio errors (CollateralRatioBelowMinimum, InsufficientCollateralBalance).
+    Collateral = 8,
+    /// Blocklist / freeze / draw-freeze errors (BorrowerBlocked, DrawsFrozen, BorrowerFrozen).
+    Block = 9,
+    /// Reentrancy guard trigger.
+    Reentrancy = 10,
+    /// Unclassified errors (CreditLineNotFound, AdminAcceptTooEarly).
+    Misc = 11,
+}

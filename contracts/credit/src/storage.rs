@@ -108,14 +108,6 @@ pub struct DrawAuditKey {
     pub timestamp: u64,
 }
 
-/// Instance and persistent storage key taxonomy for the credit contract.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DrawAuditKey {
-    pub borrower: Address,
-    pub timestamp: u64,
-}
-
 /// Composite key for per-borrower per-token collateral balance entries (v2).
 /// Wraps `(borrower, token)` for use as a single storage key.
 #[contracttype]
@@ -197,6 +189,7 @@ pub enum DataKey {
     /// Flat fee charged per missed installment.
     /// Admin-configurable via `set_late_fee_flat`. Default is 0 (disabled).
     LateFeeFlat,
+    LateFeeConfig,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
@@ -261,24 +254,19 @@ pub enum DataKey {
     LiquidationGracePeriod(Address),
     /// Per-borrower absolute exposure cap (i128 amount).
     BorrowerExposureCap(Address),
-    /// Admin-configured allowlist of accepted multi-collateral token addresses.
+    /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
     /// Per-borrower, per-token collateral balance (multi-collateral path).
     CollateralBalanceV2(Address, Address),
+    /// Per-borrower committed attestation batch.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
 
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 // ── Persistent storage TTL policy ────────────────────────────────────────────
 //
@@ -1496,5 +1484,56 @@ pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
     let now = env.ledger().timestamp();
     if now < last_ts.saturating_add(cooldown) {
         env.panic_with_error(ContractError::RiskAdminCooldownActive);
+    }
+}
+
+// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+
+pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::FreezeCooldownSeconds)
+        .filter(|&secs: &u64| secs > 0)
+}
+
+pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FreezeCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+    }
+}
+
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastFreezeTimestamp)
+}
+
+pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastFreezeTimestamp, &ts);
+}
+
+pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
+    if get_freeze_cooldown_seconds(env).is_some() {
+        set_last_freeze_timestamp(env, env.ledger().timestamp());
+    }
+}
+
+pub fn enforce_freeze_cooldown(env: &Env) {
+    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+        return;
+    };
+    if let Some(last_ts) = get_last_freeze_timestamp(env) {
+        let now = env.ledger().timestamp();
+        if now < last_ts.saturating_add(cooldown_secs) {
+            env.panic_with_error(ContractError::FreezeCooldownActive);
+        }
     }
 }

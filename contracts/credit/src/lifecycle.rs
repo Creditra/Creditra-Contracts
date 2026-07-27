@@ -90,8 +90,10 @@
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
-    publish_credit_line_event, publish_default_liquidation_requested_event,
-    publish_default_liquidation_settled_event, publish_late_fee_charged_event, CreditLineEvent,
+    publish_borrow_lifecycle_event, publish_credit_line_event,
+    publish_debt_forgiven_event, publish_default_liquidation_requested_event,
+    publish_default_liquidation_settled_event, publish_late_fee_charged_event,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent, DebtForgivenEvent,
     DefaultLiquidationSettledEvent, LateFeeChargedEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
@@ -146,6 +148,31 @@ pub fn set_credit_limit_bounds(env: Env, min: i128, max: i128) {
     // Store bounds in instance storage
     crate::storage::set_min_credit_limit(&env, min);
     crate::storage::set_max_credit_limit(&env, max);
+}
+
+pub fn get_credit_limit_bounds(env: Env) -> (Option<i128>, Option<i128>) {
+    let min = crate::storage::get_min_credit_limit(&env);
+    let max = crate::storage::get_max_credit_limit(&env);
+    (min, max)
+}
+
+pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
+    let min = crate::storage::get_min_credit_limit(env);
+    let max = crate::storage::get_max_credit_limit(env);
+
+    // Check minimum bound if configured
+    if let Some(min_limit) = min {
+        if credit_limit < min_limit {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
+
+    // Check maximum bound if configured
+    if let Some(max_limit) = max {
+        if credit_limit > max_limit {
+            env.panic_with_error(ContractError::LimitOutOfBounds);
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -421,7 +448,7 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     } else if closer == borrower {
         // Borrower self-close: only allowed when fully repaid.
         if credit_line.utilized_amount != 0 {
-            env.panic_with_error(ContractError::UtilizedNotZero);
+            env.panic_with_error(ContractError::UtilizationNotZero);
         }
     } else {
         // Third party: unconditionally rejected.
@@ -569,7 +596,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 /// pure accounting relief, e.g. for negotiated settlements handled off-chain.
 pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     assert_not_paused(&env);
-    // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
+    require_admin_auth(&env);
 
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -598,6 +625,28 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
         &credit_line,
         previous_utilized,
         Some(previous_status),
+    );
+
+    publish_debt_forgiven_event(
+        &env,
+        DebtForgivenEvent {
+            borrower: borrower.clone(),
+            amount_forgiven: forgive_amount,
+            remaining_accrued_interest: credit_line.accrued_interest,
+            new_utilized_amount: credit_line.utilized_amount,
+        },
+    );
+    publish_borrow_lifecycle_event(
+        &env,
+        BorrowLifecycleEvent {
+            borrower,
+            phase: BorrowLifecyclePhase::DebtForgiven,
+            status: credit_line.status,
+            utilized_amount: credit_line.utilized_amount,
+            credit_limit: credit_line.credit_limit,
+            interest_rate_bps: credit_line.interest_rate_bps,
+            timestamp: env.ledger().timestamp(),
+        },
     );
 }
 
@@ -708,38 +757,7 @@ pub fn settle_default_liquidation(
 /// This is an accounting-only write-off path intended for explicit admin debt
 /// relief or off-chain settlements that have already been handled elsewhere.
 /// The forgiven amount is capped to the current `utilized_amount`.
-pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
-    assert_not_paused(&env);
-    require_admin_auth(&env);
 
-    if amount <= 0 {
-        env.panic_with_error(ContractError::InvalidAmount);
-    }
-
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-    let previous_utilized = stored_line.utilized_amount;
-
-    let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
-
-    let effective_forgive = amount.min(credit_line.utilized_amount);
-    credit_line.utilized_amount = credit_line
-        .utilized_amount
-        .checked_sub(effective_forgive)
-        .unwrap_or(0);
-
-    let previous_status = credit_line.status;
-    persist_credit_line(
-        &env,
-        &borrower,
-        &credit_line,
-        previous_utilized,
-        Some(previous_status),
-    );
-}
 
 // ── reinstate_credit_line ─────────────────────────────────────────────────────
 
