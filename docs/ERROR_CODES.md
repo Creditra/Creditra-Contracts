@@ -15,22 +15,22 @@
 
 | Category      | Discriminant | Count | Description |
 |---------------|:------------:|:-----:|-------------|
-| Auth          | 1            | 3     | Authentication / authorization failures |
+| Auth          | 1            | 4     | Authentication / authorization failures |
 | Lifecycle     | 2            | 5     | Credit-line lifecycle state violations |
 | Numeric       | 3            | 6     | Numeric computation failures |
-| Limit         | 4            | 7     | Credit limit / draw / repay cap violations |
-| Liquidity     | 5            | 9     | Liquidity configuration or reserve failures |
-| Risk          | 6            | 4     | Risk-parameter violations |
-| Oracle        | 7            | 4     | Oracle price-feed failures |
+| Limit         | 4            | 8     | Credit limit / draw / repay cap violations |
+| Liquidity     | 5            | 12    | Liquidity configuration or reserve failures |
+| Risk          | 6            | 5     | Risk-parameter violations |
+| Oracle        | 7            | 5     | Oracle price-feed failures |
 | Collateral    | 8            | 2     | Collateral ratio or balance violations |
 | Block         | 9            | 4     | Draw-block conditions (blocked, frozen) |
 | Reentrancy    | 10           | 1     | Reentrancy guard violations |
 | Misc          | 11           | 7     | Miscellaneous errors |
-| **Total**     | 1–11         | **52** | — |
+| **Total**     | 1–11         | **59** | — |
 
 ---
 
-## 1. Auth (codes 1, 2, 32)
+## 1. Auth (codes 1, 2, 32, 55)
 
 Authentication or authorization failures — the caller does not have the required privileges.
 
@@ -39,6 +39,7 @@ Authentication or authorization failures — the caller does not have the requir
 | 1    | `Unauthorized` | Caller is not authorized for this action | `accept_admin` if caller is not the pending admin; borrower auth mismatch |
 | 2    | `NotAdmin` | Caller does not have admin privileges | Admin-gated entrypoints when caller is not the stored admin |
 | 32   | `AdminNotInitialized` | Admin address not yet set in storage | Any admin-gated entrypoint before `init` is called |
+| 55   | `BorrowerMismatch` | Stored borrower does not match the load key | Data integrity check on credit line load |
 
 **SDK recovery:** Prompt the caller to re-connect a wallet with the correct role. For `AdminNotInitialized`, advise the deployer to call `init()` with a valid admin address.
 
@@ -88,7 +89,7 @@ Arithmetic or numeric computation failures — inputs or calculations fall outsi
 
 ---
 
-## 4. Limit (codes 6, 10, 13, 17, 28, 45, 47)
+## 4. Limit (codes 6, 10, 13, 17, 28, 45, 47, 59)
 
 Draw, repay, or limit operations that violate numeric caps or boundary conditions.
 
@@ -101,6 +102,7 @@ Draw, repay, or limit operations that violate numeric caps or boundary condition
 | 28   | `RepayExceedsMaxAmount` | Repay exceeds per-transaction cap | `repay_credit` when amount > `MaxRepayAmount` |
 | 45   | `CloseFactorAboveMax` | Close factor exceeds protocol maximum | `settle_default_liquidation` validation |
 | 47   | `DrawReversalWindowExpired` | Draw reversal window has expired | `reverse_draw` after `DRAW_REVERSAL_WINDOW_SECS` |
+| 59   | `UtilizedNotZero` | Utilization must be zero | Borrower self-close with outstanding debt |
 
 **SDK recovery:**
 - `OverLimit`: Reduce draw amount to ≤ `credit_limit - utilized`.
@@ -112,7 +114,7 @@ Draw, repay, or limit operations that violate numeric caps or boundary condition
 
 ---
 
-## 5. Liquidity (codes 22, 23, 24, 25, 26, 27, 30, 31, 41)
+## 5. Liquidity (codes 22, 23, 24, 25, 26, 27, 30, 31, 41, 56, 57, 58)
 
 Liquidity configuration is missing or a reserve/allowance/balance check fails.
 
@@ -127,20 +129,23 @@ Liquidity configuration is missing or a reserve/allowance/balance check fails.
 | 30   | `TreasuryNotSet` | Treasury not configured | `propose_treasury_withdrawal` without treasury |
 | 31   | `ExposureCapExceeded` | Global exposure cap exceeded | `draw_credit` when total_utilized + amount > cap |
 | 41   | `BountyNotSet` | Bounty address not configured | `withdraw_bounty` without bounty set |
+| 56   | `InsufficientReserve` | Reserve balance below draw amount | `draw_credit` when token reserve < amount |
+| 57   | `InsufficientAllowance` | Borrower token allowance insufficient | `repay_credit` when allowance < repayment |
+| 58   | `InsufficientBalance` | Borrower token balance insufficient | `repay_credit` when balance < repayment |
 
 **SDK recovery:**
 - `MissingLiquidityToken` / `MissingLiquiditySource`: Admin must complete liquidity configuration.
-- `InsufficientLiquidityReserve`: Wait for reserve replenishment.
+- `InsufficientLiquidityReserve` / `InsufficientReserve`: Wait for reserve replenishment.
 - `LiquidityTokenCallFailed`: Retry; if persistent, admin must replace token.
-- `InsufficientRepaymentAllowance`: Guide borrower to increase allowance.
-- `InsufficientRepaymentBalance`: Guide borrower to deposit more tokens.
+- `InsufficientRepaymentAllowance` / `InsufficientAllowance`: Guide borrower to increase allowance.
+- `InsufficientRepaymentBalance` / `InsufficientBalance`: Guide borrower to deposit more tokens.
 - `TreasuryNotSet`: Admin must call `set_treasury`.
 - `ExposureCapExceeded`: Reduce draw amount or wait for repayments.
 - `BountyNotSet`: Admin must call `set_bounty`.
 
 ---
 
-## 6. Risk (codes 8, 9, 18, 29)
+## 6. Risk (codes 8, 9, 18, 29, 53)
 
 Risk-parameter or protocol-state violations.
 
@@ -150,16 +155,18 @@ Risk-parameter or protocol-state violations.
 | 9    | `ScoreTooHigh` | Risk score exceeds max (100) | `open_credit_line` with score > 100 |
 | 18   | `Paused` | Protocol is paused | State-changing operations while paused |
 | 29   | `DrawCooldownActive` | Draw within cooldown window | `draw_credit` before cooldown elapses |
+| 53   | `AdminQueryCooldownActive` | Admin query-critical action within cooldown | `set_oracle_config`, `set_rate_formula_config`, etc. before cooldown elapses |
 
 **SDK recovery:**
 - `RateTooHigh`: Clamp rate change within `RateChangeConfig` bounds.
 - `ScoreTooHigh`: Normalize risk score to `[0, 100]`.
 - `Paused`: Inform user; repayments are still accepted. Retry when unpaused.
 - `DrawCooldownActive`: Wait `draw_min_interval_seconds` before retrying.
+- `AdminQueryCooldownActive`: Wait for the configured admin query cooldown to elapse.
 
 ---
 
-## 7. Oracle (codes 36, 37, 38, 50)
+## 7. Oracle (codes 36, 37, 38, 50, 54)
 
 Oracle price-feed failures — the price data cannot be trusted.
 
@@ -169,12 +176,14 @@ Oracle price-feed failures — the price data cannot be trusted.
 | 37   | `OraclePriceStale` | Price exceeds `max_age_seconds` | `settle_default_liquidation` staleness check |
 | 38   | `OraclePriceDeviation` | Price deviation exceeds max allowed | `settle_default_liquidation` deviation check |
 | 50   | `OracleQuorumNotMet` | Quorum of K agreeing feeds not met | `submit_oracle_prices` quorum resolution |
+| 54   | `OracleNotFound` | Oracle address not in the registry | `remove_oracle` when oracle not registered |
 
 **SDK recovery:**
 - `OraclePriceInvalid`: Ensure oracle returns a valid positive price.
 - `OraclePriceStale`: Wait for oracle price update.
 - `OraclePriceDeviation`: Circuit-breaker tripped; await a new price within bound.
 - `OracleQuorumNotMet`: Submit prices from more independent feeds.
+- `OracleNotFound`: Verify the oracle address is registered before removal.
 
 ---
 
@@ -256,15 +265,15 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 
 | Category      | Codes | Count | Dominant SDK Recovery |
 |---------------|:-----:|:-----:|-----------------------|
-| Auth          | 1, 2, 32 | 3 | Reconnect wallet / re-deploy with admin init |
+| Auth          | 1, 2, 32, 55 | 4 | Reconnect wallet / re-deploy with admin init |
 | Lifecycle     | 4, 14, 20, 21, 51 | 5 | Await admin action or create new line |
 | Numeric       | 5, 7, 12, 33, 34, 52 | 6 | Validate inputs / re-sync ledger view |
-| Limit         | 6, 10, 13, 17, 28, 45, 47 | 7 | Reduce amount or repay first |
-| Liquidity     | 22, 23, 24, 25, 26, 27, 30, 31, 41 | 9 | Replenish allowance / wait for reserve |
-| Risk          | 8, 9, 18, 29 | 4 | Clamp inputs / wait for cooldown or unpause |
-| Oracle        | 36, 37, 38, 50 | 4 | Await valid price feed |
+| Limit         | 6, 10, 13, 17, 28, 45, 47, 59 | 8 | Reduce amount or repay first |
+| Liquidity     | 22, 23, 24, 25, 26, 27, 30, 31, 41, 56, 57, 58 | 12 | Replenish allowance / wait for reserve |
+| Risk          | 8, 9, 18, 29, 53 | 5 | Clamp inputs / wait for cooldown or unpause |
+| Oracle        | 36, 37, 38, 50, 54 | 5 | Await valid price feed |
 | Collateral    | 35, 39 | 2 | Reduce withdrawal amount |
 | Block         | 16, 19, 40, 46 | 4 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy    | 11 | 1 | Do not retry; inspect on-chain state |
 | Misc          | 3, 15, 42, 43, 44, 48, 49 | 7 | Create line first / wait for delay |
-| **Total**     | 1–52 | **52** | — |
+| **Total**     | 1–59 | **59** | — |

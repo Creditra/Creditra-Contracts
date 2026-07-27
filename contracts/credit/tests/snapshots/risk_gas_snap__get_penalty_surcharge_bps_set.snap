@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "get_penalty_surcharge_bps_set",
+    cpu_instructions: 56002,
+    memory_bytes: 7644,
+}

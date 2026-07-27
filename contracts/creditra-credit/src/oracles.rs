@@ -29,8 +29,31 @@
 //!   for sorting and O(n) for window scanning.
 
 use crate::error::ContractError;
+use crate::state::OraclePriceRecord;
 use crate::state::OracleQuorumConfig;
 use crate::state::MAX_ORACLE_FEEDS;
+
+/// Check if an oracle price record is stale relative to the current block timestamp and quorum configuration.
+///
+/// # Parameters
+/// - `record`: The stored [`OraclePriceRecord`].
+/// - `cfg`: The active [`OracleQuorumConfig`].
+/// - `current_timestamp`: The current ledger block timestamp in seconds.
+///
+/// # Returns
+/// `true` if `current_timestamp < record.timestamp` or `current_timestamp - record.timestamp > cfg.max_age_seconds`,
+/// `false` otherwise.
+pub fn is_price_stale(
+    record: &OraclePriceRecord,
+    cfg: &OracleQuorumConfig,
+    current_timestamp: u64,
+) -> bool {
+    if current_timestamp < record.timestamp {
+        return true;
+    }
+    current_timestamp.saturating_sub(record.timestamp) > cfg.max_age_seconds
+}
+
 
 /// Resolve a single canonical price from N submitted oracle prices using
 /// the quorum-of-K sliding-window algorithm.
@@ -325,4 +348,26 @@ mod tests {
             1_000
         );
     }
+
+    #[test]
+    fn price_freshness_check() {
+        let qcfg = cfg(2, 500); // max_age_seconds: 3,600
+        let record = OraclePriceRecord {
+            price: 1_000,
+            timestamp: 10_000,
+        };
+
+        // Within max age (1000s elapsed <= 3600s)
+        assert!(!is_price_stale(&record, &qcfg, 11_000));
+
+        // Exactly at max age (3600s elapsed)
+        assert!(!is_price_stale(&record, &qcfg, 13_600));
+
+        // Expired (3601s elapsed > 3600s)
+        assert!(is_price_stale(&record, &qcfg, 13_601));
+
+        // Block timestamp before record timestamp (clock anomaly)
+        assert!(is_price_stale(&record, &qcfg, 9_999));
+    }
 }
+

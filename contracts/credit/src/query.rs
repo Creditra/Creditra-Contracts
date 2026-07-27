@@ -1,5 +1,7 @@
-use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
-use crate::types::{CreditLineData, ProtocolSummary, RepaymentSchedule, CreditStatus, GracePeriodConfig};
+use crate::storage::grace_period_key;
+use crate::types::{
+    CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
+};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -19,15 +21,33 @@ use soroban_sdk::{Address, Env};
 /// Interest accrual is lazy: `accrued_interest` and `utilized_amount` reflect
 /// the last mutating call (draw, repay, suspend, etc.). Pending interest since
 /// the last checkpoint is **not** applied by this query.
-#[allow(dead_code)]
+/// Return the credit line for `borrower`, or `None` if no line exists.
+///
+/// # Authentication
+/// No authentication required. This is a pure read — it does not mutate
+/// any storage and carries no trust boundary. Any caller (indexer, client,
+/// or another contract) may invoke it freely.
+///
+/// # Stability
+/// The returned [`CreditLineData`] struct is stable for integrators.
+/// All fields — including `last_rate_update_ts`, `accrued_interest`, and
+/// `last_accrual_ts` — are serialized in the order declared in `types.rs`.
+/// New fields will only be appended; existing field positions will not change.
+///
+/// # Note on accrual
+/// Interest accrual is lazy: `accrued_interest` and `utilized_amount` reflect
+/// the last mutating call (draw, repay, suspend, etc.). Pending interest since
+/// the last checkpoint is **not** applied by this query.
 pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
     crate::storage::get_credit_line(&env, &borrower)
 }
 
 /// Return protocol-level dashboard aggregates in one read-only call.
 ///
-/// This reads only aggregate storage slots and does not touch per-borrower
-/// records, so it does not bump persistent-entry TTL.
+/// # Authentication
+/// No authentication required. This is a pure read — it reads only aggregate
+/// storage slots and does not touch per-borrower records, so it does not
+/// bump persistent-entry TTL.
 pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
     ProtocolSummary {
         count: crate::storage::get_credit_line_count(&env),
@@ -38,13 +58,16 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
     }
 }
 
-
 /// Return the configured installment repayment schedule for `borrower`, if any.
 ///
-/// Delegates to [`crate::storage::get_repayment_schedule`], which bumps the
-/// schedule entry's TTL on read so an active borrower's schedule stays live.
+/// # Authentication
+/// No authentication required. This is a pure read — it delegates to
+/// [`crate::storage::get_repayment_schedule`], which bumps the schedule
+/// entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
-    crate::storage::get_repayment_schedule(&env, &borrower)
+    env.storage()
+        .persistent()
+        .get(&crate::storage::DataKey::RepaymentSchedule(borrower))
 }
 
 /// Return the collateral-aware health factor for a borrower, expressed in basis
@@ -93,6 +116,9 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 /// - `utilized_amount` is negative (should never happen): returns `u32::MAX`
 ///   via the zero-utilised short-circuit since the storage invariant enforces
 ///   `utilized_amount >= 0`.
+/// # Authentication
+/// No authentication required. This is a pure read — it computes the health
+/// ratio from on-chain data without modifying any storage.
 pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     // Load the borrower's credit line.  If none exists, treat as zero
     // utilization → infinitely healthy.
@@ -135,10 +161,13 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         .checked_mul(min_ratio_u128)
         .unwrap_or(u128::MAX);
 
-    // If the denominator overflowed to u128::MAX, the result will be small.
-    // We guard against division-by-zero: `utilized > 0` and `min_ratio_bps`
-    // defaults to 15_000, so `denominator` is always ≥ 1 here.
-    let health_bps = numerator / denominator;
+    // If the denominator is 0 (due to min_ratio_bps = 0), the position is infinitely healthy.
+    // We also guard against division-by-zero.
+    let health_bps = if denominator == 0 {
+        u128::from(u32::MAX)
+    } else {
+        numerator / denominator
+    };
 
     // Clamp to u32 range.  Values beyond u32::MAX are theoretically possible
     // with extreme collateral-to-debt ratios but serve the same keeper
@@ -147,6 +176,10 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
 }
 
 /// Return `true` when the borrower has missed an installment past the grace window.
+///
+/// # Authentication
+/// No authentication required. This is a pure read — it examines the stored
+/// repayment schedule and grace-period config without modifying any storage.
 ///
 /// Returns `false` for the following short-circuit cases:
 /// - The borrower has no credit line.
@@ -166,17 +199,13 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     }
 
-    let Some(schedule) = get_repayment_schedule(env.clone(), borrower) else {
+    let Some(schedule) = get_repayment_schedule(env.clone(), borrower.clone()) else {
         return false;
     };
 
-    let per_borrower_grace = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
-    let grace_seconds = if per_borrower_grace > 0 {
-        per_borrower_grace
-    } else {
-        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
-        grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0)
-    };
+    let grace_cfg: Option<GracePeriodConfig> =
+        env.storage().instance().get(&grace_period_key(&env));
+    let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
     env.ledger().timestamp() > delinquent_after

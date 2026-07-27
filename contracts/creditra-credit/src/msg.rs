@@ -1,6 +1,7 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Timestamp, Uint128};
 
+use crate::penalties::LateFeeConfig;
 use crate::state::DrawAuditEvent;
 use crate::state::OracleQuorumConfig;
 
@@ -46,6 +47,14 @@ pub enum ExecuteMsg {
     SubmitOraclePrices {
         prices: Vec<i128>,
     },
+    /// Set or update the structured late-fee configuration (admin only).
+    ///
+    /// Pass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per
+    /// missed installment, or `Some(LateFeeConfig::AprBased(…))` for an
+    /// additive basis-point surcharge.  Pass `None` to remove the config.
+    SetLateFeeConfig {
+        config: Option<LateFeeConfig>,
+    },
 }
 
 #[cw_serde]
@@ -64,6 +73,8 @@ pub enum QueryMsg {
     GetOracleQuorumConfig {},
     #[returns(OraclePriceResponse)]
     GetOraclePrice {},
+    #[returns(LateFeeConfigResponse)]
+    GetLateFeeConfig {},
 }
 
 #[cw_serde]
@@ -131,4 +142,11 @@ pub struct OracleQuorumConfigResponse {
 pub struct OraclePriceResponse {
     pub price: Option<i128>,
     pub timestamp: Option<u64>,
+}
+
+/// Response for the late-fee configuration query.
+#[cw_serde]
+pub struct LateFeeConfigResponse {
+    /// The currently configured late-fee config, or `None` if unset.
+    pub config: Option<LateFeeConfig>,
 }

@@ -57,7 +57,6 @@ pub mod entrypoint {
     pub const ACCRUE_BATCH: &str = "accrue_batch";
     pub const FREEZE_DRAWS: &str = "freeze_draws";
     pub const UNFREEZE_DRAWS: &str = "unfreeze_draws";
-    pub const PARTIAL_RELEASE_COLLATERAL: &str = "partial_release_collateral";
     pub const DEFAULT_CREDIT_LINE: &str = "default_credit_line";
     pub const CLOSE_CREDIT_LINE: &str = "close_credit_line";
 
@@ -72,7 +71,6 @@ pub mod entrypoint {
         SET_CREDIT_LIMIT_BOUNDS,
         SET_UTILIZATION_CAP,
         DEPOSIT_COLLATERAL,
-        PARTIAL_RELEASE_COLLATERAL,
         WITHDRAW_COLLATERAL,
         ACCRUE_BATCH,
         FREEZE_DRAWS,

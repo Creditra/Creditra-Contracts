@@ -80,20 +80,65 @@ pub struct InterestAccruedEvent {
     pub timestamp: u64,
 }
 
-/// Publish a batch accrual completed event.
+/// Publish a batch accrual completed event to the Soroban event ledger.
 ///
-/// # Topic
-/// `("accrual", "batch")` — emitted once per `accrue_batch` call.
+/// # Parameters
+///
+/// * `env` — The Soroban environment reference (`&Env`).
+/// * `event` — The [`AccrualBatchCompletedEvent`] payload containing batch processing metrics.
+///
+/// # Topics
+///
+/// Published under the two-symbol topic tuple `("accrual", "batch")` via [`symbol_short!`].
+///
+/// # Behavior
+///
+/// Emits the versioned batch summary payload for off-chain indexers and analytics pipelines.
+///
+/// # Example
+///
+/// ```ignore
+/// publish_accrual_batch_completed(&env, AccrualBatchCompletedEvent {
+///     borrowers_processed: 10,
+///     lines_accrued: 8,
+///     total_interest_accrued: 45_000,
+///     timestamp: env.ledger().timestamp(),
+/// });
+/// ```
 pub fn publish_accrual_batch_completed(env: &Env, event: AccrualBatchCompletedEvent) {
     env.events()
         .publish((symbol_short!("accrual"), symbol_short!("batch")), event);
 }
 
-/// Publish a per-borrower interest-accrued event.
+/// Publish a per-borrower interest-accrued event to the Soroban event ledger.
 ///
-/// # Topic
-/// `("accrual", "accrue")` — emitted for each borrower whose line accrued interest.
+/// # Parameters
+///
+/// * `env` — The Soroban environment reference (`&Env`).
+/// * `event` — The [`InterestAccruedEvent`] payload containing borrower accrual delta details.
+///
+/// # Topics
+///
+/// Published under the two-symbol topic tuple `("accrual", "accrue")` via [`symbol_short!`].
+///
+/// # Behavior
+///
+/// Emits per-borrower capitalized interest state updates whenever interest is added to utilization.
+///
+/// # Example
+///
+/// ```ignore
+/// publish_interest_accrued(&env, InterestAccruedEvent {
+///     borrower: borrower_address,
+///     accrued_amount: 150,
+///     new_utilized_amount: 10_150,
+///     new_accrued_interest: 150,
+///     elapsed_seconds: 86_400,
+///     timestamp: env.ledger().timestamp(),
+/// });
+/// ```
 pub fn publish_interest_accrued(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("accrual"), symbol_short!("accrue")), event);
 }
+

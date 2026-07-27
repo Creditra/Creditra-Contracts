@@ -1255,7 +1255,7 @@ mod tests {
         client.place_bid(&auction_id, &winner, &420_i128);
         client.close_auction(&auction_id);
 
-        let token_client = TokenClient::new(&env, &bid_token);
+        let token_client = soroban_sdk::token::Client::new(&env, &bid_token);
         let balance_before = token_client.balance(&winner);
         client.claim_auction(&auction_id);
         let balance_after = token_client.balance(&winner);

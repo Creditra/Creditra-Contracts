@@ -1,6 +1,30 @@
 use cosmwasm_std::StdError;
 use thiserror::Error;
 
+/// Domain category for a [`ContractError`] variant.
+///
+/// Each variant groups related contract errors, enabling callers to
+/// match on high-level categories without inspecting every individual
+/// error variant.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[repr(u8)]
+pub enum ContractErrorCategory {
+    /// Wrapper around a standard CosmWasm error.
+    Std,
+    /// The requested resource (credit line, draw, …) was not found.
+    NotFound,
+    /// Caller lacks permission for the operation.
+    Auth,
+    /// Collateral-related constraint violation.
+    Collateral,
+    /// Input validation failure.
+    Validation,
+    /// State-machine or lifecycle violation (e.g. double settlement).
+    State,
+    /// Oracle price-feed or quorum error.
+    Oracle,
+}
+
 /// Errors returned by the CosmWasm creditra-credit contract.
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {
@@ -51,11 +75,118 @@ pub enum ContractError {
     /// Oracle quorum condition was not satisfied (too few agreeing feeds).
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
+
+    /// Rate or surcharge exceeds the protocol maximum (10 000 bps = 100 %).
+    #[error("RateTooHigh")]
+    RateTooHigh,
+
+    /// Arithmetic overflow detected in checked computation.
+    #[error("Overflow")]
+    Overflow,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ContractError;
+    use super::*;
+
+    // ── ContractErrorCategory unit tests ────────────────────────────────
+
+    #[test]
+    fn category_variants_are_distinct() {
+        let std = ContractErrorCategory::Std;
+        let nf = ContractErrorCategory::NotFound;
+        let auth = ContractErrorCategory::Auth;
+        let coll = ContractErrorCategory::Collateral;
+        let val = ContractErrorCategory::Validation;
+        let state = ContractErrorCategory::State;
+        let oracle = ContractErrorCategory::Oracle;
+
+        assert_ne!(std as u8, nf as u8);
+        assert_ne!(nf as u8, auth as u8);
+        assert_ne!(auth as u8, coll as u8);
+        assert_ne!(coll as u8, val as u8);
+        assert_ne!(val as u8, state as u8);
+        assert_ne!(state as u8, oracle as u8);
+        assert_ne!(oracle as u8, std as u8);
+    }
+
+    #[test]
+    fn category_debug_format() {
+        let oracle = ContractErrorCategory::Oracle;
+        let debug = format!("{:?}", oracle);
+        assert_eq!(debug, "Oracle");
+    }
+
+    #[test]
+    fn category_copy_and_clone() {
+        let a = ContractErrorCategory::Auth;
+        let b = a;
+        assert_eq!(a, b);
+    }
+
+    // ── ContractError::category() mapping tests ─────────────────────────
+
+    #[test]
+    fn std_error_category() {
+        let err = ContractError::Std(StdError::generic_err("test"));
+        assert_eq!(err.category(), ContractErrorCategory::Std);
+    }
+
+    #[test]
+    fn credit_line_not_found_category() {
+        let err = ContractError::CreditLineNotFound(42);
+        assert_eq!(err.category(), ContractErrorCategory::NotFound);
+    }
+
+    #[test]
+    fn draw_not_found_category() {
+        let err = ContractError::DrawNotFound(1, 42);
+        assert_eq!(err.category(), ContractErrorCategory::NotFound);
+    }
+
+    #[test]
+    fn unauthorized_category() {
+        let err = ContractError::Unauthorized;
+        assert_eq!(err.category(), ContractErrorCategory::Auth);
+    }
+
+    #[test]
+    fn collateral_insufficient_category() {
+        let err = ContractError::CollateralInsufficient;
+        assert_eq!(err.category(), ContractErrorCategory::Collateral);
+    }
+
+    #[test]
+    fn insufficient_collateral_balance_category() {
+        let err = ContractError::InsufficientCollateralBalance;
+        assert_eq!(err.category(), ContractErrorCategory::Collateral);
+    }
+
+    #[test]
+    fn invalid_amount_category() {
+        let err = ContractError::InvalidAmount;
+        assert_eq!(err.category(), ContractErrorCategory::Validation);
+    }
+
+    #[test]
+    fn already_settled_category() {
+        let err = ContractError::AlreadySettled;
+        assert_eq!(err.category(), ContractErrorCategory::State);
+    }
+
+    #[test]
+    fn oracle_price_invalid_category() {
+        let err = ContractError::OraclePriceInvalid;
+        assert_eq!(err.category(), ContractErrorCategory::Oracle);
+    }
+
+    #[test]
+    fn oracle_quorum_not_met_category() {
+        let err = ContractError::OracleQuorumNotMet;
+        assert_eq!(err.category(), ContractErrorCategory::Oracle);
+    }
+
+    // ── Existing display & equality tests (preserved) ───────────────────
 
     #[test]
     fn collateral_insufficient_display_and_equality() {
@@ -108,10 +239,68 @@ mod tests {
     }
 
     #[test]
+    fn rate_ceiling_exceeded_display_and_equality() {
+        let err = ContractError::RateCeilingExceeded;
+        assert_eq!(err.to_string(), "RateCeilingExceeded");
+        assert_eq!(err, ContractError::RateCeilingExceeded);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn overflow_display_and_equality() {
+        let err = ContractError::Overflow;
+        assert_eq!(err.to_string(), "Overflow");
+        assert_eq!(err, ContractError::Overflow);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::RateCeilingExceeded);
+    }
+
+    #[test]
     fn insufficient_collateral_balance_is_distinct_from_collateral_insufficient() {
         let balance_err = ContractError::InsufficientCollateralBalance;
         let insufficient_err = ContractError::CollateralInsufficient;
         assert_ne!(balance_err, insufficient_err);
         assert_ne!(balance_err.to_string(), insufficient_err.to_string());
+    }
+
+    #[test]
+    fn invalid_fee_share_bps_display_and_equality() {
+        let err = ContractError::InvalidFeeShareBps;
+        assert_eq!(err.to_string(), "InvalidFeeShareBps");
+        assert_eq!(err, ContractError::InvalidFeeShareBps);
+        assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn insufficient_treasury_balance_display_and_equality() {
+        let err = ContractError::InsufficientTreasuryBalance;
+        assert_eq!(err.to_string(), "InsufficientTreasuryBalance");
+        assert_eq!(err, ContractError::InsufficientTreasuryBalance);
+        assert_ne!(err, ContractError::InsufficientBountyBalance);
+    }
+
+    #[test]
+    fn insufficient_bounty_balance_display_and_equality() {
+        let err = ContractError::InsufficientBountyBalance;
+        assert_eq!(err.to_string(), "InsufficientBountyBalance");
+        assert_eq!(err, ContractError::InsufficientBountyBalance);
+        assert_ne!(err, ContractError::InsufficientTreasuryBalance);
+    }
+
+    #[test]
+    fn treasury_address_not_set_display_and_equality() {
+        let err = ContractError::TreasuryAddressNotSet;
+        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
+        assert_eq!(err, ContractError::TreasuryAddressNotSet);
+        assert_ne!(err, ContractError::BountyAddressNotSet);
+    }
+
+    #[test]
+    fn bounty_address_not_set_display_and_equality() {
+        let err = ContractError::BountyAddressNotSet;
+        assert_eq!(err.to_string(), "BountyAddressNotSet");
+        assert_eq!(err, ContractError::BountyAddressNotSet);
+        assert_ne!(err, ContractError::TreasuryAddressNotSet);
     }
 }

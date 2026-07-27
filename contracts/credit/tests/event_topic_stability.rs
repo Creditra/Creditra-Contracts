@@ -36,6 +36,7 @@ fn test_event_topics_stability() {
             borrower: borrower.clone(),
             amount: 100,
             new_utilized_amount: 100,
+            timestamp: 0_u64,
         },
     );
     publish_repayment_event(

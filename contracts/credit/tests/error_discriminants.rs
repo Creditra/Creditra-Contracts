@@ -68,7 +68,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::AlreadySettled as u32, 51);
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
     assert_eq!(ContractError::InvalidAttestation as u32, 53);
-    assert_eq!(ContractError::AdminCooldownActive as u32, 54);
+    assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -130,7 +130,7 @@ fn no_duplicate_discriminants() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
-        ContractError::AdminCooldownActive as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -144,7 +144,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 54;
+    const EXPECTED_VARIANT_COUNT: usize = 59;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -200,7 +200,7 @@ fn variant_count_is_known() {
         ContractError::AlreadySettled as u32,
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
-        ContractError::AdminCooldownActive as u32,
+        ContractError::RiskAdminCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -299,6 +299,10 @@ fn category_mappings_are_stable() {
         ContractError::AdminNotInitialized.category(),
         ContractErrorCategory::Auth
     );
+    assert_eq!(
+        ContractError::BorrowerMismatch.category(),
+        ContractErrorCategory::Auth
+    );
     // Lifecycle
     assert_eq!(
         ContractError::CreditLineClosed.category(),
@@ -374,6 +378,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawReversalWindowExpired.category(),
         ContractErrorCategory::Limit
     );
+    assert_eq!(
+        ContractError::UtilizedNotZero.category(),
+        ContractErrorCategory::Limit
+    );
     // Liquidity
     assert_eq!(
         ContractError::MissingLiquidityToken.category(),
@@ -411,6 +419,18 @@ fn category_mappings_are_stable() {
         ContractError::BountyNotSet.category(),
         ContractErrorCategory::Liquidity
     );
+    assert_eq!(
+        ContractError::InsufficientReserve.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientAllowance.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientBalance.category(),
+        ContractErrorCategory::Liquidity
+    );
     // Risk
     assert_eq!(
         ContractError::RateTooHigh.category(),
@@ -429,7 +449,7 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Risk
     );
     assert_eq!(
-        ContractError::AdminCooldownActive.category(),
+        ContractError::RiskAdminCooldownActive.category(),
         ContractErrorCategory::Risk
     );
     // Oracle
@@ -447,6 +467,10 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::OracleQuorumNotMet.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OracleNotFound.category(),
         ContractErrorCategory::Oracle
     );
     // Collateral
@@ -520,10 +544,84 @@ fn category_mappings_are_stable() {
     );
 }
 
+/// Verify the borrow error catalog remains synchronized with the enum.
+#[test]
+fn borrow_error_catalog_lists_all_variants() {
+    let catalog_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors/borrow.md");
+    let catalog = std::fs::read_to_string(&catalog_path)
+        .unwrap_or_else(|_| panic!("Missing borrow error catalog at {:?}", catalog_path));
+
+    for variant in [
+        "Unauthorized",
+        "NotAdmin",
+        "CreditLineNotFound",
+        "CreditLineClosed",
+        "InvalidAmount",
+        "OverLimit",
+        "NegativeLimit",
+        "RateTooHigh",
+        "ScoreTooHigh",
+        "UtilizationNotZero",
+        "Reentrancy",
+        "Overflow",
+        "LimitDecreaseRequiresRepayment",
+        "AlreadyInitialized",
+        "QuorumNotMet",
+        "OracleNotFound",
+        "OracleAlreadyExists",
+        "AdminAcceptTooEarly",
+        "BorrowerBlocked",
+        "DrawExceedsMaxAmount",
+        "Paused",
+        "DrawsFrozen",
+        "CreditLineSuspended",
+        "CreditLineDefaulted",
+        "MissingLiquidityToken",
+        "MissingLiquiditySource",
+        "InsufficientLiquidityReserve",
+        "LiquidityTokenCallFailed",
+        "InsufficientRepaymentAllowance",
+        "InsufficientRepaymentBalance",
+        "RepayExceedsMaxAmount",
+        "DrawCooldownActive",
+        "TreasuryNotSet",
+        "ExposureCapExceeded",
+        "AdminNotInitialized",
+        "TimestampRegression",
+        "LimitOutOfBounds",
+        "CollateralRatioBelowMinimum",
+        "OraclePriceInvalid",
+        "OraclePriceStale",
+        "OraclePriceDeviation",
+        "InsufficientCollateralBalance",
+        "BorrowerFrozen",
+        "BountyNotSet",
+        "NoPendingTreasuryWithdrawal",
+        "TreasuryTimelockActive",
+        "TreasuryProposalExists",
+        "CloseFactorAboveMax",
+        "CreditLineFrozen",
+        "DrawReversalWindowExpired",
+        "OriginalDrawNotFound",
+        "AttestationBatchNotFound",
+        "OracleQuorumNotMet",
+        "AlreadySettled",
+        "InvalidRiskWeight",
+    ] {
+        assert!(
+            catalog.contains(variant),
+            "Borrow error catalog is missing the variant {variant}"
+        );
+    }
+}
+
 /// Verify every ContractError variant has a known category and that all 11
 /// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
+    // AdminQueryCooldownActive must resolve to Risk (discriminant 53)
+    let _: ContractErrorCategory = ContractError::AdminQueryCooldownActive.category();
     use std::collections::HashSet;
 
     let all_variants: Vec<ContractErrorCategory> = vec![
@@ -581,7 +679,7 @@ fn every_variant_has_known_category() {
         ContractError::AlreadySettled.category(),
         ContractError::InvalidRiskWeight.category(),
         ContractError::InvalidAttestation.category(),
-        ContractError::FreezeCooldownActive.category(),
+        ContractError::RiskAdminCooldownActive.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -590,7 +688,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 54, "Expected 54 ContractError variants");
+    assert_eq!(all_variants.len(), 59, "Expected 59 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1079,7 +1177,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::AlreadySettled,
+            ContractError::AlreadySettled.into(),
             "Expected AlreadySettled error on settlement replay"
         );
 
