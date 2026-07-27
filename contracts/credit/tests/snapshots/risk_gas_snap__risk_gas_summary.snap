@@ -1,0 +1,58 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: samples
+---
+{
+    "clear_rate_formula_config": (
+        131834,
+        24333,
+    ),
+    "get_borrower_rate_ceiling": (
+        44890,
+        8587,
+    ),
+    "get_borrower_rate_floor": (
+        44692,
+        8513,
+    ),
+    "get_health_factor": (
+        71767,
+        12786,
+    ),
+    "get_penalty_surcharge_bps": (
+        67217,
+        10326,
+    ),
+    "get_rate_change_limits": (
+        62986,
+        9689,
+    ),
+    "get_rate_formula_config": (
+        82498,
+        13089,
+    ),
+    "set_borrower_rate_ceiling": (
+        97300,
+        16317,
+    ),
+    "set_borrower_rate_floor": (
+        93125,
+        15735,
+    ),
+    "set_penalty_surcharge_bps": (
+        111005,
+        19224,
+    ),
+    "set_rate_change_limits": (
+        99547,
+        16977,
+    ),
+    "set_rate_formula_config": (
+        130183,
+        22675,
+    ),
+    "update_risk_parameters": (
+        193939,
+        28864,
+    ),
+}

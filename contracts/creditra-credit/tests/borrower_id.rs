@@ -23,7 +23,7 @@
 //! - Issue #757
 
 use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-use cosmwasm_std::{Addr, OwnedDeps, Uint128};
+use cosmwasm_std::{Addr, Api, OwnedDeps};
 use creditra_credit::contract;
 use creditra_credit::msg::{ExecuteMsg, InstantiateMsg};
 use creditra_credit::state::{CREDIT_LINE_COUNT, CREDIT_LINES};
@@ -104,7 +104,7 @@ proptest! {
         let mut ids: Vec<u64> = Vec::with_capacity(n);
 
         for i in 0..n {
-            let borrower_str = format!("borrower_{}", i);
+            let borrower_str = deps.api.addr_make(&format!("borrower_{}", i)).to_string();
             let id = create_credit_line(&mut deps, &owner, &borrower_str);
             ids.push(id);
             addr_strs.push(borrower_str);
@@ -168,7 +168,7 @@ proptest! {
 
         let mut prev_id: Option<u64> = None;
         for i in 0..n {
-            let borrower_str = format!("borrower_{}", i);
+            let borrower_str = deps.api.addr_make(&format!("borrower_{}", i)).to_string();
             let id = create_credit_line(&mut deps, &owner, &borrower_str);
 
             if let Some(prev) = prev_id {
@@ -194,14 +194,14 @@ proptest! {
         let mut ids: Vec<u64> = Vec::with_capacity(n);
 
         for i in 0..n {
-            let borrower_str = format!("borrower_{}", i);
+            let borrower_str = deps.api.addr_make(&format!("borrower_{}", i)).to_string();
             let id = create_credit_line(&mut deps, &owner, &borrower_str);
             ids.push(id);
             addr_strs.push(borrower_str);
         }
 
         // Each ID maps to exactly the borrower that created it
-        for (i, &id) in ids.iter().enumerate() {
+        for &id in &ids {
             let cl = CREDIT_LINES.load(deps.as_ref().storage, id).unwrap();
             // Verify the borrower at this ID is unique by checking no other ID maps to it
             let mut found_count = 0u32;
@@ -232,11 +232,12 @@ mod edge_cases {
         let mut deps = mock_dependencies();
         let owner = setup_contract(&mut deps);
 
-        let id = create_credit_line(&mut deps, &owner, "alice");
+        let alice = deps.api.addr_make("alice").to_string();
+        let id = create_credit_line(&mut deps, &owner, &alice);
         let cl = CREDIT_LINES.load(deps.as_ref().storage, id).unwrap();
-        assert_eq!(cl.borrower.as_str(), "alice");
+        assert_eq!(cl.borrower.as_str(), alice.as_str());
 
-        let borrower_addr = deps.api.addr_validate("alice").unwrap();
+        let borrower_addr = deps.api.addr_validate(&alice).unwrap();
         let recovered = find_id_for_borrower(&deps, &borrower_addr);
         assert_eq!(recovered, Some(0));
     }
@@ -247,8 +248,10 @@ mod edge_cases {
         let mut deps = mock_dependencies();
         let owner = setup_contract(&mut deps);
 
-        let id_a = create_credit_line(&mut deps, &owner, "alice");
-        let id_b = create_credit_line(&mut deps, &owner, "bob");
+        let alice = deps.api.addr_make("alice").to_string();
+        let bob = deps.api.addr_make("bob").to_string();
+        let id_a = create_credit_line(&mut deps, &owner, &alice);
+        let id_b = create_credit_line(&mut deps, &owner, &bob);
 
         assert_ne!(id_a, id_b, "Two borrowers must get distinct IDs");
         assert_eq!(id_a, 0, "First borrower must get ID 0");
@@ -266,7 +269,7 @@ mod edge_cases {
         let mut addr_strs = Vec::with_capacity(count);
 
         for i in 0..count {
-            let borrower_str = format!("borrower_{}", i);
+            let borrower_str = deps.api.addr_make(&format!("borrower_{}", i)).to_string();
             let id = create_credit_line(&mut deps, &owner, &borrower_str);
             ids.push(id);
             addr_strs.push(borrower_str);
@@ -300,9 +303,11 @@ mod edge_cases {
         let mut deps = mock_dependencies();
         let owner = setup_contract(&mut deps);
 
-        // These share a common prefix which could cause encoding issues
-        let id_a = create_credit_line(&mut deps, &owner, "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx2v9hx");
-        let id_b = create_credit_line(&mut deps, &owner, "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrp7as");
+        // Seeds sharing a common prefix, which could cause encoding issues
+        let addr_a = deps.api.addr_make("common-prefix-borrower-a").to_string();
+        let addr_b = deps.api.addr_make("common-prefix-borrower-b").to_string();
+        let id_a = create_credit_line(&mut deps, &owner, &addr_a);
+        let id_b = create_credit_line(&mut deps, &owner, &addr_b);
 
         assert_ne!(id_a, id_b, "Common-prefix addresses must get distinct IDs");
 

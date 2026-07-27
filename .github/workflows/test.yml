@@ -20,4 +20,5 @@ jobs:
           toolchain: stable
 
       - name: Run tests
-        run: cargo test -p creditra-credit
+        working-directory: ./contracts/creditra-credit
+        run: cargo test

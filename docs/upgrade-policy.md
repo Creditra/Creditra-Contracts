@@ -263,8 +263,6 @@ For coverage validation (minimum 95% line coverage required):
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
-<<<<<<< HEAD
-
 ## Operational Checklist
 
 ### Pre-Upgrade
@@ -300,6 +298,4 @@ cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 - [Soroban Deployer Interface](https://docs.rs/soroban-sdk/latest/soroban_sdk/deploy/struct.Deployer.html)
 - [Contract Upgrade Best Practices](https://developers.stellar.org/docs/smart-contracts/guides/upgrading-contracts)
 
-=======
->>>>>>> f857cd8 (docs: fix unclosed code fence in upgrade-policy.md to resolve CI markdown parsing error)
 

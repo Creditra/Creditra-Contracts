@@ -112,6 +112,7 @@ fn lifecycle_v7_error_discriminants_are_pinned() {
     assert_eq!(ContractError::DrawCooldownActive as u32, 29);
     assert_eq!(ContractError::CollateralRatioBelowMinimum as u32, 35);
     assert_eq!(ContractError::InsufficientCollateralBalance as u32, 39);
+    assert_eq!(ContractError::AdminLifecycleCooldownActive as u32, 56);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -147,6 +148,7 @@ fn lifecycle_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::RateTooHigh.category(), Risk);
     assert_eq!(ContractError::ScoreTooHigh.category(), Risk);
     assert_eq!(ContractError::DrawCooldownActive.category(), Risk);
+    assert_eq!(ContractError::AdminLifecycleCooldownActive.category(), Risk);
 
     // Block bucket (discriminant 9)
     assert_eq!(ContractError::CreditLineFrozen.category(), Block);
@@ -163,13 +165,22 @@ fn lifecycle_v7_category_mappings_are_pinned() {
     // Limit bucket (discriminant 4)
     assert_eq!(ContractError::OverLimit.category(), Limit);
     assert_eq!(ContractError::UtilizationNotZero.category(), Limit);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), Limit);
+    assert_eq!(
+        ContractError::LimitDecreaseRequiresRepayment.category(),
+        Limit
+    );
     assert_eq!(ContractError::DrawExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::RepayExceedsMaxAmount.category(), Limit);
 
     // Collateral bucket (discriminant 8)
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), Collateral);
-    assert_eq!(ContractError::InsufficientCollateralBalance.category(), Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        Collateral
+    );
+    assert_eq!(
+        ContractError::InsufficientCollateralBalance.category(),
+        Collateral
+    );
 
     // Misc bucket (discriminant 11)
     assert_eq!(ContractError::CreditLineNotFound.category(), Misc);
@@ -224,6 +235,7 @@ fn lifecycle_v7_subset_has_no_duplicate_discriminants() {
         ContractError::DrawCooldownActive as u32,
         ContractError::CollateralRatioBelowMinimum as u32,
         ContractError::InsufficientCollateralBalance as u32,
+        ContractError::AdminLifecycleCooldownActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -243,7 +255,7 @@ fn lifecycle_v7_subset_has_no_duplicate_discriminants() {
 /// `lifecycle_v7_category_mappings_are_pinned`.
 #[test]
 fn lifecycle_v7_subset_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 35;
+    const EXPECTED_VARIANT_COUNT: usize = 36;
 
     let codes = [
         ContractError::CreditLineNotFound as u32,
@@ -281,6 +293,7 @@ fn lifecycle_v7_subset_variant_count_is_known() {
         ContractError::DrawCooldownActive as u32,
         ContractError::CollateralRatioBelowMinimum as u32,
         ContractError::InsufficientCollateralBalance as u32,
+        ContractError::AdminLifecycleCooldownActive as u32,
     ];
 
     assert_eq!(
@@ -313,8 +326,7 @@ mod integration {
         client.set_liquidity_token(&token_address);
         client.set_liquidity_source(&contract_id);
 
-        token::StellarAssetClient::new(&env, &token_address)
-            .mint(&contract_id, &1_000_000_i128);
+        token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
 
         (env, contract_id, admin)
     }
@@ -483,7 +495,9 @@ mod integration {
         assert!(result.is_err());
         let err_str = extract_error_str(&result.unwrap_err());
         assert!(
-            err_str.contains("Only active") || err_str.contains("active credit lines") || err_str.contains("#20"),
+            err_str.contains("Only active")
+                || err_str.contains("active credit lines")
+                || err_str.contains("#20"),
             "expected suspend-already-suspended error, got: {:?}",
             err_str
         );
@@ -670,6 +684,7 @@ mod integration {
         let borrower = Address::generate(&env);
 
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
+        client.set_min_collateral_ratio_bps(&0);
         client.draw_credit(&borrower, &500_i128);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -712,7 +727,8 @@ mod integration {
         let client = CreditClient::new(&env, &contract_id);
         let borrower = Address::generate(&env);
 
-        client.pause_protocol(&admin);
+        let _ = &admin;
+        client.set_protocol_paused(&true);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);

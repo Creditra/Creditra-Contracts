@@ -101,10 +101,7 @@ fn unfreeze_draws_blocked_within_cooldown() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.unfreeze_draws();
     }));
-    assert!(
-        result.is_err(),
-        "unfreeze_draws must fail within cooldown"
-    );
+    assert!(result.is_err(), "unfreeze_draws must fail within cooldown");
 }
 
 #[test]

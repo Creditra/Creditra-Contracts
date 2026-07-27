@@ -122,3 +122,46 @@ cargo test -p creditra-credit --test snap_deviation
 The test locks in expected outcomes for common oracle-feed moves, zero/negative
 price edge cases, and a deterministic proptest over positive prices so the
 oracle circuit-breaker math stays stable.
+
+## `accrued_interest` snapshot-fuzz test (`contracts/creditra-credit`)
+
+`contracts/creditra-credit/tests/snap_prorate.rs` pins the CosmWasm
+`accrued_interest` function — the 365-day simple-interest accrual primitive
+that mirrors the Soroban `prorate_interest`.
+
+### Run (verify mode — CI default)
+
+```bash
+cargo test -p creditra-credit --test snap_prorate
+```
+
+### Regenerate after an intentional change
+
+```bash
+cargo test -p creditra-credit --test snap_prorate \
+    -- --nocapture regenerate
+```
+
+Commit both the updated test and the regenerated
+`contracts/creditra-credit/tests/snapshots/accrued_interest.json`.
+
+### What is tested
+
+| Layer | Coverage |
+|---|---|
+| Snapshot (4 096 entries) | Exact bit-for-bit match against the pinned JSON; fails CI on any silent arithmetic drift |
+| Deterministic unit cases | Zero inputs, exact-year boundary, half-year, floor-to-zero, exact-division, overflow path, monotone time series |
+| `proptest` (512 cases each) | Monotone in time / principal / rate; zero boundary; total / panic-free; overflow upward-closed; interest ≤ principal within one year; additive consistency across split periods |
+
+### Key differences from the Soroban twin
+
+| Property | Soroban `prorate_interest` | CosmWasm `accrued_interest` |
+|---|---|---|
+| Year length | 31 557 600 s (Julian 365.25-day) | 31 536 000 s (365-day) |
+| Rounding | Caller-controlled `Floor`/`Ceil` | Always floor |
+| Overflow | Panics | Returns `Err(ContractError::Overflow)` |
+| Snapshot location | `contracts/credit/test_snapshots/prorate_interest.json` | `contracts/creditra-credit/tests/snapshots/accrued_interest.json` |
+
+The snapshot file is committed to the repository.  Any modification to
+`accrued_interest`'s arithmetic must be followed by a regeneration run and the
+new JSON committed in the same PR so CI never sees a stale snapshot.

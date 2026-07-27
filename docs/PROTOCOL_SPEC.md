@@ -368,15 +368,16 @@ See `contracts/credit/src/fees.rs`.
 
 ### 2.9 Operational controls
 
-| Entrypoint                                                                                                                                | Effect                                                                                                                                                 |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `freeze_draws(env, reason)` / `unfreeze_draws(env)`                                                                                       | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`.                                                          |
-| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)`                                                       | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`.                                            |
-| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state.                                                                                                                                |
-| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers`                                                           | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`.                                                         |
-| `accrue_batch(borrowers)`                                                                                                                 | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook.                                                                                   |
-| `reverse_draw(borrower, amount, original_ts, reason_code)`                                                                                | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
-| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ)                                                                  | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`.                                                                  |
+| Entrypoint | Effect |
+|---|---|
+| `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
+| `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
+| `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
+| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
+| `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
+| Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
+| `set_query_admin_cooldown(seconds: u64)` | Admin + pause. Sets the minimum interval (seconds) between consecutive query-critical actions. Pass `0` to disable. |
 
 ### 2.10 Read-only queries
 
@@ -407,6 +408,8 @@ See `contracts/credit/src/fees.rs`.
 | `get_collateral(borrower)`                                       | `i128`                                                                                                   |
 | `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
 | `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
+| `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
+| `query_capabilities(borrower)`                                   | `QueryCapabilities { has_credit_line, has_repayment_schedule, health_factor_applicable, delinquency_applicable, is_delinquent }` — read-only query availability bitmap; see `contracts/query/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).

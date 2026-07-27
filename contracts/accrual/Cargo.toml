@@ -23,6 +23,14 @@ path = "tests/err_stab.rs"
 name = "gas_snap"
 path = "tests/gas_snap.rs"
 
+[[test]]
+name = "capabilities"
+path = "tests/capabilities.rs"
+
+[[test]]
+name = "auth_snap"
+path = "tests/auth_snap.rs"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 creditra-credit = { path = "../credit", features = [] }

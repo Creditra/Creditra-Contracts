@@ -1,12 +1,18 @@
 [workspace]
 resolver = "2"
-
 members = [
     "contracts/credit",
     "contracts/accrual",
     "contracts/collateral",
+    "contracts/lifecycle",
+    "contracts/query",
+    "contracts/freeze",
     "gateway-contract/contracts/auction_contract",
 ]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
 
 [workspace.dependencies]
 soroban-sdk = "22"

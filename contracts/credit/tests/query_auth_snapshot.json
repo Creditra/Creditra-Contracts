@@ -1,0 +1,34 @@
+{
+  "//": "Per-entrypoint auth snapshot for the query subsystem (#947).",
+  "//": "Every entrypoint in this file is a pure read — no storage mutation,",
+  "//": "no event emission — and therefore MUST have `null` (no auth).",
+  "//": "",
+  "//": "To regenerate this snapshot, run the tests with UPDATE_SNAPSHOT=1.",
+  "entrypoints": {
+    "get_credit_line": {
+      "description": "Return the credit line for a borrower, or None if no line exists.",
+      "auth": null,
+      "read_only": true
+    },
+    "get_protocol_summary": {
+      "description": "Return protocol-level dashboard aggregates in one read-only call.",
+      "auth": null,
+      "read_only": true
+    },
+    "get_repayment_schedule": {
+      "description": "Return the configured installment repayment schedule for a borrower.",
+      "auth": null,
+      "read_only": true
+    },
+    "get_health_factor": {
+      "description": "Return the collateral-aware health factor for a borrower in bps.",
+      "auth": null,
+      "read_only": true
+    },
+    "is_delinquent": {
+      "description": "Return true when the borrower has missed an installment past the grace window.",
+      "auth": null,
+      "read_only": true
+    }
+  }
+}

@@ -173,18 +173,16 @@ mod test {
             crate::storage::set_collateral_balance(&env, &borrower, 500_i128);
         });
 
-        let total_before = env.as_contract(&contract_id, || {
-            crate::storage::get_total_collateral(&env)
-        });
+        let total_before =
+            env.as_contract(&contract_id, || crate::storage::get_total_collateral(&env));
         assert_eq!(total_before, 500_i128);
 
         env.as_contract(&contract_id, || {
             crate::storage::set_collateral_balance(&env, &borrower, 0_i128);
         });
 
-        let total_after = env.as_contract(&contract_id, || {
-            crate::storage::get_total_collateral(&env)
-        });
+        let total_after =
+            env.as_contract(&contract_id, || crate::storage::get_total_collateral(&env));
         assert_eq!(total_after, 0_i128);
     }
 
@@ -196,13 +194,10 @@ mod test {
         let (contract_id, _client) = setup(&env);
         let borrower = Address::generate(&env);
         let token = Address::generate(&env);
-        let balance_key =
-            DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+        let balance_key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
 
         env.as_contract(&contract_id, || {
-            crate::storage::set_collateral_balance_for_token(
-                &env, &borrower, &token, 500_i128,
-            );
+            crate::storage::set_collateral_balance_for_token(&env, &borrower, &token, 500_i128);
         });
 
         let initial_ttl = ttl_for_key(&env, &contract_id, &balance_key);
@@ -214,9 +209,7 @@ mod test {
         advance_past_ttl_threshold(&env, &contract_id, &balance_key);
 
         env.as_contract(&contract_id, || {
-            crate::storage::set_collateral_balance_for_token(
-                &env, &borrower, &token, 700_i128,
-            );
+            crate::storage::set_collateral_balance_for_token(&env, &borrower, &token, 700_i128);
         });
 
         let after_ttl = ttl_for_key(&env, &contract_id, &balance_key);
@@ -232,21 +225,16 @@ mod test {
         let (contract_id, _client) = setup(&env);
         let borrower = Address::generate(&env);
         let token = Address::generate(&env);
-        let balance_key =
-            DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+        let balance_key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
 
         env.as_contract(&contract_id, || {
-            crate::storage::set_collateral_balance_for_token(
-                &env, &borrower, &token, 1_000_i128,
-            );
+            crate::storage::set_collateral_balance_for_token(&env, &borrower, &token, 1_000_i128);
         });
 
         advance_past_ttl_threshold(&env, &contract_id, &balance_key);
 
         let balance = env.as_contract(&contract_id, || {
-            crate::storage::get_collateral_balance_for_token(
-                &env, &borrower, &token,
-            )
+            crate::storage::get_collateral_balance_for_token(&env, &borrower, &token)
         });
         assert_eq!(balance, 1_000_i128);
 
@@ -265,10 +253,67 @@ mod test {
         let token = Address::generate(&env);
 
         let balance = env.as_contract(&contract_id, || {
-            crate::storage::get_collateral_balance_for_token(
-                &env, &borrower, &token,
-            )
+            crate::storage::get_collateral_balance_for_token(&env, &borrower, &token)
         });
         assert_eq!(balance, 0_i128);
+    }
+
+    #[test]
+    fn get_collateral_token_bumps_ttl_on_read() {
+        let env = Env::default();
+        let (contract_id, client) = setup(&env);
+        let token = Address::generate(&env);
+        client.set_liquidity_token(&token);
+
+        // Set low TTL
+        env.as_contract(&contract_id, || {
+            env.storage().instance().extend_ttl(1, 100);
+        });
+
+        // Verify TTL is bumped
+        let ttl_before = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::LiquidityToken)
+        });
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::get_collateral_token(&env);
+        });
+
+        let ttl_after = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::LiquidityToken)
+        });
+        
+        assert!(ttl_after > ttl_before);
+    }
+
+    #[test]
+    fn get_collateral_token_allowlist_bumps_ttl_on_read() {
+        let env = Env::default();
+        let (contract_id, _client) = setup(&env);
+        let token = Address::generate(&env);
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::set_collateral_token_allowlist(&env, &soroban_sdk::vec![&env, token.clone()]);
+        });
+
+        // Set low TTL
+        env.as_contract(&contract_id, || {
+            env.storage().instance().extend_ttl(1, 100);
+        });
+
+        // Verify TTL is bumped
+        let ttl_before = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::CollateralTokenAllowlist)
+        });
+        
+        env.as_contract(&contract_id, || {
+            crate::storage::get_collateral_token_allowlist(&env);
+        });
+
+        let ttl_after = env.as_contract(&contract_id, || {
+            env.storage().instance().get_ttl(&DataKey::CollateralTokenAllowlist)
+        });
+        
+        assert!(ttl_after > ttl_before);
     }
 }

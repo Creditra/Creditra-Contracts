@@ -569,6 +569,19 @@ Set the per-borrower cooldown interval between critical admin actions.
 ### `get_borrow_admin_cooldown(env) -> Option<u64>`
 Returns the configured per-borrower admin-action cooldown, if set. No auth required.
 
+### `set_accrual_admin_cooldown(env, seconds)`
+Set the per-borrower cooldown interval between accrual-critical admin actions.
+
+- Admin only.
+- `seconds > 0` enforces a minimum interval between borrower-specific admin actions that realize or mutate accrued debt state, currently `update_risk_parameters`, `suspend_credit_line`, admin `close_credit_line`, `close_credit_lines_batch`, `default_credit_line`, `reinstate_credit_line`, and `forgive_debt`.
+- `seconds = 0` disables the accrual admin cooldown.
+- The cooldown is per borrower, so accrual-critical actions on one borrower do not block another borrower.
+- Reverts with `ContractError::AdminCooldownActive` (`54`) when an accrual-critical admin action is attempted before the interval has elapsed.
+- This cooldown is independent from `set_borrow_admin_cooldown`, which continues to gate borrow/origination-side critical admin actions such as `open_credit_line`.
+
+### `get_accrual_admin_cooldown(env) -> Option<u64>`
+Returns the configured per-borrower accrual admin-action cooldown, if set. No auth required.
+
 ### `is_draws_frozen(env) -> bool`
 Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
 

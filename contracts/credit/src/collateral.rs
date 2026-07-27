@@ -29,12 +29,6 @@
 //! utilization, so a withdrawal can never push an active credit line
 //! under-collateralized.
 //!
-//! [`partial_release_collateral`] is a dedicated borrower-callable entrypoint
-//! that applies the same health-factor guard and emits a distinct
-//! [`crate::events::CollateralPartialReleasedEvent`] (topic `"col_prel"`),
-//! making it easy for indexers to distinguish a deliberate partial release
-//! from a generic withdrawal or an atomic repay-and-release.
-//!
 //! # Storage
 //!
 //! Per-borrower collateral balances live in persistent storage under
@@ -49,15 +43,16 @@
 //! for the full error table.
 
 use crate::events::{
-    publish_collateral_deposited_event, publish_collateral_partial_released_event,
-    publish_collateral_withdrawn_event, CollateralDepositedEvent, CollateralPartialReleasedEvent,
-    CollateralWithdrawnEvent,
+    publish_collateral_deposited_event, publish_collateral_lifecycle_event,
+    publish_collateral_partial_released_event, publish_collateral_withdrawn_event,
+    CollateralDepositedEvent, CollateralPartialReleasedEvent, CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_risk_weight_bps, get_collateral_token,
-    get_credit_line, get_min_collateral_ratio_bps, set_collateral_balance,
+    get_collateral_balance, get_collateral_balance_for_token, get_collateral_risk_weight_bps,
+    get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
+    is_collateral_token_allowed, set_collateral_balance, set_collateral_balance_for_token,
 };
-use crate::types::ContractError;
+use crate::types::{CollateralEventKind, ContractError};
 use soroban_sdk::{token, Address, Env};
 
 /// Deposit collateral tokens from the borrower into the contract.
@@ -96,10 +91,23 @@ pub fn deposit_collateral(env: &Env, borrower: &Address, amount: i128) {
             new_balance,
         },
     );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::Deposited,
+        None,
+        amount,
+        new_balance,
+    );
 }
 
 /// Withdraw collateral tokens to the borrower.
 /// Requires borrower authentication and ensures collateral ratio remains above minimum.
+///
+/// # Errors
+/// - Panics with [`ContractError::InvalidAmount`] if `amount <= 0`.
+/// - Panics with [`ContractError::InsufficientCollateralBalance`] (code `39`) if `amount` exceeds stored collateral balance.
+/// - Panics with [`ContractError::CollateralRatioBelowMinimum`] if post-withdrawal balance falls below required ratio floor.
 pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -150,6 +158,14 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
             amount,
             new_balance: post_balance,
         },
+    );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::Withdrawn,
+        None,
+        amount,
+        post_balance,
     );
 }
 
@@ -285,6 +301,14 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
             health_factor_bps,
         },
     );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::PartiallyReleased,
+        None,
+        amount,
+        post_balance,
+    );
 }
 
 /// Release collateral tokens to the borrower without requiring auth.
@@ -327,6 +351,14 @@ pub fn release_collateral(env: &Env, borrower: &Address, amount: i128) {
             new_balance: post_balance,
         },
     );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::Released,
+        None,
+        amount,
+        post_balance,
+    );
 }
 
 // ── Multi-collateral: per-token deposit / withdraw / query ─────────────────────
@@ -362,6 +394,14 @@ pub fn deposit_collateral_token(env: &Env, borrower: &Address, token_addr: &Addr
             amount,
             new_balance,
         },
+    );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::Deposited,
+        Some(token_addr.clone()),
+        amount,
+        new_balance,
     );
 }
 
@@ -399,6 +439,14 @@ pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Add
             amount,
             new_balance: post_balance,
         },
+    );
+    publish_collateral_lifecycle_event(
+        env,
+        borrower,
+        CollateralEventKind::Withdrawn,
+        Some(token_addr.clone()),
+        amount,
+        post_balance,
     );
 }
 

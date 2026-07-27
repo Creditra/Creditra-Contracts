@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "update_risk_parameters_with_borrower_floor",
+    cpu_instructions: 193482,
+    memory_bytes: 28308,
+}
