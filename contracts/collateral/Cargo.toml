@@ -2,14 +2,6 @@
 name = "creditra-collateral"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra collateral ContractError catalog and v7 error-stability tests"
-license = "MIT"
-keywords = ["soroban", "stellar", "collateral", "credit", "smart-contract"]
-categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
-readme = "README.md"
-# Explicit test targets so catalog / err_stab stay runnable without pulling in
-# credit-dependent integration suites that require a compiling creditra-credit.
-autotests = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
