@@ -136,17 +136,27 @@ pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
 /// When absent the contract has no late-fee penalty configured.
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
 
-/// Governance-set protocol fee in basis points applied to every repay.
-pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
+/// Storage key for the protocol-wide fee in basis points (0..=10_000).
+///
+/// Applied to every draw repayment; 0 means no protocol fee is charged.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pf_bps");
 
-/// Default treasury fee-share ratio in basis points (10 000 = 100%).
-pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("dfs");
+/// Default treasury fee-share ratio for all markets when no per-market
+/// override exists.  Stored as basis points (0..=10_000).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("dfs_bps");
 
-/// Per-market treasury fee-share override in basis points.
-pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mfs");
+/// Per-market override of the treasury fee-share ratio in basis points.
+///
+/// If a key exists for a given `denom`, that value takes precedence over
+/// `DEFAULT_FEE_SHARE_BPS` for that market.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mfs_bps");
 
-/// Accumulated protocol fee owed to treasury per market denom.
-pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("tb");
+/// Accumulated treasury balance per market denomination.
+///
+/// Only the contract owner can debit this via `WithdrawTreasury`.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("t_bal");
 
-/// Accumulated protocol fee owed to bounty pool per market denom.
-pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bb");
+/// Accumulated bounty-pool balance per market denomination.
+///
+/// Only the contract owner can debit this via `WithdrawBounty`.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("b_bal");
