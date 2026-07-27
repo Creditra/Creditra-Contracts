@@ -146,34 +146,21 @@ pub const ORACLE_REPORT: Map<Addr, OracleReportData> = Map::new("orc_rpt");
 /// When absent the contract has no late-fee penalty configured.
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
 
-/// Per-borrower per-token collateral balance.
-///
-/// Maps `(borrower, denom)` to the deposited amount. A missing entry is
-/// equivalent to zero. This gives N borrowers × M tokens of granularity
-/// without requiring changes to the existing `CreditLine` schema.
-pub const COLLATERAL_BALANCES: Map<(&Addr, &str), Uint128> = Map::new("cb");
+// ── Per-market fee split storage ─────────────────────────────────────────────
 
-/// Tracks which denominations a borrower has deposited (for enumeration).
-///
-/// Updated atomically with [`COLLATERAL_BALANCES`] so queries can iterate
-/// a borrower's full set of collateral tokens without scanning all keys.
-pub const BORROWER_COLLATERAL_TOKENS: Map<&Addr, Vec<String>> = Map::new("bct");
+/// Default treasury fee share in basis points (0..=10_000).
+/// When unset, defaults to 10_000 (100% treasury, backward compatible).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("default_fee_share");
 
-/// Admin-managed list of accepted collateral token denominations.
-///
-/// Only denominations in this list may be deposited via
-/// [`execute_deposit_collateral`]. An empty or absent list means *no* tokens
-/// are allowed (the contract must be configured first).
-pub const COLLATERAL_TOKEN_ALLOWLIST: Item<Vec<String>> = Item::new("ctal");
+/// Per-market treasury fee share override in basis points (0..=10_000).
+/// Keyed by market denomination (the `credit_denom` of a credit line).
+/// When absent for a market, the [`DEFAULT_FEE_SHARE_BPS`] applies.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mkt_fee_share");
 
-/// Per-token risk weight in basis points (100 % = 10_000 bps).
-///
-/// When computing aggregate collateral value, each token's balance is
-/// multiplied by its risk weight and divided by 10_000. An unconfigured
-/// token defaults to [`DEFAULT_COLLATERAL_RISK_WEIGHT_BPS`].
-pub const COLLATERAL_RISK_WEIGHTS: Map<&str, u32> = Map::new("crw");
+/// Per-market accumulated treasury balance held in contract (fees collected).
+/// Keyed by market denomination.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("treasury_bal");
 
-/// Default risk weight for tokens without an explicit override.
-///
-/// 10_000 bps = 100 % (full notional value).
-pub const DEFAULT_COLLATERAL_RISK_WEIGHT_BPS: u32 = 10_000;
+/// Per-market accumulated bounty pool balance held in contract (fee share).
+/// Keyed by market denomination.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bounty_bal");

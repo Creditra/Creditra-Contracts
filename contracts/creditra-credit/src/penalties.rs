@@ -269,11 +269,7 @@ mod tests {
     #[test]
     fn flat_boundary_large_multiplication() {
         let amount = Uint128::new(u128::MAX / 2);
-        let fee = compute_late_fee(
-            LateFeeConfig::Flat(FlatFeeConfig { amount }),
-            2,
-        )
-        .unwrap();
+        let fee = compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount }), 2).unwrap();
         assert_eq!(fee, amount.checked_mul(Uint128::new(2)).unwrap());
     }
 
@@ -282,9 +278,7 @@ mod tests {
     #[test]
     fn apr_always_returns_zero_for_any_installments() {
         let fee = compute_late_fee(
-            LateFeeConfig::AprBased(AprFeeConfig {
-                surcharge_bps: 200,
-            }),
+            LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }),
             5,
         )
         .unwrap();
@@ -316,9 +310,7 @@ mod tests {
     #[test]
     fn apr_zero_missed_installments_returns_zero() {
         let fee = compute_late_fee(
-            LateFeeConfig::AprBased(AprFeeConfig {
-                surcharge_bps: 500,
-            }),
+            LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }),
             0,
         )
         .unwrap();
@@ -337,9 +329,7 @@ mod tests {
         )
         .unwrap();
         let apr_fee = compute_late_fee(
-            LateFeeConfig::AprBased(AprFeeConfig {
-                surcharge_bps: 500,
-            }),
+            LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 }),
             3,
         )
         .unwrap();

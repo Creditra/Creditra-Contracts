@@ -132,7 +132,6 @@ mod tests {
         let key = BorrowerKey::from_address(&addr);
 
         assert!(!key.is_empty());
-        assert!(key.len() > 0);
     }
 
     #[test]
