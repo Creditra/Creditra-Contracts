@@ -11,7 +11,7 @@ pub mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 pub mod key;
-pub mod limits;
+pub mod math_utils;
 pub mod migrate;
 pub mod msg;
 pub mod oracles;

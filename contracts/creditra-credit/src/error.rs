@@ -113,19 +113,23 @@ impl ContractError {
                 ContractErrorCategory::NotFound
             }
             ContractError::Unauthorized => ContractErrorCategory::Auth,
-            ContractError::CollateralInsufficient
-            | ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
-            ContractError::InvalidAmount
-            | ContractError::RateTooHigh
-            | ContractError::RateCeilingExceeded
-            | ContractError::InvalidFeeShareBps => ContractErrorCategory::Validation,
-            ContractError::AlreadySettled
-            | ContractError::InsufficientTreasuryBalance
-            | ContractError::InsufficientBountyBalance
-            | ContractError::Overflow => ContractErrorCategory::State,
-            ContractError::OraclePriceInvalid | ContractError::OracleQuorumNotMet => {
-                ContractErrorCategory::Oracle
-            }
+            ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
+            ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::CollateralTokenNotAllowed => ContractErrorCategory::Collateral,
+            ContractError::InvalidAmount => ContractErrorCategory::Validation,
+            ContractError::AlreadySettled => ContractErrorCategory::State,
+            ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
+            ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
+            ContractError::OracleNotFound => ContractErrorCategory::Oracle,
+            ContractError::RateTooHigh => ContractErrorCategory::Validation,
+            ContractError::Overflow => ContractErrorCategory::State,
+            ContractError::RateCeilingExceeded => ContractErrorCategory::Validation,
+            ContractError::InvalidFeeShareBps => ContractErrorCategory::Validation,
+            ContractError::InsufficientTreasuryBalance => ContractErrorCategory::Collateral,
+            ContractError::InsufficientBountyBalance => ContractErrorCategory::Collateral,
+            ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
+            ContractError::BountyAddressNotSet => ContractErrorCategory::State,
+            ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
         }
     }
 }
