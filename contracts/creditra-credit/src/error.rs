@@ -83,6 +83,65 @@ pub enum ContractError {
     /// Arithmetic overflow detected in checked computation.
     #[error("Overflow")]
     Overflow,
+
+    /// Invalid structured late-fee configuration (e.g. negative flat amount
+    /// or APR basis points exceeding 10 000).
+    #[error("LateFeeConfigInvalid")]
+    LateFeeConfigInvalid,
+
+    /// Fee-share basis points exceed 10 000 (100 %).
+    #[error("InvalidFeeShareBps")]
+    InvalidFeeShareBps,
+
+    /// Treasury balance is less than the requested withdrawal amount.
+    #[error("InsufficientTreasuryBalance")]
+    InsufficientTreasuryBalance,
+
+    /// Bounty-pool balance is less than the requested withdrawal amount.
+    #[error("InsufficientBountyBalance")]
+    InsufficientBountyBalance,
+
+    /// Treasury destination address has not been configured.
+    #[error("TreasuryAddressNotSet")]
+    TreasuryAddressNotSet,
+
+    /// Bounty destination address has not been configured.
+    #[error("BountyAddressNotSet")]
+    BountyAddressNotSet,
+
+    /// Rate or ceiling exceeds the absolute protocol maximum.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+}
+
+impl ContractError {
+    /// Classify this error into a high-level [`ContractErrorCategory`].
+    ///
+    /// Useful for generic callers that only care about the error family
+    /// (e.g. routing auth failures differently from validation issues).
+    pub const fn category(&self) -> ContractErrorCategory {
+        match self {
+            ContractError::Std(_) => ContractErrorCategory::Std,
+            ContractError::CreditLineNotFound(_) => ContractErrorCategory::NotFound,
+            ContractError::DrawNotFound(_, _) => ContractErrorCategory::NotFound,
+            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
+            ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::InvalidAmount => ContractErrorCategory::Validation,
+            ContractError::AlreadySettled => ContractErrorCategory::State,
+            ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
+            ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
+            ContractError::RateTooHigh => ContractErrorCategory::Validation,
+            ContractError::Overflow => ContractErrorCategory::Validation,
+            ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
+            ContractError::InvalidFeeShareBps => ContractErrorCategory::Validation,
+            ContractError::InsufficientTreasuryBalance => ContractErrorCategory::Collateral,
+            ContractError::InsufficientBountyBalance => ContractErrorCategory::Collateral,
+            ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
+            ContractError::BountyAddressNotSet => ContractErrorCategory::State,
+            ContractError::RateCeilingExceeded => ContractErrorCategory::Validation,
+        }
+    }
 }
 
 #[cfg(test)]

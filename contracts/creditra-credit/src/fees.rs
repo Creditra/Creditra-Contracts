@@ -48,7 +48,8 @@ pub struct FeeSplitAmounts {
 /// # Examples
 ///
 /// ```
-/// // 50/50 split
+/// use creditra_credit::fees::split_protocol_fee;
+/// use cosmwasm_std::Uint128;
 /// let split = split_protocol_fee(Uint128::new(100), 5_000).unwrap();
 /// assert_eq!(split.treasury_amount, Uint128::new(50));
 /// assert_eq!(split.bounty_amount, Uint128::new(50));
