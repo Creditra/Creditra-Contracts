@@ -76,6 +76,9 @@ pub enum ContractError {
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
 
+    #[error("OracleNotFound")]
+    OracleNotFound,
+
     /// Rate or surcharge exceeds the protocol maximum (10 000 bps = 100 %).
     #[error("RateTooHigh")]
     RateTooHigh,

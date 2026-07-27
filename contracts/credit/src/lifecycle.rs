@@ -104,6 +104,27 @@ use crate::storage::{
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
+
+/// Generate a unique key for tracking liquidation settlements.
+///
+/// # Storage
+/// - **Type**: Persistent storage (independent TTL per settlement)
+/// - **Key**: `(Symbol("liq_seen"), borrower, settlement_id)`
+/// - **Purpose**: Prevents replay of the same liquidation settlement
+fn liquidation_settlement_key(
+    borrower: &Address,
+    settlement_id: &Symbol,
+) -> (Symbol, Address, Symbol) {
+    (
+        symbol_short!("liq_seen"),
+        borrower.clone(),
+        settlement_id.clone(),
+    )
+}
+
+
+
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Open a new credit line for a borrower (admin only).
@@ -176,7 +197,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
         &credit_line,
         previous_utilized,
         Some(previous_status),
-    );
+nano +100 contracts/credit/src/lifecycle.rs    );
 
     publish_credit_line_event(
         env,
@@ -190,6 +211,46 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
         },
     );
 }
+
+// ── per-borrower liquidation grace ──────────────────────────────────────────
+
+/// Set or update the per-borrower liquidation grace period in seconds (admin only).
+///
+/// # Arguments
+/// - `env`: Soroban environment.
+/// - `borrower`: Borrower address to configure.
+/// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
+///
+/// # Panics
+/// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
+/// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
+pub fn set_per_borrower_liquidation_grace(
+    env: &Env,
+    borrower: Address,
+    grace_period_seconds: u64,
+) {
+    assert_not_paused(env);
+    require_admin_auth(env);
+
+    let stored_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+    if stored_line.status == CreditStatus::Closed {
+        env.panic_with_error(ContractError::CreditLineClosed);
+    }
+
+    crate::storage::set_per_borrower_liquidation_grace(env, &borrower, grace_period_seconds);
+}
+
+/// Return the per-borrower liquidation grace period in seconds for `borrower`.
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
+    crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
+}
+
+
 
 /// Set the flat late fee per missed installment (admin only).
 ///

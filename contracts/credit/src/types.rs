@@ -714,6 +714,34 @@ pub struct LifecycleCapabilities {
     pub can_reinstate: bool,
 }
 
+/// Read-only capabilities bitmap for the query (v7) subsystem.
+///
+/// Returned by `query_capabilities` / the `capabilities` anchor in
+/// `contracts/query/src/views.rs` so off-chain clients and keepers can
+/// inspect which borrower-scoped query results are currently meaningful
+/// without issuing multiple separate reads.
+///
+/// Every field is derived purely from storage — no token CPIs, no auth
+/// checks, no mutation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueryCapabilities {
+    /// `get_credit_line` returns `Some` for this borrower.
+    pub has_credit_line: bool,
+    /// `get_repayment_schedule` returns `Some` for this borrower.
+    pub has_repayment_schedule: bool,
+    /// Health factor is debt-sensitive (`utilized_amount > 0`). When
+    /// `false`, `get_health_factor` returns `u32::MAX` (no outstanding debt).
+    pub health_factor_applicable: bool,
+    /// Delinquency checks can return `true` (open line with utilization and
+    /// a configured repayment schedule). Mirrors the short-circuit gates in
+    /// [`crate::query::is_delinquent`].
+    pub delinquency_applicable: bool,
+    /// Current delinquency status from [`crate::query::is_delinquent`].
+    /// Always `false` when `delinquency_applicable` is `false`.
+    pub is_delinquent: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
@@ -773,4 +801,3 @@ pub struct PauseReason {
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
 }
-

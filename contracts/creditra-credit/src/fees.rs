@@ -35,6 +35,11 @@ pub const MAX_FEE_SHARE_BPS: u32 = 10_000;
 /// Default treasury share when unset: 100% to treasury (backward compatible).
 pub const DEFAULT_TREASURY_FEE_SHARE_BPS: u32 = 10_000;
 
+/// Protocol fee in basis points charged on draw repayment.
+///
+/// When absent no fee is charged. Stored as an `Item<u32>` in instance storage.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
+
 /// Result of splitting a protocol fee between treasury and bounty accumulators.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeeSplitAmounts {
@@ -57,6 +62,8 @@ pub struct FeeSplitAmounts {
 /// # Examples
 ///
 /// ```
+/// # use cosmwasm_std::Uint128;
+/// # use creditra_credit::fees::split_protocol_fee;
 /// // 50/50 split
 /// let split = split_protocol_fee(Uint128::new(100), 5_000).unwrap();
 /// assert_eq!(split.treasury_amount, Uint128::new(50));
@@ -173,6 +180,36 @@ pub fn accrue_protocol_fee(
     }
 
     Ok(split)
+}
+
+/// Set the governance-controlled protocol fee in basis points.
+///
+/// The value must not exceed [`MAX_PROTOCOL_FEE_BPS`].  Only the contract
+/// owner may call this.
+///
+/// # Errors
+///
+/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
+/// - [`ContractError::ProtocolFeeBpsExceeded`] if `bps` exceeds the ceiling.
+pub fn set_protocol_fee_bps(
+    deps: DepsMut,
+    sender: &Addr,
+    bps: u32,
+) -> Result<(), ContractError> {
+    assert_owner(deps.as_ref(), sender)?;
+    if bps > MAX_PROTOCOL_FEE_BPS {
+        return Err(ContractError::ProtocolFeeBpsExceeded);
+    }
+    PROTOCOL_FEE_BPS.save(deps.storage, &bps)?;
+    Ok(())
+}
+
+/// Return the current protocol fee in basis points, defaulting to 0 when unset.
+pub fn get_protocol_fee_bps(deps: Deps) -> u32 {
+    PROTOCOL_FEE_BPS
+        .may_load(deps.storage)
+        .unwrap_or(None)
+        .unwrap_or(0)
 }
 
 /// Validate the owner is the caller. Returns the loaded config.

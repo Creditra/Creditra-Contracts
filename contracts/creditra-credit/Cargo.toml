@@ -15,13 +15,23 @@ crate-type = ["cdylib", "rlib"]
 instrument = ["dep:serde_json"]
 
 [dependencies]
-cosmwasm-std = { version = "2", features = ["staking"] }
+cosmwasm-std = { version = "2", features = ["staking", "iterator"] }
 cosmwasm-schema = "2"
 cw-storage-plus = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 schemars = "0.8"
 thiserror = "2"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = false
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
 
 [dev-dependencies]
 proptest = "1.4"

@@ -409,6 +409,7 @@ See `contracts/credit/src/fees.rs`.
 | `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
 | `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
 | `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
+| `query_capabilities(borrower)`                                   | `QueryCapabilities { has_credit_line, has_repayment_schedule, health_factor_applicable, delinquency_applicable, is_delinquent }` — read-only query availability bitmap; see `contracts/query/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
 but cheap and idempotent — see `storage.rs:146`).

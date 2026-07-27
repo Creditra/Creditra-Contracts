@@ -48,6 +48,7 @@
 use soroban_sdk::{Address, Env, Symbol, symbol_short};
 
 mod admin;
+mod events;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -81,13 +82,6 @@ pub enum ContractErrorCategory {
     Risk = 6,
 }
 
-#[soroban_sdk::contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RiskAdminCooldownConfiguredEvent {
-    /// New cooldown duration in seconds. `0` means disabled.
-    pub cooldown_seconds: u64,
-}
-
 #[soroban_sdk::contract]
 pub struct RiskContract;
 
@@ -105,6 +99,7 @@ impl RiskContract {
         env.require_auth(&admin);
         let key: Symbol = symbol_short!("admin");
         env.storage().instance().set(&key, &admin);
+        events::publish_risk_initialized(&env, &admin);
     }
 
     /// Set the risk admin cooldown duration in seconds (admin only).
@@ -129,7 +124,19 @@ impl RiskContract {
         assert_not_paused(&env);
         require_admin_auth(&env);
         admin::set_risk_admin_cooldown_seconds(&env, seconds);
-        publish_risk_admin_cooldown_configured(&env, seconds);
+        events::publish_risk_admin_cooldown_configured(&env, seconds);
+    }
+
+    /// Set the paused state of the contract (admin only).
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment.
+    /// * `paused` - The new paused state.
+    pub fn set_paused(env: Env, paused: bool) {
+        require_admin_auth(&env);
+        let key: Symbol = symbol_short!("paused");
+        env.storage().instance().set(&key, &paused);
+        events::publish_risk_paused(&env, paused);
     }
 
     /// Get the configured risk admin cooldown duration in seconds.
@@ -161,6 +168,7 @@ impl RiskContract {
         assert_risk_admin_cooldown_elapsed(&env);
         let ts = env.ledger().timestamp();
         admin::set_last_risk_admin_action_ts(&env, ts);
+        events::publish_risk_admin_action_recorded(&env, ts);
     }
 
     /// Get the admin address.
@@ -180,29 +188,4 @@ impl RiskContract {
             .get(&key)
             .expect("admin not initialized")
     }
-}
-
-fn assert_not_paused(env: &Env) {
-    let key: Symbol = symbol_short!("paused");
-    let paused: bool = env.storage().instance().get(&key).unwrap_or(false);
-    if paused {
-        env.panic_with_error(ContractError::Paused);
-    }
-}
-
-fn require_admin_auth(env: &Env) {
-    let key: Symbol = symbol_short!("admin");
-    let admin: Address = env
-        .storage()
-        .instance()
-        .get(&key)
-        .expect("admin not initialized");
-    admin.require_auth();
-}
-
-fn publish_risk_admin_cooldown_configured(env: &Env, cooldown_seconds: u64) {
-    env.events().publish(
-        (symbol_short!("risk"), symbol_short!("rad_cool")),
-        RiskAdminCooldownConfiguredEvent { cooldown_seconds },
-    );
 }

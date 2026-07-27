@@ -6,8 +6,12 @@ members = [
     "contracts/accrual",
     "contracts/collateral",
     "contracts/lifecycle",
+    "contracts/query",
     "gateway-contract/contracts/auction_contract",
 ]
+
+[workspace.package]
+edition = "2021"
 
 [workspace.dependencies]
 soroban-sdk = "22"
@@ -21,3 +25,7 @@ debug-assertions = false # No debug assertions
 panic = "abort"         # Smaller than unwinding
 codegen-units = 1       # Better optimization
 lto = true             # Link time optimization
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
