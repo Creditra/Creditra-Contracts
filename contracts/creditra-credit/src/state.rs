@@ -110,6 +110,12 @@ pub struct OracleQuorumConfig {
     pub max_age_seconds: u64,
 }
 
+#[cw_serde]
+pub struct OracleReportData {
+    pub value: i128,
+    pub timestamp: u64,
+}
+
 /// Stored quorum-resolved canonical price and its ledger timestamp.
 #[cw_serde]
 pub struct OraclePriceRecord {
@@ -130,6 +136,10 @@ pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg")
 
 /// Storage key for the last resolved oracle price record.
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
+
+pub const ORACLE_LIST: Item<Vec<Addr>> = Item::new("orc_lst");
+pub const ORACLE_WEIGHT: Map<Addr, u32> = Map::new("orc_w");
+pub const ORACLE_REPORT: Map<Addr, OracleReportData> = Map::new("orc_rpt");
 
 /// Storage key for the structured late-fee configuration.
 ///

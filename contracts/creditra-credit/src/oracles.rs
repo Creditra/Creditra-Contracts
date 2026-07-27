@@ -29,12 +29,62 @@
 //!   for sorting and O(n) for window scanning.
 
 use crate::error::ContractError;
-use crate::state::OraclePriceRecord;
-use crate::state::OracleQuorumConfig;
-use crate::state::MAX_ORACLE_FEEDS;
+use crate::state::{OraclePriceRecord, OracleQuorumConfig, OracleReportData, MAX_ORACLE_FEEDS, ORACLE_LIST, ORACLE_REPORT, ORACLE_WEIGHT};
+use cosmwasm_std::{Addr, DepsMut, Env, MessageInfo};
+
+/// Add or update an oracle's weight in the registry.
+/// Admin only.
+pub fn add_oracle(deps: DepsMut, oracle: Addr, weight: u32) -> Result<(), ContractError> {
+    if weight == 0 {
+        return Err(ContractError::InvalidAmount);
+    }
+
+    let mut oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
+    if !oracle_list.contains(&oracle) {
+        oracle_list.push(oracle.clone());
+        ORACLE_LIST.save(deps.storage, &oracle_list)?;
+    }
+    ORACLE_WEIGHT.save(deps.storage, oracle, &weight)?;
+    Ok(())
+}
+
+/// Removes an oracle from the registry.
+/// Admin only.
+pub fn remove_oracle(deps: DepsMut, oracle: Addr) -> Result<(), ContractError> {
+    let mut oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
+    if let Some(idx) = oracle_list.iter().position(|x| x == &oracle) {
+        oracle_list.remove(idx);
+        ORACLE_LIST.save(deps.storage, &oracle_list)?;
+        ORACLE_WEIGHT.remove(deps.storage, oracle.clone());
+        ORACLE_REPORT.remove(deps.storage, oracle);
+        Ok(())
+    } else {
+        Err(ContractError::OracleNotFound)
+    }
+}
+
+/// Oracles report their observed value.
+/// Requires reporting oracle's auth.
+pub fn report_value(deps: DepsMut, env: Env, info: MessageInfo, value: i128) -> Result<(), ContractError> {
+    // Verify the oracle is registered
+    let oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
+
+    if !oracle_list.contains(&info.sender) {
+        return Err(ContractError::Unauthorized);
+    }
+
+    let report = OracleReportData {
+        value,
+        timestamp: env.block.time.seconds(),
+    };
+
+    ORACLE_REPORT.save(deps.storage, info.sender, &report)?;
+    Ok(())
+}
 
 /// Check if an oracle price record is stale relative to the current block timestamp and quorum configuration.
-///
+// ... (rest of the file)
+
 /// # Parameters
 /// - `record`: The stored [`OraclePriceRecord`].
 /// - `cfg`: The active [`OracleQuorumConfig`].

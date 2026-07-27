@@ -84,6 +84,11 @@ pub fn execute(
             max_deviation_bps,
             max_age_seconds,
         ),
+        ExecuteMsg::AddOracle { oracle, weight } => {
+            execute_add_oracle(deps, info, oracle, weight)
+        }
+        ExecuteMsg::RemoveOracle { oracle } => execute_remove_oracle(deps, info, oracle),
+        ExecuteMsg::ReportValue { value } => execute_report_value(deps, env, info, value),
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
@@ -381,6 +386,45 @@ pub fn execute_set_oracle_quorum_config(
         .add_attribute("min_quorum_k", min_quorum_k.to_string())
         .add_attribute("max_deviation_bps", max_deviation_bps.to_string())
         .add_attribute("max_age_seconds", max_age_seconds.to_string()))
+}
+
+pub fn execute_add_oracle(
+    deps: DepsMut,
+    info: MessageInfo,
+    oracle: String,
+    weight: u32,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let oracle_addr = deps.api.addr_validate(&oracle)?;
+    oracles::add_oracle(deps, oracle_addr, weight)?;
+    Ok(Response::default().add_attribute("action", "add_oracle").add_attribute("oracle", oracle))
+}
+
+pub fn execute_remove_oracle(
+    deps: DepsMut,
+    info: MessageInfo,
+    oracle: String,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let oracle_addr = deps.api.addr_validate(&oracle)?;
+    oracles::remove_oracle(deps, oracle_addr)?;
+    Ok(Response::default().add_attribute("action", "remove_oracle").add_attribute("oracle", oracle))
+}
+
+pub fn execute_report_value(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    value: i128,
+) -> Result<Response, ContractError> {
+    oracles::report_value(deps, env, info, value)?;
+    Ok(Response::default().add_attribute("action", "report_value").add_attribute("value", value.to_string()))
 }
 
 /// Submit N oracle prices and resolve a quorum canonical price (admin only).

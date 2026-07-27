@@ -76,6 +76,9 @@ pub enum ContractError {
     #[error("OracleQuorumNotMet")]
     OracleQuorumNotMet,
 
+    #[error("OracleNotFound")]
+    OracleNotFound,
+
     /// Rate or surcharge exceeds the protocol maximum (10 000 bps = 100 %).
     #[error("RateTooHigh")]
     RateTooHigh,
@@ -83,6 +86,26 @@ pub enum ContractError {
     /// Arithmetic overflow detected in checked computation.
     #[error("Overflow")]
     Overflow,
+}
+
+impl ContractError {
+    pub fn category(&self) -> ContractErrorCategory {
+        match self {
+            ContractError::Std(_) => ContractErrorCategory::Std,
+            ContractError::CreditLineNotFound(_) => ContractErrorCategory::NotFound,
+            ContractError::DrawNotFound(_, _) => ContractErrorCategory::NotFound,
+            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
+            ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
+            ContractError::InvalidAmount => ContractErrorCategory::Validation,
+            ContractError::AlreadySettled => ContractErrorCategory::State,
+            ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
+            ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
+            ContractError::OracleNotFound => ContractErrorCategory::Oracle,
+            ContractError::RateTooHigh => ContractErrorCategory::Validation,
+            ContractError::Overflow => ContractErrorCategory::Validation,
+        }
+    }
 }
 
 #[cfg(test)]
