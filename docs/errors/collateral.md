@@ -5,7 +5,9 @@
 
 **Published contract crate: `creditra-collateral`.**
 
-**CI guard: [`tests/catalog.rs`](../contracts/collateral/tests/catalog.rs) pins every discriminant.**
+**CI guards:**
+- [`tests/catalog.rs`](../contracts/collateral/tests/catalog.rs) pins every discriminant.
+- [`tests/err_stab.rs`](../contracts/collateral/tests/err_stab.rs) freezes the v7 collateral error surface (discriminants, mirror sync, namespace, count).
 
 This document is the canonical reference for the `CollateralError` catalog
 emitted by the Creditra collateral domain. Integrators (TypeScript SDK, Rust
@@ -22,16 +24,19 @@ these codes cross the contract ABI as raw `u32` values. Reordering or
 renumbering would silently break every SDK client that matches on a numeric
 code.
 
-Rules enforced by CI (`contracts/collateral/tests/catalog.rs`):
+Rules enforced by CI (`tests/catalog.rs` + `tests/err_stab.rs`):
 
 - Every variant has an explicit `= N` assignment in `errors.rs`.
 - No two variants share the same integer (`no_duplicate_discriminants`).
 - New variants are always appended at the end with the next available integer.
-- The integration test must be updated alongside any enum change so the
-  discriminant count and uniqueness set stay in sync.
-- The `discriminants_are_stable` and `mirror_matches_canonical_credit_contract_error_table`
-  tests pin every mirror discriminant against the canonical credit contract
+- The integration / err-stability tests must be updated alongside any enum
+  change so the discriminant count and uniqueness set stay in sync.
+- The `discriminants_are_stable`,
+  `mirror_matches_canonical_credit_contract_error_table`, and
+  `collateral_v7_mirror_tier_matches_canonical_contract_error_table` tests
+  pin every mirror discriminant against the canonical credit contract
   `ContractError` table at [`docs/ERROR_CODES.md`](ERROR_CODES.md).
+- Collateral-specific codes stay in the reserved `100+` namespace.
 
 ---
 
