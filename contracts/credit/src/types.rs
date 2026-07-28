@@ -293,8 +293,6 @@ impl ContractError {
         }
     }
 }
-    }
-}
 
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
@@ -514,6 +512,18 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
+}
+
+/// Paginated view of credit lines returned by `get_credit_lines_paginated`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// The credit lines on this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for the next page, or `None` if this is the last page.
+    pub next_cursor: Option<u32>,
+    /// Whether there are more results beyond this page.
+    pub has_more: bool,
 }
 
 /// Structured taxonomy for credit-line and global draw freezes.
