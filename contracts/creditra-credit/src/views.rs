@@ -1,10 +1,12 @@
 use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
+use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
 use std::collections::BTreeMap;
 
 use crate::collateral;
 use crate::error::ContractError;
 use crate::msg::{
-    BorrowerHealthFactorResponse, CreditLineHealthResponse, DenomReserve, DrawAuditTrailResponse,
+    BorrowerHealthFactorResponse, CollateralEntryResponse, CreditLineHealthResponse,
+    CreditLineSnapshotResponse, DenomReserve, DrawAuditTrailResponse, DrawSnapshotEntry,
     ProofOfReserveResponse,
 };
 use crate::state::{
@@ -297,6 +299,125 @@ pub fn query_borrower_health_factor(
         borrower,
         credit_lines,
     })
+}
+
+/// Assemble a full read-only snapshot of a single credit line.
+///
+/// Returns `Ok(None)` when no credit line exists for `credit_line_id`.
+///
+/// The snapshot bundles:
+///
+/// - Core credit-line fields (borrower, limits, active flag).
+/// - All draws associated with the line (active and repaid).
+/// - Sum of un-repaid draw amounts (`total_utilized`).
+/// - Per-borrower multi-token collateral breakdown and risk-weighted total.
+/// - Collateral-aware health factor in basis points (`u32::MAX` when debt is zero).
+///
+/// This avoids the multiple separate calls a client would otherwise need:
+/// `CREDIT_LINES`, `DRAWS`, multi-collateral balance queries, and manual health
+/// factor computation.
+///
+/// # Errors
+///
+/// Returns `ContractError::Std` on any underlying storage or arithmetic failure.
+///
+/// # Security
+///
+/// Read-only — no storage mutations, no authentication required.
+pub fn query_credit_line_snapshot(
+    deps: Deps,
+    credit_line_id: u64,
+) -> Result<Option<CreditLineSnapshotResponse>, ContractError> {
+    // Return None cleanly when the credit line does not exist.
+    let cl = match CREDIT_LINES.may_load(deps.storage, credit_line_id)? {
+        Some(cl) => cl,
+        None => return Ok(None),
+    };
+
+    // ── Draws ────────────────────────────────────────────────────────────────
+    let draw_count = DRAW_COUNT
+        .may_load(deps.storage, credit_line_id)?
+        .unwrap_or(0);
+
+    let mut draws: Vec<DrawSnapshotEntry> = Vec::with_capacity(draw_count as usize);
+    let mut total_utilized = Uint128::zero();
+
+    for did in 0..draw_count {
+        if let Some(draw) = DRAWS.may_load(deps.storage, (credit_line_id, did))? {
+            if !draw.repaid {
+                total_utilized = total_utilized
+                    .checked_add(draw.amount)
+                    .map_err(StdError::from)?;
+            }
+            draws.push(DrawSnapshotEntry {
+                draw_id: did,
+                amount: draw.amount,
+                denom: draw.denom,
+                drawn_at: draw.drawn_at,
+                drawn_by: draw.drawn_by,
+                repaid: draw.repaid,
+            });
+        }
+    }
+
+    // ── Multi-collateral breakdown ────────────────────────────────────────────
+    let raw_multi = collateral::query_borrower_collateral(deps, &cl.borrower);
+    let multi_collateral: Vec<CollateralEntryResponse> = raw_multi
+        .iter()
+        .map(|(denom, amount)| CollateralEntryResponse {
+            denom: denom.clone(),
+            amount: *amount,
+            risk_weight_bps: collateral::collateral_risk_weight_bps(deps, denom),
+        })
+        .collect();
+
+    let weighted_collateral_total =
+        collateral::weighted_collateral_total(deps, &cl.borrower).map_err(|e| {
+            ContractError::Std(cosmwasm_std::StdError::generic_err(e.to_string()))
+        })?;
+
+    // ── Health factor ─────────────────────────────────────────────────────────
+    //
+    // Aggregate effective collateral: primary collateral_amount + risk-weighted
+    // multi-token total.  Then:
+    //
+    //   health_factor_bps = effective_collateral * 10_000 / total_utilized
+    //
+    // Returns u32::MAX when total_utilized == 0 (no outstanding debt — infinitely
+    // healthy).  Returns 0 when effective_collateral == 0 and total_utilized > 0.
+    let effective_collateral = cl
+        .collateral_amount
+        .checked_add(weighted_collateral_total)
+        .map_err(StdError::from)?;
+
+    let health_factor_bps = if total_utilized.is_zero() {
+        u32::MAX
+    } else if effective_collateral.is_zero() {
+        0u32
+    } else {
+        let numerator = effective_collateral
+            .checked_mul(Uint128::from(10_000u32))
+            .map_err(StdError::from)?;
+        let result = numerator
+            .checked_div(total_utilized)
+            .map_err(StdError::from)?;
+        u32::try_from(result.u128()).unwrap_or(u32::MAX)
+    };
+
+    Ok(Some(CreditLineSnapshotResponse {
+        credit_line_id,
+        borrower: cl.borrower,
+        collateral_denom: cl.collateral_denom,
+        collateral_amount: cl.collateral_amount,
+        credit_denom: cl.credit_denom,
+        credit_amount: cl.credit_amount,
+        active: cl.active,
+        total_utilized,
+        multi_collateral,
+        weighted_collateral_total,
+        health_factor_bps,
+        draws,
+    }))
 }
 
 fn ensure_draw_exists(deps: Deps, credit_line_id: u64, draw_id: u64) -> Result<(), ContractError> {

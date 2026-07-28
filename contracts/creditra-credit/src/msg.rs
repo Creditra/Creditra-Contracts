@@ -122,6 +122,16 @@ pub enum QueryMsg {
     },
     #[returns(CollateralAllowlistResponse)]
     GetCollateralAllowlist {},
+    /// Full read-only snapshot of a single credit line by its stable numeric id.
+    ///
+    /// Aggregates the core credit-line record, all active draw balances,
+    /// collateral holdings (single-token + multi-token), health factor,
+    /// and active status in a single round-trip, avoiding the multiple
+    /// separate queries a caller would otherwise need.
+    ///
+    /// Returns `None` when no credit line exists for `credit_line_id`.
+    #[returns(Option<CreditLineSnapshotResponse>)]
+    CreditLineSnapshot { credit_line_id: u64 },
 }
 
 #[cw_serde]
@@ -226,3 +236,62 @@ pub struct OraclePriceResponse {
         /// Allowed token denominations.
         pub denoms: Vec<String>,
     }
+
+/// A single draw entry included in the credit-line snapshot.
+#[cw_serde]
+pub struct DrawSnapshotEntry {
+    /// Per-line numeric draw id.
+    pub draw_id: u64,
+    /// Principal drawn.
+    pub amount: Uint128,
+    /// Token denomination of this draw.
+    pub denom: String,
+    /// Block time when the draw was created.
+    pub drawn_at: Timestamp,
+    /// Address that initiated the draw.
+    pub drawn_by: Addr,
+    /// `true` when the draw has been fully repaid.
+    pub repaid: bool,
+}
+
+/// Full read-only snapshot of a credit line and its associated state.
+///
+/// Returned by [`QueryMsg::CreditLineSnapshot`]. Aggregates the core credit-line
+/// record, all draws, collateral balances, and the derived health factor in a
+/// single response so callers avoid multiple round-trip queries.
+///
+/// # Health factor semantics
+///
+/// - `health_factor_bps == u32::MAX` when `total_utilized == 0` (no outstanding debt).
+/// - A value below `10_000` indicates the position is under-collateralized.
+/// - A value of `10_000` means collateral exactly covers the utilized amount.
+/// - A value above `10_000` means the position is over-collateralized.
+#[cw_serde]
+pub struct CreditLineSnapshotResponse {
+    /// Stable numeric id of the credit line.
+    pub credit_line_id: u64,
+    /// Borrower address.
+    pub borrower: Addr,
+    /// Primary collateral token denomination.
+    pub collateral_denom: String,
+    /// Primary collateral balance held against this credit line.
+    pub collateral_amount: Uint128,
+    /// Credit (borrowable) token denomination.
+    pub credit_denom: String,
+    /// Maximum principal that may be outstanding across all draws.
+    pub credit_amount: Uint128,
+    /// Whether the credit line is currently active.
+    pub active: bool,
+    /// Sum of all un-repaid draw amounts (outstanding principal).
+    pub total_utilized: Uint128,
+    /// Multi-token collateral breakdown (may be empty when no multi-token
+    /// collateral has been deposited).
+    pub multi_collateral: Vec<CollateralEntryResponse>,
+    /// Risk-weighted total across all collateral tokens.
+    pub weighted_collateral_total: Uint128,
+    /// Collateral-aware health factor in basis points.
+    /// `u32::MAX` when `total_utilized == 0`.
+    pub health_factor_bps: u32,
+    /// All draws associated with this credit line (active and repaid).
+    pub draws: Vec<DrawSnapshotEntry>,
+}

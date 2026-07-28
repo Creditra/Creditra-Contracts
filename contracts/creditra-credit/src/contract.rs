@@ -166,6 +166,27 @@ pub fn execute(
             execute_submit_oracle_prices(deps, env, info, prices)
         }
         ExecuteMsg::SetLateFeeConfig { config } => execute_set_late_fee_config(deps, info, config),
+        ExecuteMsg::DepositCollateral {
+            borrower,
+            denom,
+            amount,
+        } => execute_deposit_collateral(deps, info, borrower, denom, amount),
+        ExecuteMsg::WithdrawCollateral {
+            borrower,
+            denom,
+            amount,
+        } => execute_withdraw_collateral(deps, info, borrower, denom, amount),
+        ExecuteMsg::AddCollateralToken {
+            denom,
+            risk_weight_bps,
+        } => execute_add_collateral_token(deps, info, denom, risk_weight_bps),
+        ExecuteMsg::RemoveCollateralToken { denom } => {
+            execute_remove_collateral_token(deps, info, denom)
+        }
+        ExecuteMsg::SetCollateralRiskWeight {
+            denom,
+            risk_weight_bps,
+        } => execute_set_collateral_risk_weight(deps, info, denom, risk_weight_bps),
     }
 }
 
@@ -997,6 +1018,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             query_collateral_balance(deps, borrower, denom)
         }
         QueryMsg::GetCollateralAllowlist {} => query_collateral_allowlist(deps),
+        QueryMsg::CreditLineSnapshot { credit_line_id } => {
+            let resp = views::query_credit_line_snapshot(deps, credit_line_id)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            to_json_binary(&resp)
+        }
     }
 }
 
