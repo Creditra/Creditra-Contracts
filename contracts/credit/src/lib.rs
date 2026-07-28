@@ -312,14 +312,96 @@ fn enforce_accrual_admin_cooldown(env: &Env, borrower: &Address) {
     crate::storage::set_last_accrual_admin_action_ts(env, borrower, now);
 }
 
+/// Cross-contract interface for the auction contract.
+///
+/// This trait defines the minimal set of entrypoints that the credit contract
+/// calls on the auction contract during default liquidation settlement.
+/// Both contracts are versioned using a `ProtocolVersion` handshake to ensure
+/// compatibility before cross-contract calls are made.
+///
+/// # Security Note
+///
+/// - The credit contract verifies `get_version()` before calling `settle_default_liquidation()`.
+/// - All calls are protected by reentrancy guards in the credit contract.
+/// - Auction contract verifies caller identity via `require_auth(factory_contract)`.
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
+    /// Settle a default liquidation auction and return the recovered amount.
+    ///
+    /// This function is called by the credit contract when a borrower's position is
+    /// defaulted and collateral has been auctioned. The auction contract atomically:
+    /// 1. Verifies the auction is in `Closed` state
+    /// 2. Prevents replay (one-time settlement per `auction_id`)
+    /// 3. Transfers the highest bid to the credit contract
+    /// 4. Returns the settled amount for validation
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `auction_id`: Unique identifier for the auction (typically a `Symbol`)
+    /// - `credit_contract`: Address of the calling credit contract (for identity verification)
+    /// - `borrower`: Address of the borrower whose collateral was liquidated
+    ///
+    /// # Returns
+    ///
+    /// The `highest_bid` amount settled from the auction (i128, may be 0 if no bids).
+    /// The credit contract asserts this value matches its expected `recovered_amount`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `AuctionError::NoFactoryContract` — Factory not configured
+    /// - `AuctionError::Unauthorized` — Caller is not the registered factory
+    /// - `AuctionError::NotFound` — Auction with `auction_id` does not exist
+    /// - `AuctionError::NotClosed` — Auction is not in `Closed` state
+    /// - `AuctionError::AlreadySettled` — Auction already settled (replay protection)
+    ///
+    /// # Reentrancy
+    ///
+    /// This function may perform token transfers. The credit contract sets a reentrancy
+    /// guard before calling this function to prevent nested re-entrance.
+    ///
+    /// # Example Usage
+    ///
+    /// Called from `Credit::settle_default_liquidation()`:
+    /// ```ignore
+    /// let auction_client = AuctionClient::new(&env, &auction_address);
+    /// let recovered = auction_client.settle_default_liquidation(
+    ///     &settlement_id,
+    ///     &env.current_contract_address(),
+    ///     &borrower,
+    /// );
+    /// assert_eq!(recovered, admin_supplied_amount, "amount mismatch");
+    /// ```
     fn settle_default_liquidation(
         env: soroban_sdk::Env,
         auction_id: soroban_sdk::Symbol,
         credit_contract: soroban_sdk::Address,
         borrower: soroban_sdk::Address,
     ) -> i128;
+
+    /// Get the protocol version of the auction contract.
+    ///
+    /// This function is called by the credit contract as part of the version handshake
+    /// before invoking `settle_default_liquidation()`. Version compatibility ensures
+    /// both contracts speak the same protocol.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// A `ProtocolVersion` struct with `major` and `minor` fields.
+    /// Current version: `{ major: 1, minor: 0 }`.
+    ///
+    /// # Compatibility Rules
+    ///
+    /// The credit contract asserts:
+    /// - `remote.major == current.major` — Breaking changes require major bump
+    /// - `remote.minor >= current.minor` — Forward compatibility on minor versions
+    ///
+    /// If the check fails, `settle_default_liquidation()` is **not** called.
     fn get_version(env: soroban_sdk::Env) -> crate::handshake::ProtocolVersion;
 }
 
@@ -1830,6 +1912,129 @@ impl Credit {
     /// # Reentrancy
     /// Protected by the contract-wide reentrancy guard to prevent cross-contract
     /// callback attacks during settlement.
+    /// Settle a defaulted credit line using recovered amount from a completed auction.
+    ///
+    /// This is the primary cross-contract settlement entrypoint. It coordinates with the
+    /// auction contract to atomically reconcile the recovered amount and update the
+    /// borrower's debt. This function is guarded by reentrancy protection and oracle
+    /// circuit-breaker validation (if configured).
+    ///
+    /// # Authorization
+    ///
+    /// Requires admin authentication via `require_admin_auth()`.
+    /// Only the contract admin can initiate settlement.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `borrower`: Address of the borrower whose line is being settled
+    /// - `recovered_amount`: Amount recovered from the auction (validated against auction return)
+    /// - `settlement_id`: Unique identifier for this settlement (prevents replay)
+    /// - `close_factor_bps`: Maximum percentage of debt that can be recovered (basis points, 0-10000)
+    /// - `oracle_price`: Optional oracle price for circuit-breaker validation
+    ///
+    /// # Preconditions
+    ///
+    /// All of the following must be true:
+    /// 1. Caller must be authenticated as the admin
+    /// 2. Reentrancy guard must not be set
+    /// 3. Contract must not be paused
+    /// 4. Credit line status must be `Defaulted`
+    /// 5. `recovered_amount > 0` and `recovered_amount <= target_recovery`
+    ///    (where `target_recovery = utilized_amount * close_factor_bps / 10_000`)
+    /// 6. Settlement ID `(borrower, settlement_id)` must not have been previously settled
+    /// 7. If oracle circuit-breaker is configured:
+    ///    - Oracle price must be > 0 or panic with `OraclePriceInvalid`
+    ///    - Oracle price age must be ≤ `max_age_seconds` or panic with `OraclePriceStale`
+    ///    - Oracle price deviation from last price must be ≤ `max_deviation_bps` or panic with `OraclePriceDeviation`
+    ///
+    /// # Cross-Contract Handshake
+    ///
+    /// If an auction contract is configured:
+    ///
+    /// 1. **Version check**: Calls `AuctionClient::get_version()` and verifies major version match
+    ///    - Current version: `{ major: 1, minor: 0 }`
+    ///    - Reverts with `IncompatibleVersion` if major versions don't match
+    ///
+    /// 2. **Settlement call**: Invokes `AuctionClient::settle_default_liquidation()`
+    ///    - Parameters: `(settlement_id, env.current_contract_address(), borrower)`
+    ///    - Receives: `highest_bid` amount from auction
+    ///    - Validates: `highest_bid == recovered_amount`, else panics with `InvalidAmount`
+    ///
+    /// # Effects (on success)
+    ///
+    /// 1. Sets reentrancy guard at entry (cleared at exit)
+    /// 2. Validates oracle configuration (if set)
+    /// 3. Invokes auction contract (if configured) and validates return value
+    /// 4. Allocates `recovered_amount` to:
+    ///    - First: Accrued interest (if any)
+    ///    - Remainder: Utilized principal
+    /// 5. Persists replay marker: `(borrower, settlement_id)` → settled
+    /// 6. If `utilized_amount == 0` after settlement, transitions status to `Closed`
+    /// 7. Emits `("credit", "liq_setl")` event with settlement details
+    /// 8. Clears reentrancy guard at exit (success or panic)
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `ContractError::Unauthorized` — Caller is not the admin
+    /// - `ContractError::Reentrancy` — Reentrancy guard already set
+    /// - `ContractError::Paused` — Protocol is paused
+    /// - `ContractError::CreditLineNotFound` — Borrower has no credit line
+    /// - `ContractError::CreditLineDefaulted` — Credit line is not in `Defaulted` status (pre-condition)
+    /// - `ContractError::InvalidAmount` — Auction return value doesn't match `recovered_amount`
+    /// - `ContractError::OraclePriceInvalid` — Oracle price invalid or missing
+    /// - `ContractError::OraclePriceStale` — Oracle price exceeds max age
+    /// - `ContractError::OraclePriceDeviation` — Oracle price change exceeds max deviation
+    /// - Auction errors (if configured):
+    ///   - `AuctionError::NoFactoryContract`
+    ///   - `AuctionError::Unauthorized`
+    ///   - `AuctionError::NotFound`
+    ///   - `AuctionError::NotClosed`
+    ///   - `AuctionError::AlreadySettled`
+    ///
+    /// # Reentrancy Safety
+    ///
+    /// This function sets a contract-wide reentrancy guard at entry and clears it on exit
+    /// (whether success or panic). The guard prevents:
+    /// - Re-entrance through `draw_credit` or `repay_credit` during settlement
+    /// - Multiple concurrent settlements
+    /// - Callbacks from auction or oracle contracts
+    ///
+    /// # Replay Protection
+    ///
+    /// Settlement is protected against replay on both sides:
+    /// - **Credit side**: `(borrower, settlement_id)` pair can only be settled once
+    /// - **Auction side**: `auction_id` can only be settled once (within auction contract)
+    ///
+    /// If replayed with the same `(borrower, settlement_id)`, this function panics before
+    /// any state mutation.
+    ///
+    /// # Example Usage
+    ///
+    /// ```ignore
+    /// let credit = CreditClient::new(&env, &credit_address);
+    ///
+    /// // Prerequisites:
+    /// // 1. Borrower has defaulted credit line
+    /// // 2. Auction is closed with highest_bid = 500
+    /// // 3. Admin supplies matching recovered_amount
+    ///
+    /// credit.settle_default_liquidation(
+    ///     &borrower,
+    ///     &500_i128,                    // recovered_amount
+    ///     &Symbol::new(&env, "auc_1"),  // settlement_id (unique per settlement)
+    ///     &10_000_u32,                  // close_factor_bps (100% recovery)
+    ///     &None,                        // oracle_price (if oracle configured)
+    /// );
+    /// // Line is now settled; if full recovery, status becomes Closed
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - `docs/CROSS_CONTRACT_HANDSHAKE.md` — Protocol specification
+    /// - `docs/default-liquidation-auction-hook.md` — Settlement interface
+    /// - `contracts/credit/src/handshake.rs` — Version negotiation
     pub fn settle_default_liquidation(
         env: Env,
         borrower: Address,
@@ -1908,21 +2113,68 @@ impl Credit {
 
     // ── Auction contract admin ────────────────────────────────────────────────
 
-    /// Configure the auction contract address for default-liquidation hooks.
+    /// Configure the auction contract address for default-liquidation settlements.
     ///
-    /// When set, the credit contract records which auction contract is
-    /// authorized to participate in the liquidation settlement flow. This
-    /// address is stored in instance storage and can be updated by the admin.
+    /// When set, this address is stored in instance storage and used by
+    /// `settle_default_liquidation()` to perform version negotiation and cross-contract
+    /// settlement calls. If not set, `settle_default_liquidation()` will execute
+    /// settlement accounting without calling the auction contract.
     ///
     /// # Authorization
-    /// Admin only.
+    ///
+    /// Requires admin authentication via `require_admin_auth()`.
+    /// Only the contract admin can configure the auction address.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `auction_address`: Address of the auction contract to integrate
+    ///
+    /// # Preconditions
+    ///
+    /// 1. Caller must be authenticated as the admin
+    /// 2. Contract must not be paused
+    ///
+    /// # Effects
+    ///
+    /// Stores `auction_address` in instance storage at key `DataKey::AuctionContract`.
+    /// Can be called multiple times to update the address; overwrites previous value.
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `ContractError::Unauthorized` — Caller is not the admin
+    /// - `ContractError::Paused` — Protocol is paused
+    /// - `ContractError::NotAdmin` — Admin has not been initialized
+    ///
+    /// # See Also
+    ///
+    /// - `get_auction_contract()` — Retrieve the configured address
+    /// - `settle_default_liquidation()` — Uses this address for cross-contract calls
     pub fn set_auction_contract(env: Env, auction_address: Address) {
         assert_not_paused(&env);
         require_admin_auth(&env);
         crate::storage::set_auction_contract(&env, &auction_address);
     }
 
-    /// Return the configured auction contract address, if set.
+    /// Retrieve the configured auction contract address, if set.
+    ///
+    /// Returns the auction contract address that was previously set via
+    /// `set_auction_contract()`. If no address has been set, returns `None`.
+    /// This function does not require authentication (read-only query).
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Address)` — The configured auction contract address
+    /// - `None` — No auction contract has been configured
+    ///
+    /// # See Also
+    ///
+    /// - `set_auction_contract()` — Configure the auction address
     pub fn get_auction_contract(env: Env) -> Option<Address> {
         crate::storage::get_auction_contract(&env)
     }
