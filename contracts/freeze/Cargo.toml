@@ -23,6 +23,10 @@ path = "tests/auth_boundary.rs"
 name = "events"
 path = "tests/events.rs"
 
+[[test]]
+name = "auth_snap"
+path = "tests/auth_snap.rs"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 creditra-credit = { path = "../credit", features = [] }
