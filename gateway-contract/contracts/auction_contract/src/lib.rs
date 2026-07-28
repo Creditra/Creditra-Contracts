@@ -14,7 +14,7 @@ pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
 use crate::storage::{
-    bump_auction_state_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
+    bump_auction_state_ttl, bump_instance_ttl, bump_settlement_marker_ttl, clear_reentrancy_guard,
     get_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
 };
 use crate::types::*;
@@ -236,6 +236,7 @@ impl Auction {
         dutch_decay: DutchAuctionDecay,
         dutch_step_count: Option<u32>,
     ) {
+        bump_instance_ttl(&env);
         if start_time >= end_time {
             panic!("invalid times");
         }
@@ -291,11 +292,13 @@ impl Auction {
     /// # Authorization
     /// Requires `require_auth` from the factory itself.
     pub fn set_factory_contract(env: Env, factory: Address) {
+        bump_instance_ttl(&env);
         factory.require_auth();
         storage::set_factory_contract(&env, &factory);
     }
 
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
+        bump_instance_ttl(&env);
         bidder.require_auth();
 
         if amount <= 0 {
@@ -454,6 +457,7 @@ impl Auction {
         credit_contract: Address,
         borrower: Address,
     ) -> i128 {
+        bump_instance_ttl(&env);
         let factory = get_factory_contract(&env)
             .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
         factory.require_auth();
@@ -529,6 +533,7 @@ impl Auction {
     /// * [`AuctionError::AlreadyClaimed`] - Auction was already claimed.
     /// * [`AuctionError::InvalidState`] - Bid token not found in storage.
     pub fn claim_auction(env: Env, auction_id: Symbol) {
+        bump_instance_ttl(&env);
         let state: AuctionState = env
             .storage()
             .persistent()
@@ -577,6 +582,64 @@ impl Auction {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
+    }
+
+    /// Closes the singleton auction once its end time has passed.
+    ///
+    /// Transitions the auction from [`AuctionStatus::Open`] to
+    /// [`AuctionStatus::Closed`] and emits an [`AuctionClosedEvent`].
+    /// No caller authorization is required — any account may trigger
+    /// close once the end time is reached (permissionless keeper pattern).
+    ///
+    /// # Parameters
+    /// - `auction_id`: The unique identifier of the auction to close.
+    ///
+    /// # Errors
+    /// - [`AuctionError::NotFound`]        — No auction exists for `auction_id`.
+    /// - [`AuctionError::AuctionNotOpen`]  — Auction is not in the `Open` state
+    ///                                       (already `Closed` or `Claimed`).
+    /// - [`AuctionError::AuctionNotClosed`] — Current ledger timestamp is before
+    ///                                        the auction's configured `end_time`.
+    ///
+    /// # State transitions
+    /// `Open` → `Closed` (terminal for further bidding; enables `claim_auction`
+    /// and `settle_default_liquidation`).
+    ///
+    /// # Events
+    /// Emits [`AuctionClosedEvent`] on `(AUC_CLOSE, auction)` with:
+    /// - `auction_id`
+    /// - `winner`: the current highest bidder, or `None` if no bids were placed
+    /// - `amount`: the highest bid amount, or `0` if no bids were placed
+    pub fn close_auction(env: Env, auction_id: Symbol) {
+        bump_instance_ttl(&env);
+
+        let state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
+        bump_auction_state_ttl(&env, &auction_id);
+
+        if state.status != AuctionStatus::Open {
+            env.panic_with_error(AuctionError::AuctionNotOpen);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < state.config.end_time {
+            env.panic_with_error(AuctionError::AuctionNotClosed);
+        }
+
+        let mut updated = state;
+        updated.status = AuctionStatus::Closed;
+        env.storage().persistent().set(&auction_id, &updated);
+        bump_auction_state_ttl(&env, &auction_id);
+
+        publish_auction_closed_event(
+            &env,
+            auction_id,
+            updated.highest_bidder,
+            updated.highest_bid,
+        );
     }
 }
 
