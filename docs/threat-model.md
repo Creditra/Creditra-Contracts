@@ -1,278 +1,314 @@
-# Credit Contract Threat Model and Trust Assumptions
-
-This document describes the security model for `contracts/credit`, including
-actors, trust boundaries, assumptions, and expected failure modes.
-
-## Scope
-
-In-scope:
-
-- `Credit` contract state transitions and authorization checks.
-- Interactions with an external token contract during draw flows.
-- Admin-operated configuration endpoints and operational controls.
-
-Out-of-scope:
-
-- Off-chain risk engine correctness.
-- Wallet/device security of protocol operators and borrowers.
-- Chain-level consensus failures.
-
-## Security Objectives
-
-1. Preserve correctness of borrower credit state (`credit_limit`, `utilized_amount`, `status`).
-2. Prevent unauthorized administrative changes.
-3. Prevent borrowers from drawing beyond allowed limits.
-4. Ensure failed external token operations do not leave partial on-chain state changes.
-
-## Actors and Roles
-
-- **Admin (trusted operator)**  
-  Can configure liquidity/token settings and perform privileged line management.
-- **Borrower (partially trusted user)**  
-  Can draw and repay only against their own credit line.
-- **Indexer / Observer (untrusted reader)**  
-  Reads state and events, cannot mutate contract state.
-- **Token contract (external dependency)**  
-  Invoked during draw path for reserve checks and token transfer.
-- **Soroban runtime / ledger (trusted platform assumption)**  
-  Provides transaction atomicity, auth primitives, and deterministic execution.
-
-## Assets and Invariants
-
-Critical assets:
-
-- Contract admin authority.
-- Borrower credit line records in persistent storage.
-- Liquidity configuration (token contract address, reserve/source address).
-
-Key invariants:
-
-- `utilized_amount` never exceeds `credit_limit`.
-- `utilized_amount` never drops below zero.
-- Closed lines cannot be drawn or repaid.
-- Only authorized roles perform admin actions.
-
-## Trust Boundaries
-
-### Boundary A: Contract caller -> Credit contract
-
-- Borrower authorization is required on borrower-driven write paths.
-- Admin authorization is required on admin-only paths.
-- Any missing/incorrect authorization is treated as a hard failure.
-
-### Boundary B: Credit contract -> External token contract
-
-- Draw path depends on token contract behavior for `balance` and `transfer`.
-- Assumption: token implements expected Soroban token semantics.
-- If token call fails, transaction reverts atomically.
-
-### Boundary C: Protocol operations -> On-chain config
-
-- Admin key custody and operational discipline directly affect security.
-- Misconfiguration (wrong token/source) can halt or misroute liquidity.
-
-## Threats and Mitigations
-
-### 1) Unauthorized admin actions
-
-Threat: attacker attempts to set config or mutate credit lines without admin rights.  
-Mitigation: admin-only paths require admin auth.  
-Residual risk: admin private key compromise bypasses this control.
-
-### 2) Unauthorized borrower actions
-
-Threat: attacker repays/draws for another borrower or manipulates line lifecycle.  
-Mitigation: borrower-driven methods require borrower auth and use borrower-keyed records.
-
-### 3) Reentrancy and callback-style interference
-
-Threat: external contract call causes reentrant execution and state corruption.  
-Mitigation: explicit reentrancy guard on draw/repay critical paths (defense-in-depth).  
-Assumption: standard token contracts do not callback into caller.
-
-### 4) Malicious or non-standard token contract
-
-Threat: configured token contract lies about balances, has unexpected behavior, or blocks transfers.  
-Mitigation:
-
-- token trust is explicit and administrative;
-- failed token operations revert transaction atomically;
-- operationally restrict token allowlist to vetted contracts.
-
-Residual risk: if admin configures a malicious token, integrity/liveness can be degraded.
-
-### 5) Admin key compromise
-
-Threat: compromised admin key changes config, force-closes lines, or defaults borrowers.  
-Impact: full protocol control loss for this deployment.  
-Mitigations (operational):
-
-- hardware-backed/multisig admin account;
-- strict key rotation and break-glass procedure;
-- on-chain monitoring/alerts for admin method calls.
-
-Two-step admin rotation mitigation now exists on-chain:
-
-- `propose_admin(new_admin, delay_seconds)` by current admin only;
-- `accept_admin()` by proposed admin only;
-- optional delay window enforced via stored acceptance timestamp;
-- each phase emits an audit event for monitoring.
-
-### 6) Operational and liveness risks
-
-Threats:
-
-- Wrong liquidity source address.
-- Inadequate reserve balance.
-- Stale operational processes (no monitoring).
-- `freeze_draws` left active outside a declared maintenance window.
-
-Mitigations:
-
-- pre-deployment and post-change checklist;
-- automated reserve health checks;
-- incident runbooks and rollback plans for config mistakes;
-- monitoring alert on `DrawsFrozenEvent { frozen: true }` outside declared windows and on freeze durations exceeding operational thresholds (e.g. > 1 hour).
-
-### 7) Admin abuses global draw freeze
-
-Threat: compromised or malicious admin calls `freeze_draws` to block all borrowers from drawing, causing protocol-wide liveness failure.
-
-Impact: all `draw_credit` calls revert with `ContractError::DrawsFrozen` (15) until unfrozen. Repayments are unaffected — borrowers can always reduce their debt.
-
-Mitigations:
-
-- `is_draws_frozen` is publicly readable; off-chain monitoring can detect and alert on unexpected freezes immediately.
-- `DrawsFrozenEvent` includes `actor` and `timestamp` fields for governance audit trails.
-- Operational policy: require multi-party approval or a declared maintenance window before invoking `freeze_draws`.
-- The flag is distinct from per-line `Suspended` — it does not mutate borrower state, so no remediation of individual lines is needed after unfreeze.
-
-Residual risk: admin key compromise remains the root threat. Mitigated operationally by hardware-backed/multisig admin accounts and real-time monitoring.
-
-## Immutable Upgrade Posture
-
-Current posture: **assume immutable deployment unless a separate governance or migration process is explicitly introduced.**
-
-Implications:
-
-- Code defects require contract migration to a new deployment.
-- Security hotfixes are operationally heavier than in upgradeable architectures.
-- Documentation and runbooks must include migration procedures.
-
-Recommended operational policy:
-
-1. treat contract release as immutable,
-2. maintain tested migration scripts,
-3. announce and execute controlled migration if critical issues are found.
-
-## Assumptions
-
-1. Soroban authorization and transaction atomicity are correct.
-2. Token contract follows expected token interface semantics.
-3. Admin keys are protected by strong operational controls.
-4. Off-chain risk decisions are sane and not adversarial.
-
-## Failure Modes
-
-- **Fail-closed:** unauthorized calls, invalid state transitions, or failing token calls revert.
-- **Liveness degradation:** low reserve or token misbehavior can block draws.
-- **Governance failure:** admin compromise can cause protocol-wide misuse.
-
-## Security Review Notes
-
-- Recommended before production: independent review focused on auth boundaries,
-  external token trust assumptions, and admin key operational controls.
-- Re-run threat model on each material contract behavior change.
-
-
-### 7) Large single-transaction draw (compromised borrower key or buggy integrator)
-
-Threat: A compromised borrower private key or a buggy integrator submits an
-oversized single-transaction draw, draining a disproportionate share of the
-liquidity reserve in one ledger.
-
-Mitigation: Admin can configure a protocol-wide per-transaction draw cap via
-`set_max_draw_amount`. Draws above the cap revert with
-`ContractError::DrawExceedsMaxAmount` before any state or token transfer
-occurs.
-
-Residual risk:
-- Cap is unset by default; operators must actively configure it for the
-  protection to apply.
-- A compromised admin key can raise or remove the cap.
-- Multiple sequential draws just at or under the cap are not rate-limited
-  by this control; separate rate-limiting or circuit-breaker logic would
-  be needed to address that threat.
-
-Operational recommendation: set `max_draw_amount` to a value reflecting the
-largest legitimate single draw expected during normal protocol operation
-immediately after deployment initialization.
-
-### 8) Admin draw reversal misuse and token-accounting divergence
-
-Threat: An operator uses `reverse_draw` outside intended operational procedure,
-or users incorrectly assume reversal automatically claws tokens back from the
-borrower.
-
-Mitigation:
-- `reverse_draw` is admin-authenticated and time-bounded to a 1-hour window from
-  `original_ts`.
-- Reversal is borrower-bound and draw-bound using stored audit records keyed by
-  `(borrower, original_ts)`.
-- Every reversal emits a dedicated `("credit", "draw_rev")` audit event with
-  reason code, actor, and amount for monitoring and post-incident review.
-- Contract behavior is explicit: reversal is accounting-only and does not call
-  token transfer APIs.
-
-Residual risk:
-- Accounting reversal can reduce outstanding debt while drawn tokens remain with
-  the borrower; this is a conscious emergency-correction tradeoff, not a
-  clawback primitive.
-- Compromised admin key can still misuse reversal controls within the allowed
-  window.
-
-## Ledger Timestamp Trust Assumptions
-
-### Timestamp source and trust boundary
-
-Soroban ledger timestamps (`env.ledger().timestamp()`) are set by the Stellar
-validator network and are expected to be monotonically non-decreasing across
-consecutive ledgers. The contract **trusts** this property for correctness of
-time-dependent logic (rate-change intervals, suspension grace periods, interest
-accrual).
-
-### Threat: regressed or manipulated ledger timestamp
-
-Threat: a validator coalition or test environment supplies a ledger timestamp
-that is less than or equal to a previously stored timestamp, causing
-time-dependent fields to move backwards.
-
-Impact without mitigation:
-- `last_rate_update_ts` could regress, bypassing the `rate_change_min_interval`
-  cooldown and allowing unlimited rapid rate changes.
-- `suspension_ts` could regress, corrupting grace-period calculations.
-- `last_accrual_ts` could regress, causing double-accrual of interest.
-
-### Mitigations (application-layer monotonicity guards)
-
-The contract enforces monotonicity at the application layer for all mutable
-timestamp fields:
-
-| Field               | Location       | Guard behavior |
-|---------------------|----------------|----------------|
-| `last_rate_update_ts` | `risk.rs`    | `assert_ts_monotonic` — reverts with `TimestampRegression` (19) if `new_ts <= stored_ts` and `stored_ts != 0` |
-| `suspension_ts`     | `lifecycle.rs` | `assert_ts_monotonic` — same guard; `suspension_ts = 0` (cleared on reinstate) always passes |
-| `last_accrual_ts`   | `accrual.rs`   | Early-return no-op if `now <= last_accrual_ts`; does not revert but silently skips accrual |
-
-The helper `storage::assert_ts_monotonic(env, stored_ts, new_ts)` is the
-single source of truth for this invariant. A `stored_ts` of zero is treated as
-"never written" and always passes (first-write semantics).
-
-### Residual risk
-
-- Validator-level timestamp manipulation is a chain-level threat outside the
-  contract's control. The application guard provides defense-in-depth but
-  cannot prevent a malicious validator majority from stalling time.
-- The `last_accrual_ts` guard silently skips rather than reverts; this is
-  intentional to avoid blocking repayments during a clock anomaly, at the cost
-  of potentially under-accruing interest for that ledger.
+# Threat Model — Authorization Matrix
+
+**Crate:** `creditra-credit`  
+**Source:** `contracts/credit/src/lib.rs`, `contracts/credit/src/lifecycle.rs`
+
+---
+
+## Auth roles
+
+| Role | How it is established |
+|---|---|
+| **Admin** | Address stored in instance storage under `DataKey::Admin` during `init`. Rotated via `propose_admin` + `accept_admin` with a time-lock. |
+| **Borrower** | The address that owns a credit line. Must sign their own draw, repay, and self-suspend calls. |
+| **Proposed admin** | Temporary role set by `propose_admin`; must call `accept_admin` within the time-lock window. |
+| **Closer** | Passed explicitly to `close_credit_line`; must be either the admin or the borrower. |
+
+---
+
+## Function authorization matrix
+
+| Function | Auth required | Auth call | Notes |
+|---|---|---|---|
+| `init` | None | — | One-shot; re-calling is a no-op after admin is set. |
+| `propose_admin` | Admin | `require_admin_auth` | Writes proposed admin + accept-after timestamp. |
+| `accept_admin` | Proposed admin | `proposed_admin.require_auth()` | Enforces time-lock before storage write. |
+| `open_credit_line` | Admin | `require_admin_auth` | Auth checked before any storage mutation. |
+| `set_liquidity_token` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `set_liquidity_source` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `set_max_draw_amount` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `set_max_repay_amount` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `set_draw_min_interval` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `set_utilization_cap` | Admin | `require_admin_auth` | Auth is first call in function body. |
+| `set_rate_change_limits` | Admin | `require_admin_auth` | Delegated to `risk::set_rate_change_limits`. |
+| `set_rate_formula_config` | Admin | `require_admin_auth` | Delegated to `risk`. |
+| `clear_rate_formula_config` | Admin | `require_admin_auth` | Auth before storage remove. |
+| `set_grace_period_config` | Admin | `require_admin_auth` | Auth before validation and write. |
+| `set_protocol_paused` | Admin | `require_admin_auth` | Circuit-breaker control. |
+| `freeze_draws` | Admin | `require_admin_auth` | Emergency draw freeze with [`FreezeReason`]. |
+| `unfreeze_draws` | Admin | `require_admin_auth` | Lifts emergency draw freeze. |
+| `freeze_credit_line` | Admin | `require_admin_auth` | Per-line draw freeze with [`FreezeReason`]. |
+| `unfreeze_credit_line` | Admin | `require_admin_auth` | Lifts per-line draw freeze. |
+| `suspend_credit_line` | Admin | `require_admin_auth` | Auth before state read. |
+| `self_suspend_credit_line` | Borrower | `borrower.require_auth()` | No admin path; borrower-only. |
+| `default_credit_line` | Admin | `require_admin_auth` | Auth before state read. |
+| `reinstate_credit_line` | Admin | `require_admin_auth` | Auth before target validation and state read. |
+| `forgive_debt` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
+| `settle_default_liquidation` | Admin | `require_admin_auth` | Auth is first call in function body. |
+| `close_credit_line` | Closer | `closer.require_auth()` | Closer must be admin or borrower (enforced by business logic). |
+| `block_borrower` | Admin | `admin.require_auth()` + `require_admin_auth` | Double check: explicit param auth + role check. |
+| `unblock_borrower` | Admin | `admin.require_auth()` + `require_admin_auth` | Same double check as `block_borrower`. |
+| `bulk_block_borrowers` | Admin | `admin.require_auth()` + `require_admin_auth` | Same double check; batch capped at 50. |
+| `draw_credit` | Borrower | `borrower.require_auth()` | Auth after reentrancy guard, before any state read. |
+| `repay_credit` | Borrower | `borrower.require_auth()` | Auth after reentrancy guard, before any state read. |
+| `get_credit_line` | None | — | Pure storage read; no side effects. |
+| `get_liquidity_source` | None | — | Pure storage read. |
+| `get_rate_change_limits` | None | — | Pure storage read. |
+| `get_utilization_cap` | None | — | Pure storage read. |
+| `get_grace_period_config` | None | — | Pure storage read. |
+| `get_max_draw_amount` | None | — | Pure storage read. |
+| `get_max_repay_amount` | None | — | Pure storage read. |
+| `get_draw_min_interval` | None | — | Pure storage read. |
+| `get_schema_version` | None | — | Pure storage read. |
+| `get_total_utilized` | None | — | Pure storage read. |
+| `get_credit_line_count` | None | — | Pure storage read. |
+| `enumerate_credit_lines` | None | — | Pure storage read; capped iteration. |
+| `get_rate_formula_config` | None | — | Pure storage read. |
+| `get_protocol_config` | None | — | Aggregated read; no side effects. |
+| `is_draws_frozen` | None | — | Pure storage read. |
+| `is_borrower_blocked` | None | — | Pure storage read. |
+
+---
+
+## Auth-before-mutation guarantee
+
+Every mutating function calls its auth check as the first or second statement
+(after `assert_not_paused` and/or the reentrancy guard where applicable).
+No storage write or state change occurs before the auth check returns.
+
+Key ordering for admin mutators:
+```
+assert_not_paused  (optional, where relevant)
+require_admin_auth ← auth check
+<validation>
+<storage write>
+```
+
+Key ordering for borrower mutators (`draw_credit`, `repay_credit`):
+```
+set_reentrancy_guard
+borrower.require_auth() ← auth check
+<validation>
+<storage write>
+clear_reentrancy_guard
+```
+
+---
+
+## Test coverage
+
+Every privileged entrypoint has a corresponding negative test in
+`contracts/credit/tests/unauthorized_matrix.rs`. Each test confirms that
+calling the function without valid authorization panics (reverts).
+
+| Test | Entrypoint covered |
+|---|---|
+| `set_liquidity_token_unauthorized` | `set_liquidity_token` |
+| `set_liquidity_source_unauthorized` | `set_liquidity_source` |
+| `set_max_draw_amount_unauthorized` | `set_max_draw_amount` |
+| `set_max_repay_amount_unauthorized` | `set_max_repay_amount` |
+| `set_draw_min_interval_unauthorized` | `set_draw_min_interval` |
+| `freeze_draws_unauthorized` | `freeze_draws` |
+| `unfreeze_draws_unauthorized` | `unfreeze_draws` |
+| `propose_admin_unauthorized` | `propose_admin` |
+| `accept_admin_wrong_signer` | `accept_admin` |
+| `open_credit_line_unauthorized` | `open_credit_line` |
+| `set_utilization_cap_unauthorized` | `set_utilization_cap` |
+| `suspend_credit_line_unauthorized` | `suspend_credit_line` |
+| `default_credit_line_unauthorized` | `default_credit_line` |
+| `reinstate_credit_line_unauthorized` | `reinstate_credit_line` |
+| `forgive_debt_unauthorized` | `forgive_debt` |
+| `settle_default_liquidation_unauthorized` | `settle_default_liquidation` |
+| `close_credit_line_stranger_unauthorized` | `close_credit_line` |
+| `block_borrower_unauthorized` | `block_borrower` |
+| `unblock_borrower_unauthorized` | `unblock_borrower` |
+| `bulk_block_borrowers_unauthorized` | `bulk_block_borrowers` |
+| `update_risk_parameters_unauthorized` | `update_risk_parameters` |
+| `set_rate_change_limits_unauthorized` | `set_rate_change_limits` |
+| `set_rate_formula_config_unauthorized` | `set_rate_formula_config` |
+| `clear_rate_formula_config_unauthorized` | `clear_rate_formula_config` |
+| `set_grace_period_config_unauthorized` | `set_grace_period_config` |
+| `set_protocol_paused_unauthorized` | `set_protocol_paused` |
+| `draw_credit_wrong_signer` | `draw_credit` |
+| `repay_credit_wrong_signer` | `repay_credit` |
+| `self_suspend_wrong_signer` | `self_suspend_credit_line` |
+| `suspend_credit_line_non_admin_mock_auth` | `suspend_credit_line` (mock non-admin) |
+| `default_credit_line_non_admin_mock_auth` | `default_credit_line` (mock non-admin) |
+| `freeze_draws_non_admin_mock_auth` | `freeze_draws` (mock non-admin) |
+| `update_risk_parameters_non_admin_mock_auth` | `update_risk_parameters` (mock non-admin) |
+| `set_protocol_paused_non_admin_mock_auth` | `set_protocol_paused` (mock non-admin) |
+
+
+---
+
+## Soroban-Specific Reentrancy via `__check_auth` Callbacks
+
+### Background
+
+Traditional reentrancy exploits reenter a contract during an external token
+transfer (the classic EVM pattern). Soroban introduces a second, less obvious
+vector: the **`__check_auth` callback**.
+
+When a contract calls `address.require_auth()`, the Soroban host invokes
+`__check_auth` on the authorising account/contract. If the authorising
+address is itself a smart contract (a "custom account"), that contract's
+`__check_auth` implementation runs **inside the same transaction**, with the
+ability to invoke any other contract — including the one that just called
+`require_auth()`.
+
+This means an attacker can deploy a malicious custom-account contract whose
+`__check_auth` re-enters `place_bid` or `claim_auction` *before the outer
+call has finished mutating state*.
+
+---
+
+### Attack Scenario — `place_bid` via `__check_auth`
+
+**Pre-conditions**
+
+- Auction is open with one existing bid from honest bidder `H`.
+- Attacker controls a custom-account contract `M` whose `__check_auth`
+  re-enters the auction contract.
+
+**Step-by-step**
+
+```
+Attacker transaction
+│
+├─ 1. call place_bid(auction_id, amount=X)   ← outer call begins
+│       bidder = M (malicious custom account)
+│
+│   Auction contract execution
+│   ├─ set_reentrancy_guard()                ← GUARD SET (flag = true)
+│   ├─ bidder.require_auth()                 ← triggers M.__check_auth
+│   │
+│   │   M.__check_auth() execution           ← REENTRANT CALL
+│   │   └─ call place_bid(auction_id,        ← re-enters before outer
+│   │            amount=X+1)                    call completes
+│   │       Auction contract (inner)
+│   │       ├─ set_reentrancy_guard()
+│   │       │       current flag == true
+│   │       │       → panic! AuctionError::Reentrancy   ✓ BLOCKED
+│   │       └─ (inner call reverts)
+│   │
+│   ├─ <validation continues normally>
+│   ├─ refund previous bidder H
+│   ├─ record M as highest bidder
+│   └─ clear_reentrancy_guard()              ← GUARD CLEARED (flag = false)
+│
+└─ outer call succeeds normally
+```
+
+Without the guard, the inner `place_bid` would run against **stale state**
+(old highest bidder, old highest bid) and could manipulate the auction outcome
+or drain funds via double-refund.
+
+---
+
+### Attack Scenario — `claim_auction` via `__check_auth`
+
+```
+Attacker transaction
+│
+├─ 1. call claim_auction(auction_id)         ← outer call begins
+│       winner = M (malicious custom account)
+│
+│   Auction contract execution
+│   ├─ set_reentrancy_guard()                ← GUARD SET
+│   ├─ winner.require_auth()                 ← triggers M.__check_auth
+│   │
+│   │   M.__check_auth() execution
+│   │   └─ call claim_auction(auction_id)    ← re-enters before
+│   │       Auction contract (inner)            settlement flag is set
+│   │       ├─ set_reentrancy_guard()
+│   │       │       current flag == true
+│   │       │       → panic! AuctionError::Reentrancy   ✓ BLOCKED
+│   │       └─ (inner call reverts)
+│   │
+│   ├─ mark auction as claimed
+│   │       AuctionKey::Claimed(id) = true
+│   ├─ transfer asset to winner
+│   └─ clear_reentrancy_guard()              ← GUARD CLEARED
+│
+└─ outer call succeeds; double-claim prevented
+```
+
+A successful double-`claim_auction` would let the attacker receive the
+auctioned asset twice while paying only once.
+
+---
+
+### Mitigation — `set_reentrancy_guard` / `clear_reentrancy_guard`
+
+**Location:**
+`gateway-contract/contracts/auction_contract/src/storage.rs`
+— functions `set_reentrancy_guard` and `clear_reentrancy_guard`.
+
+**Mechanism**
+
+| Step | What happens |
+|---|---|
+| Function entry | `set_reentrancy_guard(env)` reads the instance-storage key `Symbol("reentrancy")`. If already `true`, panics with `AuctionError::Reentrancy`. Otherwise writes `true`. |
+| `require_auth()` call | Any `__check_auth` callback that tries to re-enter sees `flag == true` and is rejected immediately. |
+| Function exit (success **or** panic) | `clear_reentrancy_guard(env)` writes `false`. Soroban's transactional execution means a panic rolls back all storage writes including the guard, so the flag is always consistent after the transaction settles. |
+
+**Storage layout**
+
+```
+Instance storage
+└─ key:   Symbol("reentrancy")   // defined in reentrancy_key()
+   value: bool
+           false  →  no call in progress (safe to enter)
+           true   →  call in progress    (reject re-entry)
+```
+
+**CEI ordering enforced by the guard**
+
+```
+// place_bid / claim_auction call ordering
+set_reentrancy_guard(env)          // Check  — reject if already locked
+caller.require_auth()              // Effect — auth (may trigger __check_auth)
+<read and validate state>          // Check  — business logic
+<mutate state>                     // Effect — storage writes
+<external token transfer>          // Interact — CPI to token contract
+clear_reentrancy_guard(env)        // Release — unlock for next call
+```
+
+The guard enforces **CEI (Check-Effect-Interact)** ordering even when the
+Soroban host's `__check_auth` mechanism tries to insert an interaction
+between the Check and Effect phases.
+
+---
+
+### Why Instance Storage for the Guard
+
+Instance storage lives in a single ledger entry and is loaded atomically at
+the start of each contract invocation. Using it for the guard means:
+
+- No extra persistent-storage round-trips.
+- The flag is scoped to this contract instance — a different auction contract
+  deployment has its own flag.
+- Soroban rolls back instance storage on panic, so a failed inner call cannot
+  leave the guard permanently set.
+
+---
+
+### Residual Risk and Mitigations
+
+| Residual risk | Status |
+|---|---|
+| Guard not cleared on panic path | Mitigated — Soroban rolls back all storage on `panic_with_error`, including the `true` write. |
+| Guard set but `require_auth` never called | Not exploitable — the flag just gets cleared at the end of the same call. |
+| Multiple concurrent callers (parallel transactions) | Not applicable — each Soroban transaction executes serially against a snapshot; instance storage is per-invocation. |
+| `__check_auth` calls a *different* entrypoint not guarded | Out of scope for this guard. All state-mutating entrypoints that perform token transfers (`place_bid`, `claim_auction`) are individually guarded. |
+
+---
+
+### Related Functions Protected by the Guard
+
+| Entrypoint | File | Guard applied |
+|---|---|---|
+| `place_bid` | `gateway-contract/contracts/auction_contract/src/lib.rs` | `set_reentrancy_guard` / `clear_reentrancy_guard` |
+| `claim_auction` | `gateway-contract/contracts/auction_contract/src/lib.rs` | `set_reentrancy_guard` / `clear_reentrancy_guard` |
+| `draw_credit` | `contracts/credit/src/lib.rs` | Mirrors the same guard pattern |
+| `repay_credit` | `contracts/credit/src/lib.rs` | Mirrors the same guard pattern |

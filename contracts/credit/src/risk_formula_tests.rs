@@ -81,6 +81,158 @@ fn compute_rate_zero_slope() {
     assert_eq!(compute_rate_from_score(&cfg, 100), 300);
 }
 
+// ── Property-based fuzz test for monotonicity and clamping ────────────────
+//
+// This test validates the core invariants of the rate formula:
+// 1. Monotonicity: output is non-decreasing in risk_score
+// 2. Clamping: output is always within [min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS)]
+// 3. No overflow: saturating arithmetic prevents panics on extreme values
+//
+// The fuzz test sweeps a wide variety of configurations and verifies these
+// invariants hold across the full risk_score range [0, MAX_RISK_SCORE].
+
+/// Deterministic pseudo-random number generator for reproducible fuzz testing.
+/// Uses a simple linear congruential generator (LCG) seeded by the caller.
+fn deterministic_prng(seed: &mut u64) -> u32 {
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (*seed >> 32) as u32
+}
+
+/// Generate test configurations with high variance to stress the formula.
+/// Returns a vector of (base, slope, min, max) tuples designed to cover:
+/// - Small and large base rates
+/// - Zero and very large slopes (overflow-prone)
+/// - Tight and loose min/max bounds
+/// - Edge cases (min == max, min == 0, max == MAX_INTEREST_RATE_BPS)
+fn generate_fuzz_configs() -> Vec<(u32, u32, u32, u32)> {
+    let mut configs = vec![];
+    let mut seed = 12345u64; // Fixed seed for reproducibility
+
+    // Deterministically generate test vectors covering a wide range of scenarios
+    for _i in 0..100 {
+        let base = deterministic_prng(&mut seed) % (MAX_INTEREST_RATE_BPS + 1);
+        let slope = deterministic_prng(&mut seed) % (MAX_INTEREST_RATE_BPS * 2 + 1);
+        let min = deterministic_prng(&mut seed) % (MAX_INTEREST_RATE_BPS + 1);
+        let max = deterministic_prng(&mut seed) % (MAX_INTEREST_RATE_BPS + 1);
+
+        // Ensure min <= max
+        let (min_val, max_val) = if min <= max { (min, max) } else { (max, min) };
+
+        configs.push((base, slope, min_val, max_val));
+    }
+
+    // Add explicit edge cases
+    configs.extend([
+        // Zero slope (should be constant rate)
+        (100, 0, 50, 500),
+        (500, 0, 500, 500),
+        (0, 0, 0, 0),
+        // Large base + slope (risk of overflow)
+        (u32::MAX, u32::MAX, 0, MAX_INTEREST_RATE_BPS),
+        (u32::MAX / 2, u32::MAX / 2, 0, MAX_INTEREST_RATE_BPS),
+        // Min == max (should always return the same value)
+        (0, 100, 5000, 5000),
+        (1000, 100, 3000, 3000),
+        // Min == 0 (no floor)
+        (0, 10, 0, 10000),
+        (100, 50, 0, 8000),
+        // Base is MAX_INTEREST_RATE_BPS
+        (MAX_INTEREST_RATE_BPS, 0, 100, MAX_INTEREST_RATE_BPS),
+        (MAX_INTEREST_RATE_BPS, 1, 100, MAX_INTEREST_RATE_BPS),
+        // Very large slope (will overflow at high scores)
+        (100, u32::MAX / 50, 0, MAX_INTEREST_RATE_BPS),
+        (0, u32::MAX, 0, MAX_INTEREST_RATE_BPS),
+        // Normal realistic configs
+        (200, 50, 100, 5000),
+        (300, 75, 150, 8000),
+    ]);
+
+    configs
+}
+
+#[test]
+fn fuzz_rate_formula_clamp_monotonicity() {
+    use crate::risk::MAX_RISK_SCORE;
+
+    let configs = generate_fuzz_configs();
+
+    for (base, slope, min_rate, max_rate) in configs {
+        let cfg = make_cfg(base, slope, min_rate, max_rate);
+        let effective_max = max_rate.min(MAX_INTEREST_RATE_BPS);
+
+        // Sweep through all risk scores from 0 to MAX_RISK_SCORE
+        let mut prev_rate = None;
+
+        for score in 0..=MAX_RISK_SCORE {
+            let rate = compute_rate_from_score(&cfg, score);
+
+            // ─ Assertion 1: Output is within bounds ──────────────────────────
+            // The computed rate must be >= min_rate (floor)
+            assert!(
+                rate >= min_rate,
+                "Rate {} below min_rate {} for config (base={}, slope={}, min={}, max={})",
+                rate,
+                min_rate,
+                base,
+                slope,
+                min_rate,
+                max_rate
+            );
+
+            // The computed rate must be <= effective_max (clamped upper bound)
+            assert!(
+                rate <= effective_max,
+                "Rate {} exceeds effective max {} (max={}, MAX_INTEREST_RATE_BPS={}) \
+                 for config (base={}, slope={}, min={})",
+                rate,
+                effective_max,
+                max_rate,
+                MAX_INTEREST_RATE_BPS,
+                base,
+                slope,
+                min_rate
+            );
+
+            // ─ Assertion 2: Monotonicity ─────────────────────────────────────
+            // Rate should never decrease as score increases
+            if let Some(prev) = prev_rate {
+                assert!(
+                    rate >= prev,
+                    "Non-monotonic decrease: score {} rate {} < score {} rate {} \
+                     for config (base={}, slope={}, min={}, max={})",
+                    score,
+                    rate,
+                    score - 1,
+                    prev,
+                    base,
+                    slope,
+                    min_rate,
+                    max_rate
+                );
+            }
+
+            prev_rate = Some(rate);
+        }
+
+        // ─ Assertion 3: Zero score returns correct base (clamped) ───────────
+        let zero_rate = compute_rate_from_score(&cfg, 0);
+        let expected_zero = base.clamp(min_rate, effective_max);
+        assert_eq!(
+            zero_rate, expected_zero,
+            "Rate at score 0 is {}, expected {} for config (base={}, slope={}, min={}, max={})",
+            zero_rate, expected_zero, base, slope, min_rate, max_rate
+        );
+
+        // ─ Assertion 4: Max score doesn't panic (no overflow) ──────────────
+        // This is implicitly tested by the loop above reaching MAX_RISK_SCORE,
+        // but we also verify the result is reasonable:
+        let max_score_rate = compute_rate_from_score(&cfg, MAX_RISK_SCORE);
+        assert!(max_score_rate <= MAX_INTEREST_RATE_BPS);
+    }
+}
+
 // ── Integration tests via contract client ────────────────────────────────
 
 #[test]
@@ -241,7 +393,7 @@ fn clearing_formula_restores_manual_mode() {
 // ── Config validation tests ──────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "min_rate_bps must be <= max_rate_bps")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_min_greater_than_max_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -253,7 +405,7 @@ fn set_config_min_greater_than_max_reverts() {
 }
 
 #[test]
-#[should_panic(expected = "max_rate_bps exceeds MAX_INTEREST_RATE_BPS")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_max_exceeds_cap_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -265,7 +417,7 @@ fn set_config_max_exceeds_cap_reverts() {
 }
 
 #[test]
-#[should_panic(expected = "base_rate_bps exceeds MAX_INTEREST_RATE_BPS")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn set_config_base_exceeds_cap_reverts() {
     let env = Env::default();
     env.mock_all_auths();
@@ -358,7 +510,7 @@ fn existing_lines_unaffected_until_update() {
 }
 
 #[test]
-#[should_panic(expected = "rate change exceeds maximum allowed delta")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn formula_update_respects_rate_change_limits() {
     let env = Env::default();
     env.mock_all_auths();

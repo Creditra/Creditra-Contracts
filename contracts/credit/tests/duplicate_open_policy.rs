@@ -15,7 +15,7 @@
 #[cfg(test)]
 mod test_helpers {
     use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::{Address, Env};
+    use soroban_sdk::{token, Address, Env};
 
     // Re-export types from the credit contract
     pub use creditra_credit::types::CreditStatus;
@@ -37,6 +37,18 @@ mod test_helpers {
         let client = creditra_credit::CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_000_i128);
+        token::StellarAssetClient::new(&env, &token).mint(&borrower, &1_000_000_i128);
+        token::Client::new(&env, &token).approve(
+            &borrower,
+            &contract_id,
+            &1_000_000_i128,
+            &1_000_000_u32,
+        );
 
         (env, admin, borrower, contract_id)
     }
@@ -147,7 +159,7 @@ mod unit_tests {
     /// with an existing Active credit line fails with the error message
     /// "borrower already has an active credit line".
     #[test]
-    #[should_panic(expected = "borrower already has an active credit line")]
+    #[should_panic(expected = "Error(Contract, #14)")]
     fn test_duplicate_active_credit_line_rejection() {
         let (env, _admin, borrower, contract_id, _credit_limit, _interest_rate_bps, _risk_score) =
             setup_with_active_line();
@@ -1425,7 +1437,7 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_zero_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 
@@ -1453,7 +1465,7 @@ mod unit_tests {
     /// fails with the error message "credit_limit must be greater than zero".
     /// This validation occurs regardless of whether a credit line already exists.
     #[test]
-    #[should_panic(expected = "credit_limit must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_negative_credit_limit_rejection() {
         let (env, _admin, borrower, contract_id) = setup();
 

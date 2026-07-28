@@ -26,6 +26,16 @@ Stored in persistent storage keyed by the borrower's address.
 | `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
 | `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
 
+### `RepaymentSchedule`
+
+Optional per-borrower installment schedule stored in persistent storage under the borrower address.
+
+| Field | Type | Description |
+|---|---|---|
+| `amount_per_period` | `i128` | Required principal amount for each installment; interest-only repayment does not advance the schedule |
+| `period_seconds` | `u64` | Installment interval in seconds |
+| `next_due_ts` | `u64` | Timestamp for the next installment due date |
+
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
 
@@ -221,6 +231,26 @@ Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing:
 - `principal_repaid` — portion applied to principal
 - `new_utilized_amount` — total outstanding debt after repayment
 - `new_accrued_interest` — remaining interest debt after repayment
+
+### `set_repayment_schedule(env, borrower, amount_per_period, period_seconds, first_due_ts)`
+Sets or replaces the installment schedule for a borrower credit line. Admin only.
+
+- `amount_per_period` must be positive.
+- `period_seconds` must be positive.
+- The schedule is cleared automatically when the line is reopened or closed.
+
+### `set_borrower_exposure_cap(env, borrower, amount)`
+Set the maximum outstanding exposure permitted for a borrower across all active credit lines. Admin only.
+
+- `amount = 0` removes the cap.
+- Negative values revert with `ContractError::InvalidAmount`.
+- The cap is checked during `draw_credit` against the borrower's post-draw utilized balance.
+
+### `get_borrower_exposure_cap(env, borrower) -> Option<i128>`
+Returns the configured borrower exposure cap, if any.
+
+### `is_delinquent(env, borrower)`
+Returns `true` when a borrower has a repayment schedule, still has debt, and the current time is past `next_due_ts + grace_period_seconds`.
 
 Integrators can reconcile balances using:
 - `principal_owed = new_utilized_amount - new_accrued_interest`
@@ -469,31 +499,88 @@ if let Some((last_id, _)) = page1.last() {
 - **Ordering**: Insertion order (sequential IDs assigned at creation).
 - **Gas limit**: `limit` is capped at 100 to prevent gas exhaustion.
 
-### `freeze_draws(env)`
+### `freeze_draws(env, reason)`
 Freeze all `draw_credit` calls contract-wide (admin only).
 
-- Sets `DataKey::DrawsFrozen` to `true` in instance storage.
+- Sets `DataKey::DrawsFrozen` to [`DrawsFreezeState { frozen: true, reason }`] in instance storage.
+- `reason` must be a [`FreezeReason`] variant for structured audit/indexer classification.
 - Does **not** mutate any borrower's `CreditStatus`; lines remain Active, Defaulted, etc.
 - Repayments are never blocked by this flag.
-- Idempotent: calling when already frozen still emits the event.
 
-Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, timestamp, actor }`.
+Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: true, reason }`.
 
 ### `unfreeze_draws(env)`
 Re-enable `draw_credit` after a global freeze (admin only).
 
-- Sets `DataKey::DrawsFrozen` to `false` in instance storage.
-- Idempotent: calling when already unfrozen still emits the event.
+- Sets `DrawsFreezeState.frozen` to `false` while preserving the last recorded reason.
+- Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, reason }`.
 
-Emits: `("credit", "drw_freeze")` with `DrawsFrozenEvent { frozen: false, timestamp, actor }`.
+### `get_draws_freeze_reason(env) -> Option<FreezeReason>`
+Returns the structured reason for the active global draw freeze. Returns `None` when draws are not frozen. No auth required.
 
-### `set_draw_min_interval(env, seconds)`
+### `freeze_credit_line(env, borrower, reason)`
+Freeze draws for a single credit line (admin only).
+
+- Records `reason` under `DataKey::CreditLineFreeze(Address)` in persistent storage.
+- Does **not** change `CreditStatus`; distinct from `suspend_credit_line`.
+- Repayments remain available.
+- Reverts with `CreditLineNotFound` when no line exists.
+
+Emits: `("credit", "line_frz")` with `CreditLineFreezeEvent { borrower, reason, frozen: true, ledger }`.
+
+### `unfreeze_credit_line(env, borrower)`
+Lift a per-credit-line draw freeze (admin only). No-op when not frozen.
+
+Emits: `("credit", "line_frz")` with `frozen: false` when a freeze record existed.
+
+### `is_credit_line_frozen(env, borrower) -> bool`
+Returns `true` when the borrower's credit line has an active admin freeze. No auth required.
+
+### `get_credit_line_freeze_reason(env, borrower) -> Option<FreezeReason>`
+Returns the structured freeze reason for a credit line, if frozen. No auth required.
+
+#### `FreezeReason` taxonomy
+
+| Variant | Value | Intended use |
+|---------|-------|--------------|
+| `LiquidityReserve` | 0 | Scheduled reserve / treasury operations |
+| `Compliance` | 1 | Regulatory or compliance-mandated pause |
+| `RiskInvestigation` | 2 | Active risk investigation or off-chain signal |
+| `OperationalMaintenance` | 3 | Planned maintenance window |
+| `BorrowerRequest` | 4 | Borrower-initiated voluntary draw pause |
+
+### `is_draws_frozen(env) -> bool`
 Set the per-borrower draw cooldown interval in seconds (admin only).
 
 - `seconds > 0` enforces a minimum interval between successful draws for every borrower.
 - `seconds = 0` disables the per-borrower cooldown.
 - This setting is optional and defaults to disabled when unset.
 - It affects only `draw_credit`; `repay_credit` remains available regardless of the cooldown.
+
+### `set_borrow_admin_cooldown(env, seconds)`
+Set the per-borrower cooldown interval between critical admin actions.
+
+- Admin only.
+- `seconds > 0` enforces a minimum interval between borrower-specific admin mutations such as `open_credit_line`, `update_risk_parameters`, `suspend_credit_line`, `default_credit_line`, `reinstate_credit_line`, `forgive_debt`, admin `close_credit_line`, borrower freeze, and credit-line freeze changes.
+- `seconds = 0` disables the admin-action cooldown.
+- The cooldown is per borrower, so actions on one borrower do not block actions on another borrower.
+- Reverts with `ContractError::AdminCooldownActive` (`54`) when a critical admin action is attempted before the interval has elapsed.
+
+### `get_borrow_admin_cooldown(env) -> Option<u64>`
+Returns the configured per-borrower admin-action cooldown, if set. No auth required.
+
+### `set_accrual_admin_cooldown(env, seconds)`
+Set the per-borrower cooldown interval between accrual-critical admin actions.
+
+- Admin only.
+- `seconds > 0` enforces a minimum interval between borrower-specific admin actions that realize or mutate accrued debt state, currently `update_risk_parameters`, `suspend_credit_line`, admin `close_credit_line`, `close_credit_lines_batch`, `default_credit_line`, `reinstate_credit_line`, and `forgive_debt`.
+- `seconds = 0` disables the accrual admin cooldown.
+- The cooldown is per borrower, so accrual-critical actions on one borrower do not block another borrower.
+- Reverts with `ContractError::AdminCooldownActive` (`54`) when an accrual-critical admin action is attempted before the interval has elapsed.
+- This cooldown is independent from `set_borrow_admin_cooldown`, which continues to gate borrow/origination-side critical admin actions such as `open_credit_line`.
+
+### `get_accrual_admin_cooldown(env) -> Option<u64>`
+Returns the configured per-borrower accrual admin-action cooldown, if set. No auth required.
 
 ### `is_draws_frozen(env) -> bool`
 Returns `true` when draws are globally frozen. Defaults to `false` when the key has never been set. No auth required.
@@ -572,6 +659,7 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `27`       | `InsufficientRepaymentBalance`   | Borrower's token balance is below the effective repayment amount.             |
 | `28`       | `RepayExceedsMaxAmount`          | The requested repay exceeds the configured per-transaction maximum.           |
 | `29`       | `DrawCooldownActive`             | Borrower attempted to draw again before the cooldown interval elapsed.        |
+| `54`       | `AdminCooldownActive`            | Critical borrower admin action attempted before the cooldown elapsed.         |
 
 ---
 
@@ -647,7 +735,8 @@ cargo test -p creditra-credit amount_validation
 | `("credit", "liq_setl")`   | `liq_setl` | `settle_default_liquidation`| Auction settlement applied to debt accounting |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
-| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled |
+| `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled (`frozen`, `reason`) |
+| `("credit", "line_frz")` | `CreditLineFreezeEvent` | `freeze_credit_line`, `unfreeze_credit_line` | Per-line draw freeze toggled (`borrower`, `reason`, `frozen`, `ledger`) |
 
 The contract also emits additive v2 event topics (for indexer analytics fields
 like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
