@@ -61,16 +61,78 @@
 //!
 //! [`CollateralError`]: errors::CollateralError
 
-
+pub mod errors;
 pub mod views;
 pub use views::*;
 
 pub use errors::CollateralError;
 
-use soroban_sdk::contract;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+#[contracttype]
+pub enum DataKey {
+    Balance(Address),
+}
 
 /// Soroban contract root for the collateral domain.
-
 #[contract]
 pub struct Collateral;
 
+#[contractimpl]
+impl Collateral {
+    /// Deposits collateral for a given user.
+    ///
+    /// # Arguments
+    /// * `env` - The execution environment.
+    /// * `user` - The address of the user depositing the collateral.
+    /// * `amount` - The amount of collateral to deposit.
+    ///
+    /// # Returns
+    /// * `Result<(), CollateralError>` - Success or an appropriate error code from the catalog.
+    pub fn deposit(env: Env, user: Address, amount: i128) -> Result<(), CollateralError> {
+        user.require_auth();
+
+        if amount <= 0 {
+            return Err(CollateralError::InvalidAmount); 
+        }
+
+        let key = DataKey::Balance(user.clone());
+        let current_balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        
+        let new_balance = current_balance
+            .checked_add(amount)
+            .ok_or(CollateralError::MathOverflow)?;
+
+        env.storage().persistent().set(&key, &new_balance);
+        
+        Ok(())
+    }
+
+    /// Withdraws previously deposited collateral for a given user.
+    ///
+    /// # Arguments
+    /// * `env` - The execution environment.
+    /// * `user` - The address of the user withdrawing the collateral.
+    /// * `amount` - The amount of collateral to withdraw.
+    ///
+    /// # Returns
+    /// * `Result<(), CollateralError>` - Success or an appropriate error code from the catalog.
+    pub fn withdraw(env: Env, user: Address, amount: i128) -> Result<(), CollateralError> {
+        user.require_auth();
+
+        if amount <= 0 {
+            return Err(CollateralError::InvalidAmount);
+        }
+
+        let key = DataKey::Balance(user.clone());
+        let current_balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        
+        let new_balance = current_balance
+            .checked_sub(amount)
+            .ok_or(CollateralError::InsufficientBalance)?;
+
+        env.storage().persistent().set(&key, &new_balance);
+
+        Ok(())
+    }
+}
