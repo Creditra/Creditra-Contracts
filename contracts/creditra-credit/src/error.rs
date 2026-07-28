@@ -118,6 +118,10 @@ pub enum ContractError {
     /// Late-fee configuration is invalid.
     #[error("LateFeeConfigInvalid")]
     LateFeeConfigInvalid,
+
+    /// Protocol fee basis points exceeds maximum allowed value.
+    #[error("ProtocolFeeBpsExceeded")]
+    ProtocolFeeBpsExceeded,
 }
 
 impl ContractError {
@@ -145,6 +149,7 @@ impl ContractError {
             ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
+            ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
         }
     }
 }

@@ -302,12 +302,10 @@ fn verify_mul_div_snapshot() {
                 .parse()
                 .unwrap_or_else(|_| panic!("entry {i}: invalid expected '{}'", entry.expected));
 
-            let live_val = live.unwrap_or_else(|_| {
-                panic!(
-                    "entry {i} (a={a}, numerator={numerator}, denominator={denominator}): \
-                     unexpected None"
-                )
-            });
+            let live_val = live.expect(
+                "entry {i} (a={a}, numerator={numerator}, denominator={denominator}): \
+                 unexpected None"
+            );
 
             // Primary: exact match against pinned value.
             assert_eq!(

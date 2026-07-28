@@ -94,6 +94,10 @@ pub enum ExecuteMsg {
         denom: String,
         risk_weight_bps: u32,
     },
+    /// Set the protocol fee basis points (admin only).
+    SetProtocolFeeBps {
+        bps: u32,
+    },
 }
 
 #[cw_serde]
@@ -122,6 +126,8 @@ pub enum QueryMsg {
     },
     #[returns(CollateralAllowlistResponse)]
     GetCollateralAllowlist {},
+    #[returns(ProtocolFeeBpsResponse)]
+    GetProtocolFeeBps {},
 }
 
 #[cw_serde]
@@ -225,4 +231,11 @@ pub struct OraclePriceResponse {
     pub struct CollateralAllowlistResponse {
         /// Allowed token denominations.
         pub denoms: Vec<String>,
+    }
+
+    /// Response for the protocol fee basis points query.
+    #[cw_serde]
+    pub struct ProtocolFeeBpsResponse {
+        /// Current protocol fee in basis points, or None if unset.
+        pub bps: Option<u32>,
     }

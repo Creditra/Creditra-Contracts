@@ -193,6 +193,9 @@ pub fn execute(
             denom,
             risk_weight_bps,
         } => execute_set_collateral_risk_weight(deps, info, denom, risk_weight_bps),
+        ExecuteMsg::SetProtocolFeeBps { bps } => {
+            execute_set_protocol_fee_bps(deps, info, bps)
+        }
     }
 }
 
@@ -976,6 +979,21 @@ pub fn execute_set_collateral_risk_weight(
     collateral::set_collateral_risk_weight(deps, &denom, risk_weight_bps)
 }
 
+/// Set the protocol fee basis points (admin only).
+///
+/// # Errors
+///
+/// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
+/// - [`ContractError::ProtocolFeeBpsExceeded`] if `bps` exceeds the maximum.
+pub fn execute_set_protocol_fee_bps(
+    deps: DepsMut,
+    info: MessageInfo,
+    bps: u32,
+) -> Result<Response, ContractError> {
+    fees::set_protocol_fee_bps(deps, &info.sender, bps)?;
+    Ok(Response::new().add_attribute("action", "set_protocol_fee_bps"))
+}
+
 fn append_audit_entry(
     deps: DepsMut,
     env: Env,
@@ -1102,6 +1120,13 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             query_collateral_balance(deps, borrower, denom)
         }
         QueryMsg::GetCollateralAllowlist {} => query_collateral_allowlist(deps),
+        QueryMsg::GetProtocolFeeBps {} => {
+            let bps = PROTOCOL_FEE_BPS
+                .may_load(deps.storage)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            let resp = crate::msg::ProtocolFeeBpsResponse { bps };
+            to_json_binary(&resp)
+        }
     }
 }
 

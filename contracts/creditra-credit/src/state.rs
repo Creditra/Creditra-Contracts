@@ -177,3 +177,18 @@ pub const COLLATERAL_RISK_WEIGHTS: Map<&str, u32> = Map::new("crw");
 ///
 /// 10_000 bps = 100 % (full notional value).
 pub const DEFAULT_COLLATERAL_RISK_WEIGHT_BPS: u32 = 10_000;
+
+/// Protocol fee rate in basis points (0 ..= 10_000).
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
+
+/// Default fee share for treasury (basis points).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("dfsb");
+
+/// Market-specific fee share override (basis points), keyed by market denomination.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mfsb");
+
+/// Treasury balance accumulator, keyed by market denomination.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("tb");
+
+/// Bounty pool balance accumulator, keyed by market denomination.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bb");
