@@ -18,17 +18,19 @@ for post-default liquidation handling.
 - Payload: borrower, utilized_amount, timestamp.
 - Purpose: signal that liquidation orchestration is required.
 
-2. Entrypoint: settle_default_liquidation(borrower, recovered_amount, settlement_id)
+2. Entrypoint: settle_default_liquidation(borrower, recovered_amount, settlement_id, close_factor_bps)
 - Admin-only.
 - Accounting-only: no token transfer in this method.
+- Parameters:
+  - `close_factor_bps`: Basis points of utilized_amount that can be recovered in this settlement (1–10_000). Default 10_000 = full liquidation.
 - Preconditions:
   - credit line status must be Defaulted
-  - recovered_amount must be positive and <= utilized_amount
+  - recovered_amount must be positive and <= target_recovery (utilized_amount * close_factor_bps / 10_000)
   - settlement_id must be unused for that borrower
 - Effects:
   - decreases utilized_amount by recovered_amount
   - when remaining utilized_amount == 0, status transitions to Closed
-  - emits credit/liq_setl
+  - emits credit/liq_setl with close_factor_bps field
 
 ### Auction contract settlement signal
 

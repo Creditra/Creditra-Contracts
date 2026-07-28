@@ -33,26 +33,41 @@ mod debt_monotonic {
     use creditra_credit::types::{CreditLineData, CreditStatus};
     use creditra_credit::{Credit, CreditClient};
     use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::{Address, Env};
+    use soroban_sdk::{token, Address, Env};
 
     fn total_debt(line: &CreditLineData) -> i128 {
         line.utilized_amount
     }
 
-    fn setup_initialized_contract(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
+    fn setup_initialized_contract(
+        env: &Env,
+    ) -> (CreditClient<'_>, Address, Address, Address, Address) {
         env.mock_all_auths();
         let admin = Address::generate(env);
         let borrower = Address::generate(env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
-        (client, contract_id, admin, borrower)
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        token::StellarAssetClient::new(env, &token).mint(&contract_id, &1_000_000_i128);
+        token::StellarAssetClient::new(env, &token).mint(&borrower, &1_000_000_i128);
+        token::Client::new(env, &token).approve(
+            &borrower,
+            &contract_id,
+            &1_000_000_i128,
+            &1_000_000_u32,
+        );
+
+        (client, contract_id, admin, borrower, token)
     }
 
     #[test]
     fn debt_monotonic_across_full_lifecycle() {
         let env = Env::default();
-        let (client, _contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, _contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         // -- OPEN: debt starts at zero --
         client.open_credit_line(&borrower, &10_000, &500_u32, &70_u32);
@@ -170,7 +185,7 @@ mod debt_monotonic {
         use soroban_sdk::testutils::Ledger;
         let env = Env::default();
         env.ledger().set_timestamp(1_000);
-        let (client, contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &10_000, &500_u32, &70_u32);
         client.draw_credit(&borrower, &5_000);
@@ -258,7 +273,7 @@ mod debt_monotonic {
     #[test]
     fn debt_monotonic_multiple_draw_repay_cycles() {
         let env = Env::default();
-        let (client, _contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, _contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &10_000, &300_u32, &50_u32);
 
@@ -309,7 +324,7 @@ mod debt_monotonic {
     #[test]
     fn debt_monotonic_status_transitions_preserve_debt() {
         let env = Env::default();
-        let (client, _contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, _contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &5_000, &400_u32, &60_u32);
         client.draw_credit(&borrower, &3_000);
@@ -340,7 +355,7 @@ mod debt_monotonic {
         use soroban_sdk::testutils::Ledger;
 
         let env = Env::default();
-        let (client, _contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, _contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &10_000, &300_u32, &50_u32);
         client.draw_credit(&borrower, &4_000);
@@ -385,7 +400,7 @@ mod debt_monotonic {
     #[test]
     fn debt_monotonic_overpay_does_not_go_negative() {
         let env = Env::default();
-        let (client, _contract_id, _admin, borrower) = setup_initialized_contract(&env);
+        let (client, _contract_id, _admin, borrower, _token) = setup_initialized_contract(&env);
 
         client.open_credit_line(&borrower, &5_000, &300_u32, &50_u32);
         client.draw_credit(&borrower, &1_000);

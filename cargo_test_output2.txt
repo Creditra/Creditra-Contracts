@@ -1,0 +1,2746 @@
+warning: function `min_next_bid` is never used
+  --> gateway-contract/contracts/auction_contract/src/lib.rs:22:4
+   |
+22 | fn min_next_bid(highest_bid: i128, min_increment_bps: u32) -> i128 {
+   |    ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PERSISTENT_LIFETIME_THRESHOLD` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:45:18
+   |
+45 | pub(crate) const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_status` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:72:8
+   |
+72 | pub fn get_status(env: &Env) -> AuctionStatus {
+   |        ^^^^^^^^^^
+
+warning: function `set_status` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:79:8
+   |
+79 | pub fn set_status(env: &Env, status: AuctionStatus) {
+   |        ^^^^^^^^^^
+
+warning: function `get_highest_bidder` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:83:8
+   |
+83 | pub fn get_highest_bidder(env: &Env) -> Option<Address> {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bidder` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:87:8
+   |
+87 | pub fn set_highest_bidder(env: &Env, bidder: &Address) {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:165:8
+    |
+165 | pub fn get_end_time(env: &Env) -> u64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:169:8
+    |
+169 | pub fn set_end_time(env: &Env, end_time: u64) {
+    |        ^^^^^^^^^^^^
+
+warning: function `get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:173:8
+    |
+173 | pub fn get_highest_bid(env: &Env) -> u128 {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:180:8
+    |
+180 | pub fn set_highest_bid(env: &Env, bid: u128) {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `auction_exists` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:187:8
+    |
+187 | pub fn auction_exists(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `auction_get_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:191:8
+    |
+191 | pub fn auction_get_status(env: &Env, id: u32) -> crate::types::AuctionStatus {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:198:8
+    |
+198 | pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatus) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:208:8
+    |
+208 | pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:212:8
+    |
+212 | pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:222:8
+    |
+222 | pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:226:8
+    |
+226 | pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:236:8
+    |
+236 | pub fn auction_get_min_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:243:8
+    |
+243 | pub fn auction_set_min_bid(env: &Env, id: u32, min_bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:253:8
+    |
+253 | pub fn auction_get_end_time(env: &Env, id: u32) -> u64 {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:260:8
+    |
+260 | pub fn auction_set_end_time(env: &Env, id: u32, end_time: u64) {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:270:8
+    |
+270 | pub fn auction_get_highest_bidder(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:276:8
+    |
+276 | pub fn auction_set_highest_bidder(env: &Env, id: u32, bidder: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:286:8
+    |
+286 | pub fn auction_get_highest_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:293:8
+    |
+293 | pub fn auction_set_highest_bid(env: &Env, id: u32, bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_is_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:303:8
+    |
+303 | pub fn auction_is_claimed(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:310:8
+    |
+310 | pub fn auction_set_claimed(env: &Env, id: u32) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+   Compiling creditra-credit v0.1.0 (/Users/amankoli/Creditra-Contracts/contracts/credit)
+warning: unused import: `super::*`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1613:9
+     |
+1613 |     use super::*;
+     |         ^^^^^^^^
+     |
+     = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::errors::AuctionError`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1614:9
+     |
+1614 |     use crate::errors::AuctionError;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AuctionStatus`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1615:54
+     |
+1615 |     use crate::{Auction, AuctionClient, AuctionMode, AuctionStatus, DutchAuctionDecay};
+     |                                                      ^^^^^^^^^^^^^
+
+warning: unused import: `super::*`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1787:9
+     |
+1787 |     use super::*;
+     |         ^^^^^^^^
+
+warning: unused import: `TryIntoVal`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1790:57
+     |
+1790 |     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
+     |                                                         ^^^^^^^^^^
+
+warning: unused imports: `AssertUnwindSafe` and `catch_unwind`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1984:22
+     |
+1984 |     use std::panic::{catch_unwind, AssertUnwindSafe};
+     |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused import: `Ledger`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1616:48
+     |
+1616 |     use soroban_sdk::testutils::{Address as _, Ledger as _};
+     |                                                ^^^^^^
+
+warning: unused variable: `alice`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1008:13
+     |
+1008 |         let alice = Address::generate(&env);
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_alice`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `bob`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1009:13
+     |
+1009 |         let bob = Address::generate(&env);
+     |             ^^^ help: if this is intentional, prefix it with an underscore: `_bob`
+
+warning: unused variable: `borrower`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1113:13
+     |
+1113 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `client`
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1809:13
+     |
+1809 |         let client = AuctionClient::new(&env, &contract_id);
+     |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_client`
+
+warning: function `advance_ledgers` is never used
+  --> gateway-contract/contracts/auction_contract/src/test.rs:21:8
+   |
+21 |     fn advance_ledgers(env: &Env, ledgers: u32) {
+   |        ^^^^^^^^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+    --> gateway-contract/contracts/auction_contract/src/test.rs:1990:14
+     |
+1990 |         env: &Env,
+     |              ^^^^ the lifetime is elided here
+...
+1993 |     ) -> (AuctionClient, Address, Address, Symbol) {
+     |           ^^^^^^^^^^^^^ the same lifetime is hidden here
+     |
+     = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+     = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+     |
+1993 |     ) -> (AuctionClient<'_>, Address, Address, Symbol) {
+     |                        ++++
+
+warning: `gateway-auction` (lib) generated 27 warnings
+warning: `gateway-auction` (lib test) generated 40 warnings (27 duplicates) (run `cargo fix --lib -p gateway-auction --tests` to apply 11 suggestions)
+   Compiling gateway-auction v0.1.0 (/Users/amankoli/Creditra-Contracts/gateway-contract/contracts/auction_contract)
+error: an inner attribute is not permitted in this context
+ --> contracts/credit/src/lib.rs:3:1
+  |
+3 | #![cfg_attr(not(test), no_std)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner attributes, like `#![no_std]`, annotate the item enclosing them, and are usually found at the beginning of source files
+  = note: outer attributes, like `#[test]`, annotate the item following them
+
+error: an inner attribute is not permitted in this context
+ --> contracts/credit/src/lib.rs:4:1
+  |
+4 | #![allow(clippy::unused_unit)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner attributes, like `#![no_std]`, annotate the item enclosing them, and are usually found at the beginning of source files
+  = note: outer attributes, like `#[test]`, annotate the item following them
+
+error[E0753]: expected outer doc comment
+ --> contracts/credit/src/lib.rs:6:1
+  |
+6 | //! # Creditra credit contract
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+6 - //! # Creditra credit contract
+6 + // # Creditra credit contract
+  |
+
+error[E0753]: expected outer doc comment
+ --> contracts/credit/src/lib.rs:7:1
+  |
+7 | //!
+  | ^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+7 - //!
+7 + //
+  |
+
+error[E0753]: expected outer doc comment
+ --> contracts/credit/src/lib.rs:8:1
+  |
+8 | //! Per-borrower credit lines on Stellar/Soroban with **algorithmic
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+8 - //! Per-borrower credit lines on Stellar/Soroban with **algorithmic
+8 + // Per-borrower credit lines on Stellar/Soroban with **algorithmic
+  |
+
+error[E0753]: expected outer doc comment
+ --> contracts/credit/src/lib.rs:9:1
+  |
+9 | //! risk-priced underwriting** rather than overcollateralization. This is the
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+  |
+9 - //! risk-priced underwriting** rather than overcollateralization. This is the
+9 + // risk-priced underwriting** rather than overcollateralization. This is the
+  |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:10:1
+   |
+10 | //! single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+10 - //! single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
+10 + // single `#[contract] Credit` with all entrypoints in the `#[contractimpl]`
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:11:1
+   |
+11 | //! block below.
+   | ^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+11 - //! block below.
+11 + // block below.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:12:1
+   |
+12 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+12 - //!
+12 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:13:1
+   |
+13 | //! ## What
+   | ^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+13 - //! ## What
+13 + // ## What
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:14:1
+   |
+14 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+14 - //!
+14 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:15:1
+   |
+15 | //! Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+15 - //! Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
+15 + // Maintains a `CreditLineData` per borrower (see [`crate::types`]) with
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:16:1
+   |
+16 | //! `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+16 - //! `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
+16 + // `credit_limit`, `utilized_amount`, `interest_rate_bps`, `risk_score`,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:17:1
+   |
+17 | //! `status`, and accrual timestamps. The contract orchestrates:
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+17 - //! `status`, and accrual timestamps. The contract orchestrates:
+17 + // `status`, and accrual timestamps. The contract orchestrates:
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:18:1
+   |
+18 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+18 - //!
+18 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:19:1
+   |
+19 | //! - **Origination** — `open_credit_line` (admin) validates against
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+19 - //! - **Origination** — `open_credit_line` (admin) validates against
+19 + // - **Origination** — `open_credit_line` (admin) validates against
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:20:1
+   |
+20 | //!   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+20 - //!   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
+20 + //   `MinCreditLimit`/`MaxCreditLimit` bounds and the rate cap
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:21:1
+   |
+21 | //!   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+21 - //!   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
+21 + //   `MAX_INTEREST_RATE_BPS = 10_000` (see [`crate::risk`]).
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:22:1
+   |
+22 | //! - **Draw** — `draw_credit` performs a 25-step validation chain
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+22 - //! - **Draw** — `draw_credit` performs a 25-step validation chain
+22 + // - **Draw** — `draw_credit` performs a 25-step validation chain
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:23:1
+   |
+23 | //!   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+23 - //!   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
+23 + //   (pause, freeze, blocklist, status, cooldown, limit, collateral ratio,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:24:1
+   |
+24 | //!   utilization cap, exposure cap, liquidity reserve) before a token CPI
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+24 - //!   utilization cap, exposure cap, liquidity reserve) before a token CPI
+24 + //   utilization cap, exposure cap, liquidity reserve) before a token CPI
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:25:1
+   |
+25 | //!   into the configured `LiquidityToken`.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+25 - //!   into the configured `LiquidityToken`.
+25 + //   into the configured `LiquidityToken`.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:26:1
+   |
+26 | //! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+26 - //! - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
+26 + // - **Repay** — `repay_credit` is **not pause-gated**: borrowers must always
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:27:1
+   |
+27 | //!   be able to deleverage. Interest-first allocation with optional
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+27 - //!   be able to deleverage. Interest-first allocation with optional
+27 + //   be able to deleverage. Interest-first allocation with optional
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:28:1
+   |
+28 | //!   protocol-fee-on-interest split between treasury and bounty accumulators.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+28 - //!   protocol-fee-on-interest split between treasury and bounty accumulators.
+28 + //   protocol-fee-on-interest split between treasury and bounty accumulators.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:29:1
+   |
+29 | //! - **Risk update** — `update_risk_parameters` either computes the new rate
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+29 - //! - **Risk update** — `update_risk_parameters` either computes the new rate
+29 + // - **Risk update** — `update_risk_parameters` either computes the new rate
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:30:1
+   |
+30 | //!   from `risk_score` via the piecewise-linear formula (if configured) or
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+30 - //!   from `risk_score` via the piecewise-linear formula (if configured) or
+30 + //   from `risk_score` via the piecewise-linear formula (if configured) or
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:31:1
+   |
+31 | //!   accepts an admin-supplied rate; both paths are clamped and gated by the
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+31 - //!   accepts an admin-supplied rate; both paths are clamped and gated by the
+31 + //   accepts an admin-supplied rate; both paths are clamped and gated by the
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:32:1
+   |
+32 | //!   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+32 - //!   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+32 + //   per-borrower floor and the `RateChangeConfig` magnitude+cadence cap.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:33:1
+   |
+33 | //! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+33 - //! - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
+33 + // - **Lifecycle** — `suspend`, `self_suspend`, `close`, `default`,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:34:1
+   |
+34 | //!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+34 - //!   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
+34 + //   `reinstate`, `forgive_debt`, with `apply_accrual` invoked before every
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:35:1
+   |
+35 | //!   mutation. See [`crate::lifecycle`].
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+35 - //!   mutation. See [`crate::lifecycle`].
+35 + //   mutation. See [`crate::lifecycle`].
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:36:1
+   |
+36 | //! - **Settlement** — `settle_default_liquidation` is admin-only,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+36 - //! - **Settlement** — `settle_default_liquidation` is admin-only,
+36 + // - **Settlement** — `settle_default_liquidation` is admin-only,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:37:1
+   |
+37 | //!   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+37 - //!   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
+37 + //   reentrancy-guarded, oracle-circuit-breaker-protected, and dispatches a
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:38:1
+   |
+38 | //!   cross-contract call to the configured `AuctionContract`. The return
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+38 - //!   cross-contract call to the configured `AuctionContract`. The return
+38 + //   cross-contract call to the configured `AuctionContract`. The return
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:39:1
+   |
+39 | //!   value is asserted against the admin-supplied `recovered_amount` and the
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+39 - //!   value is asserted against the admin-supplied `recovered_amount` and the
+39 + //   value is asserted against the admin-supplied `recovered_amount` and the
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:40:1
+   |
+40 | //!   `(borrower, settlement_id)` pair is replay-protected via a persistent
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+40 - //!   `(borrower, settlement_id)` pair is replay-protected via a persistent
+40 + //   `(borrower, settlement_id)` pair is replay-protected via a persistent
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:41:1
+   |
+41 | //!   marker.
+   | ^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+41 - //!   marker.
+41 + //   marker.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:42:1
+   |
+42 | //! - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+42 - //! - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
+42 + // - **Operational controls** — pause/unpause, freeze/unfreeze, block/unblock
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:43:1
+   |
+43 | //!   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+43 - //!   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
+43 + //   borrowers, `accrue_batch` keeper hook, `reverse_draw` time-windowed
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:44:1
+   |
+44 | //!   reversal.
+   | ^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+44 - //!   reversal.
+44 + //   reversal.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:45:1
+   |
+45 | //! - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+45 - //! - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
+45 + // - **Upgrade** — admin-gated atomic WASM swap with schema-version bump.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:46:1
+   |
+46 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+46 - //!
+46 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:47:1
+   |
+47 | //! ## How
+   | ^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+47 - //! ## How
+47 + // ## How
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:48:1
+   |
+48 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+48 - //!
+48 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:49:1
+   |
+49 | //! - **Storage tiers.** Hot configuration in Instance storage (admin,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+49 - //! - **Storage tiers.** Hot configuration in Instance storage (admin,
+49 + // - **Storage tiers.** Hot configuration in Instance storage (admin,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:50:1
+   |
+50 | //!   pause flag, reentrancy guard, oracle config, rate formula, treasury,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+50 - //!   pause flag, reentrancy guard, oracle config, rate formula, treasury,
+50 + //   pause flag, reentrancy guard, oracle config, rate formula, treasury,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:51:1
+   |
+51 | //!   global caps); per-borrower state in Persistent storage with TTL
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+51 - //!   global caps); per-borrower state in Persistent storage with TTL
+51 + //   global caps); per-borrower state in Persistent storage with TTL
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:52:1
+   |
+52 | //!   auto-bumped on every access. See [`crate::storage`].
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+52 - //!   auto-bumped on every access. See [`crate::storage`].
+52 + //   auto-bumped on every access. See [`crate::storage`].
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:53:1
+   |
+53 | //! - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+53 - //! - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
+53 + // - **Reentrancy.** The single `Symbol("reentrancy")` instance flag guards
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:54:1
+   |
+54 | //!   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+54 - //!   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
+54 + //   `draw_credit`, `repay_credit`, and `settle_default_liquidation` —
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:55:1
+   |
+55 | //!   external token CPIs cannot re-enter.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+55 - //!   external token CPIs cannot re-enter.
+55 + //   external token CPIs cannot re-enter.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:56:1
+   |
+56 | //! - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+56 - //! - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
+56 + // - **Arithmetic.** Every `i128` accounting operation uses `checked_*`
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:57:1
+   |
+57 | //!   primitives; the release profile sets `overflow-checks = true` so a
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+57 - //!   primitives; the release profile sets `overflow-checks = true` so a
+57 + //   primitives; the release profile sets `overflow-checks = true` so a
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:58:1
+   |
+58 | //!   numeric edge case reverts with `ContractError::Overflow = 12` rather
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+58 - //!   numeric edge case reverts with `ContractError::Overflow = 12` rather
+58 + //   numeric edge case reverts with `ContractError::Overflow = 12` rather
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:59:1
+   |
+59 | //!   than wrapping.
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+59 - //!   than wrapping.
+59 + //   than wrapping.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:60:1
+   |
+60 | //! - **Lazy accrual.** Interest is realized only on mutation; the math is
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+60 - //! - **Lazy accrual.** Interest is realized only on mutation; the math is
+60 + // - **Lazy accrual.** Interest is realized only on mutation; the math is
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:61:1
+   |
+61 | //!   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+61 - //!   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
+61 + //   `floor((u * r * Δt) / (10_000 * 31_557_600))` via
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:62:1
+   |
+62 | //!   [`crate::math_utils::prorate_interest`], with grace and penalty
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+62 - //!   [`crate::math_utils::prorate_interest`], with grace and penalty
+62 + //   [`crate::math_utils::prorate_interest`], with grace and penalty
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:63:1
+   |
+63 | //!   branches in [`crate::accrual::apply_accrual`].
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+63 - //!   branches in [`crate::accrual::apply_accrual`].
+63 + //   branches in [`crate::accrual::apply_accrual`].
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:64:1
+   |
+64 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+64 - //!
+64 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:65:1
+   |
+65 | //! ## Why
+   | ^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+65 - //! ## Why
+65 + // ## Why
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:66:1
+   |
+66 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+66 - //!
+66 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:67:1
+   |
+67 | //! Overcollateralized lending (Aave / Compound / Maker) gates the median
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+67 - //! Overcollateralized lending (Aave / Compound / Maker) gates the median
+67 + // Overcollateralized lending (Aave / Compound / Maker) gates the median
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:68:1
+   |
+68 | //! wallet out of on-chain credit. Creditra prices and sizes the credit line
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+68 - //! wallet out of on-chain credit. Creditra prices and sizes the credit line
+68 + // wallet out of on-chain credit. Creditra prices and sizes the credit line
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:69:1
+   |
+69 | //! from a deterministic function of behavioral signal plus an optional
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+69 - //! from a deterministic function of behavioral signal plus an optional
+69 + // from a deterministic function of behavioral signal plus an optional
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:70:1
+   |
+70 | //! collateral floor, configurable from "fully unsecured" to "150 % LTV"
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+70 - //! collateral floor, configurable from "fully unsecured" to "150 % LTV"
+70 + // collateral floor, configurable from "fully unsecured" to "150 % LTV"
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:71:1
+   |
+71 | //! at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+71 - //! at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+71 + // at deployment time. See [`WHITEPAPER.md`](../../../WHITEPAPER.md) for
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:72:1
+   |
+72 | //! the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+72 - //! the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+72 + // the protocol-level model and [`docs/RISK_PRICING.md`](../../../docs/RISK_PRICING.md)
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:73:1
+   |
+73 | //! for the algorithm with worked examples.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+73 - //! for the algorithm with worked examples.
+73 + // for the algorithm with worked examples.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:74:1
+   |
+74 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+74 - //!
+74 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:75:1
+   |
+75 | //! ## Security invariants
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+75 - //! ## Security invariants
+75 + // ## Security invariants
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:76:1
+   |
+76 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+76 - //!
+76 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:77:1
+   |
+77 | //! - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+77 - //! - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+77 + // - `TotalUtilized == Σ utilized_amount` over open lines (enforced via
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:78:1
+   |
+78 | //!   `persist_credit_line` with `previous_utilized` capture).
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+78 - //!   `persist_credit_line` with `previous_utilized` capture).
+78 + //   `persist_credit_line` with `previous_utilized` capture).
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:79:1
+   |
+79 | //! - `interest_rate_bps <= 10_000` after every mutation.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+79 - //! - `interest_rate_bps <= 10_000` after every mutation.
+79 + // - `interest_rate_bps <= 10_000` after every mutation.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:80:1
+   |
+80 | //! - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+80 - //! - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+80 + // - Monotonic timestamps on `last_accrual_ts`, `last_rate_update_ts`,
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:81:1
+   |
+81 | //!   `suspension_ts`; backward writes revert
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+81 - //!   `suspension_ts`; backward writes revert
+81 + //   `suspension_ts`; backward writes revert
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:82:1
+   |
+82 | //!   `ContractError::TimestampRegression = 33`.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+82 - //!   `ContractError::TimestampRegression = 33`.
+82 + //   `ContractError::TimestampRegression = 33`.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:83:1
+   |
+83 | //! - `(borrower, settlement_id)` is the dedup key for cross-contract
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+83 - //! - `(borrower, settlement_id)` is the dedup key for cross-contract
+83 + // - `(borrower, settlement_id)` is the dedup key for cross-contract
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:84:1
+   |
+84 | //!   settlement replay safety.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+84 - //!   settlement replay safety.
+84 + //   settlement replay safety.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:85:1
+   |
+85 | //! - 38 `ContractError` discriminants are ABI-stable; CI test
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+85 - //! - 38 `ContractError` discriminants are ABI-stable; CI test
+85 + // - 38 `ContractError` discriminants are ABI-stable; CI test
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:86:1
+   |
+86 | //!   `tests/error_discriminants.rs` reverts on reorder.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+86 - //!   `tests/error_discriminants.rs` reverts on reorder.
+86 + //   `tests/error_discriminants.rs` reverts on reorder.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:87:1
+   |
+87 | //! - 25+ event topics under the `credit` namespace are stability-pinned by
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+87 - //! - 25+ event topics under the `credit` namespace are stability-pinned by
+87 + // - 25+ event topics under the `credit` namespace are stability-pinned by
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:88:1
+   |
+88 | //!   `tests/event_topic_stability.rs`.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+88 - //!   `tests/event_topic_stability.rs`.
+88 + //   `tests/event_topic_stability.rs`.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:89:1
+   |
+89 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+89 - //!
+89 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:90:1
+   |
+90 | //! See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+90 - //! See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+90 + // See [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:91:1
+   |
+91 | //! per-entrypoint contract surface and
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+91 - //! per-entrypoint contract surface and
+91 + // per-entrypoint contract surface and
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:92:1
+   |
+92 | //! [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+92 - //! [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
+92 + // [`docs/SECURITY.md`](../../../docs/SECURITY.md) for the threat model.
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:93:1
+   |
+93 | //!
+   | ^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+93 - //!
+93 + //
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:94:1
+   |
+94 | //! Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+94 - //! Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
+94 + // Host-side per-entrypoint CPU/memory sampling for gas-regression baselines
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:95:1
+   |
+95 | //! lives in [`instrument`] (requires the `instrument` Cargo feature; not
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: inner doc comments like this (starting with `//!` or `/*!`) can only appear before items
+help: you might have meant to write a regular comment
+   |
+95 - //! lives in [`instrument`] (requires the `instrument` Cargo feature; not
+95 + // lives in [`instrument`] (requires the `instrument` Cargo feature; not
+   |
+
+error[E0753]: expected outer doc comment
+  --> contracts/credit/src/lib.rs:96:1
+   |
+96 | //! compiled into WASM).
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+97 |
+98 | mod accrual;
+   | ------------ the inner doc comment doesn't annotate this module
+   |
+help: to annotate the module, change the doc comment from inner to outer style
+   |
+96 - //! compiled into WASM).
+96 + /// compiled into WASM).
+   |
+
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/refund_atomic.rs:71:9
+    |
+ 62 |     client.init_auction(
+    |            ------------ arguments to this method are incorrect
+...
+ 71 |         &None,
+    |         ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:26:9
+    |
+ 17 |     client.init_auction(
+    |            ------------ arguments to this method are incorrect
+...
+ 26 |         &None,
+    |         ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0308]: arguments to this method are incorrect
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:46:12
+    |
+ 46 |     client.init_auction(
+    |            ^^^^^^^^^^^^
+    |
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:53:9
+    |
+ 53 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:54:9
+    |
+ 54 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<u32>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/auth_settle.rs:56:9
+    |
+ 56 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<u32>`
+               found reference `&DutchAuctionDecay`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error[E0599]: no method named `set_timestamp` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+   --> gateway-contract/contracts/auction_contract/tests/panic_with_error.rs:71:18
+    |
+ 71 |     env.ledger().set_timestamp(1001);
+    |                  ^^^^^^^^^^^^^
+    |
+   ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:263:8
+    |
+263 |     fn set_timestamp(&self, timestamp: u64);
+    |        ------------- the method is available for `soroban_sdk::ledger::Ledger` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: there is a method `timestamp` with a similar name, but with different arguments
+   --> /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/ledger.rs:87:5
+    |
+ 87 |     pub fn timestamp(&self) -> u64 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: trait `Ledger` which provides `set_timestamp` is implemented but not in scope; perhaps you want to import it
+    |
+ 12 + use soroban_sdk::testutils::Ledger;
+    |
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `gateway-auction` (test "auth_settle") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:179:17
+    |
+170 |             client.init_auction(
+    |                    ------------ arguments to this method are incorrect
+...
+179 |                 &None,
+    |                 ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0308, E0599.
+For more information about an error, try `rustc --explain E0308`.
+error[E0308]: mismatched types
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:193:17
+    |
+184 |             client.init_auction(
+    |                    ------------ arguments to this method are incorrect
+...
+193 |                 &None,
+    |                 ^^^^^ expected `&DutchAuctionDecay`, found `&Option<_>`
+    |
+    = note: expected reference `&DutchAuctionDecay`
+               found reference `&std::option::Option<_>`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error: could not compile `gateway-auction` (test "panic_with_error") due to 2 previous errors
+error[E0599]: no method named `with_mut` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:196:33
+    |
+196 |             client.env.ledger().with_mut(|li| li.timestamp = 1_000);
+    |                                 ^^^^^^^^ method not found in `soroban_sdk::ledger::Ledger`
+    |
+   ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:284:8
+    |
+284 |     fn with_mut<F>(&self, f: F)
+    |        -------- the method is available for `soroban_sdk::ledger::Ledger` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Ledger` which provides `with_mut` is implemented but not in scope; perhaps you want to import it
+    |
+ 30 + use soroban_sdk::testutils::Ledger;
+    |
+
+error: could not compile `gateway-auction` (test "refund_atomic") due to 1 previous error
+error[E0308]: arguments to this method are incorrect
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:211:12
+    |
+211 |     client.init_auction(
+    |            ^^^^^^^^^^^^
+    |
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:218:9
+    |
+218 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<i128>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:219:8
+    |
+219 |        &DutchAuctionDecay::None,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<i128>`
+               found reference `&DutchAuctionDecay`
+note: expected `&Option<u32>`, found `&DutchAuctionDecay`
+   --> gateway-contract/contracts/auction_contract/tests/transition_matrix.rs:221:9
+    |
+221 |         &DutchAuctionDecay::None,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: expected reference `&std::option::Option<u32>`
+               found reference `&DutchAuctionDecay`
+note: method defined here
+   --> gateway-contract/contracts/auction_contract/src/lib.rs:125:12
+    |
+125 |     pub fn init_auction(
+    |            ^^^^^^^^^^^^
+
+error: could not compile `gateway-auction` (test "transition_matrix") due to 4 previous errors
+error[E0425]: cannot find function `publish_protocol_fee_bps_set_event` in this scope
+    --> contracts/credit/src/lib.rs:1003:9
+     |
+1003 |         publish_protocol_fee_bps_set_event(&env, bps);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this function
+     |
+ 118 + use crate::events::publish_protocol_fee_bps_set_event;
+     |
+
+error[E0425]: cannot find function `publish_protocol_fee_bounds_set_event` in this scope
+    --> contracts/credit/src/lib.rs:1026:9
+     |
+1026 |         publish_protocol_fee_bounds_set_event(&env, min_bps, max_bps);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this function
+     |
+ 118 + use crate::events::publish_protocol_fee_bounds_set_event;
+     |
+
+error[E0425]: cannot find type `ProofOfReserve` in this scope
+    --> contracts/credit/src/lib.rs:1241:46
+     |
+1241 |     pub fn get_proof_of_reserve(env: Env) -> ProofOfReserve {
+     |                                              ^^^^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this struct
+     |
+ 118 + use crate::types::ProofOfReserve;
+     |
+
+error[E0425]: cannot find function `self_suspend_credit_line` in module `lifecycle`
+    --> contracts/credit/src/lib.rs:1362:20
+     |
+1362 |         lifecycle::self_suspend_credit_line(env, borrower)
+     |                    ^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+    ::: contracts/credit/src/lifecycle.rs:168:1
+     |
+ 168 | pub fn suspend_credit_line(env: Env, borrower: Address) {
+     | ------------------------------------------------------- similarly named function `suspend_credit_line` defined here
+     |
+help: a function with a similar name exists
+     |
+1362 -         lifecycle::self_suspend_credit_line(env, borrower)
+1362 +         lifecycle::suspend_credit_line(env, borrower)
+     |
+
+error[E0425]: cannot find function `publish_close_factor_bps_set_event` in this scope
+    --> contracts/credit/src/lib.rs:1516:9
+     |
+1516 |         publish_close_factor_bps_set_event(&env, close_factor_bps);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this function
+     |
+ 118 + use crate::events::publish_close_factor_bps_set_event;
+     |
+
+error[E0425]: cannot find function `publish_paused_event` in this scope
+    --> contracts/credit/src/lib.rs:1769:9
+     |
+1769 |         publish_paused_event(&env, paused);
+     |         ^^^^^^^^^^^^^^^^^^^^
+     |
+    ::: contracts/credit/src/events.rs:227:1
+     |
+ 227 | pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
+     | -------------------------------------------------------- similarly named function `publish_drawn_event` defined here
+     |
+help: a function with a similar name exists
+     |
+1769 -         publish_paused_event(&env, paused);
+1769 +         publish_drawn_event(&env, paused);
+     |
+help: consider importing this function
+     |
+ 118 + use crate::events::publish_paused_event;
+     |
+
+error[E0425]: cannot find function `publish_paused_event` in this scope
+    --> contracts/credit/src/lib.rs:1821:9
+     |
+1821 |         publish_paused_event(&env, paused);
+     |         ^^^^^^^^^^^^^^^^^^^^
+     |
+    ::: contracts/credit/src/events.rs:227:1
+     |
+ 227 | pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
+     | -------------------------------------------------------- similarly named function `publish_drawn_event` defined here
+     |
+help: a function with a similar name exists
+     |
+1821 -         publish_paused_event(&env, paused);
+1821 +         publish_drawn_event(&env, paused);
+     |
+help: consider importing this function
+     |
+ 118 + use crate::events::publish_paused_event;
+     |
+
+error[E0425]: cannot find value `reserve_amount` in this scope
+    --> contracts/credit/src/lib.rs:2053:12
+     |
+2053 |         if reserve_amount > 0 {
+     |            ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `reserve_amount` in this scope
+    --> contracts/credit/src/lib.rs:2054:78
+     |
+2054 |             StellarAssetClient::new(env, &token_address).mint(&contract_id, &reserve_amount);
+     |                                                                              ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `draw_amount` in this scope
+    --> contracts/credit/src/lib.rs:2057:12
+     |
+2057 |         if draw_amount > 0 {
+     |            ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `draw_amount` in this scope
+    --> contracts/credit/src/lib.rs:2058:43
+     |
+2058 |             client.draw_credit(borrower, &draw_amount);
+     |                                           ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `sac` in this scope
+    --> contracts/credit/src/lib.rs:2696:9
+     |
+2696 |         sac.mint(&borrower, &100_i128);
+     |         ^^^ not found in this scope
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+ --> contracts/credit/src/query.rs:1:22
+  |
+1 | use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+  --> contracts/credit/src/risk.rs:63:94
+   |
+63 | ...ate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Symbol` and `symbol_short`
+  --> contracts/credit/src/risk.rs:65:19
+   |
+65 | use soroban_sdk::{symbol_short, Address, Env, Symbol};
+   |                   ^^^^^^^^^^^^                ^^^^^^
+
+error[E0425]: cannot find value `token_address` in this scope
+    --> contracts/credit/src/lib.rs:2697:33
+     |
+2697 |         TokenClient::new(&env, &token_address).approve(
+     |                                 ^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `contract_id` in this scope
+    --> contracts/credit/src/lib.rs:2699:14
+     |
+2699 |             &contract_id,
+     |              ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:2705:46
+     |
+2687 |         let (client, _admin, borrower) = base(&env);
+     |                      ------ `_admin` defined here
+...
+2705 |         client.close_credit_line(&borrower, &admin);
+     |                                              ^^^^^
+     |
+help: the leading underscore in `_admin` marks it as unused, consider renaming it to `admin`
+     |
+2687 -         let (client, _admin, borrower) = base(&env);
+2687 +         let (client, admin, borrower) = base(&env);
+     |
+
+warning: unused imports: `CreditLineEvent`, `publish_credit_line_event`, and `publish_token_rescued_event`
+   --> contracts/credit/src/lib.rs:138:5
+    |
+138 |     publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+141 |     publish_repayment_event, publish_token_rescued_event,
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+142 |     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+143 |     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
+    |                            ^^^^^^^^^^^^^^^
+
+warning: unused imports: `clear_repayment_schedule` and `rate_cfg_key`
+   --> contracts/credit/src/lib.rs:150:5
+    |
+150 |     clear_repayment_schedule, get_borrower_by_credit_line_id, get_borrower_frozen_until,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+155 |     proposed_at_key, rate_cfg_key, rate_formula_key,
+    |                      ^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+   --> contracts/credit/src/lib.rs:170:43
+    |
+170 | use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
+    |                                           ^^^^^^^^^^^^
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3368:9
+     |
+3368 |         client.init(&admin);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:3368:22
+     |
+3368 |         client.init(&admin);
+     |                      ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3369:9
+     |
+3369 |         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3369:34
+     |
+3369 |         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
+     |                                  ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3370:9
+     |
+3370 |         client.draw_credit(&borrower, &200_i128);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3370:29
+     |
+3370 |         client.draw_credit(&borrower, &200_i128);
+     |                             ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3371:9
+     |
+3371 |         client.repay_credit(&borrower, &50_i128);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3371:30
+     |
+3371 |         client.repay_credit(&borrower, &50_i128);
+     |                              ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3372:9
+     |
+3372 |         client.suspend_credit_line(&borrower);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3372:37
+     |
+3372 |         client.suspend_credit_line(&borrower);
+     |                                     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3373:9
+     |
+3373 |         client.default_credit_line(&borrower);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3373:37
+     |
+3373 |         client.default_credit_line(&borrower);
+     |                                     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3374:9
+     |
+3374 |         client.reinstate_credit_line(&borrower);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3374:39
+     |
+3374 |         client.reinstate_credit_line(&borrower);
+     |                                       ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `client` in this scope
+    --> contracts/credit/src/lib.rs:3375:9
+     |
+3375 |         client.close_credit_line(&borrower, &admin);
+     |         ^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `borrower` in this scope
+    --> contracts/credit/src/lib.rs:3375:35
+     |
+3375 |         client.close_credit_line(&borrower, &admin);
+     |                                   ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `admin` in this scope
+    --> contracts/credit/src/lib.rs:3375:46
+     |
+3375 |         client.close_credit_line(&borrower, &admin);
+     |                                              ^^^^^ not found in this scope
+
+error[E0433]: cannot find module or crate `types` in this scope
+  --> contracts/credit/src/test_ttl.rs:84:50
+   |
+84 |         client.reinstate_credit_line(&borrower, &types::CreditStatus::Active);
+   |                                                  ^^^^^ use of unresolved module or unlinked crate `types`
+   |
+help: to make use of source file contracts/credit/src/types.rs, use `mod types` in this file to declare the module
+  --> contracts/credit/src/lib.rs:1:1
+   |
+ 1 + mod types;
+   |
+help: consider importing this enum through its public re-export
+   |
+ 3 +     use crate::CreditStatus;
+   |
+help: if you import `CreditStatus`, refer to it directly
+   |
+84 -         client.reinstate_credit_line(&borrower, &types::CreditStatus::Active);
+84 +         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+   |
+
+warning: unused import: `crate::events::LateFeeChargedEvent`
+   --> contracts/credit/src/lifecycle.rs:600:9
+    |
+600 |     use crate::events::LateFeeChargedEvent;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `Events as _`, `Symbol`, `TryFromVal`, and `TryIntoVal`
+   --> contracts/credit/src/lifecycle.rs:604:35
+    |
+604 |         testutils::{Address as _, Events as _, Ledger},
+    |                                   ^^^^^^^^^^^
+605 |         token::StellarAssetClient,
+606 |         Address, Env, Symbol, TryFromVal, TryIntoVal,
+    |                       ^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+ --> contracts/credit/src/query.rs:1:22
+  |
+1 | use crate::storage::{CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events as _`
+    --> contracts/credit/src/lib.rs:2028:9
+     |
+2028 |     use soroban_sdk::testutils::Events as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Symbol` and `symbol_short`
+    --> contracts/credit/src/lib.rs:2031:23
+     |
+2031 |     use soroban_sdk::{symbol_short, Symbol};
+     |                       ^^^^^^^^^^^^  ^^^^^^
+
+warning: unused imports: `TryFromVal` and `TryIntoVal`
+    --> contracts/credit/src/lib.rs:2032:23
+     |
+2032 |     use soroban_sdk::{TryFromVal, TryIntoVal};
+     |                       ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `crate::storage::DataKey`
+    --> contracts/credit/src/lib.rs:2033:9
+     |
+2033 |     use crate::storage::DataKey;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::events::RepaymentEvent`
+    --> contracts/credit/src/lib.rs:2034:9
+     |
+2034 |     use crate::events::RepaymentEvent;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ContractError` and `CreditStatus`
+    --> contracts/credit/src/lib.rs:2201:24
+     |
+2201 |     use crate::types::{ContractError, CreditStatus};
+     |                        ^^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused import: `TryIntoVal`
+    --> contracts/credit/src/lib.rs:2207:40
+     |
+2207 |     use soroban_sdk::{Env, TryFromVal, TryIntoVal};
+     |                                        ^^^^^^^^^^
+
+warning: unused imports: `Client as TokenClient` and `StellarAssetClient`
+    --> contracts/credit/src/lib.rs:2974:30
+     |
+2974 |     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+     |                              ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+    --> contracts/credit/src/lib.rs:3034:33
+     |
+3034 |         contract, contractimpl, symbol_short,
+     |                                 ^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token`
+    --> contracts/credit/src/lib.rs:3201:9
+     |
+3201 |     use soroban_sdk::token;
+     |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+    --> contracts/credit/src/lib.rs:3202:9
+     |
+3202 |     use soroban_sdk::token::StellarAssetClient;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::boxed::Box`
+    --> contracts/credit/src/lib.rs:3204:9
+     |
+3204 |     use std::boxed::Box;
+     |         ^^^^^^^^^^^^^^^
+
+warning: unused imports: `AssertUnwindSafe` and `catch_unwind`
+    --> contracts/credit/src/lib.rs:3205:22
+     |
+3205 |     use std::panic::{catch_unwind, AssertUnwindSafe};
+     |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3396:9
+     |
+3396 |         #[test]
+     |         ^^^^^^^
+     |
+     = note: `#[warn(unnameable_test_items)]` on by default
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3416:9
+     |
+3416 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3435:9
+     |
+3435 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3454:9
+     |
+3454 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3473:9
+     |
+3473 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3496:9
+     |
+3496 |         #[test]
+     |         ^^^^^^^
+
+warning: cannot test inner items
+    --> contracts/credit/src/lib.rs:3526:9
+     |
+3526 |         #[test]
+     |         ^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+    --> contracts/credit/src/lib.rs:5172:13
+     |
+5172 |         use soroban_sdk::token::StellarAssetClient;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+ --> contracts/credit/src/test_ttl.rs:7:9
+  |
+7 |     use soroban_sdk::token::StellarAssetClient;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> contracts/credit/src/attestation.rs:281:9
+    |
+278 |     fn leaf(env: &Env, pattern: u8) -> BytesN<32> {
+    |                                        ---------- expected `soroban_sdk::BytesN<32>` because of return type
+...
+281 |         env.crypto().sha256(&data)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `BytesN<32>`, found `Hash<32>`
+    |
+    = note: expected struct `soroban_sdk::BytesN<32>`
+               found struct `soroban_sdk::crypto::Hash<32>`
+help: call `Into::into` on this expression to convert `soroban_sdk::crypto::Hash<32>` into `soroban_sdk::BytesN<32>`
+    |
+281 |         env.crypto().sha256(&data).into()
+    |                                   +++++++
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:669:16
+    |
+669 |         client.set_late_fee_flat(&50_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:720:16
+    |
+720 |         client.set_late_fee_flat(&30_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:748:16
+    |
+748 |         client.set_late_fee_flat(&50_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:772:16
+    |
+772 |         client.set_late_fee_flat(&0_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:792:16
+    |
+792 |         client.set_late_fee_flat(&50_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:813:16
+    |
+813 |         client.set_late_fee_flat(&50_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:836:16
+    |
+836 |         client.set_late_fee_flat(&-1_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0599]: no method named `set_late_fee_flat` found for struct `CreditClient<'a>` in the current scope
+   --> contracts/credit/src/lifecycle.rs:849:16
+    |
+849 |         client.set_late_fee_flat(&30_i128);
+    |                ^^^^^^^^^^^^^^^^^ method not found in `CreditClient<'_>`
+    |
+   ::: contracts/credit/src/lib.rs:208:1
+    |
+208 | #[contract]
+    | ----------- method `set_late_fee_flat` not found for this struct
+
+error[E0308]: mismatched types
+    --> contracts/credit/src/lib.rs:1313:44
+     |
+1313 |         lifecycle::get_credit_limit_bounds(env)
+     |         ---------------------------------- ^^^ expected `&Env`, found `Env`
+     |         |
+     |         arguments to this function are incorrect
+     |
+note: function defined here
+    --> contracts/credit/src/lifecycle.rs:51:8
+     |
+  51 | pub fn get_credit_limit_bounds(env: &Env) -> (Option<i128>, Option<i128>) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^ ---------
+help: consider borrowing here
+     |
+1313 |         lifecycle::get_credit_limit_bounds(&env)
+     |                                            +
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:1825:9
+     |
+1825 |         freeze::freeze_draws(env)
+     |         ^^^^^^^^^^^^^^^^^^^^----- argument #2 of type `FreezeReason` is missing
+     |
+note: function defined here
+    --> contracts/credit/src/freeze.rs:47:8
+     |
+  47 | pub fn freeze_draws(env: Env, reason: FreezeReason) {
+     |        ^^^^^^^^^^^^           --------------------
+help: provide the argument
+     |
+1825 |         freeze::freeze_draws(env, /* FreezeReason */)
+     |                                 ++++++++++++++++++++
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:16:27
+   |
+16 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:66:27
+   |
+66 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:87:27
+   |
+87 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+    --> contracts/credit/src/lib.rs:2060:9
+     |
+2041 |     ) -> (CreditClient<'a>, Address) {
+     |          --------------------------- expected `(CreditClient<'a>, soroban_sdk::Address)` because of return type
+...
+2060 |         (client, token_address, contract_id, admin)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected a tuple with 2 elements, found one with 4 elements
+     |
+     = note: expected tuple `(CreditClient<'a>, soroban_sdk::Address)`
+                found tuple `(CreditClient<'a>, soroban_sdk::Address, soroban_sdk::Address, soroban_sdk::Address)`
+
+error[E0599]: no method named `set_timestamp` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+    --> contracts/credit/src/lib.rs:2145:22
+     |
+2145 |         env.ledger().set_timestamp(100);
+     |                      ^^^^^^^^^^^^^
+     |
+    ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:263:8
+     |
+ 263 |     fn set_timestamp(&self, timestamp: u64);
+     |        ------------- the method is available for `soroban_sdk::ledger::Ledger` here
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: there is a method `timestamp` with a similar name, but with different arguments
+    --> /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/ledger.rs:87:5
+     |
+  87 |     pub fn timestamp(&self) -> u64 {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: trait `Ledger` which provides `set_timestamp` is implemented but not in scope; perhaps you want to import it
+     |
+2026 +     use soroban_sdk::testutils::Ledger;
+     |
+
+error[E0599]: no method named `set_timestamp` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+    --> contracts/credit/src/lib.rs:2175:22
+     |
+2175 |         env.ledger().set_timestamp(100);
+     |                      ^^^^^^^^^^^^^
+     |
+    ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:263:8
+     |
+ 263 |     fn set_timestamp(&self, timestamp: u64);
+     |        ------------- the method is available for `soroban_sdk::ledger::Ledger` here
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: there is a method `timestamp` with a similar name, but with different arguments
+    --> /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/ledger.rs:87:5
+     |
+  87 |     pub fn timestamp(&self) -> u64 {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: trait `Ledger` which provides `set_timestamp` is implemented but not in scope; perhaps you want to import it
+     |
+2026 +     use soroban_sdk::testutils::Ledger;
+     |
+
+error[E0599]: no method named `set_timestamp` found for struct `soroban_sdk::ledger::Ledger` in the current scope
+    --> contracts/credit/src/lib.rs:2178:22
+     |
+2178 |         env.ledger().set_timestamp(200);
+     |                      ^^^^^^^^^^^^^
+     |
+    ::: /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/testutils.rs:263:8
+     |
+ 263 |     fn set_timestamp(&self, timestamp: u64);
+     |        ------------- the method is available for `soroban_sdk::ledger::Ledger` here
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: there is a method `timestamp` with a similar name, but with different arguments
+    --> /Users/amankoli/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-22.0.11/src/ledger.rs:87:5
+     |
+  87 |     pub fn timestamp(&self) -> u64 {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: trait `Ledger` which provides `set_timestamp` is implemented but not in scope; perhaps you want to import it
+     |
+2026 +     use soroban_sdk::testutils::Ledger;
+     |
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:2694:16
+     |
+2694 |         client.reinstate_credit_line(&borrower);
+     |                ^^^^^^^^^^^^^^^^^^^^^----------- argument #2 of type `&types::CreditStatus` is missing
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1385:12
+     |
+1385 |     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+     |            ^^^^^^^^^^^^^^^^^^^^^                              ---------------------------
+help: provide the argument
+     |
+2694 |         client.reinstate_credit_line(&borrower, /* &types::CreditStatus */);
+     |                                               ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:2776:16
+     |
+2776 |         client.reinstate_credit_line(&borrower);
+     |                ^^^^^^^^^^^^^^^^^^^^^----------- argument #2 of type `&types::CreditStatus` is missing
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1385:12
+     |
+1385 |     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+     |            ^^^^^^^^^^^^^^^^^^^^^                              ---------------------------
+help: provide the argument
+     |
+2776 |         client.reinstate_credit_line(&borrower, /* &types::CreditStatus */);
+     |                                               ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:3272:16
+     |
+3272 |         client.reinstate_credit_line(&borrower);
+     |                ^^^^^^^^^^^^^^^^^^^^^----------- argument #2 of type `&types::CreditStatus` is missing
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1385:12
+     |
+1385 |     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+     |            ^^^^^^^^^^^^^^^^^^^^^                              ---------------------------
+help: provide the argument
+     |
+3272 |         client.reinstate_credit_line(&borrower, /* &types::CreditStatus */);
+     |                                               ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:3282:16
+     |
+3282 |         client.reinstate_credit_line(&borrower);
+     |                ^^^^^^^^^^^^^^^^^^^^^----------- argument #2 of type `&types::CreditStatus` is missing
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1385:12
+     |
+1385 |     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+     |            ^^^^^^^^^^^^^^^^^^^^^                              ---------------------------
+help: provide the argument
+     |
+3282 |         client.reinstate_credit_line(&borrower, /* &types::CreditStatus */);
+     |                                               ++++++++++++++++++++++++++++
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:3320:16
+     |
+3320 |         client.reinstate_credit_line(&borrower);
+     |                ^^^^^^^^^^^^^^^^^^^^^----------- argument #2 of type `&types::CreditStatus` is missing
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1385:12
+     |
+1385 |     pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
+     |            ^^^^^^^^^^^^^^^^^^^^^                              ---------------------------
+help: provide the argument
+     |
+3320 |         client.reinstate_credit_line(&borrower, /* &types::CreditStatus */);
+     |                                               ++++++++++++++++++++++++++++
+
+warning: unused variable: `previous_utilized`
+   --> contracts/credit/src/lifecycle.rs:318:9
+    |
+318 |     let previous_utilized = stored_line.utilized_amount;
+    |         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_previous_utilized`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `previous_status`
+   --> contracts/credit/src/lifecycle.rs:336:9
+    |
+336 |     let previous_status = credit_line.status;
+    |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_previous_status`
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4828:20
+     |
+4828 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4828 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4828 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4838:20
+     |
+4838 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4838 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4838 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4862:20
+     |
+4862 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4862 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4862 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4884:20
+     |
+4884 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4884 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4884 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4895:20
+     |
+4895 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4895 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4895 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4917:20
+     |
+4917 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4917 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4917 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4943:20
+     |
+4943 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4943 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4943 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4963:20
+     |
+4963 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4963 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4963 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:4989:20
+     |
+4989 |             client.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                    ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+4989 -             client.freeze_draws(&FreezeReason::LiquidityReserve);
+4989 +             client.freeze_draws();
+     |
+
+error[E0061]: this method takes 0 arguments but 1 argument was supplied
+    --> contracts/credit/src/lib.rs:5013:22
+     |
+5013 |             client_a.freeze_draws(&FreezeReason::LiquidityReserve);
+     |                      ^^^^^^^^^^^^ ------------------------------- unexpected argument of type `&FreezeReason`
+     |
+note: method defined here
+    --> contracts/credit/src/lib.rs:1824:12
+     |
+1824 |     pub fn freeze_draws(env: Env) {
+     |            ^^^^^^^^^^^^
+help: remove the extra argument
+     |
+5013 -             client_a.freeze_draws(&FreezeReason::LiquidityReserve);
+5013 +             client_a.freeze_draws();
+     |
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:2204:9
+     |
+2204 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:3199:9
+     |
+3199 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:3730:13
+     |
+3730 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:4791:13
+     |
+4791 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:5535:13
+     |
+5535 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Events`
+    --> contracts/credit/src/lib.rs:5024:13
+     |
+5024 |         use soroban_sdk::testutils::Events as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:5171:13
+     |
+5171 |         use soroban_sdk::testutils::Ledger;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `env`
+   --> contracts/credit/src/lifecycle.rs:634:9
+    |
+634 |         env: &Env,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `hash_zero`
+   --> contracts/credit/src/scoring.rs:242:13
+    |
+242 |         let hash_zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_zero`
+
+warning: unused variable: `hash_max`
+   --> contracts/credit/src/scoring.rs:243:13
+    |
+243 |         let hash_max: BytesN<32> = BytesN::from_array(&env, &[255u8; 32]);
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_max`
+
+warning: unused variable: `hash_mixed`
+   --> contracts/credit/src/scoring.rs:244:13
+    |
+244 | ...   let hash_mixed: BytesN<32> = BytesN::from_array(&env, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20...
+    |           ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_mixed`
+
+Some errors have detailed explanations: E0061, E0308, E0425, E0753.
+For more information about an error, try `rustc --explain E0061`.
+warning: `creditra-credit` (lib) generated 8 warnings
+error: could not compile `creditra-credit` (lib) due to 102 previous errors; 8 warnings emitted
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:3148:50
+     |
+3148 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                  ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:3148:63
+     |
+3148 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                               ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `from`
+    --> contracts/credit/src/lib.rs:3160:58
+     |
+3160 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                          ^^^^ help: if this is intentional, prefix it with an underscore: `_from`
+
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:3160:73
+     |
+3160 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                         ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:3160:86
+     |
+3160 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:3172:24
+     |
+3172 |         pub fn balance(env: Env, _id: Address) -> i128 {
+     |                        ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:3176:26
+     |
+3176 |         pub fn allowance(env: Env, _from: Address, _spender: Address) -> i128 {
+     |                          ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+Some errors have detailed explanations: E0061, E0308, E0425, E0433, E0599, E0753.
+warning: `creditra-credit` (lib test) generated 53 warnings (7 duplicates)
+error: could not compile `creditra-credit` (lib test) due to 156 previous errors; 53 warnings emitted

@@ -9,7 +9,7 @@
 //! - draw_credit is blocked when draws are frozen
 //! - freeze_draws/unfreeze_draws are idempotent
 
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
@@ -42,7 +42,10 @@ fn is_draws_frozen_returns_false_on_freshly_initialized_contract() {
     let client = CreditClient::new(&env, &contract_id);
 
     // On a freshly initialized contract, is_draws_frozen should return false
-    assert!(!client.is_draws_frozen(), "is_draws_frozen should return false by default before any freeze_draws call");
+    assert!(
+        !client.is_draws_frozen(),
+        "is_draws_frozen should return false by default before any freeze_draws call"
+    );
 }
 
 // ── freeze_draws/unfreeze_draws toggle ────────────────────────────────────────
@@ -54,8 +57,11 @@ fn freeze_draws_sets_flag_to_true() {
 
     assert!(!client.is_draws_frozen(), "should start unfrozen");
 
-    client.freeze_draws();
-    assert!(client.is_draws_frozen(), "should be frozen after freeze_draws");
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+    assert!(
+        client.is_draws_frozen(),
+        "should be frozen after freeze_draws"
+    );
 }
 
 #[test]
@@ -63,11 +69,14 @@ fn unfreeze_draws_sets_flag_to_false() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     client.unfreeze_draws();
-    assert!(!client.is_draws_frozen(), "should be unfrozen after unfreeze_draws");
+    assert!(
+        !client.is_draws_frozen(),
+        "should be unfrozen after unfreeze_draws"
+    );
 }
 
 // ── draw_credit blocked when frozen ───────────────────────────────────────────
@@ -85,7 +94,7 @@ fn draw_credit_blocked_when_draws_frozen() {
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Draw should fail
@@ -93,7 +102,10 @@ fn draw_credit_blocked_when_draws_frozen() {
         client.draw_credit(&borrower, &500);
     }));
 
-    assert!(result.is_err(), "draw_credit must fail when draws are frozen");
+    assert!(
+        result.is_err(),
+        "draw_credit must fail when draws are frozen"
+    );
 }
 
 // ── repay_credit succeeds while frozen (critical safety feature) ───────────────
@@ -113,7 +125,7 @@ fn repay_credit_succeeds_while_draws_frozen() {
     assert_eq!(before.utilized_amount, 500);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Mint tokens to borrower and approve contract
@@ -143,7 +155,7 @@ fn repay_credit_full_repayment_while_draws_frozen() {
     client.draw_credit(&borrower, &800);
 
     // Freeze draws
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Full repayment
@@ -169,7 +181,7 @@ fn freeze_draws_emits_event() {
 
     let _ = env.events().all(); // clear setup events
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     let events = env.events().all();
     assert_eq!(events.len(), 1, "should emit exactly one event");
@@ -186,7 +198,7 @@ fn unfreeze_draws_emits_event() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     let _ = env.events().all(); // clear
 
     client.unfreeze_draws();
@@ -208,11 +220,11 @@ fn freeze_draws_idempotent() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen());
 
     // Freeze again - should succeed and remain frozen
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
     assert!(client.is_draws_frozen(), "should remain frozen after redundant freeze");
 }
 
