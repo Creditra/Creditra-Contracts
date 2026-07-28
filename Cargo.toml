@@ -4,6 +4,7 @@ members = [
     "contracts/credit",
     "contracts/accrual",
     "contracts/collateral",
+    "contracts/borrow",
     "contracts/lifecycle",
     "contracts/query",
     "contracts/freeze",
