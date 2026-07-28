@@ -293,8 +293,6 @@ impl ContractError {
         }
     }
 }
-    }
-}
 
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
