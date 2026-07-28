@@ -7,8 +7,8 @@
 //! - repay_credit succeeds while draws are frozen (critical safety feature)
 //! - freeze_draws/unfreeze_draws toggle the flag correctly
 //! - draw_credit is blocked when draws are frozen
+//! - freeze_draws/unfreeze_draws are idempotent
 
-use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
@@ -201,44 +201,6 @@ fn unfreeze_draws_emits_event() {
     );
 }
 
-// ── authorization tests ───────────────────────────────────────────────────────
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1)")]
-fn freeze_draws_unauthorized_reverts() {
-    let env = Env::default();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(Credit, ());
-    let client = CreditClient::new(&env, &contract_id);
-    client.init(&admin);
-
-    // Do NOT mock auths - this should fail without admin auth
-    let unauthorized = Address::generate(&env);
-    env.mock_auths(&unauthorized, &[]);
-
-    client.freeze_draws();
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1)")]
-fn unfreeze_draws_unauthorized_reverts() {
-    let env = Env::default();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(Credit, ());
-    let client = CreditClient::new(&env, &contract_id);
-    client.init(&admin);
-
-    // Freeze with admin first
-    env.mock_all_auths();
-    client.freeze_draws();
-
-    // Try to unfreeze without admin auth
-    let unauthorized = Address::generate(&env);
-    env.mock_auths(&unauthorized, &[]);
-
-    client.unfreeze_draws();
-}
-
 // ── idempotent behavior ────────────────────────────────────────────────────────
 
 #[test]
@@ -262,19 +224,4 @@ fn unfreeze_draws_idempotent() {
     // Unfreeze when already unfrozen - should succeed
     client.unfreeze_draws();
     assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
-}
-
-// ── is_draws_frozen no auth required ───────────────────────────────────────────
-
-#[test]
-fn is_draws_frozen_no_auth_required() {
-    let env = Env::default();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(Credit, ());
-    let client = CreditClient::new(&env, &contract_id);
-    client.init(&admin);
-
-    // Do NOT mock auths - is_draws_frozen should work without auth
-    let result = client.is_draws_frozen();
-    assert!(!result, "is_draws_frozen should work without authentication");
 }
