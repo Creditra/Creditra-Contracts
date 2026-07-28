@@ -28,6 +28,11 @@ required-features = ["instrument"]
 name = "rustdoc_risk_tests"
 path = "tests/rustdoc_risk_tests.rs"
 
+[[test]]
+name = "proptest"
+path = "tests/proptest.rs"
+required-features = ["instrument"]
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 serde = { version = "1.0", features = ["derive"] }
