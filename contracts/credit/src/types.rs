@@ -679,6 +679,22 @@ pub struct ProofOfReserve {
     pub bounty_balance: i128,
 }
 
+/// Full state snapshot for a borrower's credit line.
+///
+/// Returned by `get_borrow_state` to provide a comprehensive view of the
+/// borrower's current state in a single read-only call. This includes
+/// credit line data, collateral balance, and borrow capabilities.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowStateSnapshot {
+    /// The full credit line data if it exists, or `None`.
+    pub credit_line: Option<CreditLineData>,
+    /// The borrower's collateral balance.
+    pub collateral_balance: i128,
+    /// The borrower's current borrow capabilities.
+    pub capabilities: BorrowCapabilities,
+}
+
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///

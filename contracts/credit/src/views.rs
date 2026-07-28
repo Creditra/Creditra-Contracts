@@ -220,3 +220,40 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         has_more,
     }
 }
+
+// ── Borrow state snapshot view ───────────────────────────────────────────────
+
+/// Return a full state snapshot for a borrower's credit line.
+///
+/// This is a read-only, no-auth view that returns a comprehensive snapshot
+/// of the borrower's current state including credit line data, collateral
+/// balance, and borrow capabilities. This is useful for off-chain monitoring,
+/// risk dashboards, and debugging.
+///
+/// # Parameters
+///
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+///
+/// A [`BorrowStateSnapshot`] struct containing:
+/// - `credit_line`: The full [`CreditLineData`] if it exists, or `None`.
+/// - `collateral_balance`: The borrower's collateral balance.
+/// - `capabilities`: The borrower's current [`BorrowCapabilities`].
+///
+/// # Security
+///
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state. TTL may be bumped if the borrower's
+/// persistent entry is near expiry, but this does not change logical state.
+pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
+    let credit_line = get_credit_line(&env, &borrower);
+    let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
+    let capabilities = borrow_capabilities(env.clone(), borrower.clone());
+
+    BorrowStateSnapshot {
+        credit_line,
+        collateral_balance,
+        capabilities,
+    }
+}
