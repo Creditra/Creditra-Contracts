@@ -39,13 +39,16 @@
 //!
 //! - `contracts/accrual/tests/gas_snap.rs` — accrual gas baseline.
 //! - `contracts/collateral/tests/auth_snap.rs` — authorization snapshot.
+#![cfg(test)]
 
+extern crate std;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
-    testutils::{budget::Budget, Address as _, Ledger},
+    testutils::{budget::Budget, Address as _, Ledger, MockAuth},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
 };
+use crate::{CollateralContract, CollateralContractClient};
 
 const COLLATERAL_AMOUNT: i128 = 1_000;
 
@@ -53,7 +56,7 @@ const COLLATERAL_AMOUNT: i128 = 1_000;
 
 /// Reset the budget to unlimited, run `f`, return (cpu, mem).
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
@@ -90,6 +93,49 @@ fn setup(env: &Env) -> Fixture<'_> {
         contract_id,
         token,
     }
+}
+
+#[test]
+fn test_collateral_gas_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let contract_id = env.register_contract(None, CollateralContract);
+    let client = CollateralContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let amount = 1000_i128;
+
+    env.budget().reset_unlimited();
+    
+    let cpu_before_deposit = env.budget().cpu_instruction_cost();
+    let mem_before_deposit = env.budget().memory_bytes_cost();
+
+    client.deposit(&user, &amount);
+    
+    let cpu_after_deposit = env.budget().cpu_instruction_cost();
+    let mem_after_deposit = env.budget().memory_bytes_cost();
+    let cpu_before_withdraw = env.budget().cpu_instruction_cost();
+    let mem_before_withdraw = env.budget().memory_bytes_cost();
+
+    client.withdraw(&user, &amount);
+    
+    let cpu_after_withdraw = env.budget().cpu_instruction_cost();
+    let mem_after_withdraw = env.budget().memory_bytes_cost();
+
+    std::println!("=== Collateral Contract Gas Snapshot Baseline ===");
+    std::println!(
+        "Deposit  -> CPU: {}, MEM: {}", 
+        cpu_after_deposit.saturating_sub(cpu_before_deposit),
+        mem_after_deposit.saturating_sub(mem_before_deposit)
+    );
+    std::println!(
+        "Withdraw -> CPU: {}, MEM: {}", 
+        cpu_after_withdraw.saturating_sub(cpu_before_withdraw),
+        mem_after_withdraw.saturating_sub(mem_before_withdraw)
+    );
+
+    env.budget().print();
 }
 
 // ── Borrower write entrypoints ────────────────────────────────────────────
