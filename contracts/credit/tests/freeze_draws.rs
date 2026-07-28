@@ -7,6 +7,7 @@
 //! - repay_credit succeeds while draws are frozen (critical safety feature)
 //! - freeze_draws/unfreeze_draws toggle the flag correctly
 //! - draw_credit is blocked when draws are frozen
+//! - freeze_draws/unfreeze_draws are idempotent
 
 use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Events};
@@ -210,4 +211,29 @@ fn unfreeze_draws_emits_event() {
         Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
         Symbol::new(&env, "drw_freeze")
     );
+}
+
+// ── idempotent behavior ────────────────────────────────────────────────────────
+
+#[test]
+fn freeze_draws_idempotent() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+    assert!(client.is_draws_frozen());
+
+    // Freeze again - should succeed and remain frozen
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+    assert!(client.is_draws_frozen(), "should remain frozen after redundant freeze");
+}
+
+#[test]
+fn unfreeze_draws_idempotent() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // Unfreeze when already unfrozen - should succeed
+    client.unfreeze_draws();
+    assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
 }

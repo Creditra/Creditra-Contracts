@@ -39,13 +39,21 @@ use soroban_sdk::{Address, Env};
 ///
 /// Sets [`DataKey::DrawsFrozen`] with `frozen = true` and records `reason`.
 ///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `DataKey::DrawsFrozen`
 /// - **Value**: [`DrawsFreezeState`]
 ///
 /// # Events
-/// Emits [`DrawsFrozenEvent`] with `frozen = true` and the supplied `reason`.
+/// Emits [`DrawsFrozenEvent`] with `frozen = true`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn freeze_draws(env: Env, reason: FreezeReason) {
     require_admin_auth(&env);
     enforce_freeze_cooldown(&env);
@@ -62,11 +70,24 @@ pub fn freeze_draws(env: Env, reason: FreezeReason) {
 
 /// Unfreeze draws globally (admin only).
 ///
-/// Sets `frozen = false` while preserving the last recorded reason for audit reads.
+/// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
+/// unfrozen is a no-op (no event emitted for the redundant call).
+///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 ///
 /// # Events
-/// Emits [`DrawsFrozenEvent`] with `frozen = false` and the last stored reason
-/// (defaults to [`FreezeReason::LiquidityReserve`] when never frozen before).
+/// Emits [`DrawsFrozenEvent`] with `frozen = false`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn unfreeze_draws(env: Env) {
     require_admin_auth(&env);
     enforce_freeze_cooldown(&env);
@@ -87,6 +108,17 @@ pub fn unfreeze_draws(env: Env) {
 /// Returns `true` when draws are globally frozen.
 ///
 /// Defaults to `false` (draws allowed) if the key has never been set.
+///
+/// # Authorization
+/// No authentication required — this is a pure read with no side effects.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+///
+/// # Returns
+/// - `true` if draws are frozen
+/// - `false` if draws are not frozen or the key has never been set
 pub fn is_draws_frozen(env: &Env) -> bool {
     get_draws_freeze_state(env).map_or(false, |state| state.frozen)
 }

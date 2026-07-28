@@ -2368,14 +2368,67 @@ impl Credit {
         publish_paused_event(&env, paused);
     }
 
-    pub fn freeze_draws(env: Env) {
-        freeze::freeze_draws(env, crate::types::FreezeReason::LiquidityReserve)
+    /// Freeze all draws globally (admin only).
+    ///
+    /// Sets [`DataKey::DrawsFrozen`] with `frozen = true` and records `reason`.
+    ///
+    /// # Authorization
+    /// Requires administrative privileges. The configured admin must authorize this
+    /// call via `require_auth()`; unauthorized callers are rejected before any
+    /// storage mutation occurs.
+    ///
+    /// # Storage
+    /// - **Type**: Instance storage (shared TTL with all instance keys)
+    /// - **Key**: `DataKey::DrawsFrozen`
+    /// - **Value**: [`DrawsFreezeState`]
+    ///
+    /// # Events
+    /// Emits [`DrawsFrozenEvent`] with `frozen = true`.
+    ///
+    /// # Errors
+    /// - Panics with auth error if the caller is not the configured admin.
+    pub fn freeze_draws(env: Env, reason: FreezeReason) {
+        freeze::freeze_draws(env, reason)
     }
 
+    /// Unfreeze draws globally (admin only).
+    ///
+    /// Sets [`DataKey::DrawsFrozen`] with `frozen = false` while preserving
+    /// the original freeze reason for audit trail.
+    ///
+    /// # Authorization
+    /// Requires administrative privileges. The configured admin must authorize this
+    /// call via `require_auth()`; unauthorized callers are rejected before any
+    /// storage mutation occurs.
+    ///
+    /// # Storage
+    /// - **Type**: Instance storage (shared TTL with all instance keys)
+    /// - **Key**: `DataKey::DrawsFrozen`
+    /// - **Value**: [`DrawsFreezeState`]
+    ///
+    /// # Events
+    /// Emits [`DrawsFrozenEvent`] with `frozen = false`.
+    ///
+    /// # Errors
+    /// - Panics with auth error if the caller is not the configured admin.
     pub fn unfreeze_draws(env: Env) {
         freeze::unfreeze_draws(env)
     }
 
+    /// Returns `true` when draws are globally frozen.
+    ///
+    /// Defaults to `false` (draws allowed) if the key has never been set.
+    ///
+    /// # Authorization
+    /// No authentication required — this is a pure read with no side effects.
+    ///
+    /// # Storage
+    /// - **Type**: Instance storage (shared TTL with all instance keys)
+    /// - **Key**: `DataKey::DrawsFrozen`
+    ///
+    /// # Returns
+    /// - `true` if draws are frozen
+    /// - `false` if draws are not frozen or the key has never been set
     pub fn is_draws_frozen(env: Env) -> bool {
         freeze::is_draws_frozen(&env)
     }
