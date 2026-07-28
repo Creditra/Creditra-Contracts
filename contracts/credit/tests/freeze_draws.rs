@@ -200,3 +200,81 @@ fn unfreeze_draws_emits_event() {
         Symbol::new(&env, "drw_freeze")
     );
 }
+
+// ── authorization tests ───────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn freeze_draws_unauthorized_reverts() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // Do NOT mock auths - this should fail without admin auth
+    let unauthorized = Address::generate(&env);
+    env.mock_auths(&unauthorized, &[]);
+
+    client.freeze_draws();
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn unfreeze_draws_unauthorized_reverts() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // Freeze with admin first
+    env.mock_all_auths();
+    client.freeze_draws();
+
+    // Try to unfreeze without admin auth
+    let unauthorized = Address::generate(&env);
+    env.mock_auths(&unauthorized, &[]);
+
+    client.unfreeze_draws();
+}
+
+// ── idempotent behavior ────────────────────────────────────────────────────────
+
+#[test]
+fn freeze_draws_idempotent() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.freeze_draws();
+    assert!(client.is_draws_frozen());
+
+    // Freeze again - should succeed and remain frozen
+    client.freeze_draws();
+    assert!(client.is_draws_frozen(), "should remain frozen after redundant freeze");
+}
+
+#[test]
+fn unfreeze_draws_idempotent() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // Unfreeze when already unfrozen - should succeed
+    client.unfreeze_draws();
+    assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
+}
+
+// ── is_draws_frozen no auth required ───────────────────────────────────────────
+
+#[test]
+fn is_draws_frozen_no_auth_required() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    // Do NOT mock auths - is_draws_frozen should work without auth
+    let result = client.is_draws_frozen();
+    assert!(!result, "is_draws_frozen should work without authentication");
+}

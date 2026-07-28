@@ -29,6 +29,11 @@ use soroban_sdk::Env;
 /// Sets [`DataKey::DrawsFrozen`] to `true`. Idempotent: calling when already
 /// frozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `DataKey::DrawsFrozen`
@@ -37,6 +42,9 @@ use soroban_sdk::Env;
 ///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = true`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn freeze_draws(env: Env) {
     require_admin_auth(&env);
     env.storage().instance().set(&DataKey::DrawsFrozen, &true);
@@ -48,6 +56,11 @@ pub fn freeze_draws(env: Env) {
 /// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
 /// unfrozen is a no-op (no event emitted for the redundant call).
 ///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `DataKey::DrawsFrozen`
@@ -55,6 +68,9 @@ pub fn freeze_draws(env: Env) {
 ///
 /// # Events
 /// Emits [`DrawsFrozenEvent`] with `frozen = false`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn unfreeze_draws(env: Env) {
     require_admin_auth(&env);
     env.storage().instance().set(&DataKey::DrawsFrozen, &false);
@@ -65,9 +81,16 @@ pub fn unfreeze_draws(env: Env) {
 ///
 /// Defaults to `false` (draws allowed) if the key has never been set.
 ///
+/// # Authorization
+/// No authentication required — this is a pure read with no side effects.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `DataKey::DrawsFrozen`
+///
+/// # Returns
+/// - `true` if draws are frozen
+/// - `false` if draws are not frozen or the key has never been set
 pub fn is_draws_frozen(env: &Env) -> bool {
     env.storage()
         .instance()
