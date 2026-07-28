@@ -12,7 +12,7 @@ use creditra_risk::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    vec, Address, Env, IntoVal, Symbol,
+    symbol_short, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -84,6 +84,8 @@ fn test_init_stores_admin() {
 
 /// Validate that [`RiskContract::set_risk_admin_cooldown`] publishes a
 /// [`RiskAdminCooldownConfiguredEvent`] with the correct topic and payload.
+///
+/// Soroban events are tuples `(contract_id, topics: Vec<Val>, data: Val)`.
 #[test]
 fn test_set_risk_admin_cooldown_publishes_event() {
     let (env, _admin, contract_id) = setup();
@@ -95,13 +97,21 @@ fn test_set_risk_admin_cooldown_publishes_event() {
     assert_eq!(events.len(), 1, "exactly one event must be published");
 
     let event = events.get(0).unwrap();
+    // event is (contract_id: Address, topics: Vec<Val>, data: Val)
+    let topics = &event.1;
+    let data = event.2.clone();
     assert_eq!(
-        event.topics,
-        (Symbol::new(&env, "risk"), Symbol::new(&env, "rad_cool")).into_val(&env),
-        "event topic must be ('risk', 'rad_cool')"
+        Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+        symbol_short!("risk"),
+        "first topic must be 'risk'"
+    );
+    assert_eq!(
+        Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+        symbol_short!("rad_cool"),
+        "second topic must be 'rad_cool'"
     );
 
-    let payload: RiskAdminCooldownConfiguredEvent = event.data.clone().try_into_val(&env).unwrap();
+    let payload: RiskAdminCooldownConfiguredEvent = data.try_into_val(&env).unwrap();
     assert_eq!(
         payload.cooldown_seconds, 3_600,
         "event payload must match the configured cooldown"
@@ -243,28 +253,38 @@ fn test_get_admin_panics_when_not_initialized() {
 // ── Test: RiskAdminCooldownConfiguredEvent round-trip ─────────────────────
 
 /// Validate that [`RiskAdminCooldownConfiguredEvent`] can be serialized and
-/// deserialized correctly via the Soroban event log.
+/// deserialized correctly. We use set_risk_admin_cooldown to trigger the real
+/// event emission path and verify the payload round-trips through the event log.
 #[test]
 fn test_risk_admin_cooldown_configured_event_roundtrip() {
-    let env = Env::default();
+    let (env, _admin, contract_id) = setup();
+    let client = RiskContractClient::new(&env, &contract_id);
 
-    let event = RiskAdminCooldownConfiguredEvent {
-        cooldown_seconds: 1_800,
-    };
-
-    env.events().publish(
-        (Symbol::new(&env, "risk"), Symbol::new(&env, "rad_cool")),
-        event.clone(),
-    );
+    client.set_risk_admin_cooldown(&1_800);
 
     let all_events = env.events().all();
-    assert_eq!(all_events.len(), 1);
+    assert!(!all_events.is_empty(), "at least one event must be emitted");
 
-    let retrieved: RiskAdminCooldownConfiguredEvent =
-        all_events.get(0).unwrap().data.try_into_val(&env).unwrap();
+    // Find the rad_cool event (the one emitted by set_risk_admin_cooldown).
+    let event = all_events
+        .iter()
+        .find(|e| {
+            if let Some(v) = e.1.get(1) {
+                Symbol::try_from_val(&env, &v)
+                    .map(|s| s == symbol_short!("rad_cool"))
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        })
+        .expect("rad_cool event must be present");
+
+    // all_events entries are (contract_id, topics, data) tuples
+    let data = event.2.clone();
+    let retrieved: RiskAdminCooldownConfiguredEvent = data.try_into_val(&env).unwrap();
 
     assert_eq!(
-        retrieved.cooldown_seconds, event.cooldown_seconds,
+        retrieved.cooldown_seconds, 1_800,
         "event payload must round-trip correctly"
     );
 }
