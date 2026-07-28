@@ -2370,8 +2370,7 @@ impl Credit {
 
     /// Freeze all draws globally (admin only).
     ///
-    /// Sets [`DataKey::DrawsFrozen`] to `true`. Idempotent: calling when already
-    /// frozen is a no-op (no event emitted for the redundant call).
+    /// Sets [`DataKey::DrawsFrozen`] with `frozen = true` and records `reason`.
     ///
     /// # Authorization
     /// Requires administrative privileges. The configured admin must authorize this
@@ -2381,22 +2380,21 @@ impl Credit {
     /// # Storage
     /// - **Type**: Instance storage (shared TTL with all instance keys)
     /// - **Key**: `DataKey::DrawsFrozen`
-    /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
-    ///   If instance is archived, this flag is lost and draws become allowed.
+    /// - **Value**: [`DrawsFreezeState`]
     ///
     /// # Events
     /// Emits [`DrawsFrozenEvent`] with `frozen = true`.
     ///
     /// # Errors
     /// - Panics with auth error if the caller is not the configured admin.
-    pub fn freeze_draws(env: Env) {
-        freeze::freeze_draws(env, crate::types::FreezeReason::LiquidityReserve)
+    pub fn freeze_draws(env: Env, reason: FreezeReason) {
+        freeze::freeze_draws(env, reason)
     }
 
     /// Unfreeze draws globally (admin only).
     ///
-    /// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
-    /// unfrozen is a no-op (no event emitted for the redundant call).
+    /// Sets [`DataKey::DrawsFrozen`] with `frozen = false` while preserving
+    /// the original freeze reason for audit trail.
     ///
     /// # Authorization
     /// Requires administrative privileges. The configured admin must authorize this
@@ -2406,7 +2404,7 @@ impl Credit {
     /// # Storage
     /// - **Type**: Instance storage (shared TTL with all instance keys)
     /// - **Key**: `DataKey::DrawsFrozen`
-    /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
+    /// - **Value**: [`DrawsFreezeState`]
     ///
     /// # Events
     /// Emits [`DrawsFrozenEvent`] with `frozen = false`.

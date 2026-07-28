@@ -54,7 +54,7 @@ use soroban_sdk::{Address, Env};
 ///
 /// # Errors
 /// - Panics with auth error if the caller is not the configured admin.
-pub fn freeze_draws(env: Env) {
+pub fn freeze_draws(env: Env, reason: FreezeReason) {
     require_admin_auth(&env);
     enforce_freeze_cooldown(&env);
     env.storage().instance().set(
