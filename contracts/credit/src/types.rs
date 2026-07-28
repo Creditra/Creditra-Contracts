@@ -293,8 +293,6 @@ impl ContractError {
         }
     }
 }
-    }
-}
 
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
@@ -693,6 +691,21 @@ pub struct BorrowStateSnapshot {
     pub collateral_balance: i128,
     /// The borrower's current borrow capabilities.
     pub capabilities: BorrowCapabilities,
+}
+
+/// Paginated view of credit lines for off-chain reporting.
+///
+/// Returned by `get_credit_lines_paginated` to enable efficient navigation
+/// through large sets of credit lines using cursor-based pagination.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Vector of credit line data for this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for the next page, or `None` if this is the last page.
+    pub next_cursor: Option<u32>,
+    /// Whether more results are available beyond this page.
+    pub has_more: bool,
 }
 
 
