@@ -6,7 +6,7 @@
 //! Every event the risk contract emits is defined here as a
 //! `#[contracttype]` payload struct paired with a `publish_*` helper.
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env};
 
 /// Payload emitted when the risk admin cooldown is configured.
 #[contracttype]
