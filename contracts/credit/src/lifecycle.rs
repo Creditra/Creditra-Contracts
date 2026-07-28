@@ -752,7 +752,9 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
-    // Compute the maximum recoverable amount for this settlement
+    // Compute the maximum recoverable amount for this settlement. The supplied
+    // `recovered_amount` may exceed the effective cap, in which case we clamp to
+    // the configured close factor and treat the remainder as unrecoverable.
     let max_recoverable = credit_line
         .utilized_amount
         .checked_mul(close_factor_bps as i128)
@@ -760,9 +762,7 @@ pub fn settle_default_liquidation(
         .checked_div(10_000)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
-    if recovered_amount > max_recoverable {
-        env.panic_with_error(ContractError::OverLimit);
-    }
+    let actual_recovery = recovered_amount.min(max_recoverable);
 
     credit_line.utilized_amount = credit_line
         .utilized_amount
