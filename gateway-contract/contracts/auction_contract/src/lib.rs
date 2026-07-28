@@ -432,6 +432,54 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
+    /// Closes an open auction, transitioning its status from `Open` to `Closed`.
+    ///
+    /// The caller must be the registered factory contract.  After closing, the
+    /// auction is eligible for `settle_default_liquidation` (factory-only) or
+    /// `claim_auction` (winner-only).
+    ///
+    /// # Authorization
+    /// Requires [`Address::require_auth`] from the registered factory contract.
+    ///
+    /// # Parameters
+    /// - `env`: The execution environment.
+    /// - `auction_id`: The identifier of the auction to close.
+    ///
+    /// # Errors
+    /// * [`AuctionError::NoFactoryContract`] — factory address not configured.
+    /// * [`AuctionError::NotFound`] — no auction found for `auction_id`.
+    /// * [`AuctionError::AuctionNotOpen`] — auction is already `Closed`.
+    /// * [`AuctionError::AlreadyClaimed`] — auction is in `Claimed` terminal state.
+    pub fn close_auction(env: Env, auction_id: Symbol) {
+        let factory = get_factory_contract(&env)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
+        factory.require_auth();
+
+        let mut state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| env.panic_with_error(AuctionError::NotFound));
+        bump_auction_state_ttl(&env, &auction_id);
+
+        match state.status {
+            AuctionStatus::Claimed => env.panic_with_error(AuctionError::AlreadyClaimed),
+            AuctionStatus::Closed => env.panic_with_error(AuctionError::AuctionNotOpen),
+            AuctionStatus::Open => {}
+        }
+
+        state.status = AuctionStatus::Closed;
+        env.storage().persistent().set(&auction_id, &state);
+        bump_auction_state_ttl(&env, &auction_id);
+
+        events::publish_auction_closed_event(
+            &env,
+            auction_id,
+            state.highest_bidder,
+            state.highest_bid,
+        );
+    }
+
     /// Settles an auction that ended in default or completes the liquidation process.
     ///
     /// Transfers the highest bid amount (if any) to the credit contract.
