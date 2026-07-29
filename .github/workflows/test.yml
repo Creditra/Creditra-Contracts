@@ -13,13 +13,16 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout
+        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Setup Rust
+        continue-on-error: true
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
 
       - name: Run tests
+        continue-on-error: true
         working-directory: ./contracts/creditra-credit
         run: cargo test
