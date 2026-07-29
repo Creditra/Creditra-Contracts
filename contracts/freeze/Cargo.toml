@@ -1,0 +1,14 @@
+[package]
+name = "creditra-freeze"
+version = "0.1.0"
+edition = "2021"
+description = "Creditra freeze Soroban smart contract"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
