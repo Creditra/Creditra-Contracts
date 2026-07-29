@@ -247,7 +247,10 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
 /// and does not mutate any state. TTL may be bumped if the borrower's
 /// persistent entry is near expiry, but this does not change logical state.
 pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
-    let credit_line = get_credit_line(&env, &borrower);
+    let mut credit_line = soroban_sdk::Vec::new(&env);
+    if let Some(line) = get_credit_line(&env, &borrower) {
+        credit_line.push_back(line);
+    }
     let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
     let capabilities = borrow_capabilities(env.clone(), borrower.clone());
 

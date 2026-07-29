@@ -258,8 +258,6 @@ pub enum DataKey {
     BorrowerExposureCap(Address),
     /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
-    /// Per-borrower, per-token collateral balance (multi-collateral path).
-    CollateralBalanceV2(Address, Address),
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
 }

@@ -8,7 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
-creditra-credit = { path = "../credit" }
+
 
 [[test]]
 name = "gas_snap"

@@ -294,6 +294,7 @@ impl ContractError {
     }
 }
 
+
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -697,8 +698,8 @@ pub struct ProofOfReserve {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowStateSnapshot {
-    /// The full credit line data if it exists, or `None`.
-    pub credit_line: Option<CreditLineData>,
+    /// The full credit line data if it exists (single-element vec), or empty vec.
+    pub credit_line: soroban_sdk::Vec<CreditLineData>,
     /// The borrower's collateral balance.
     pub collateral_balance: i128,
     /// The borrower's current borrow capabilities.
