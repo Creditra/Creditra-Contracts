@@ -1,5 +1,9 @@
 name: CI
 
+# Runs format, lint, tests, WASM build, and the 95 % coverage gate on every
+# push / PR.  ALL substantive steps are hard failures — continue-on-error is
+# intentionally absent so that a failing gate actually blocks the check.
+
 on:
   push:
     branches: [main, master, develop, "feature/**"]
@@ -15,24 +19,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 1. Static checks + unit tests ────────────────────────────────────────
   checks:
     name: Format, Lint, Test
     runs-on: ubuntu-latest
-    continue-on-error: true
+
     steps:
       - name: Checkout
-        continue-on-error: true
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        continue-on-error: true
+      - name: Install Rust (stable + rustfmt + clippy)
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache cargo
-        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: |
@@ -44,45 +46,41 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Check formatting
-        continue-on-error: true
         run: cargo fmt --all -- --check
 
-      - name: Clippy
-        continue-on-error: true
+      - name: Clippy (warnings are errors)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build
-        continue-on-error: true
         run: cargo build --release
 
       - name: Test
-        continue-on-error: true
         run: cargo test --workspace
 
+  # ── 2. Hard 95 % coverage gate ───────────────────────────────────────────
   coverage:
-    name: Coverage
+    name: Coverage Gate (≥ 95 % lines)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    needs: checks
+    # ── NO continue-on-error ─────────────────────────────────────────────────
+    # This job MUST fail when coverage drops below 95 %.
+
     steps:
       - name: Checkout
-        continue-on-error: true
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        continue-on-error: true
+      - name: Install Rust (stable + llvm-tools)
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        continue-on-error: true
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
-      - name: Cache cargo
-        continue-on-error: true
+      - name: Cache cargo (coverage)
         uses: actions/cache@v4
         with:
           path: |
@@ -93,40 +91,42 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-cov-
 
-      - name: Enforce line coverage >= 95%
-        continue-on-error: true
+      # HARD GATE — exits non-zero when line coverage < 95 %
+      - name: Enforce line coverage ≥ 95 %
         run: cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 
+      # Emit LCOV for downstream consumers; allowed to fail (soft step)
       - name: Generate LCOV report
+        if: always()
         continue-on-error: true
         run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
 
-      - name: Upload LCOV coverage report
+      - name: Upload LCOV artifact
+        if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: lcov-report
+          name: lcov-report-ci-${{ github.run_id }}
           path: lcov.info
           retention-days: 30
 
+  # ── 3. WASM build + size budget ──────────────────────────────────────────
   build-wasm:
-    name: Build WASM
+    name: Build WASM (size ≤ 50 KB)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    needs: checks
+
     steps:
       - name: Checkout
-        continue-on-error: true
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        continue-on-error: true
+      - name: Install Rust (stable + wasm32 target)
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
-      - name: Cache cargo
-        continue-on-error: true
+      - name: Cache cargo (wasm)
         uses: actions/cache@v4
         with:
           path: |
@@ -138,12 +138,10 @@ jobs:
             ${{ runner.os }}-cargo-wasm-
 
       - name: Build contract (WASM)
-        continue-on-error: true
         working-directory: ./contracts/creditra-credit
         run: cargo build --release --target wasm32-unknown-unknown
 
-      - name: Verify WASM size threshold
-        continue-on-error: true
+      - name: Verify WASM size ≤ 50 KB
         run: |
           set -euo pipefail
           WASM_PATH="target/wasm32-unknown-unknown/release/creditra_credit.wasm"
@@ -162,13 +160,13 @@ jobs:
             exit 1
           fi
 
-          THRESHOLD_BYTES=51200
+          THRESHOLD_BYTES=51200  # 50 KiB
           echo "WASM size: ${SIZE_BYTES} bytes ($((SIZE_BYTES / 1024)) KB)"
           echo "Threshold: ${THRESHOLD_BYTES} bytes (50 KB)"
           echo "::notice::WASM size is ${SIZE_BYTES} bytes. Threshold is ${THRESHOLD_BYTES} bytes."
 
           if [ "${SIZE_BYTES}" -gt "${THRESHOLD_BYTES}" ]; then
-            echo "::error::WASM size ${SIZE_BYTES} exceeds threshold ${THRESHOLD_BYTES}."
+            echo "::error::WASM size ${SIZE_BYTES} bytes exceeds the 50 KB threshold."
             exit 1
           fi
-
+          echo "✅ WASM size check passed."
