@@ -96,6 +96,20 @@ pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
 /// because each `Addr` serialises to a distinct canonical bech32 byte string.
 pub const BORROWER_TO_ID: Map<Addr, u64> = Map::new("bid");
 
+/// Protocol-wide default max-utilization cap (basis points).
+///
+/// When no per-borrower override is set, this default applies to all
+/// borrowers.  `10_000 bps == 100%`, meaning the borrower may draw up
+/// to the full `credit_amount` of the credit line.
+pub const DEFAULT_MAX_UTILIZATION_BPS: Item<u32> = Item::new("def_max_util");
+
+/// Per-borrower max-utilization override in basis points (0..=10_000).
+///
+/// Keyed by borrower `Addr`.  When present, it supersedes
+/// [`DEFAULT_MAX_UTILIZATION_BPS`] for that borrower.  A value of 0
+/// means the borrower may not draw at all.
+pub const BORROWER_MAX_UTILIZATION: Map<Addr, u32> = Map::new("bor_max_util");
+
 /// Multi-oracle quorum configuration for redundancy median resolution.
 #[cw_serde]
 pub struct OracleQuorumConfig {

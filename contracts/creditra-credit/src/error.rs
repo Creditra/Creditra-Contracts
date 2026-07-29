@@ -102,6 +102,10 @@ pub enum ContractError {
     /// Requested bounty withdrawal exceeds the accumulated bounty balance.
     #[error("InsufficientBountyBalance")]
     InsufficientBountyBalance,
+
+    /// A draw would exceed the borrower's max-utilization cap.
+    #[error("MaxUtilizationExceeded")]
+    MaxUtilizationExceeded,
 }
 
 impl ContractError {
@@ -130,6 +134,7 @@ impl ContractError {
             ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
+            ContractError::MaxUtilizationExceeded => ContractErrorCategory::Validation,
         }
     }
 }
