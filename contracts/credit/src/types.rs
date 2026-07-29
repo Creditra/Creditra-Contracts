@@ -222,6 +222,21 @@ pub enum ContractError {
 /// category codes. New variants must be appended at the end.
 ///
 /// # Usage
+/// Stable error categories for client-side grouping.
+pub enum ContractErrorCategory {
+    Auth,
+    Lifecycle,
+    Numeric,
+    Limit,
+    Liquidity,
+    Risk,
+    Oracle,
+    Collateral,
+    Block,
+    Reentrancy,
+    Misc,
+}
+
 /// Use [`ContractError::category`] to map any error to its category at
 /// runtime. This allows SDK clients to group errors by category without
 /// matching on individual error codes.
@@ -287,6 +302,7 @@ impl ContractError {
 
             Self::CreditLineNotFound
             | Self::AdminAcceptTooEarly
+            | Self::InvalidAttestation
             | Self::NoPendingTreasuryWithdrawal
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound => Misc,
@@ -453,6 +469,18 @@ pub struct OracleConfig {
     /// E.g. 500 = 5 %.
     pub max_deviation_bps: u32,
     /// Maximum age of an oracle price in seconds before it is considered stale.
+    pub max_age_seconds: u64,
+}
+
+/// Configuration for quorum-of-K oracle price resolution.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of feeds that must agree within a window.
+    pub min_quorum_k: u32,
+    /// Maximum allowed deviation between lowest and highest price in a qualifying window, in bps.
+    pub max_deviation_bps: u32,
+    /// Maximum age of a price submission in seconds before it is considered stale.
     pub max_age_seconds: u64,
 }
 
@@ -705,22 +733,6 @@ pub struct BorrowStateSnapshot {
     /// The borrower's current borrow capabilities.
     pub capabilities: BorrowCapabilities,
 }
-
-/// Paginated view of credit lines for off-chain reporting.
-///
-/// Returned by `get_credit_lines_paginated` to enable efficient navigation
-/// through large sets of credit lines using cursor-based pagination.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreditLinesPage {
-    /// Vector of credit line data for this page.
-    pub lines: soroban_sdk::Vec<CreditLineData>,
-    /// Cursor for the next page, or `None` if this is the last page.
-    pub next_cursor: Option<u32>,
-    /// Whether more results are available beyond this page.
-    pub has_more: bool,
-}
-
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///

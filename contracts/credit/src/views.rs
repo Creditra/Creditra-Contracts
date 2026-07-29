@@ -9,7 +9,8 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    BorrowCapabilities, BorrowStateSnapshot, CreditLineSnapshot, CreditLinesPage, ProofOfReserve,
+    ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
