@@ -121,7 +121,6 @@ mod lifecycle_views;
 
 mod limits;
 pub mod math_utils;
-mod oracles;
 mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
@@ -132,7 +131,6 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
-mod views;
 
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
@@ -179,10 +177,6 @@ use crate::types::{
     ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
-use auth::require_admin_auth;
-
 
 #[cfg(test)]
 mod boundary_tests;
@@ -198,8 +192,7 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
-use crate::auth::{require_admin, require_admin_auth};
-use crate::attestation::AttestationBatch;
+use crate::auth::require_admin;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_borrower_frozen_event,
@@ -399,20 +392,6 @@ impl Credit {
         config::set_liquidity_source(env, reserve_address)
     }
 
-    /// Sets the minimum collateral ratio in basis points (admin only).
-    /// Set the minimum collateral ratio required for borrowing (admin only).
-    ///
-    /// # Arguments
-    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
-    ///
-    /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
-    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
-    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
-        require_admin_auth(&env);
-        assert_not_paused(&env);
-        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
-    }
 
 
     /// Open a new credit line for a borrower (admin only).
