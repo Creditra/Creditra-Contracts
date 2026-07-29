@@ -1,0 +1,8 @@
+{
+  "name": "Creditra Protocol Portal",
+  "description": "Decentralized, risk-priced credit on Stellar / Soroban without overcollateralization",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

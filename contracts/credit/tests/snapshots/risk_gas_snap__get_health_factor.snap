@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "get_health_factor",
+    cpu_instructions: 69235,
+    memory_bytes: 12467,
+}

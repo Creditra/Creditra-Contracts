@@ -1,0 +1,191 @@
+---
+source: contracts/credit/tests/snap_deviation.rs
+expression: cases
+---
+[
+    DeviationTestCase {
+        new_price: 1000,
+        last_price: 1000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 1050,
+        last_price: 1000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 950,
+        last_price: 1000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 10000,
+        last_price: 10000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 10500,
+        last_price: 10000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 9500,
+        last_price: 10000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 10000,
+        last_price: 9500,
+        deviation_bps: Some(
+            526,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 12500,
+        last_price: 10000,
+        deviation_bps: Some(
+            2500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 8000,
+        last_price: 10000,
+        deviation_bps: Some(
+            2000,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 1234567,
+        last_price: 1200000,
+        deviation_bps: Some(
+            288,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 1188000,
+        last_price: 1200000,
+        deviation_bps: Some(
+            100,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 5000000,
+        last_price: 5000000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 5250000,
+        last_price: 5000000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 4750000,
+        last_price: 5000000,
+        deviation_bps: Some(
+            500,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 20000000,
+        last_price: 20000000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 20500000,
+        last_price: 20000000,
+        deviation_bps: Some(
+            250,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 19500000,
+        last_price: 20000000,
+        deviation_bps: Some(
+            250,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 100000000,
+        last_price: 100000000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 101000000,
+        last_price: 100000000,
+        deviation_bps: Some(
+            100,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 99000000,
+        last_price: 100000000,
+        deviation_bps: Some(
+            100,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 1000000000,
+        last_price: 1000000000,
+        deviation_bps: Some(
+            0,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 1010000000,
+        last_price: 1000000000,
+        deviation_bps: Some(
+            100,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 990000000,
+        last_price: 1000000000,
+        deviation_bps: Some(
+            100,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 100,
+        last_price: 0,
+        deviation_bps: None,
+    },
+    DeviationTestCase {
+        new_price: 0,
+        last_price: 100,
+        deviation_bps: Some(
+            10000,
+        ),
+    },
+    DeviationTestCase {
+        new_price: -100,
+        last_price: 100,
+        deviation_bps: Some(
+            20000,
+        ),
+    },
+    DeviationTestCase {
+        new_price: 100,
+        last_price: -100,
+        deviation_bps: None,
+    },
+]

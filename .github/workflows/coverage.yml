@@ -1,23 +1,41 @@
 name: Test Coverage
 
+# Enforces a hard 95 % line-coverage gate on every push to main/master and on
+# every pull request targeting those branches.  Any run where coverage drops
+# below 95 % will exit non-zero and block the check.  Only the optional Codecov
+# upload step is allowed to fail gracefully (network / token issues must not
+# block development).
+
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   coverage:
-    name: Code Coverage
+    name: Coverage Gate (≥ 95 % lines)
     runs-on: ubuntu-latest
+    # ── NO continue-on-error here ─────────────────────────────────────────────
+    # This job MUST fail the check when coverage drops below 95 %.
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust (stable + llvm-tools)
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+          components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -32,15 +50,52 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-llvm-cov-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-llvm-cov-
 
-      - name: Run cargo-llvm-cov
+      # ── HARD GATE ─────────────────────────────────────────────────────────
+      # Exits non-zero (failing the workflow) when line coverage < 95 %.
+      # Also emits an LCOV report so Codecov and the upload step can consume it.
+      - name: Enforce 95 % line coverage (hard gate)
         run: |
-          cargo llvm-cov --workspace --all-targets --fail-under-lines 95 --lcov --output-path coverage/lcov.info
+          cargo llvm-cov \
+            --workspace \
+            --all-targets \
+            --fail-under-lines 95 \
+            --lcov --output-path coverage/lcov.info
 
+      # ── OPTIONAL: upload to Codecov ────────────────────────────────────────
+      # Allowed to fail so that a missing / expired token or a Codecov outage
+      # does not block the mandatory coverage gate above.
       - name: Upload coverage to Codecov
+        if: always()
+        continue-on-error: true
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Creditra/Creditra-Contracts
+
+      # ── OPTIONAL: keep the LCOV file as a build artifact ──────────────────
+      - name: Upload LCOV artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-report-${{ github.run_id }}
+          path: coverage/lcov.info
+          retention-days: 30
+
+      # ── Coverage summary for the GitHub Actions UI ─────────────────────────
+      - name: Write coverage summary
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "## Coverage Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Threshold | Tool |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ≥ 95 % lines | \`cargo llvm-cov --fail-under-lines 95\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "See \`coverage/lcov.info\` artifact for the full LCOV report." >> "$GITHUB_STEP_SUMMARY"

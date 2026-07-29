@@ -1,110 +1,28 @@
-use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
-use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
-use crate::types::{CreditLineData, CreditStatus};
+use crate::collateral;
+use crate::lifecycle;
+use crate::events::{
+    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent,
+};
+use crate::math_utils::{apply_bps, mul_div, Rounding};
+use crate::storage::{
+    clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
+    persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+    CREDIT_LINE_TTL_THRESHOLD,
+};
+use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
 
-pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
-        set_reentrancy_guard(&env);
-        borrower.require_auth();
-
-        if amount <= 0 {
-            clear_reentrancy_guard(&env);
-            panic!("amount must be positive");
-        }
-
-        let token_address: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
-        let reserve_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::LiquiditySource)
-            .unwrap_or(env.current_contract_address());
-
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
-
-        if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
-            panic!("credit line is closed");
-        }
-
-        let updated_utilized = credit_line
-            .utilized_amount
-            .checked_add(amount)
-            .expect("overflow");
-
-        if updated_utilized > credit_line.credit_limit {
-            clear_reentrancy_guard(&env);
-            panic!("exceeds credit limit");
-        }
-
-        if let Some(token_address) = token_address {
-            let token_client = token::Client::new(&env, &token_address);
-            let reserve_balance = token_client.balance(&reserve_address);
-            if reserve_balance < amount {
-                clear_reentrancy_guard(&env);
-                panic!("Insufficient liquidity reserve for requested draw amount");
-            }
-
-            token_client.transfer(&reserve_address, &borrower, &amount);
-        }
-
-        credit_line.utilized_amount = updated_utilized;
-        env.storage().persistent().set(&borrower, &credit_line);
-        let timestamp = env.ledger().timestamp();
-        publish_drawn_event(
-            &env,
-            DrawnEvent {
-                borrower,
-                amount,
-                new_utilized_amount: updated_utilized,
-                timestamp,
-            },
-        );
-        clear_reentrancy_guard(&env);
+/// Map a credit-line status to the draw-time error, if any.
+///
+/// Restricted is intentionally allowed to reach the numeric limit check in
+/// `draw_credit`; that keeps the status distinct from terminal states while
+/// still preventing fresh borrowing until the line is cured.
+pub(crate) fn draw_status_error(status: CreditStatus) -> Option<ContractError> {
+    match status {
+        CreditStatus::Active | CreditStatus::Restricted => None,
+        CreditStatus::Suspended => Some(ContractError::CreditLineSuspended),
+        CreditStatus::Defaulted => Some(ContractError::CreditLineDefaulted),
+        CreditStatus::Closed => Some(ContractError::CreditLineClosed),
     }
-
-    /// Repay credit (borrower).
-    /// Allowed when status is Active, Suspended, or Defaulted. Reverts if credit line does not exist,
-    /// is Closed, or borrower has not authorized. Reduces utilized_amount by amount (capped at 0).
-    pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
-        set_reentrancy_guard(&env);
-        borrower.require_auth();
-        let mut credit_line: CreditLineData = env
-            .storage()
-            .persistent()
-            .get(&borrower)
-            .expect("Credit line not found");
-
-        if credit_line.borrower != borrower {
-            panic!("Borrower mismatch for credit line");
-        }
-
-        if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
-            panic!("credit line is closed");
-        }
-        if amount <= 0 {
-            clear_reentrancy_guard(&env);
-            panic!("amount must be positive");
-        }
-        let new_utilized = credit_line.utilized_amount.saturating_sub(amount).max(0);
-        credit_line.utilized_amount = new_utilized;
-        env.storage().persistent().set(&borrower, &credit_line);
-
-        let timestamp = env.ledger().timestamp();
-        publish_repayment_event(
-            &env,
-            RepaymentEvent {
-                borrower: borrower.clone(),
-                amount,
-                new_utilized_amount: new_utilized,
-                timestamp,
-            },
-        );
-        clear_reentrancy_guard(&env);
-        // TODO: accept token from borrower
-    }
-
+}

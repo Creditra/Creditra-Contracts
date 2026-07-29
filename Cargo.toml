@@ -1,16 +1,32 @@
 [workspace]
 resolver = "2"
 members = ["contracts/credit", "contracts/freeze"]
+members = [
+    "contracts/credit",
+    "contracts/risk",
+    "contracts/accrual",
+    "contracts/collateral",
+    "contracts/borrow",
+    "contracts/lifecycle",
+    "contracts/query",
+    "contracts/freeze",
+    "contracts/risk",
+    "gateway-contract/contracts/auction_contract",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
 
 [workspace.dependencies]
 soroban-sdk = "22"
 
 [profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
+opt-level = "z"         # Optimize for size
+overflow-checks = true  # Arithmetic overflow → panic/revert, never silent wrap
+debug = 0               # No debug info
+strip = "symbols"       # Strip symbols
+debug-assertions = false # No debug assertions
+panic = "abort"         # Smaller than unwinding
+codegen-units = 1       # Better optimization
+lto = true              # Link time optimization

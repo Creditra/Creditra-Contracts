@@ -1,0 +1,30 @@
+---
+source: contracts/credit/tests/snap_prorate.rs
+expression: principal_cases
+---
+[
+    (
+        1,
+        0,
+    ),
+    (
+        10,
+        0,
+    ),
+    (
+        100,
+        0,
+    ),
+    (
+        1000,
+        0,
+    ),
+    (
+        10000,
+        300,
+    ),
+    (
+        100000,
+        3000,
+    ),
+]
