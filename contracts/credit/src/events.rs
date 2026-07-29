@@ -184,6 +184,59 @@ pub struct DrawsFrozenEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineFreezeEvent {
+    pub borrower: Address,
+    pub reason: crate::types::FreezeReason,
+    pub frozen: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeAccruedEvent {
+    pub borrower: Address,
+    pub fee_amount: i128,
+    pub treasury_amount: i128,
+    pub bounty_amount: i128,
+    pub new_treasury_balance: i128,
+    pub new_bounty_balance: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerFrozenEvent {
+    pub borrower: Address,
+    pub frozen_until: u64,
+    pub ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateEnteredEvent {
+    pub borrower: Address,
+    pub base_rate_bps: u32,
+    pub penalty_surcharge_bps: u32,
+    pub effective_rate_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateExitedEvent {
+    pub borrower: Address,
+    pub previous_rate_bps: u32,
+    pub new_rate_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralPartialReleasedEvent {
+    pub borrower: Address,
+    pub amount_released: i128,
+    pub new_balance: i128,
+    pub health_factor_bps: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowerBlockedEvent {
     pub borrower: Address,
     pub blocked: bool,
@@ -251,6 +304,27 @@ pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
 }
 
+pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "col_part_rel")),
+        event,
+    );
+}
+
+pub fn publish_oracle_quorum_config_set_event(env: &Env, min_quorum_k: u32, max_deviation_bps: u32, max_age_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "oracle_quorum")),
+        (min_quorum_k, max_deviation_bps, max_age_seconds),
+    );
+}
+
+pub fn publish_oracle_quorum_price_set_event(env: &Env, price: i128, min_quorum_k: u32, timestamp: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "oracle_price")),
+        (price, min_quorum_k, timestamp),
+    );
+}
+
 pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("fee_accrd")), event);
@@ -302,6 +376,13 @@ pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types:
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "drw_freeze")),
         DrawsFrozenEvent { frozen, reason },
+    );
+}
+
+pub fn publish_credit_line_freeze_event(env: &Env, borrower: &Address, reason: crate::types::FreezeReason, frozen: bool) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "cl_freeze")),
+        CreditLineFreezeEvent { borrower: borrower.clone(), reason, frozen },
     );
 }
 
