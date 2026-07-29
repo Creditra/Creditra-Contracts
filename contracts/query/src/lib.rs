@@ -19,6 +19,12 @@
 //! relevant to the v7 query subsystem for CI stability guards.
 //! See [`tests/err_stab.rs`] for the pinning assertions.
 //!
+//! ## Auth snapshot
+//!
+//! Every query entrypoint is a pure read with no `require_auth` call. See
+//! [`tests/auth_snap.rs`] for the per-entrypoint pinning assertions that
+//! guard against a future entrypoint silently gaining an auth requirement.
+//!
 //! ## Query entrypoints covered
 //!
 //! - `get_credit_line` / `get_credit_line_summary`

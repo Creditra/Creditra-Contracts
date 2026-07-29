@@ -1501,6 +1501,23 @@ impl Credit {
         lifecycle_views::capabilities(env, borrower)
     }
 
+    /// Return the query-subsystem capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only view reporting which borrower-scoped query results are
+    /// currently meaningful: whether a credit line / repayment schedule
+    /// exists, whether the health factor is debt-sensitive, and whether
+    /// delinquency checks are applicable. See [`QueryCapabilities`] for the
+    /// exact precondition each flag mirrors.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`QueryCapabilities`] bitmap.
+    pub fn query_capabilities(env: Env, borrower: Address) -> QueryCapabilities {
+        query_views::capabilities(env, borrower)
+    }
+
     /// Deposit collateral tokens from the borrower into the contract.
     ///
     /// # Authorization
