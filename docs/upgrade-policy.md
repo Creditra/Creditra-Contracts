@@ -263,7 +263,6 @@ For coverage validation (minimum 95% line coverage required):
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
-
 ## Operational Checklist
 
 ### Pre-Upgrade

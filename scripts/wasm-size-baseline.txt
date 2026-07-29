@@ -1,0 +1,6 @@
+# WASM Size Baseline
+# Format: <crate-name> <size-in-bytes>
+# Update after significant code changes that affect contract size.
+# The CI workflow (wasm-size-guard.yml) asserts builds are within ±5 KB of these values.
+creditra-credit 35000
+gateway-auction 15000

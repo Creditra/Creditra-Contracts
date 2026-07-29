@@ -1,0 +1,41 @@
+[package]
+name = "creditra-freeze"
+version = "0.1.0"
+edition = "2021"
+description = "Creditra freeze auth-boundary integration tests"
+license = "MIT"
+keywords = ["soroban", "stellar", "freeze", "credit", "smart-contract"]
+categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+creditra-credit = { path = "../credit" }
+
+[[test]]
+name = "auth_boundary"
+path = "tests/auth_boundary.rs"
+
+[[test]]
+name = "events"
+path = "tests/events.rs"
+
+[[test]]
+name = "auth_snap"
+path = "tests/auth_snap.rs"
+
+[[test]]
+name = "gas_snap"
+path = "tests/gas_snap.rs"
+
+[[test]]
+name = "ttl_bump"
+path = "tests/ttl_bump.rs"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+creditra-credit = { path = "../credit", features = [] }
+insta = "1.40"

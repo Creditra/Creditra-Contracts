@@ -29,7 +29,10 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::{publish_credit_line_freeze_event, publish_draws_frozen_event};
-use crate::storage::{get_credit_line, DataKey};
+use crate::storage::{
+    bump_instance_ttl, enforce_freeze_cooldown, get_credit_line,
+    record_freeze_timestamp_if_cooldown, DataKey,
+};
 use crate::types::{ContractError, DrawsFreezeState, FreezeReason};
 use soroban_sdk::{Address, Env};
 
@@ -37,15 +40,24 @@ use soroban_sdk::{Address, Env};
 ///
 /// Sets [`DataKey::DrawsFrozen`] with `frozen = true` and records `reason`.
 ///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `DataKey::DrawsFrozen`
 /// - **Value**: [`DrawsFreezeState`]
 ///
 /// # Events
-/// Emits [`DrawsFrozenEvent`] with `frozen = true` and the supplied `reason`.
+/// Emits [`DrawsFrozenEvent`] with `frozen = true`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn freeze_draws(env: Env, reason: FreezeReason) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     env.storage().instance().set(
         &DataKey::DrawsFrozen,
         &DrawsFreezeState {
@@ -54,17 +66,32 @@ pub fn freeze_draws(env: Env, reason: FreezeReason) {
         },
     );
     publish_draws_frozen_event(&env, true, reason);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Unfreeze draws globally (admin only).
 ///
-/// Sets `frozen = false` while preserving the last recorded reason for audit reads.
+/// Sets [`DataKey::DrawsFrozen`] to `false`. Idempotent: calling when already
+/// unfrozen is a no-op (no event emitted for the redundant call).
+///
+/// # Authorization
+/// Requires administrative privileges. The configured admin must authorize this
+/// call via `require_auth()`; unauthorized callers are rejected before any
+/// storage mutation occurs.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+/// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 ///
 /// # Events
-/// Emits [`DrawsFrozenEvent`] with `frozen = false` and the last stored reason
-/// (defaults to [`FreezeReason::LiquidityReserve`] when never frozen before).
+/// Emits [`DrawsFrozenEvent`] with `frozen = false`.
+///
+/// # Errors
+/// - Panics with auth error if the caller is not the configured admin.
 pub fn unfreeze_draws(env: Env) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     let reason = get_draws_freeze_state(&env)
         .map(|state| state.reason)
         .unwrap_or(FreezeReason::LiquidityReserve);
@@ -76,11 +103,23 @@ pub fn unfreeze_draws(env: Env) {
         },
     );
     publish_draws_frozen_event(&env, false, reason);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Returns `true` when draws are globally frozen.
 ///
 /// Defaults to `false` (draws allowed) if the key has never been set.
+///
+/// # Authorization
+/// No authentication required — this is a pure read with no side effects.
+///
+/// # Storage
+/// - **Type**: Instance storage (shared TTL with all instance keys)
+/// - **Key**: `DataKey::DrawsFrozen`
+///
+/// # Returns
+/// - `true` if draws are frozen
+/// - `false` if draws are not frozen or the key has never been set
 pub fn is_draws_frozen(env: &Env) -> bool {
     get_draws_freeze_state(env).map_or(false, |state| state.frozen)
 }
@@ -104,13 +143,15 @@ pub fn get_draws_freeze_reason(env: &Env) -> Option<FreezeReason> {
 /// Emits [`CreditLineFreezeEvent`] on `("credit", "line_frz")` with `frozen = true`.
 pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     if get_credit_line(&env, &borrower).is_none() {
         env.panic_with_error(ContractError::CreditLineNotFound);
     }
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineFreeze(borrower.clone()), &reason);
+    let key = DataKey::CreditLineFreeze(borrower.clone());
+    env.storage().persistent().set(&key, &reason);
+    crate::storage::bump_credit_line_freeze_ttl(&env, &borrower);
     publish_credit_line_freeze_event(&env, &borrower, reason, true);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Lift a per-credit-line draw freeze (admin only).
@@ -121,6 +162,7 @@ pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
 /// Emits [`CreditLineFreezeEvent`] with `frozen = false` when a freeze record existed.
 pub fn unfreeze_credit_line(env: Env, borrower: Address) {
     require_admin_auth(&env);
+    enforce_freeze_cooldown(&env);
     let key = DataKey::CreditLineFreeze(borrower.clone());
     let Some(reason) = env
         .storage()
@@ -131,24 +173,177 @@ pub fn unfreeze_credit_line(env: Env, borrower: Address) {
     };
     env.storage().persistent().remove(&key);
     publish_credit_line_freeze_event(&env, &borrower, reason, false);
+    record_freeze_timestamp_if_cooldown(&env);
 }
 
 /// Returns `true` when a credit line has an active admin freeze.
 pub fn is_credit_line_frozen(env: &Env, borrower: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .has(&DataKey::CreditLineFreeze(borrower.clone()))
+    let key = DataKey::CreditLineFreeze(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        crate::storage::bump_credit_line_freeze_ttl(env, borrower);
+        true
+    } else {
+        false
+    }
 }
 
 /// Returns the structured freeze reason for a credit line, if frozen.
 pub fn get_credit_line_freeze_reason(env: &Env, borrower: &Address) -> Option<FreezeReason> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineFreeze(borrower.clone()))
+    let key = DataKey::CreditLineFreeze(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        crate::storage::bump_credit_line_freeze_ttl(env, borrower);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
 }
 
 fn get_draws_freeze_state(env: &Env) -> Option<DrawsFreezeState> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get::<DataKey, DrawsFreezeState>(&DataKey::DrawsFrozen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{
+        INSTANCE_BUMP_AMOUNT, INSTANCE_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD,
+    };
+    use crate::{Credit, CreditClient};
+    use soroban_sdk::testutils::storage::Instance as _;
+    use soroban_sdk::testutils::storage::Persistent as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+
+    fn setup(env: &Env) -> (Address, CreditClient<'_>, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000, &300, &70);
+        (contract_id, client, borrower)
+    }
+
+    fn ttl_for_key(env: &Env, contract_id: &Address, key: &DataKey) -> u32 {
+        env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
+    }
+
+    fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
+        env.as_contract(contract_id, || env.storage().instance().get_ttl())
+    }
+
+    fn drain_instance_ttl(env: &Env, contract_id: &Address) {
+        let current = instance_ttl(env, contract_id);
+        let target = INSTANCE_BUMP_THRESHOLD.saturating_sub(1);
+        let delta = current.saturating_sub(target);
+        if delta > 0 {
+            env.ledger().with_mut(|li| {
+                li.sequence_number = li.sequence_number.saturating_add(delta);
+            });
+        }
+    }
+
+    fn advance_to_ttl_threshold(env: &Env, ttl: u32) {
+        env.ledger().with_mut(|ledger| {
+            ledger.sequence_number = ledger
+                .sequence_number
+                .saturating_add(ttl.saturating_sub(LEDGER_BUMP_THRESHOLD - 1));
+        });
+    }
+
+    #[test]
+    fn credit_line_freeze_read_refreshes_persistent_ttl() {
+        let env = Env::default();
+        let (contract_id, client, borrower) = setup(&env);
+        let key = DataKey::CreditLineFreeze(borrower.clone());
+
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        let initial_ttl = ttl_for_key(&env, &contract_id, &key);
+        assert!(initial_ttl >= LEDGER_BUMP_AMOUNT);
+
+        advance_to_ttl_threshold(&env, initial_ttl);
+        assert!(client.is_credit_line_frozen(&borrower));
+        assert!(ttl_for_key(&env, &contract_id, &key) >= LEDGER_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn is_draws_frozen_bumps_instance_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+        drain_instance_ttl(&env, &contract_id);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before < INSTANCE_BUMP_THRESHOLD);
+
+        assert!(client.is_draws_frozen());
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= INSTANCE_BUMP_AMOUNT,
+            "is_draws_frozen must extend instance TTL; before={before} after={after}"
+        );
+    }
+
+    #[test]
+    fn get_draws_freeze_reason_bumps_instance_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::Compliance);
+        drain_instance_ttl(&env, &contract_id);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before < INSTANCE_BUMP_THRESHOLD);
+
+        let reason = client.get_draws_freeze_reason();
+        assert_eq!(reason, Some(FreezeReason::Compliance));
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= INSTANCE_BUMP_AMOUNT,
+            "get_draws_freeze_reason must extend instance TTL; before={before} after={after}"
+        );
+    }
+
+    #[test]
+    fn get_credit_line_freeze_reason_bumps_persistent_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, borrower) = setup(&env);
+        let key = DataKey::CreditLineFreeze(borrower.clone());
+
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        let initial_ttl = ttl_for_key(&env, &contract_id, &key);
+        assert!(initial_ttl >= LEDGER_BUMP_AMOUNT);
+
+        advance_to_ttl_threshold(&env, initial_ttl);
+
+        let reason = client.get_credit_line_freeze_reason(&borrower);
+        assert_eq!(reason, Some(FreezeReason::Compliance));
+
+        assert!(ttl_for_key(&env, &contract_id, &key) >= LEDGER_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn draw_freeze_reads_do_not_write_ttl_when_healthy() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before >= INSTANCE_BUMP_THRESHOLD);
+
+        assert!(client.is_draws_frozen());
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= before.saturating_sub(1),
+            "TTL must not decrease when bump is a no-op; before={before} after={after}"
+        );
+    }
 }

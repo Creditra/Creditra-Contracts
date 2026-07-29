@@ -129,14 +129,57 @@ fn compute_interest(utilized: i128, rate_bps: i128, seconds: i128) -> Result<i12
     }
 }
 
-/// Apply interest accrual to a credit line and return the updated line.
+/// Apply interest accrual to a credit line and return the updated line record.
 ///
-/// This implementation routes all prorating math through `math_utils::prorate_interest`,
-/// with explicit `Rounding::Floor`. `last_accrual_ts` is only updated when a
-/// non-zero accrual has been successfully computed and applied. No rounding-up
-/// is performed by default.
-
+/// # Overview
+///
+/// `apply_accrual` is the central interest capitalization chokepoint. It computes pro-rated
+/// interest since `line.last_accrual_ts` using [`crate::math_utils::prorate_interest`] with
+/// [`Rounding::Floor`], capitalizes non-zero interest into both `line.accrued_interest` and
+/// `line.utilized_amount`, and advances `line.last_accrual_ts` to the current ledger timestamp.
+///
+/// # Parameters
+///
+/// * `env` — The Soroban environment reference (`&Env`); used to retrieve current ledger timestamp.
+/// * `line` — The [`CreditLineData`] record to accrue interest for.
+///
+/// # Returns
+///
+/// Returns the updated [`CreditLineData`] struct. If no time has elapsed or utilization is zero,
+/// the line is returned unmodified.
+///
+/// # Interest Calculation & Rate Branches
+///
+/// 1. **Standard Active**: Effective rate is `line.interest_rate_bps`.
+/// 2. **Delinquent Active**: When delinquent (`crate::query::is_delinquent`), penalty surcharge BPS is added
+///    (clamped to [`crate::risk::MAX_INTEREST_RATE_BPS`]). Transitions emit [`PenaltyRateEnteredEvent`] or [`PenaltyRateExitedEvent`].
+/// 3. **Suspended with Grace Policy**: If status is `Suspended` and a [`GracePeriodConfig`] exists:
+///    - In-grace window uses `GraceWaiverMode::FullWaiver` (0 interest) or `GraceWaiverMode::ReducedRate` (`reduced_rate_bps`).
+///    - Post-grace window accrues at standard effective rate.
+///    - Emits [`GraceWaiverReceiptEvent`] when interest is waived.
+///
+/// # Mathematical Principles & Invariants
+///
+/// * **Floor Rounding**: All interest deltas round down (`Rounding::Floor`). Sub-unit fractional interest is not carried forward.
+/// * **Julian Year Denominator**: Uses [`SECONDS_PER_YEAR`] = 31,536,000 seconds.
+/// * **Timestamp Invariant**: `last_accrual_ts` is advanced **only** when non-zero interest (`accrued_i > 0`) is applied,
+///   preventing zero-delta timestamp burn on fast ledgers.
+/// * **Zero Utilization**: Returns `line` unmodified without advancing `last_accrual_ts`.
+///
+/// # Panics & Overflow Safety
+///
+/// Reverts with [`ContractError::Overflow`] if:
+/// * Prorated interest conversion from `u128` exceeds `i128::MAX`.
+/// * Capitalizing interest into `utilized_amount` or `accrued_interest` overflows `i128::MAX`.
+///
+/// # Example
+///
+/// ```ignore
+/// let updated_line = apply_accrual(&env, credit_line);
+/// assert!(updated_line.utilized_amount >= original_utilized);
+/// ```
 pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
+
     let now = env.ledger().timestamp();
 
     // Do nothing if ledger time has not advanced.
@@ -144,9 +187,10 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         return line;
     }
 
-    // If there's no utilization, this is a read-only check — do not update
-    // `last_accrual_ts` here per requirements.
+    // If there's no utilization, we update the checkpoint to prevent retroactive interest accrual
+    // but do not compute any interest.
     if line.utilized_amount == 0 {
+        line.last_accrual_ts = now;
         return line;
     }
 
@@ -329,13 +373,54 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
     line
 }
 
-/// Materialize interest accrual for a bounded list of borrowers.
+/// Materialize pending interest accrual across a bounded batch of borrower addresses.
 ///
-/// No auth is required: the call only updates accounting state for lines
-/// that already exist and are `Active`. Missing lines and non-active lines
-/// are skipped without reverting the whole batch. Only non-zero accruals
-/// emit `InterestAccruedEvent`.
+/// # Overview
+///
+/// `accrue_batch` provides off-chain keepers and automated protocol maintenance routines
+/// with a single batched entrypoint to materialize interest accrual on multiple active credit lines.
+/// It iterates through `borrowers`, loads each line from storage, applies interest capitalization
+/// via [`apply_accrual`], and persists updated records if state changed.
+///
+/// # Parameters
+///
+/// * `env` — The Soroban contract environment reference (`&Env`).
+/// * `borrowers` — Soroban [`Vec<Address>`] containing borrower account addresses to process.
+///
+/// # Behavior
+///
+/// 1. Iterates through each address in `borrowers`.
+/// 2. Fetches credit line from storage using [`get_credit_line`].
+/// 3. Filters for active lines with positive utilization (`status == Active` and `utilized_amount > 0`).
+/// 4. Executes [`apply_accrual`] to prorate interest up to the current ledger timestamp.
+/// 5. If `utilized_amount` or `last_accrual_ts` modified, persists the updated record via [`persist_credit_line`].
+/// 6. **Fault Tolerance**: Non-existent borrower addresses and non-active credit lines are silently skipped
+///    without reverting the remainder of the batch.
+///
+/// # Authorization Rationale
+///
+/// * **No Auth Required**: Anyone may invoke batch accrual. Because accrual only capitalizes deterministically computed
+///   interest based on on-chain rates and elapsed time, caller identity cannot manipulate calculations or extract funds.
+///
+/// # Gas & Batch Constraints
+///
+/// * Maximum batch size is enforced at the top-level contract entrypoint (`borrowers.len() <= ACCRUE_BATCH_MAX`, cap = 50).
+/// * Storage writes are optimized: persistent storage is mutated **only** when accrual yields a non-zero interest delta.
+///
+/// # Events
+///
+/// * Emits per-borrower [`crate::events::InterestAccruedEvent`] for each line where `accrued_amount > 0`.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut borrowers = Vec::new(&env);
+/// borrowers.push_back(alice_address);
+/// borrowers.push_back(bob_address);
+/// accrue_batch(&env, borrowers);
+/// ```
 pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
+
     for borrower in borrowers.iter() {
         if let Some(stored_line) = get_credit_line(env, &borrower) {
             if stored_line.status == CreditStatus::Active && stored_line.utilized_amount > 0 {

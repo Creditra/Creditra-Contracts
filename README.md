@@ -63,6 +63,7 @@ flowchart LR
 | Crate | Path | Role |
 |---|---|---|
 | `creditra-credit` | `contracts/credit/` | Credit-line core: open / draw / repay / risk update / default / settle / upgrade. `lib.rs` is 5 449 lines, 13 sub-modules. |
+| `creditra-risk` | `contracts/risk/` | Standalone risk admin cooldown contract: time-based circuit breaker for admin risk-mutation actions. |
 | `gateway-auction` | `gateway-contract/contracts/auction_contract/` | Minimal English & Dutch auction; one-shot settlement handoff back to credit. |
 
 Full module catalog and entrypoint signatures: [`docs/PROTOCOL_SPEC.md`](./docs/PROTOCOL_SPEC.md).
@@ -150,6 +151,11 @@ Creditra-Contracts/
 │       ├── query.rs           # read-only helpers, is_delinquent
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
+├── contracts/risk/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs             # #[contract] RiskContract + entrypoints
+│       └── admin.rs           # cooldown storage helpers + guard
 ├── gateway-contract/contracts/auction_contract/
 │   ├── tests/
 │   │   ├── transition_matrix.rs  # AuctionStatus transition matrix (Issue #614)
@@ -192,7 +198,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `set_credit_limit_bounds`.
 - **Liquidity & treasury:** `set_liquidity_token`, `set_liquidity_source`,
   `set_protocol_fee_bps`, `set_treasury`, `withdraw_treasury`.
-- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`.
+- **Collateral (optional):** `deposit_collateral`, `withdraw_collateral`,
+  `partial_release_collateral` (borrower-callable; releases a portion of
+  collateral while keeping health-factor ≥ `MinCollateralRatioBps`).
 - **Repayment schedule:** `set_repayment_schedule`, `get_repayment_schedule`,
   `is_delinquent`.
 - **Operational controls:** `pause_protocol` / `unpause_protocol`,
@@ -208,7 +216,7 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 `Auction` (`#[contract]`,
 `gateway-contract/contracts/auction_contract/src/lib.rs`):
 
-- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price)`
+- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price, dutch_decay, dutch_step_count)`
 - `set_factory_contract(factory)`
 - `place_bid(auction_id, bidder, amount)` — English ascending or Dutch
   descending mode, with anti-grief minimum increment and reentrancy-guarded
@@ -236,8 +244,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Admin-gated WASM upgrade with schema version bump.
 - Circuit breaker (`pause_protocol`) with repay-credit exception.
 - Treasury + protocol fee on interest portion.
-- Per-borrower utilization cap, global exposure cap, draw cooldown, per-tx
-  caps.
+- Per-borrower utilization cap, per-borrower exposure cap, global exposure
+  cap, draw cooldown, per-tx caps.
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.

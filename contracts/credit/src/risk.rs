@@ -17,7 +17,7 @@
 //!     - the magnitude+cadence cap encoded by [`RateChangeConfig`] in
 //!       `Symbol("rate_cfg")` instance storage,
 //!     - the global ceiling [`MAX_INTEREST_RATE_BPS`] = 10_000.
-//! - [`set_rate_change_limits_legacy`] — configure the magnitude+cadence
+//! - [`set_rate_change_limits`] — configure the magnitude+cadence
 //!   cap.
 //! - [`set_penalty_surcharge_bps`] — configure the additive surcharge
 //!   applied to delinquent lines during accrual (see [`crate::accrual`]).
@@ -59,10 +59,11 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::events::publish_risk_parameters_updated;
-use crate::storage::{assert_not_paused, rate_cfg_key, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD};
+use crate::events::{publish_risk_parameters_updated, publish_risk_admin_cooldown_configured};
+use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    assert_risk_admin_cooldown_elapsed, set_last_risk_admin_action_ts, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
 pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -70,12 +71,27 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score on the normalized 0-100 scale.
 pub const MAX_RISK_SCORE: u32 = 100;
 
+/// Compute interest rate from risk score using the piecewise-linear formula.
+///
+/// # Formula
+/// ```text
+/// raw_rate = base_rate_bps + (risk_score * slope_bps_per_score)
+/// effective_rate = clamp(raw_rate, min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS))
+/// ```
+///
+/// Uses saturating arithmetic to prevent overflow — if the multiplication
+/// overflows u32, it saturates to `u32::MAX` and is then clamped by the
+/// upper bound.
+pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 {
+    let raw = cfg
+        .base_rate_bps
+        .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
+    let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
+    raw.clamp(cfg.min_rate_bps, upper)
+}
+
 /// Set optional global rate-change caps (admin only).
-pub fn set_rate_change_limits(
-    env: Env,
-    max_rate_change_bps: u32,
-    rate_change_min_interval: u64,
-) {
+pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
@@ -146,23 +162,6 @@ pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
 /// The penalty surcharge in basis points.
 pub fn get_penalty_surcharge_bps(env: Env) -> u32 {
     crate::storage::get_penalty_surcharge_bps(&env)
-}
-
-/// Compute a risk-score-based interest rate using the piecewise-linear formula.
-///
-/// The formula is:
-/// ```text
-/// raw_rate = base_rate_bps + risk_score * slope_bps_per_score
-/// effective = clamp(raw_rate, min_rate_bps, min(max_rate_bps, MAX_INTEREST_RATE_BPS))
-/// ```
-///
-/// All arithmetic is saturating so a misconfigured formula cannot overflow.
-pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 {
-    let raw = cfg
-        .base_rate_bps
-        .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
-    let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
-    raw.clamp(cfg.min_rate_bps, upper)
 }
 
 /// Update risk parameters for an existing credit line (admin only).
@@ -245,6 +244,7 @@ pub fn update_risk_parameters(
 ) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    assert_risk_admin_cooldown_elapsed(&env);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
@@ -324,9 +324,14 @@ pub fn update_risk_parameters(
     credit_line.risk_score = risk_score;
 
     let previous_status = credit_line.status;
-    // Handle limit decrease: transition to Restricted if utilization exceeds new limit
+    // Handle limit decrease: transition to Restricted if utilization exceeds new limit,
+    // and auto-cure Restricted back to Active if new limit is at/above utilization.
     if credit_line.utilized_amount > credit_limit {
-        credit_line.status = CreditStatus::Restricted;
+        if credit_line.status == CreditStatus::Active {
+            credit_line.status = CreditStatus::Restricted;
+        }
+    } else if credit_line.status == CreditStatus::Restricted {
+        credit_line.status = CreditStatus::Active;
     }
 
     credit_line.credit_limit = credit_limit;
@@ -346,6 +351,8 @@ pub fn update_risk_parameters(
         credit_line.interest_rate_bps,
         credit_line.risk_score,
     );
+
+    set_last_risk_admin_action_ts(&env, env.ledger().timestamp());
 }
 
 /// Get the configured rate-change limits, if any.
@@ -356,4 +363,25 @@ pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
 /// Get the configured rate formula, if any.
 pub fn get_rate_formula_config(env: Env) -> Option<RateFormulaConfig> {
     env.storage().instance().get(&rate_formula_key(&env))
+}
+
+/// Set the risk admin cooldown duration in seconds (admin only).
+///
+/// When `seconds > 0`, every risk admin mutation (e.g. `update_risk_parameters`)
+/// enforces a minimum elapsed interval since the last mutation. This provides a
+/// time-based circuit breaker that limits the blast radius of compromised admin keys.
+///
+/// A value of `0` disables the cooldown (default).
+pub fn set_risk_admin_cooldown(env: Env, seconds: u64) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+    set_risk_admin_cooldown_seconds(&env, seconds);
+    publish_risk_admin_cooldown_configured(&env, seconds);
+}
+
+/// Get the configured risk admin cooldown duration in seconds.
+///
+/// Returns `0` when the cooldown is disabled (default).
+pub fn get_risk_admin_cooldown(env: Env) -> u64 {
+    get_risk_admin_cooldown_seconds(&env)
 }

@@ -51,17 +51,15 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let repay = 11_000_i128;
     asset.mint(&borrower, &repay);
-    token::Client::new(&env, &token_address).approve(
-        &borrower,
-        &contract_id,
-        &repay,
-        &u32::MAX,
-    );
+    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &u32::MAX);
     client.repay_credit(&borrower, &repay);
 
     // Sanity: contract holds a treasury balance now.
     let summary = client.get_protocol_summary();
-    assert!(summary.treasury_balance > 0, "setup: expected non-zero treasury balance");
+    assert!(
+        summary.treasury_balance > 0,
+        "setup: expected non-zero treasury balance"
+    );
 
     (env, contract_id, token_address, treasury)
 }
@@ -183,7 +181,8 @@ fn execute_after_timelock_succeeds() {
     env.ledger().with_mut(|l| l.timestamp = 100_000);
     client.propose_treasury_withdrawal(&admin);
 
-    env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK + 3_600); // +1 h extra
+    env.ledger()
+        .with_mut(|l| l.timestamp = 100_000 + TIMELOCK + 3_600); // +1 h extra
     client.execute_treasury_withdrawal(&admin);
 
     let token_client = token::Client::new(&env, &token_address);

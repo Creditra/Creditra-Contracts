@@ -227,6 +227,10 @@ never principal).
 formula-computed rate. Stored under `DataKey::RateFloorBps(Address)`.
 Configured by `set_borrower_rate_floor`.
 
+**Rate ceiling**. Per-borrower maximum interest rate that caps the manual or
+formula-computed rate. Stored under `DataKey::RateCeilingBps(Address)`.
+Configured by `set_borrower_rate_ceiling`.
+
 **`RateChangeConfig`**. Magnitude and cadence cap on rate changes per
 `update_risk_parameters` call. `max_rate_change_bps` and
 `rate_change_min_interval` (seconds).
