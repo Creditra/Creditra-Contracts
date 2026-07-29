@@ -94,6 +94,23 @@ pub enum ExecuteMsg {
         denom: String,
         risk_weight_bps: u32,
     },
+    /// Set the protocol-wide default max-utilization cap (admin only).
+    ///
+    /// `max_utilization_bps` is in basis points where `10_000 == 100%`.
+    /// This default applies to all borrowers who have no per-borrower
+    /// override.  Passing `None` resets the default to 100% (10_000 bps).
+    SetMaxUtilization {
+        max_utilization_bps: Option<u32>,
+    },
+    /// Set a per-borrower max-utilization override (admin only).
+    ///
+    /// When set, this borrower's cap supersedes the protocol-wide
+    /// default returned by [`SetMaxUtilization`].  Passing `None`
+    /// removes the override, falling the borrower back to the default.
+    SetBorrowerMaxUtilization {
+        borrower: String,
+        max_utilization_bps: Option<u32>,
+    },
 }
 
 #[cw_serde]
