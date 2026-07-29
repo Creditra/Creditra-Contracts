@@ -27,6 +27,10 @@ path = "tests/events.rs"
 name = "capabilities"
 path = "tests/capabilities.rs"
 
+[[test]]
+name = "rustdoc_query_tests"
+path = "tests/rustdoc_query_tests.rs"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 creditra-credit = { path = "../credit", features = [] }
