@@ -28,12 +28,8 @@ name = "capabilities"
 path = "tests/capabilities.rs"
 
 [[test]]
-name = "rustdoc_query_tests"
-path = "tests/rustdoc_query_tests.rs"
-
-[[test]]
-name = "gas_snap"
-path = "tests/gas_snap.rs"
+name = "auth_snap"
+path = "tests/auth_snap.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
