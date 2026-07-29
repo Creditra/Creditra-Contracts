@@ -10,6 +10,7 @@ readme = "../../README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+name = "creditra_collateral"
 
 [dependencies]
 soroban-sdk = { workspace = true }
@@ -18,6 +19,14 @@ creditra-credit = { path = "../credit" }
 [[test]]
 name = "admin_cooldown"
 path = "tests/admin_cooldown.rs"
+
+[[test]]
+name = "capabilities"
+path = "tests/capabilities.rs"
+
+[[test]]
+name = "capabilities"
+path = "tests/capabilities.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

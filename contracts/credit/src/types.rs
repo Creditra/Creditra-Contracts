@@ -720,6 +720,75 @@ pub struct PauseReason {
     pub actor: soroban_sdk::Address,
 }
 
+/// Read-only capabilities bitmap for collateral operations on a borrower's position.
+///
+/// Returned by the `capabilities()` view in `contracts/collateral/src/views.rs`.
+/// Lets off-chain clients and on-chain integrators inspect which collateral
+/// operations are currently permitted without simulating the full entrypoint.
+///
+/// # Semantics
+///
+/// Each `bool` field represents one collateral operation:
+/// - `true` — the operation is currently permitted (all preconditions pass).
+/// - `false` — the operation is blocked for the indicated reason.
+///
+/// Amount-dependent checks (minimum collateral ratio, exposure caps) are NOT
+/// evaluated because this view does not know the intended deposit/withdraw
+/// amount. A `true` value means the structural preconditions pass; the actual
+/// entrypoint may still revert if the supplied amount violates numeric limits.
+///
+/// # Security
+///
+/// Pure read-only view. No authentication required. No state mutations. TTL
+/// may be bumped on the borrower's persistent storage entry as a side-effect
+/// of reading the credit line, but this does not change logical state.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralCapabilities {
+    /// Whether the borrower can deposit additional collateral.
+    ///
+    /// `true` when:
+    /// - The protocol is not paused.
+    /// - The borrower's credit line exists and is not permanently `Closed`.
+    /// - The borrower is not on the blocked list.
+    pub can_deposit: bool,
+
+    /// Whether the borrower can withdraw collateral.
+    ///
+    /// `true` when:
+    /// - The protocol is not paused.
+    /// - The borrower's credit line exists and is not permanently `Closed`.
+    /// - The borrower is not on the blocked list.
+    /// - The borrower has a positive collateral balance (`> 0`).
+    ///
+    /// Amount-dependent checks (health factor ≥ `MinCollateralRatioBps`
+    /// post-withdrawal) are NOT evaluated here.
+    pub can_withdraw: bool,
+
+    /// Whether the borrower can perform a partial collateral release.
+    ///
+    /// `true` when all conditions for `can_withdraw` hold AND the borrower
+    /// has outstanding utilization (partial release only makes sense when
+    /// the position is actively borrowed against).
+    pub can_partial_release: bool,
+
+    /// Whether collateral is currently required for this borrower's position.
+    ///
+    /// `true` when the global `MinCollateralRatioBps` is set (> 0) and the
+    /// borrower has positive utilization. This signals to the borrower that
+    /// their draws are subject to collateral enforcement.
+    pub collateral_required: bool,
+
+    /// The borrower's current collateral balance in the protocol's accounting
+    /// unit (same units as `utilized_amount`). Zero when no collateral has
+    /// been deposited or when the borrower has no credit line.
+    pub collateral_balance: i128,
+
+    /// The configured minimum collateral ratio in basis points, or `0` when
+    /// collateral enforcement is disabled.
+    pub min_ratio_bps: u32,
+}
+
 /// Error categories for client-side grouping of [`ContractError`] variants.
 ///
 /// # Discriminant stability
