@@ -1,0 +1,27 @@
+[package]
+name = "creditra-freeze-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.creditra-credit]
+path = "../../credit"
+
+[dependencies.soroban-sdk]
+version = "22"
+features = ["testutils"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+
+[[bin]]
+name = "fuzz_freeze"
+path = "fuzz_targets/fuzz_freeze.rs"
+doc = false
