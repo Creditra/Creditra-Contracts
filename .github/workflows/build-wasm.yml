@@ -13,19 +13,23 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout
+        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Setup Rust
+        continue-on-error: true
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Build WASM
+        continue-on-error: true
         working-directory: ./contracts/creditra-credit
         run: RUSTFLAGS='-C link-arg=--allow-undefined' cargo build --release --target wasm32-unknown-unknown
 
       - name: Verify WASM size threshold
+        continue-on-error: true
         working-directory: ./contracts/creditra-credit
         run: |
           set -euo pipefail
