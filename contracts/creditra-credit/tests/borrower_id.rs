@@ -22,11 +22,13 @@
 //! - `contracts/creditra-credit/src/state.rs` — `CREDIT_LINE_COUNT`, `CREDIT_LINES`
 //! - Issue #757
 
-use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-use cosmwasm_std::{Addr, Api, OwnedDeps};
+use cosmwasm_std::testing::{
+    message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
+};
+use cosmwasm_std::{Addr, OwnedDeps, Uint128};
 use creditra_credit::contract;
 use creditra_credit::msg::{ExecuteMsg, InstantiateMsg};
-use creditra_credit::state::{CREDIT_LINE_COUNT, CREDIT_LINES};
+use creditra_credit::state::{CREDIT_LINES, CREDIT_LINE_COUNT};
 use proptest::prelude::*;
 use proptest::test_runner::Config as ProptestConfig;
 use std::collections::HashSet;
@@ -74,7 +76,10 @@ fn find_id_for_borrower(
     deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
     borrower: &Addr,
 ) -> Option<u64> {
-    let count = CREDIT_LINE_COUNT.may_load(deps.as_ref().storage).unwrap().unwrap_or(0);
+    let count = CREDIT_LINE_COUNT
+        .may_load(deps.as_ref().storage)
+        .unwrap()
+        .unwrap_or(0);
     for id in 0..count {
         if let Some(cl) = CREDIT_LINES.may_load(deps.as_ref().storage, id).unwrap() {
             if cl.borrower == *borrower {
@@ -303,11 +308,17 @@ mod edge_cases {
         let mut deps = mock_dependencies();
         let owner = setup_contract(&mut deps);
 
-        // Seeds sharing a common prefix, which could cause encoding issues
-        let addr_a = deps.api.addr_make("common-prefix-borrower-a").to_string();
-        let addr_b = deps.api.addr_make("common-prefix-borrower-b").to_string();
-        let id_a = create_credit_line(&mut deps, &owner, &addr_a);
-        let id_b = create_credit_line(&mut deps, &owner, &addr_b);
+        // These share a common prefix which could cause encoding issues
+        let id_a = create_credit_line(
+            &mut deps,
+            &owner,
+            "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx2v9hx",
+        );
+        let id_b = create_credit_line(
+            &mut deps,
+            &owner,
+            "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrp7as",
+        );
 
         assert_ne!(id_a, id_b, "Common-prefix addresses must get distinct IDs");
 

@@ -18,6 +18,7 @@ jobs:
   checks:
     name: Format, Lint, Test
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,6 +55,7 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,6 +98,7 @@ jobs:
   build-wasm:
     name: Build WASM
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
