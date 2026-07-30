@@ -704,6 +704,22 @@ pub struct QueryCapabilities {
     pub is_delinquent: bool,
 }
 
+/// Read-only capabilities bitmap for collateral operations.
+///
+/// Returned by `capabilities` to let off-chain consumers inspect whether the
+/// borrower can currently deposit, withdraw, or partially release collateral
+/// without simulating the entrypoint logic.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralCapabilities {
+    /// Whether collateral deposit is currently permitted.
+    pub can_deposit: bool,
+    /// Whether collateral withdrawal is currently permitted.
+    pub can_withdraw: bool,
+    /// Whether partial collateral release is currently permitted.
+    pub can_partial_release: bool,
+}
+
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single

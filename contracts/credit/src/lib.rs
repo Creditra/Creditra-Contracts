@@ -171,10 +171,11 @@ use crate::storage::{
 };
 use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, CollateralCapabilities, ContractError, CreditLineData, CreditLineSnapshot,
+    CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities,
+    OracleConfig, OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary,
+    ProtocolSummaryView, QueryCapabilities, RateChangeConfig, RateFormulaConfig,
+    TreasuryWithdrawalProposal,
 };
 
 
@@ -191,8 +192,6 @@ mod views_tests;
 #[cfg(kani)]
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
-
-
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -1481,6 +1480,34 @@ impl Credit {
     /// A [`QueryCapabilities`] bitmap.
     pub fn query_capabilities(env: Env, borrower: Address) -> QueryCapabilities {
         query_views::capabilities(env, borrower)
+    }
+
+    /// Return a borrower's current collateral capabilities bitmap.
+    ///
+    /// Read-only view that reports whether collateral deposit, withdrawal, or
+    /// partial release are currently possible for the borrower.
+    pub fn capabilities(env: Env, borrower: Address) -> CollateralCapabilities {
+        views::capabilities(env, borrower)
+    }
+
+    /// Commit an attestation batch for a borrower.
+    pub fn commit_attestation_batch(
+        env: Env,
+        borrower: Address,
+        merkle_root: BytesN<32>,
+        count: u32,
+    ) {
+        crate::attestation::commit_attestation_batch(env, borrower, merkle_root, count);
+    }
+
+    /// Return the attestation batch associated with a borrower, if any.
+    pub fn get_attestation_batch(env: Env, borrower: Address) -> Option<AttestationBatch> {
+        crate::attestation::get_attestation_batch(env, borrower)
+    }
+
+    /// Clear the attestation batch associated with a borrower.
+    pub fn clear_attestation_batch(env: Env, borrower: Address) {
+        crate::attestation::clear_attestation_batch(env, borrower);
     }
 
     /// Deposit collateral tokens from the borrower into the contract.
