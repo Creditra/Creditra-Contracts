@@ -39,7 +39,7 @@
 
 use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, IntoVal};
 
 const START_TS: u64 = 10_000;
 
@@ -84,7 +84,7 @@ fn freeze_draws_auth_snapshot() {
     let env = Env::default();
     let (client, admin, _borrower) = setup(&env);
 
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     let auths = env.auths();
     assert_eq!(
@@ -102,7 +102,7 @@ fn freeze_draws_auth_snapshot() {
 fn unfreeze_draws_auth_snapshot() {
     let env = Env::default();
     let (client, admin, _borrower) = setup(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     client.unfreeze_draws();
 
@@ -205,7 +205,7 @@ fn unfreeze_borrower_auth_snapshot() {
 fn freeze_draws_reverts_without_auth() {
     let env = Env::default();
     let (client, _contract_id, _admin, _borrower) = setup_no_mock(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn unfreeze_draws_reverts_without_auth() {
             },
         }],
     )
-    .freeze_draws();
+    .freeze_draws(&FreezeReason::LiquidityReserve);
     client.unfreeze_draws();
 }
 
@@ -306,7 +306,7 @@ fn freeze_draws_wrong_signer_reverts() {
             },
         }],
     )
-    .freeze_draws();
+    .freeze_draws(&FreezeReason::LiquidityReserve);
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn unfreeze_draws_wrong_signer_reverts() {
             },
         }],
     )
-    .freeze_draws();
+    .freeze_draws(&FreezeReason::LiquidityReserve);
     let attacker = Address::generate(&env);
     client.mock_auths(
         &[soroban_sdk::testutils::MockAuth {
@@ -455,7 +455,7 @@ fn unfreeze_borrower_wrong_signer_reverts() {
 fn is_draws_frozen_requires_no_auth() {
     let env = Env::default();
     let (client, _admin, _borrower) = setup(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     let _ = client.is_draws_frozen();
 
@@ -469,7 +469,7 @@ fn is_draws_frozen_requires_no_auth() {
 fn get_draws_freeze_reason_requires_no_auth() {
     let env = Env::default();
     let (client, _admin, _borrower) = setup(&env);
-    client.freeze_draws();
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
 
     let _ = client.get_draws_freeze_reason();
 
