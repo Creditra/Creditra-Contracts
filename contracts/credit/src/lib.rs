@@ -1772,40 +1772,24 @@ impl Credit {
         crate::storage::get_credit_line_count(&env)
     }
 
-    /// Enumerate credit lines in stable insertion order.
+    /// Cursor-based pagination over all credit lines.
     ///
-    /// `start_after` is an exclusive cursor over the stable numeric id.
-    /// Results are capped by `MAX_ENUMERATION_LIMIT` for predictable cost.
+    /// Walks `CreditLineBorrowerById` starting at `cursor` (inclusive) and
+    /// yields up to `limit` lines. Returns `(lines, next_cursor)` where
+    /// `next_cursor` is `None` when the end of the enumeration space is reached.
+    ///
+    /// `limit` is capped at `MAX_ENUMERATION_LIMIT` (100) regardless of the
+    /// caller-supplied value. When `skip_closed` is `true`, lines with
+    /// `status == Closed` are omitted.
+    ///
+    /// No authentication required — this is a pure read.
     pub fn enumerate_credit_lines(
         env: Env,
-        start_after: Option<u32>,
+        cursor: u32,
         limit: u32,
-    ) -> Vec<(u32, CreditLineData)> {
-        let count = crate::storage::get_credit_line_count(&env);
-        let capped_limit = limit.min(MAX_ENUMERATION_LIMIT);
-        let mut out = Vec::new(&env);
-
-        if capped_limit == 0 || count == 0 {
-            return out;
-        }
-
-        let mut next_id = start_after.map(|id| id.saturating_add(1)).unwrap_or(0);
-        let mut returned = 0_u32;
-        while next_id < count && returned < capped_limit {
-            if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
-                if let Some(line) = env
-                    .storage()
-                    .persistent()
-                    .get::<Address, CreditLineData>(&borrower)
-                {
-                    out.push_back((next_id, line));
-                    returned = returned.saturating_add(1);
-                }
-            }
-            next_id = next_id.saturating_add(1);
-        }
-
-        out
+        skip_closed: bool,
+    ) -> (soroban_sdk::Vec<CreditLineData>, Option<u32>) {
+        query::enumerate_credit_lines(env, cursor, limit, skip_closed)
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
