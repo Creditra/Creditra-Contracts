@@ -5,9 +5,11 @@
 //! # What
 //!
 //! Exposes [`freeze_capabilities`], a pure read-only view that returns a `u64`
-//! bitmask of every freeze feature supported by this contract version. Clients
-//! and off-chain tooling can call this view to detect capability deltas across
-//! contract upgrades without simulating any state-changing transaction.
+//! bitmask of every freeze feature supported by this contract version, and
+//! [`get_state`], a read-only view returning a full [`FreezeState`] snapshot.
+//! Clients and off-chain tooling can call these views to detect capability
+//! deltas across contract upgrades without simulating any state-changing
+//! transaction.
 //!
 //! # Design
 //!
@@ -29,12 +31,13 @@
 //! | [`CAPABILITY_FREEZE_REASON`]       | 3   | `0x08` | `get_draws_freeze_reason`, `get_credit_line_freeze_reason` |
 //! | [`CAPABILITY_BORROWER_EXPIRY`]     | 4   | `0x10` | `get_borrower_frozen_until`, time-bounded freeze     |
 //! | [`CAPABILITY_FREEZE_COOLDOWN`]     | 5   | `0x20` | admin cool-off guard on all state-changing freeze ops |
+//! | [`CAPABILITY_GET_STATE`]           | 6   | `0x40` | `get_state` full state snapshot view                  |
 //!
 //! # See also
 //! - [`contracts/collateral/src/views.rs`] — canonical bitmap pattern.
 //! - [`contracts/freeze/tests/views_capabilities.rs`] — focused unit tests.
 
-use soroban_sdk::Env;
+use soroban_sdk::{contracttype, Address, Env};
 
 // ── Per-feature capability constants ──────────────────────────────────────
 
@@ -80,6 +83,15 @@ pub const CAPABILITY_BORROWER_EXPIRY: u64 = 1 << 4;
 /// overwhelming on-chain indexers or bypassing rate-limit policies.
 pub const CAPABILITY_FREEZE_COOLDOWN: u64 = 1 << 5;
 
+/// Bit 6 (`0x40`): Read-only `get_state` full state snapshot view.
+///
+/// Set when the contract exposes [`get_state`], a convenience view returning
+/// a [`FreezeState`] struct with the contract admin and global freeze flag.
+/// Enables off-chain dashboards and indexers to obtain a complete contract
+/// state snapshot in a single read without calling `get_admin` +
+/// `is_globally_frozen` separately.
+pub const CAPABILITY_GET_STATE: u64 = 1 << 6;
+
 // ── Aggregate ─────────────────────────────────────────────────────────────
 
 /// Aggregate bitmask of all currently supported freeze capabilities.
@@ -92,7 +104,8 @@ pub const ALL_FREEZE_CAPABILITIES: u64 = CAPABILITY_FREEZE_DRAWS
     | CAPABILITY_FREEZE_BORROWER
     | CAPABILITY_FREEZE_REASON
     | CAPABILITY_BORROWER_EXPIRY
-    | CAPABILITY_FREEZE_COOLDOWN;
+    | CAPABILITY_FREEZE_COOLDOWN
+    | CAPABILITY_GET_STATE;
 
 // ── View function ──────────────────────────────────────────────────────────
 
@@ -128,4 +141,65 @@ pub const ALL_FREEZE_CAPABILITIES: u64 = CAPABILITY_FREEZE_DRAWS
 /// ```
 pub fn freeze_capabilities(_env: &Env) -> u64 {
     ALL_FREEZE_CAPABILITIES
+}
+
+// ── FreezeState ───────────────────────────────────────────────────────────
+
+/// Full state snapshot for the freeze contract.
+///
+/// Returned by [`get_state`] to provide a comprehensive read-only view of the
+/// contract's current state: admin address and global freeze status.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FreezeState {
+    /// Contract admin address, `None` if the contract has not been initialized.
+    pub admin: Option<Address>,
+    /// Whether global protocol emergency freeze is active.
+    pub global_freeze_active: bool,
+}
+
+// ── get_state view ────────────────────────────────────────────────────────
+
+/// Return a full read-only state snapshot for the freeze contract.
+///
+/// # What
+///
+/// Assembles the contract admin address and global freeze flag into a single
+/// [`FreezeState`] struct, avoiding the need for callers to issue separate
+/// `get_admin` and `is_globally_frozen` queries.
+///
+/// # Parameters
+/// - `env`: Soroban execution environment.
+///
+/// # Returns
+///
+/// A [`FreezeState`] struct containing:
+/// - `admin`: The contract admin address, or `None` if uninitialized.
+/// - `global_freeze_active`: `true` when the global emergency freeze is active.
+///
+/// # Security
+///
+/// - **No authentication required** — this is a pure read-only view.
+/// - **No state mutations** — only instance-storage reads are performed.
+/// - **No cross-contract calls** — the value is derived from local storage.
+///
+/// # Example
+///
+/// ```ignore
+/// let state = get_state(&env);
+/// assert_eq!(state.admin, Some(expected_admin));
+/// assert_eq!(state.global_freeze_active, false);
+/// ```
+pub fn get_state(env: &Env) -> FreezeState {
+    let admin: Option<Address> = env.storage().instance().get(&crate::DataKey::Admin);
+    let global_freeze_active = env
+        .storage()
+        .instance()
+        .get::<_, bool>(&crate::DataKey::GlobalFreeze)
+        .unwrap_or(false);
+
+    FreezeState {
+        admin,
+        global_freeze_active,
+    }
 }
