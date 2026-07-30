@@ -2,7 +2,7 @@
 name = "creditra-freeze"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra freeze Soroban smart contract"
+description = "Creditra freeze auth-boundary integration tests"
 license = "MIT"
 keywords = ["soroban", "stellar", "freeze", "credit", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
@@ -18,10 +18,6 @@ creditra-credit = { path = "../credit" }
 [[test]]
 name = "auth_boundary"
 path = "tests/auth_boundary.rs"
-
-[[test]]
-name = "events"
-path = "tests/events.rs"
 
 [[test]]
 name = "auth_snap"

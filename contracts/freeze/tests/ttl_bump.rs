@@ -37,7 +37,7 @@ const INSTANCE_BUMP_THRESHOLD: u32 = 1_555_200;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Deploy and initialise the credit contract, open a credit line for `borrower`.
-fn setup() -> (Env, Address, Address, CreditClient<'static>) {
+fn setup() -> (Env, Address, Address, Address, CreditClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
@@ -46,7 +46,7 @@ fn setup() -> (Env, Address, Address, CreditClient<'static>) {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
     client.open_credit_line(&borrower, &1_000_000, &300, &50);
-    (env, contract_id, borrower, client)
+    (env, contract_id, admin, borrower, client)
 }
 
 /// Return the current instance storage TTL for the contract.
@@ -72,7 +72,7 @@ fn drain_instance_ttl(env: &Env, contract_id: &Address) {
 /// the refresh threshold.
 #[test]
 fn is_draws_frozen_bumps_instance_ttl_when_below_threshold() {
-    let (env, contract_id, _borrower, client) = setup();
+    let (env, contract_id, _admin, _borrower, client) = setup();
 
     client.freeze_draws(&FreezeReason::LiquidityReserve);
     drain_instance_ttl(&env, &contract_id);
@@ -92,7 +92,7 @@ fn is_draws_frozen_bumps_instance_ttl_when_below_threshold() {
 /// `get_draws_freeze_reason` must bump instance TTL when below threshold.
 #[test]
 fn get_draws_freeze_reason_bumps_instance_ttl_when_below_threshold() {
-    let (env, contract_id, _borrower, client) = setup();
+    let (env, contract_id, _admin, _borrower, client) = setup();
 
     client.freeze_draws(&FreezeReason::Compliance);
     drain_instance_ttl(&env, &contract_id);
@@ -114,7 +114,7 @@ fn get_draws_freeze_reason_bumps_instance_ttl_when_below_threshold() {
 /// an unnecessary TTL extension write.
 #[test]
 fn is_draws_frozen_does_not_write_ttl_when_healthy() {
-    let (env, contract_id, _borrower, client) = setup();
+    let (env, contract_id, _admin, _borrower, client) = setup();
 
     client.freeze_draws(&FreezeReason::LiquidityReserve);
 
@@ -135,7 +135,7 @@ fn is_draws_frozen_does_not_write_ttl_when_healthy() {
 /// `is_credit_line_frozen` must bump persistent TTL when below threshold.
 #[test]
 fn is_credit_line_frozen_bumps_persistent_ttl_when_below_threshold() {
-    let (env, contract_id, borrower, client) = setup();
+    let (env, contract_id, admin, borrower, client) = setup();
 
     client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
     let ttl_before = client.get_credit_line_freeze_reason(&borrower);
@@ -156,7 +156,7 @@ fn is_credit_line_frozen_bumps_persistent_ttl_when_below_threshold() {
 /// `get_credit_line_freeze_reason` must bump persistent TTL when below threshold.
 #[test]
 fn get_credit_line_freeze_reason_bumps_persistent_ttl_when_below_threshold() {
-    let (env, contract_id, borrower, client) = setup();
+    let (env, contract_id, admin, borrower, client) = setup();
 
     client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
     drain_instance_ttl(&env, &contract_id);
@@ -177,10 +177,10 @@ fn get_credit_line_freeze_reason_bumps_persistent_ttl_when_below_threshold() {
 /// `is_borrower_frozen` must bump persistent TTL when below threshold.
 #[test]
 fn is_borrower_frozen_bumps_persistent_ttl_when_below_threshold() {
-    let (env, contract_id, borrower, client) = setup();
+    let (env, contract_id, admin, borrower, client) = setup();
 
     let now = env.ledger().timestamp();
-    client.freeze_borrower_until(&borrower, &(now + 3600));
+    client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
     drain_instance_ttl(&env, &contract_id);
 
     let before = instance_ttl(&env, &contract_id);
@@ -198,10 +198,10 @@ fn is_borrower_frozen_bumps_persistent_ttl_when_below_threshold() {
 /// `get_borrower_frozen_until` must bump persistent TTL when below threshold.
 #[test]
 fn get_borrower_frozen_until_bumps_persistent_ttl_when_below_threshold() {
-    let (env, contract_id, borrower, client) = setup();
+    let (env, contract_id, admin, borrower, client) = setup();
 
     let now = env.ledger().timestamp();
-    client.freeze_borrower_until(&borrower, &(now + 7200));
+    client.freeze_borrower_until(&admin, &borrower, &(now + 7200));
     drain_instance_ttl(&env, &contract_id);
 
     let before = instance_ttl(&env, &contract_id);
@@ -223,13 +223,13 @@ fn get_borrower_frozen_until_bumps_persistent_ttl_when_below_threshold() {
 /// extended to `INSTANCE_BUMP_AMOUNT` after each one.
 #[test]
 fn every_freeze_read_entrypoint_bumps_ttl() {
-    let (env, contract_id, borrower, client) = setup();
+    let (env, contract_id, admin, borrower, client) = setup();
 
     // Seed freeze state.
     let now = env.ledger().timestamp();
     client.freeze_draws(&FreezeReason::LiquidityReserve);
     client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
-    client.freeze_borrower_until(&borrower, &(now + 3600));
+    client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
 
     // ① is_draws_frozen
     drain_instance_ttl(&env, &contract_id);

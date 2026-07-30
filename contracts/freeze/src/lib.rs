@@ -1,15 +1,30 @@
 // SPDX-License-Identifier: MIT
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
-//! Creditra freeze contract: account and global emergency freeze management.
+//! Creditra freeze contract (v7): account and global emergency freeze management.
 //!
 //! # Safety & Authentication Audit
 //! All state-changing entrypoints require explicit signature/authentication verification
 //! by calling `require_auth()` on the acting address (`admin` or `freezer`).
+//!
+//! Freeze controls live in [`creditra_credit::freeze`] and the matching
+//! entrypoints on [`creditra_credit::Credit`]. This package anchors focused
+//! per-entrypoint authorization boundary tests and exposes a read-only
+//! [`views::freeze_capabilities`] bitmap so clients can detect supported
+//! freeze features at runtime.
+//!
+//! # Public surface
+//!
+//! | Module  | What                                                          |
+//! |---------|---------------------------------------------------------------|
+//! | `errors`| Stable ABI-pinned [`FreezeError`] catalog (mirror + specific) |
+//! | `views` | Read-only [`freeze_capabilities`] bitmap (v7)                  |
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
 };
+
+pub mod views;
 
 /// Storage keys for freeze contract storage.
 #[contracttype]
@@ -568,6 +583,23 @@ impl FreezeContract {
             .unwrap_or(false)
     }
 
+    /// Return a full read-only state snapshot for the freeze contract.
+    ///
+    /// # Parameters
+    /// - `env`: Soroban environment handle.
+    ///
+    /// # Returns
+    ///
+    /// A [`FreezeState`](views::FreezeState) struct containing:
+    /// - `admin`: The contract admin address, or `None` if uninitialized.
+    /// - `global_freeze_active`: `true` when the global emergency freeze is active.
+    ///
+    /// # View Function
+    /// Non-state-changing query. No auth required.
+    pub fn get_state(env: Env) -> views::FreezeState {
+        views::get_state(&env)
+    }
+
     // Helper functions
 
     fn require_admin(env: &Env) -> Address {
@@ -837,6 +869,7 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "HostError")]
     fn test_auth_verifications() {
         let env = Env::default();
         // Do not call env.mock_all_auths(); auth verification should check require_auth
@@ -845,33 +878,102 @@ mod test {
         let client = FreezeContractClient::new(&env, &contract_id);
         
         // env.mock_all_auths() was not called, so calls will fail auth check
-        let res = std::panic::catch_unwind(|| {
-            client.init(&admin);
-        });
-        assert!(res.is_err());
+        client.init(&admin);
+    }
+
+    // ── get_state view tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_get_state_after_init() {
+        let (env, client, admin) = setup_test_env();
+
+        let state = client.get_state();
+        assert_eq!(state.admin, Some(admin));
+        assert_eq!(state.global_freeze_active, false);
+    }
+
+    #[test]
+    fn test_get_state_global_freeze_active() {
+        let (_env, client, admin) = setup_test_env();
+
+        client.toggle_global_freeze(&admin, &true);
+        let state = client.get_state();
+        assert_eq!(state.global_freeze_active, true);
+
+        client.toggle_global_freeze(&admin, &false);
+        let state = client.get_state();
+        assert_eq!(state.global_freeze_active, false);
+    }
+
+    #[test]
+    fn test_get_state_after_admin_change() {
+        let (_env, client, admin) = setup_test_env();
+        let new_admin = Address::generate(&_env);
+
+        client.set_admin(&admin, &new_admin);
+        let state = client.get_state();
+        assert_eq!(state.admin, Some(new_admin));
+    }
+
+    #[test]
+    fn test_get_state_uninitialized_returns_none_admin() {
+        let env = Env::default();
+        let contract_id = env.register(FreezeContract, ());
+        let client = FreezeContractClient::new(&env, &contract_id);
+
+        let state = client.get_state();
+        assert_eq!(state.admin, None);
+        assert_eq!(state.global_freeze_active, false);
+    }
+
+    #[test]
+    fn test_get_state_no_auth_required() {
+        let env = Env::default();
+        // No mock_all_auths — get_state is a read-only view and requires no auth.
+        let admin = Address::generate(&env);
+        let contract_id = env.register(FreezeContract, ());
+        let client = FreezeContractClient::new(&env, &contract_id);
+
+        // Even uninitialized, get_state should not panic on auth.
+        let state = client.get_state();
+        assert_eq!(state.admin, None);
+    }
+
+    /// Regression: `get_state` must always agree with the individual
+    /// `get_admin`, `is_globally_frozen` views.
+    #[test]
+    fn test_get_state_consistent_with_individual_views() {
+        let (_env, client, admin) = setup_test_env();
+
+        // Initial state: all three views must agree.
+        let state = client.get_state();
+        assert_eq!(state.admin, client.get_admin());
+        assert_eq!(state.global_freeze_active, client.is_globally_frozen());
+
+        // Toggle global freeze and verify consistency.
+        client.toggle_global_freeze(&admin, &true);
+        let state = client.get_state();
+        assert_eq!(state.global_freeze_active, client.is_globally_frozen());
+        assert_eq!(state.admin, client.get_admin());
+
+        // Unfreeze and verify.
+        client.toggle_global_freeze(&admin, &false);
+        let state = client.get_state();
+        assert_eq!(state.global_freeze_active, client.is_globally_frozen());
+        assert_eq!(state.admin, client.get_admin());
+
+        // Change admin and verify.
+        let new_admin = Address::generate(&_env);
+        client.set_admin(&admin, &new_admin);
+        let state = client.get_state();
+        assert_eq!(state.admin, client.get_admin());
+        assert_eq!(state.global_freeze_active, client.is_globally_frozen());
     }
 }
-#![cfg_attr(not(test), no_std)]
-
-//! Creditra freeze contract (v7).
-//!
-//! Freeze controls live in [`creditra_credit::freeze`] and the matching
-//! entrypoints on [`creditra_credit::Credit`]. This package anchors focused
-//! per-entrypoint authorization boundary tests and exposes a read-only
-//! [`views::freeze_capabilities`] bitmap so clients can detect supported
-//! freeze features at runtime.
-//!
-//! # Public surface
-//!
-//! | Module  | What                                                          |
-//! |---------|---------------------------------------------------------------|
-//! | `errors`| Stable ABI-pinned [`FreezeError`] catalog (mirror + specific) |
-//! | `views` | Read-only [`freeze_capabilities`] bitmap (v7)                  |
 
 pub use creditra_credit::*;
 
 pub mod errors;
 pub use errors::*;
 
-pub mod views;
 pub use views::*;
