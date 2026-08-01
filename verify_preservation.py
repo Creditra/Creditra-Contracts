@@ -33,6 +33,7 @@ def verify_file_structure(file_path, expected_header="// SPDX-License-Identifier
             return False
         print(f"  ✓ File has {len(lines)} lines")
         
+
         # Check file has code content (not just comments)
         has_code = any(
             line.strip() and 
@@ -62,6 +63,7 @@ def verify_events_rs_unchanged():
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
+
         # Check that the original doc comment is still there (now on line 3)
         expected_doc = "//! Event types and topic constants for the Credit contract."
         if lines[2].strip() == expected_doc:
