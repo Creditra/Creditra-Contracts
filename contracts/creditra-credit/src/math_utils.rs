@@ -182,10 +182,7 @@ mod tests {
     fn mul_div_large_values_floor() {
         // u128::MAX / 2 × 2 / 2 = u128::MAX / 2
         let half = Uint128::from(u128::MAX / 2);
-        assert_eq!(
-            mul_div(half, 2, 2, Rounding::Floor),
-            Some(half)
-        );
+        assert_eq!(mul_div(half, 2, 2, Rounding::Floor), Some(half));
     }
 
     #[test]
@@ -208,18 +205,12 @@ mod tests {
 
     #[test]
     fn mul_div_zero_denominator_returns_none() {
-        assert_eq!(
-            mul_div(Uint128::new(100), 1, 0, Rounding::Floor),
-            None
-        );
+        assert_eq!(mul_div(Uint128::new(100), 1, 0, Rounding::Floor), None);
     }
 
     #[test]
     fn mul_div_overflow_returns_none() {
         // Uint128::MAX × 2 overflows
-        assert_eq!(
-            mul_div(Uint128::MAX, 2, 1, Rounding::Floor),
-            None
-        );
+        assert_eq!(mul_div(Uint128::MAX, 2, 1, Rounding::Floor), None);
     }
 }

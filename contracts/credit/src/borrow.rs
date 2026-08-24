@@ -13,6 +13,8 @@ use crate::storage::{
 use crate::types::{ContractError, CreditLineData, CreditStatus};
 use soroban_sdk::{token, Address, Env};
 
+use crate::types::{ContractError, CreditStatus};
+
 /// Map a credit-line status to the draw-time error, if any.
 ///
 /// Restricted is intentionally allowed to reach the numeric limit check in

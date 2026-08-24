@@ -1,8 +1,8 @@
-use crate::storage::{get_borrower_by_credit_line_id, grace_period_key, MAX_ENUMERATION_LIMIT};
+use crate::storage::grace_period_key;
 use crate::types::{
     CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
 };
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
 ///
@@ -209,81 +209,4 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
     env.ledger().timestamp() > delinquent_after
-}
-
-/// Cursor-based pagination over all credit lines.
-///
-/// Walks `CreditLineBorrowerById` starting at `cursor` (inclusive) and yields
-/// up to `limit` lines. Returns the collected lines together with a
-/// `next_cursor` that is `Some(id)` when more data remains, or `None` when the
-/// end of the enumeration space has been reached.
-///
-/// # Parameters
-///
-/// - `cursor`: Stable numeric id to start from (inclusive). Pass `0` for the
-///   first page.
-/// - `limit`: Maximum number of lines to return. Capped at
-///   `MAX_ENUMERATION_LIMIT` (100) regardless of the caller-supplied value.
-/// - `skip_closed`: When `true`, lines with `status == CreditStatus::Closed`
-///   are omitted from the result.
-///
-/// # Returns
-///
-/// A tuple `(lines, next_cursor)`:
-/// - `lines`: Soroban `Vec<CreditLineData>` for the current page.
-/// - `next_cursor`: `Some(id)` to fetch the next page, or `None` when this was
-///   the last page.
-///
-/// # Authentication
-///
-/// No authentication required. This is a pure read — it does not mutate any
-/// storage.
-///
-/// # Accrual note
-///
-/// Interest accrual is lazy. The returned `CreditLineData` reflects the last
-/// mutating call (draw, repay, suspend, etc.); pending interest since the last
-/// checkpoint is **not** applied by this query.
-pub fn enumerate_credit_lines(
-    env: Env,
-    cursor: u32,
-    limit: u32,
-    skip_closed: bool,
-) -> (Vec<CreditLineData>, Option<u32>) {
-    let count = crate::storage::get_credit_line_count(&env);
-    let capped_limit = limit.min(MAX_ENUMERATION_LIMIT);
-    let mut out: Vec<CreditLineData> = Vec::new(&env);
-
-    // Nothing to return: empty store, zero limit, or cursor past the end.
-    if capped_limit == 0 || count == 0 || cursor >= count {
-        return (out, None);
-    }
-
-    let mut next_id = cursor;
-    let mut returned = 0_u32;
-    while next_id < count && returned < capped_limit {
-        if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
-            if let Some(line) = env
-                .storage()
-                .persistent()
-                .get::<Address, CreditLineData>(&borrower)
-            {
-                if !skip_closed || line.status != CreditStatus::Closed {
-                    out.push_back(line);
-                    returned = returned.saturating_add(1);
-                }
-            }
-        }
-        next_id = next_id.saturating_add(1);
-    }
-
-    // If we haven't exhausted the enumeration space, provide a cursor for the
-    // next page. Otherwise signal completion with `None`.
-    let next_cursor = if next_id < count {
-        Some(next_id)
-    } else {
-        None
-    };
-
-    (out, next_cursor)
 }

@@ -37,9 +37,7 @@ use cosmwasm_std::testing::{
 };
 use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
 use creditra_credit::contract::{execute, instantiate, query};
-use creditra_credit::msg::{
-    BorrowerHealthFactorResponse, ExecuteMsg, InstantiateMsg, QueryMsg,
-};
+use creditra_credit::msg::{BorrowerHealthFactorResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use proptest::prelude::*;
 use proptest::test_runner::Config as ProptestConfig;
 

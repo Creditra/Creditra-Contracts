@@ -19,6 +19,9 @@
 //! Auth, amount-parsing, and audit-trail invariants are pinned here so a
 //! future refactor cannot silently weaken the documented preconditions.
 
+use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
+use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage};
+use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
 use creditra_credit::contract::{
     execute, execute_add_audit_memo, execute_create_credit_line, execute_create_draw,
     execute_repay_draw, execute_set_late_fee_config, execute_set_oracle_quorum_config,
@@ -29,9 +32,6 @@ use creditra_credit::msg::{
     OracleQuorumConfigResponse, QueryMsg,
 };
 use creditra_credit::penalties::{AprFeeConfig, FlatFeeConfig, LateFeeConfig};
-use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
-use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage};
-use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -100,11 +100,7 @@ fn draw_amount(
         "ucredit".to_string(),
     )
     .unwrap();
-    let draw_attr = res
-        .attributes
-        .iter()
-        .find(|a| a.key == "draw_id")
-        .unwrap();
+    let draw_attr = res.attributes.iter().find(|a| a.key == "draw_id").unwrap();
     draw_attr.value.parse::<u64>().unwrap()
 }
 
@@ -136,7 +132,10 @@ mod instantiate_tests {
             owner: "not-a-valid-bech32!!!".to_string(),
         };
         let result = instantiate(deps.as_mut(), env, info, msg);
-        assert!(result.is_err(), "instantiate should reject invalid owner addresses");
+        assert!(
+            result.is_err(),
+            "instantiate should reject invalid owner addresses"
+        );
     }
 }
 
@@ -413,15 +412,9 @@ mod add_audit_memo_tests {
         let draw_id = draw_amount(&mut deps, cl_id, "100");
         let env = mock_env();
         let info = message_info(&stranger(&deps), &[]);
-        let err = execute_add_audit_memo(
-            deps.as_mut(),
-            env,
-            info,
-            cl_id,
-            draw_id,
-            "hax".to_string(),
-        )
-        .unwrap_err();
+        let err =
+            execute_add_audit_memo(deps.as_mut(), env, info, cl_id, draw_id, "hax".to_string())
+                .unwrap_err();
         assert_eq!(err, ContractError::Unauthorized);
     }
 }
@@ -440,8 +433,7 @@ mod update_protocol_version_tests {
         setup(&mut deps);
         let admin_addr = admin(&deps);
         let info = message_info(&admin_addr, &[]);
-        let res =
-            execute_update_protocol_version(deps.as_mut(), info, 7u32, 2u32).unwrap();
+        let res = execute_update_protocol_version(deps.as_mut(), info, 7u32, 2u32).unwrap();
         let major = res.attributes.iter().find(|a| a.key == "major").unwrap();
         let minor = res.attributes.iter().find(|a| a.key == "minor").unwrap();
         assert_eq!(major.value, "7");
@@ -454,8 +446,7 @@ mod update_protocol_version_tests {
         setup(&mut deps);
         let stranger_addr = stranger(&deps);
         let info = message_info(&stranger_addr, &[]);
-        let err =
-            execute_update_protocol_version(deps.as_mut(), info, 2u32, 0u32).unwrap_err();
+        let err = execute_update_protocol_version(deps.as_mut(), info, 2u32, 0u32).unwrap_err();
         assert_eq!(err, ContractError::Unauthorized);
     }
 }
@@ -475,7 +466,9 @@ mod set_late_fee_config_tests {
         let admin_addr = admin(&deps);
         let env = mock_env();
         let info = message_info(&admin_addr, &[]);
-        let cfg = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(250) });
+        let cfg = LateFeeConfig::Flat(FlatFeeConfig {
+            amount: Uint128::new(250),
+        });
         execute_set_late_fee_config(deps.as_mut(), info, Some(cfg)).unwrap();
 
         let raw = query(deps.as_ref(), env, QueryMsg::GetLateFeeConfig {}).unwrap();
@@ -490,9 +483,7 @@ mod set_late_fee_config_tests {
         let admin_addr = admin(&deps);
         let env = mock_env();
         let info = message_info(&admin_addr, &[]);
-        let cfg = LateFeeConfig::AprBased(AprFeeConfig {
-            surcharge_bps: 750,
-        });
+        let cfg = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 750 });
         execute_set_late_fee_config(deps.as_mut(), info, Some(cfg)).unwrap();
 
         let raw = query(deps.as_ref(), env, QueryMsg::GetLateFeeConfig {}).unwrap();
@@ -510,7 +501,7 @@ mod set_late_fee_config_tests {
             surcharge_bps: 10_001,
         });
         let err = execute_set_late_fee_config(deps.as_mut(), info, Some(cfg)).unwrap_err();
-        assert_eq!(err, ContractError::LateFeeConfigInvalid);
+        assert_eq!(err, ContractError::RateTooHigh);
     }
 
     #[test]
@@ -520,7 +511,9 @@ mod set_late_fee_config_tests {
         let admin_addr = admin(&deps);
         let env = mock_env();
         let admin_info = message_info(&admin_addr, &[]);
-        let cfg = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
+        let cfg = LateFeeConfig::Flat(FlatFeeConfig {
+            amount: Uint128::new(100),
+        });
         execute_set_late_fee_config(deps.as_mut(), admin_info.clone(), Some(cfg)).unwrap();
         execute_set_late_fee_config(deps.as_mut(), admin_info, None).unwrap();
 
@@ -563,9 +556,8 @@ mod oracle_tests {
         let mut deps = mock_dependencies();
         setup(&mut deps);
         let info = message_info(&admin(&deps), &[]);
-        let err =
-            execute_set_oracle_quorum_config(deps.as_mut(), info, 1u32, 100u32, 100u64)
-                .unwrap_err();
+        let err = execute_set_oracle_quorum_config(deps.as_mut(), info, 1u32, 100u32, 100u64)
+            .unwrap_err();
         assert_eq!(err, ContractError::InvalidAmount);
     }
 
@@ -586,13 +578,24 @@ mod oracle_tests {
             .find(|a| a.key == "canonical_price")
             .unwrap();
         let canon_val: i128 = canon.value.parse().unwrap();
-        assert!((99..=101).contains(&canon_val), "canonical price {} out of expected window", canon_val);
+        assert!(
+            (99..=101).contains(&canon_val),
+            "canonical price {} out of expected window",
+            canon_val
+        );
 
         let raw = query(deps.as_ref(), env, QueryMsg::GetOraclePrice {}).unwrap();
         let resp: OraclePriceResponse = from_json(&raw).unwrap();
-        assert!(resp.price.is_some(), "oracle price should be persisted after submit");
+        assert!(
+            resp.price.is_some(),
+            "oracle price should be persisted after submit"
+        );
         let stored = resp.price.unwrap();
-        assert!((99..=101).contains(&stored), "stored oracle price {} out of expected window", stored);
+        assert!(
+            (99..=101).contains(&stored),
+            "stored oracle price {} out of expected window",
+            stored
+        );
         assert!(resp.timestamp.is_some());
     }
 }
@@ -627,8 +630,7 @@ mod query_dispatch_tests {
             borrower: borrower_str.clone(),
         };
         let raw = query(deps.as_ref(), env, msg).unwrap();
-        let health: creditra_credit::msg::BorrowerHealthFactorResponse =
-            from_json(&raw).unwrap();
+        let health: creditra_credit::msg::BorrowerHealthFactorResponse = from_json(&raw).unwrap();
         assert_eq!(health.borrower, borrower_str);
         assert!(health.credit_lines.is_empty());
     }

@@ -222,21 +222,6 @@ pub enum ContractError {
 /// category codes. New variants must be appended at the end.
 ///
 /// # Usage
-/// Stable error categories for client-side grouping.
-pub enum ContractErrorCategory {
-    Auth,
-    Lifecycle,
-    Numeric,
-    Limit,
-    Liquidity,
-    Risk,
-    Oracle,
-    Collateral,
-    Block,
-    Reentrancy,
-    Misc,
-}
-
 /// Use [`ContractError::category`] to map any error to its category at
 /// runtime. This allows SDK clients to group errors by category without
 /// matching on individual error codes.
@@ -302,14 +287,14 @@ impl ContractError {
 
             Self::CreditLineNotFound
             | Self::AdminAcceptTooEarly
-            | Self::InvalidAttestation
             | Self::NoPendingTreasuryWithdrawal
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound => Misc,
         }
     }
 }
-
+    }
+}
 
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
@@ -472,18 +457,6 @@ pub struct OracleConfig {
     pub max_age_seconds: u64,
 }
 
-/// Configuration for quorum-of-K oracle price resolution.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OracleQuorumConfig {
-    /// Minimum number of feeds that must agree within a window.
-    pub min_quorum_k: u32,
-    /// Maximum allowed deviation between lowest and highest price in a qualifying window, in bps.
-    pub max_deviation_bps: u32,
-    /// Maximum age of a price submission in seconds before it is considered stale.
-    pub max_age_seconds: u64,
-}
-
 /// Event emitted when the rate formula config is set or cleared.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -541,18 +514,6 @@ pub struct ProtocolSummaryView {
     pub total_collateral: i128,
     /// Count of currently Active credit lines.
     pub active_line_count: u32,
-}
-
-/// Paginated view of credit lines returned by `get_credit_lines_paginated`.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreditLinesPage {
-    /// The credit lines on this page.
-    pub lines: soroban_sdk::Vec<CreditLineData>,
-    /// Cursor for the next page, or `None` if this is the last page.
-    pub next_cursor: Option<u32>,
-    /// Whether there are more results beyond this page.
-    pub has_more: bool,
 }
 
 /// Structured taxonomy for credit-line and global draw freezes.
@@ -704,22 +665,6 @@ pub struct QueryCapabilities {
     pub is_delinquent: bool,
 }
 
-/// Read-only capabilities bitmap for collateral operations.
-///
-/// Returned by `capabilities` to let off-chain consumers inspect whether the
-/// borrower can currently deposit, withdraw, or partially release collateral
-/// without simulating the entrypoint logic.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CollateralCapabilities {
-    /// Whether collateral deposit is currently permitted.
-    pub can_deposit: bool,
-    /// Whether collateral withdrawal is currently permitted.
-    pub can_withdraw: bool,
-    /// Whether partial collateral release is currently permitted.
-    pub can_partial_release: bool,
-}
-
 /// Proof-of-reserve view for the protocol treasury.
 ///
 /// Exposes the accumulated reserves held by the protocol in a single
@@ -742,13 +687,14 @@ pub struct ProofOfReserve {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowStateSnapshot {
-    /// The full credit line data if it exists (single-element vec), or empty vec.
-    pub credit_line: soroban_sdk::Vec<CreditLineData>,
+    /// The full credit line data if it exists, or `None`.
+    pub credit_line: Option<CreditLineData>,
     /// The borrower's collateral balance.
     pub collateral_balance: i128,
     /// The borrower's current borrow capabilities.
     pub capabilities: BorrowCapabilities,
 }
+
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///

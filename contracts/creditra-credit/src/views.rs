@@ -1,5 +1,4 @@
 use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
-use cosmwasm_std::{Deps, StdError, StdResult, Uint128};
 use std::collections::BTreeMap;
 
 use crate::collateral;
@@ -371,10 +370,8 @@ pub fn query_credit_line_snapshot(
         })
         .collect();
 
-    let weighted_collateral_total =
-        collateral::weighted_collateral_total(deps, &cl.borrower).map_err(|e| {
-            ContractError::Std(cosmwasm_std::StdError::generic_err(e.to_string()))
-        })?;
+    let weighted_collateral_total = collateral::weighted_collateral_total(deps, &cl.borrower)
+        .map_err(|e| ContractError::Std(cosmwasm_std::StdError::generic_err(e.to_string())))?;
 
     // ── Health factor ─────────────────────────────────────────────────────────
     //
@@ -462,16 +459,16 @@ fn add_to_denom_collateral(
     denom: &str,
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    let entry = denom_map.entry(denom.to_string()).or_insert_with(|| {
-        DenomReserve {
+    let entry = denom_map
+        .entry(denom.to_string())
+        .or_insert_with(|| DenomReserve {
             denom: denom.to_string(),
             collateral_amount: Uint128::zero(),
             credit_limit: Uint128::zero(),
             drawn_amount: Uint128::zero(),
             repaid_amount: Uint128::zero(),
             net_outstanding: Uint128::zero(),
-        }
-    });
+        });
     entry.collateral_amount = entry.collateral_amount.checked_add(amount).map_err(|_| {
         ContractError::Std(cosmwasm_std::StdError::generic_err("Collateral overflow"))
     })?;

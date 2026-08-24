@@ -126,14 +126,14 @@ fn setup_env() -> (Env, CreditClient<'static>, Address, Vec<Address>) {
 /// This is the single invariant under test. Any violation indicates that the
 /// capitalization arithmetic has produced an inconsistent state.
 fn assert_accrued_le_utilized(client: &CreditClient<'_>, step_label: &str) {
-    let mut cursor = 0_u32;
+    let mut cursor = None;
     loop {
-        let (lines, next_cursor) = client.enumerate_credit_lines(&cursor, &8, &false);
-        if lines.is_empty() {
+        let page = client.enumerate_credit_lines(&cursor, &8);
+        if page.is_empty() {
             break;
         }
-        for i in 0..lines.len() {
-            let line = lines.get(i).unwrap();
+        for item in page.iter() {
+            let (id, line) = item;
             assert!(
                 line.accrued_interest >= 0,
                 "{step_label}: accrued_interest is negative ({}) for borrower {:?}",
@@ -147,10 +147,7 @@ fn assert_accrued_le_utilized(client: &CreditClient<'_>, step_label: &str) {
                 line.utilized_amount,
                 line.borrower,
             );
-        }
-        match next_cursor {
-            Some(c) => cursor = c,
-            None => break,
+            cursor = Some(id);
         }
     }
 }

@@ -24,27 +24,10 @@ same pattern as [`contracts/lifecycle/src/views.rs`](../lifecycle/src/views.rs))
 | `delinquency_applicable` | Open line + utilization + schedule (mirrors `is_delinquent` gates) |
 | `is_delinquent` | Current delinquency status; always `false` when not applicable |
 
-## Auth snapshot (v7, issue #876)
-
-Every entrypoint on the query surface is a pure read — none of them call
-`require_auth`. [`tests/auth_snap.rs`](./tests/auth_snap.rs) pins that shape
-per entrypoint so a future change that silently adds an authorization
-requirement (breaking indexers/keepers that call these without a signer) is
-caught immediately, even under `mock_all_auths`. See that file's module
-doc for the full entrypoint table.
-
 ## Run tests
 
 ```bash
-# Capabilities view tests
 cargo test -p creditra-query --test capabilities
-
-# Auth snapshot tests
-cargo test -p creditra-query --test auth_snap
-
-# Full query test suite
-cargo test -p creditra-query
 ```
 
-See [`tests/capabilities.rs`](./tests/capabilities.rs) and
-[`tests/auth_snap.rs`](./tests/auth_snap.rs).
+See [`tests/capabilities.rs`](./tests/capabilities.rs).

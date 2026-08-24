@@ -96,20 +96,6 @@ pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
 /// because each `Addr` serialises to a distinct canonical bech32 byte string.
 pub const BORROWER_TO_ID: Map<Addr, u64> = Map::new("bid");
 
-/// Protocol-wide default max-utilization cap (basis points).
-///
-/// When no per-borrower override is set, this default applies to all
-/// borrowers.  `10_000 bps == 100%`, meaning the borrower may draw up
-/// to the full `credit_amount` of the credit line.
-pub const DEFAULT_MAX_UTILIZATION_BPS: Item<u32> = Item::new("def_max_util");
-
-/// Per-borrower max-utilization override in basis points (0..=10_000).
-///
-/// Keyed by borrower `Addr`.  When present, it supersedes
-/// [`DEFAULT_MAX_UTILIZATION_BPS`] for that borrower.  A value of 0
-/// means the borrower may not draw at all.
-pub const BORROWER_MAX_UTILIZATION: Map<Addr, u32> = Map::new("bor_max_util");
-
 /// Multi-oracle quorum configuration for redundancy median resolution.
 #[cw_serde]
 pub struct OracleQuorumConfig {
@@ -159,6 +145,23 @@ pub const ORACLE_REPORT: Map<Addr, OracleReportData> = Map::new("orc_rpt");
 ///
 /// When absent the contract has no late-fee penalty configured.
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
+
+// ── Multi-collateral storage ────────────────────────────────────────────────
+
+/// Tokens currently posted by each borrower.
+pub const BORROWER_COLLATERAL_TOKENS: Map<&Addr, Vec<String>> = Map::new("bct");
+
+/// Raw collateral balance keyed by borrower and denomination.
+pub const COLLATERAL_BALANCES: Map<(&Addr, &str), Uint128> = Map::new("cb");
+
+/// Optional risk-weight overrides, in basis points.
+pub const COLLATERAL_RISK_WEIGHTS: Map<&str, u32> = Map::new("crw");
+
+/// Admin-managed list of accepted collateral denominations.
+pub const COLLATERAL_TOKEN_ALLOWLIST: Item<Vec<String>> = Item::new("cta");
+
+/// Default collateral risk weight: 100%.
+pub const DEFAULT_COLLATERAL_RISK_WEIGHT_BPS: u32 = 10_000;
 
 // ── Per-market fee split storage ─────────────────────────────────────────────
 

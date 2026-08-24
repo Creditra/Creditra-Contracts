@@ -29,7 +29,10 @@
 //!   for sorting and O(n) for window scanning.
 
 use crate::error::ContractError;
-use crate::state::{OraclePriceRecord, OracleQuorumConfig, OracleReportData, MAX_ORACLE_FEEDS, ORACLE_LIST, ORACLE_REPORT, ORACLE_WEIGHT};
+use crate::state::{
+    OraclePriceRecord, OracleQuorumConfig, OracleReportData, MAX_ORACLE_FEEDS, ORACLE_LIST,
+    ORACLE_REPORT, ORACLE_WEIGHT,
+};
 use cosmwasm_std::{Addr, DepsMut, Env, MessageInfo};
 
 /// Add or update an oracle's weight in the registry.
@@ -65,7 +68,12 @@ pub fn remove_oracle(deps: DepsMut, oracle: Addr) -> Result<(), ContractError> {
 
 /// Oracles report their observed value.
 /// Requires reporting oracle's auth.
-pub fn report_value(deps: DepsMut, env: Env, info: MessageInfo, value: i128) -> Result<(), ContractError> {
+pub fn report_value(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    value: i128,
+) -> Result<(), ContractError> {
     // Verify the oracle is registered
     let oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
 

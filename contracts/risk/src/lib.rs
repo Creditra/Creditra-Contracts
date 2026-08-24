@@ -44,8 +44,7 @@
 //! The guard function [`admin::assert_risk_admin_cooldown_elapsed`] is called
 //! at the top of every state-changing entrypoint. It reads both values and
 //! reverts with [`ContractError::RiskAdminCooldownActive`] when the cooldown
-//! interval has not yet elapsed. The public error-code values are ABI-stable
-//! and pinned in [`tests/err_stab.rs`](../tests/err_stab.rs).
+//! interval has not yet elapsed.
 //!
 //! ## Why
 //!

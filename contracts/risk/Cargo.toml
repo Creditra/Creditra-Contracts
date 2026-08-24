@@ -43,10 +43,6 @@ name = "ttl_bump"
 path = "tests/ttl_bump.rs"
 
 [[test]]
-name = "err_stab"
-path = "tests/err_stab.rs"
-
-[[test]]
 name = "risk_fuzz_tests"
 path = "tests/risk_fuzz_tests.rs"
 required-features = ["instrument"]

@@ -281,13 +281,6 @@ All events are emitted by the CosmWasm `creditra-credit` contract
 | `("LIQ_SETL","auction")` | 1.0.0 | No | — | |
 | `("accrual","batch")` | 1.0.0 | No | — | Accrual contract, batch-level |
 | `("accrual","accrue")` | 1.0.0 | No | — | Accrual contract, per-borrower |
-| `("collat","deposit")` | 1.0.0 | No | — | Collateral contract, deposited |
-| `("collat","withdraw")` | 1.0.0 | No | — | Collateral contract, withdrawn |
-| `("collat","updated")` | 1.0.0 | No | — | Collateral contract, updated |
-| `("collat","release")` | 1.0.0 | No | — | Collateral contract, released |
-| `("collat","liquidate")` | 1.0.0 | No | — | Collateral contract, liquidated |
-| `("collat","transfer")` | 1.0.0 | No | — | Collateral contract, transferred |
-| `("collat","closed")` | 1.0.0 | No | — | Collateral contract, closed |
 | CosmWasm `wasm` events | 1.0.0 | No | — | 7 entrypoints, see §7 |
 
 ---
@@ -372,7 +365,6 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | 2026-06-28 | Added `contracts/credit/tests/events_catalog.rs` | New integration test verifying every cataloged event is emitted with the correct topic and payload shape. |
 | 2026-07-24 | Added `DrawReversedEvent`, `CollateralPartialReleasedEvent`, oracle quorum events (`orc_qcfg`, `orc_qprc`) to catalog | Catalog was missing 4 events present in `contracts/credit/src/events.rs`. Fixed `GraceWaiverAppliedEvent` → `GraceWaiverReceiptEvent` naming to match code. Added corresponding tests. |
 | 2026-07-25 | Added accrual contract events (`contracts/accrual/`), CosmWasm contract events (`contracts/creditra-credit/`). Fixed `"default"` → `"defaulted"` lifecycle topic. Fixed `BorrowerFrozenEvent` topic from `("credit","br_freeze")` to `("br_freeze",)`. Added `Restricted = 4` to `CreditStatus`. Expanded `FreezeReason` with all 5 variants. Updated doc comment in `events.rs`. | Schema v1.0 → v1.1 |
-| 2026-07-29 | Added structured event catalog for collateral smart contract (`contracts/collateral/src/events.rs`) covering deposit, withdraw, update, release, liquidate, transfer, and closed operations under `("collat", ...)` namespace. | Added collateral lifecycle event schema |
 
 ---
 

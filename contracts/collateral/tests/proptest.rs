@@ -113,7 +113,7 @@ fn action_strategy() -> impl Strategy<Value = Action> {
     ]
 }
 
-fn action_sequence_strategy() -> impl Strategy<Value = std::vec::Vec<Action>> {
+fn action_sequence_strategy() -> impl Strategy<Value = Vec<Action>> {
     prop::collection::vec(action_strategy(), 1..20)
 }
 
@@ -145,11 +145,11 @@ fn check_invariants(harness: &CollateralHarness) {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    #![proptest_config(ProptestConfig {
+    #![proptest_config = ProptestConfig {
         // Run 50 iterations in CI, more for thorough local testing
         cases: 50,
         .. ProptestConfig::default()
-    })]
+    }]
 
     /// Core invariant: after any sequence of deposit/withdraw/admin actions,
     /// the collateral balance must never go negative, and must never exceed

@@ -25,7 +25,7 @@
 use cosmwasm_std::testing::{
     message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
 };
-use cosmwasm_std::{Addr, OwnedDeps, Uint128};
+use cosmwasm_std::{Addr, Api, OwnedDeps, Uint128};
 use creditra_credit::contract;
 use creditra_credit::msg::{ExecuteMsg, InstantiateMsg};
 use creditra_credit::state::{CREDIT_LINES, CREDIT_LINE_COUNT};
@@ -309,16 +309,10 @@ mod edge_cases {
         let owner = setup_contract(&mut deps);
 
         // These share a common prefix which could cause encoding issues
-        let id_a = create_credit_line(
-            &mut deps,
-            &owner,
-            "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx2v9hx",
-        );
-        let id_b = create_credit_line(
-            &mut deps,
-            &owner,
-            "cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrp7as",
-        );
+        let borrower_a = deps.api.addr_make("common-prefix-a").to_string();
+        let borrower_b = deps.api.addr_make("common-prefix-b").to_string();
+        let id_a = create_credit_line(&mut deps, &owner, &borrower_a);
+        let id_b = create_credit_line(&mut deps, &owner, &borrower_b);
 
         assert_ne!(id_a, id_b, "Common-prefix addresses must get distinct IDs");
 

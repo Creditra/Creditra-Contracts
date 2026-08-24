@@ -94,23 +94,6 @@ pub enum ExecuteMsg {
         denom: String,
         risk_weight_bps: u32,
     },
-    /// Set the protocol-wide default max-utilization cap (admin only).
-    ///
-    /// `max_utilization_bps` is in basis points where `10_000 == 100%`.
-    /// This default applies to all borrowers who have no per-borrower
-    /// override.  Passing `None` resets the default to 100% (10_000 bps).
-    SetMaxUtilization {
-        max_utilization_bps: Option<u32>,
-    },
-    /// Set a per-borrower max-utilization override (admin only).
-    ///
-    /// When set, this borrower's cap supersedes the protocol-wide
-    /// default returned by [`SetMaxUtilization`].  Passing `None`
-    /// removes the override, falling the borrower back to the default.
-    SetBorrowerMaxUtilization {
-        borrower: String,
-        max_utilization_bps: Option<u32>,
-    },
 }
 
 #[cw_serde]
@@ -218,41 +201,41 @@ pub struct OraclePriceResponse {
     pub timestamp: Option<u64>,
 }
 
-    /// Response for the late-fee configuration query.
-    #[cw_serde]
-    pub struct LateFeeConfigResponse {
-        /// The currently configured late-fee config, or `None` if unset.
-        pub config: Option<LateFeeConfig>,
-    }
+/// Response for the late-fee configuration query.
+#[cw_serde]
+pub struct LateFeeConfigResponse {
+    /// The currently configured late-fee config, or `None` if unset.
+    pub config: Option<LateFeeConfig>,
+}
 
-    /// A single entry in a borrower's multi-collateral portfolio.
-    #[cw_serde]
-    pub struct CollateralEntryResponse {
-        /// Token denomination.
-        pub denom: String,
-        /// Raw deposited balance (before risk weighting).
-        pub amount: Uint128,
-        /// Risk weight in basis points applied to this token.
-        pub risk_weight_bps: u32,
-    }
+/// A single entry in a borrower's multi-collateral portfolio.
+#[cw_serde]
+pub struct CollateralEntryResponse {
+    /// Token denomination.
+    pub denom: String,
+    /// Raw deposited balance (before risk weighting).
+    pub amount: Uint128,
+    /// Risk weight in basis points applied to this token.
+    pub risk_weight_bps: u32,
+}
 
-    /// Response for the multi-collateral balance query.
-    #[cw_serde]
-    pub struct CollateralBalanceResponse {
-        /// Borrower address.
-        pub borrower: String,
-        /// Per-token collateral breakdown.
-        pub entries: Vec<CollateralEntryResponse>,
-        /// Risk-weighted total across all tokens.
-        pub weighted_total: Uint128,
-    }
+/// Response for the multi-collateral balance query.
+#[cw_serde]
+pub struct CollateralBalanceResponse {
+    /// Borrower address.
+    pub borrower: String,
+    /// Per-token collateral breakdown.
+    pub entries: Vec<CollateralEntryResponse>,
+    /// Risk-weighted total across all tokens.
+    pub weighted_total: Uint128,
+}
 
-    /// Response for the collateral allowlist query.
-    #[cw_serde]
-    pub struct CollateralAllowlistResponse {
-        /// Allowed token denominations.
-        pub denoms: Vec<String>,
-    }
+/// Response for the collateral allowlist query.
+#[cw_serde]
+pub struct CollateralAllowlistResponse {
+    /// Allowed token denominations.
+    pub denoms: Vec<String>,
+}
 
 /// A single draw entry included in the credit-line snapshot.
 #[cw_serde]

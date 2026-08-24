@@ -289,8 +289,7 @@ fn verify_mul_div_snapshot() {
         if entry.overflow {
             // ── Overflow entries ──────────────────────────────────────────
             assert_eq!(
-                live,
-                None,
+                live, None,
                 "entry {i} (a={a}, numerator={numerator}, denominator={denominator}): \
                  expected None but got {:?}",
                 live,
@@ -302,7 +301,7 @@ fn verify_mul_div_snapshot() {
                 .parse()
                 .unwrap_or_else(|_| panic!("entry {i}: invalid expected '{}'", entry.expected));
 
-            let live_val = live.unwrap_or_else(|_| {
+            let live_val = live.unwrap_or_else(|| {
                 panic!(
                     "entry {i} (a={a}, numerator={numerator}, denominator={denominator}): \
                      unexpected None"
@@ -346,8 +345,7 @@ fn regenerate_mul_div_snapshot() {
             .unwrap_or_else(|e| panic!("could not create snapshots dir: {e}"));
     }
 
-    let json =
-        serde_json::to_string_pretty(&entries).expect("failed to serialise snapshot");
+    let json = serde_json::to_string_pretty(&entries).expect("failed to serialise snapshot");
     fs::write(&path, &json)
         .unwrap_or_else(|e| panic!("failed to write snapshot to '{}': {e}", path.display()));
 
@@ -367,11 +365,7 @@ fn regenerate_mul_div_snapshot() {
 
         let live = mul_div(Uint128::new(a), numerator, denominator, rounding);
         if entry.overflow {
-            assert_eq!(
-                live,
-                None,
-                "self-check failed at entry {i}: expected None"
-            );
+            assert_eq!(live, None, "self-check failed at entry {i}: expected None");
         } else {
             let expected: u128 = entry.expected.parse().unwrap();
             let v = live.unwrap();

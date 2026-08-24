@@ -9,8 +9,7 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, BorrowStateSnapshot, CollateralCapabilities, CreditLineSnapshot,
-    CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -68,26 +67,6 @@ pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
         can_self_suspend,
     }
 }
-
-/// Return a borrower's current collateral capabilities bitmap.
-///
-/// This is a read-only, no-auth view that reports whether the borrower can
-/// currently attempt collateral deposit, withdrawal, or partial release.
-/// The view uses the same prerequisite checks that the entrypoints rely on:
-/// an explicitly configured collateral token and a positive collateral balance
-/// for withdraw/release operations.
-pub fn capabilities(env: Env, borrower: Address) -> CollateralCapabilities {
-    let token_configured = crate::storage::get_collateral_token(&env).is_some();
-    let has_balance = crate::storage::get_collateral_balance(&env, &borrower) > 0;
-
-    CollateralCapabilities {
-        can_deposit: token_configured,
-        can_withdraw: token_configured && has_balance,
-        can_partial_release: token_configured && has_balance,
-    }
-}
-
-// ── Protocol-level views ─────────────────────────────────────────────────────
 
 /// Assemble a full read-only snapshot of `borrower`'s credit line.
 ///
@@ -268,10 +247,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
 /// and does not mutate any state. TTL may be bumped if the borrower's
 /// persistent entry is near expiry, but this does not change logical state.
 pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
-    let mut credit_line = soroban_sdk::Vec::new(&env);
-    if let Some(line) = get_credit_line(&env, &borrower) {
-        credit_line.push_back(line);
-    }
+    let credit_line = get_credit_line(&env, &borrower);
     let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
     let capabilities = borrow_capabilities(env.clone(), borrower.clone());
 
