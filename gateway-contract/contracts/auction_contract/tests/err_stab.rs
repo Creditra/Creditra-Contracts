@@ -799,7 +799,7 @@ mod integration {
             &0_u32,
             &Some(500_i128), // dutch_start_price
             &Some(100_i128), // dutch_floor_price
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
 

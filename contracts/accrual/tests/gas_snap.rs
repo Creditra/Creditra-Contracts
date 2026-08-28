@@ -31,7 +31,7 @@ use soroban_sdk::{
 
 /// Reset the budget, run `f`, and return consumed CPU + memory.
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())

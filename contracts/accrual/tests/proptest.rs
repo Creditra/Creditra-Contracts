@@ -115,7 +115,7 @@ fn assert_accrued_le_utilized(client: &CreditClient<'_>, label: &str) {
 
 /// Assert `total_utilized` >= 0 (sanity check).
 fn assert_total_utilized_non_negative(client: &CreditClient<'_>, label: &str) {
-    let total = client.total_utilized();
+    let total = client.get_total_utilized();
     assert!(total >= 0, "{label}: total_utilized is negative: {total}");
 }
 

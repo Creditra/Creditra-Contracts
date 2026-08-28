@@ -349,7 +349,6 @@ fn close_auction_succeeds_with_factory_auth() {
     );
 }
 
-
 #[test]
 fn settle_liquidation_rejects_non_factory_invoker() {
     let (env, contract_id, auction_id, factory, borrower, _expected) = setup_settleable();

@@ -412,7 +412,12 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &l, &1);
 
-        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l.clone(), vec![&env]));
+        assert!(verify_attestation_proof(
+            env.clone(),
+            borrower.clone(),
+            l.clone(),
+            vec![&env]
+        ));
     }
 
     #[test]
@@ -426,8 +431,18 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l0.clone(), vec![&env, l1.clone()]));
-        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l1.clone(), vec![&env, l0]));
+        assert!(verify_attestation_proof(
+            env.clone(),
+            borrower.clone(),
+            l0.clone(),
+            vec![&env, l1.clone()]
+        ));
+        assert!(verify_attestation_proof(
+            env.clone(),
+            borrower.clone(),
+            l1.clone(),
+            vec![&env, l0]
+        ));
     }
 
     #[test]
@@ -442,7 +457,12 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(!verify_attestation_proof(env.clone(), borrower.clone(), wrong_leaf.clone(), vec![&env, l1]));
+        assert!(!verify_attestation_proof(
+            env.clone(),
+            borrower.clone(),
+            wrong_leaf.clone(),
+            vec![&env, l1]
+        ));
     }
 
     #[test]

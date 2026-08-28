@@ -76,6 +76,7 @@ fn drawn_event_shape() {
     publish_drawn_event(
         &env,
         DrawnEvent {
+        timestamp: 0,
             borrower: borrower.clone(),
             amount: 500,
             new_utilized_amount: 500,
@@ -214,7 +215,7 @@ fn draw_reversed_event_shape() {
 fn credit_line_freeze_event_shape() {
     let (env, borrower, _admin) = env_and_addresses();
 
-    publish_credit_line_freeze_event(&env, &borrower, FreezeReason::AdminAction, true);
+    publish_credit_line_freeze_event(&env, &borrower, FreezeReason::RiskInvestigation, true);
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
     assert_eq!(second_topic(&env, 0), Symbol::new(&env, "line_frz"));
@@ -419,8 +420,8 @@ fn contract_upgraded_shape() {
     publish_contract_upgraded_event(
         &env,
         ContractUpgradedEvent {
-            old_wasm_hash: BytesN::new(&env, &[0xAA; 32]),
-            new_wasm_hash: BytesN::new(&env, &[0xBB; 32]),
+            old_wasm_hash: BytesN::from_array(&env, &[0xAA; 32]),
+            new_wasm_hash: BytesN::from_array(&env, &[0xBB; 32]),
         },
     );
 
@@ -466,7 +467,7 @@ fn attestation_batch_committed_shape() {
         &env,
         AttestationBatchCommittedEvent {
             borrower: borrower.clone(),
-            merkle_root: BytesN::new(&env, &[0xCC; 32]),
+            merkle_root: BytesN::from_array(&env, &[0xCC; 32]),
             count: 42,
         },
     );
@@ -564,7 +565,7 @@ fn auction_closed_shape() {
 fn auction_default_liquidation_settlement_shape() {
     let (env, borrower, admin) = env_and_addresses();
 
-    publish_default_liquidation_settlement_event(
+    publish_default_liquidation_settled_event(
         &env,
         Symbol::new(&env, "auction-1"),
         admin.clone(),
@@ -604,6 +605,7 @@ fn all_credit_event_structs_instantiate() {
         new_utilized_amount: 50,
     };
     let _ = DrawnEvent {
+        timestamp: 0,
         borrower: borrower.clone(),
         amount: 100,
         new_utilized_amount: 100,
@@ -658,19 +660,16 @@ fn all_credit_event_structs_instantiate() {
     };
     let _ = CreditLineFreezeEvent {
         borrower: borrower.clone(),
-        reason: FreezeReason::AdminAction,
+        reason: FreezeReason::RiskInvestigation,
         frozen: true,
-        ledger: 100,
     };
     let _ = BorrowerBlockedEvent {
         borrower: borrower.clone(),
         blocked: true,
-        ledger: 100,
     };
     let _ = BorrowerFrozenEvent {
         borrower: borrower.clone(),
         frozen_until: 1_000_000,
-        ledger: 100,
     };
     let _ = FeeAccruedEvent {
         borrower: borrower.clone(),
@@ -718,8 +717,8 @@ fn all_credit_event_structs_instantiate() {
         amount: 100,
     };
     let _ = ContractUpgradedEvent {
-        old_wasm_hash: BytesN::new(&env, &[0x11; 32]),
-        new_wasm_hash: BytesN::new(&env, &[0x22; 32]),
+        old_wasm_hash: BytesN::from_array(&env, &[0x11; 32]),
+        new_wasm_hash: BytesN::from_array(&env, &[0x22; 32]),
     };
     let _ = LateFeeChargedEvent {
         borrower: borrower.clone(),
@@ -741,7 +740,7 @@ fn all_credit_event_structs_instantiate() {
     };
     let _ = AttestationBatchCommittedEvent {
         borrower: borrower.clone(),
-        merkle_root: BytesN::new(&env, &[0x33; 32]),
+        merkle_root: BytesN::from_array(&env, &[0x33; 32]),
         count: 10,
     };
 }

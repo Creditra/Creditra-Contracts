@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #![cfg(test)]
-extern crate std;
 
 //! Per-entrypoint authorization snapshots for the accrual (v7) subsystem.
 //!
@@ -44,12 +43,14 @@ extern crate std;
 //! - [`creditra_credit::auth::require_admin_auth`] — the admin-gating primitive.
 //! - `docs/threat-model.md` — the normative authorization matrix.
 
-use creditra_credit::{Credit, CreditClient};
-use creditra_credit::types::{CreditStatus, GraceWaiverMode, LateFeeConfig};
+extern crate std;
 use creditra_credit::penalties::{AprFeeConfig, FlatFeeConfig};
+use creditra_credit::types::{CreditStatus, GraceWaiverMode, LateFeeConfig};
+use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Ledger},
-    symbol_short, token, Address, Env, IntoVal, Symbol, Vec,
+    token, Address, Env, IntoVal, Symbol, Vec,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -147,9 +148,7 @@ fn auth_snap_set_late_fee_config_admin_only() {
     let (env, contract_id, admin) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    let cfg = LateFeeConfig::AprBased(AprFeeConfig {
-        surcharge_bps: 500,
-    });
+    let cfg = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 500 });
     client.set_late_fee_config(&Some(cfg.clone()));
 
     let auths = env.auths();
@@ -458,12 +457,16 @@ fn auth_snap_close_credit_line_third_party_closer_not_admin() {
     client.close_credit_line(&borrower, &third_party_closer);
 
     let auths = env.auths();
-    assert_eq!(
-        auths.len(), 1, "exactly one auth (the closer)");
+    assert_eq!(auths.len(), 1, "exactly one auth (the closer)");
     let (auth_addr, _contract, sym, _args) = &auths[0];
     assert_eq!(
-        auth_addr, &third_party_closer, "closer must be third party, not admin");
-    assert_ne!(auth_addr, &admin, "admin must NOT be required for third-party close");
+        auth_addr, &third_party_closer,
+        "closer must be third party, not admin"
+    );
+    assert_ne!(
+        auth_addr, &admin,
+        "admin must NOT be required for third-party close"
+    );
     assert_eq!(sym, &Symbol::new(&env, "close_credit_line"));
 }
 
@@ -481,6 +484,10 @@ fn auth_snap_sequential_admin_calls_each_require_one_admin_auth() {
 
     client.set_accrual_admin_cooldown(&600_u64);
     let auths2 = env.auths();
-    assert_eq!(auths2.len(), 1, "second call: exactly one auth (no bleed-through)");
+    assert_eq!(
+        auths2.len(),
+        1,
+        "second call: exactly one auth (no bleed-through)"
+    );
     assert_eq!(auths2[0].0, admin);
 }

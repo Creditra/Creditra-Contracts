@@ -307,7 +307,9 @@ pub fn accrual_capabilities(env: Env, borrower: Address) -> AccrualCapabilities 
     // can_accrue: line exists, Active, has utilization, protocol not paused
     let can_accrue = credit_line
         .as_ref()
-        .map(|line| !paused && line.status == crate::types::CreditStatus::Active && line.utilized_amount > 0)
+        .map(|line| {
+            !paused && line.status == crate::types::CreditStatus::Active && line.utilized_amount > 0
+        })
         .unwrap_or(false);
 
     // penalty_rate_active: surcharge configured AND borrower is delinquent

@@ -114,7 +114,7 @@ fn gas_reinstate_credit_line() {
     let (env, client, _admin, borrower) = setup_with_credit();
     client.default_credit_line(&borrower);
     snap("reinstate_credit_line", &env, || {
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &creditra_credit::types::CreditStatus::Active);
     });
 }
 
@@ -140,7 +140,7 @@ fn lifecycle_gas_summary() {
         client.default_credit_line(&borrower);
     });
     measure_one!("reinstate_credit_line", {
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &creditra_credit::types::CreditStatus::Active);
     });
     measure_one!("self_suspend_credit_line", {
         client.self_suspend_credit_line(&borrower);
