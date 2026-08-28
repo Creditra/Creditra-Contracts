@@ -1,7 +1,8 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Storage, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map};
 
+use crate::error::ContractError;
 use crate::penalties::LateFeeConfig;
 
 #[cw_serde]
@@ -89,6 +90,29 @@ pub const DRAWS: Map<(u64, u64), Draw> = Map::new("dr");
 
 pub const DRAW_AUDIT_COUNT: Map<(u64, u64), u64> = Map::new("dacnt");
 pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
+
+/// Sum of unrepaid draw amounts on a credit line.
+///
+/// Missing `DRAW_COUNT` is treated as zero draws. Missing individual draw
+/// records are skipped. Overflow on the running sum returns
+/// [`ContractError::Overflow`].
+pub fn outstanding_utilization(
+    storage: &dyn Storage,
+    credit_line_id: u64,
+) -> Result<Uint128, ContractError> {
+    let draw_count = DRAW_COUNT.may_load(storage, credit_line_id)?.unwrap_or(0);
+    let mut utilized = Uint128::zero();
+    for did in 0..draw_count {
+        if let Some(draw) = DRAWS.may_load(storage, (credit_line_id, did))? {
+            if !draw.repaid {
+                utilized = utilized
+                    .checked_add(draw.amount)
+                    .map_err(|_| ContractError::Overflow)?;
+            }
+        }
+    }
+    Ok(utilized)
+}
 
 /// Deterministic, collision-free mapping from borrower address to their
 /// stable credit-line id.  Every `open_credit_line` call for a new borrower

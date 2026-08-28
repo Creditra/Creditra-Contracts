@@ -117,6 +117,10 @@ pub enum ContractError {
     /// Requested bounty withdrawal exceeds the accumulated bounty balance.
     #[error("InsufficientBountyBalance")]
     InsufficientBountyBalance,
+
+    /// A draw would push unrepaid utilization above the committed credit amount.
+    #[error("OverLimit")]
+    OverLimit,
 }
 
 impl ContractError {
@@ -146,6 +150,7 @@ impl ContractError {
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
             ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
+            ContractError::OverLimit => ContractErrorCategory::Validation,
         }
     }
 }
@@ -351,5 +356,14 @@ mod tests {
         assert_eq!(err.to_string(), "InsufficientBountyBalance");
         assert_eq!(err, ContractError::InsufficientBountyBalance);
         assert_ne!(err, ContractError::InsufficientTreasuryBalance);
+    }
+
+    #[test]
+    fn over_limit_display_and_equality() {
+        let err = ContractError::OverLimit;
+        assert_eq!(err.to_string(), "OverLimit");
+        assert_eq!(err, ContractError::OverLimit);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_eq!(err.category(), ContractErrorCategory::Validation);
     }
 }
