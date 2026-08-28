@@ -1,17 +1,4 @@
-use crate::collateral;
-use crate::events::{
-    publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
-    InterestAccruedEvent, RepaymentEvent,
-};
-use crate::lifecycle;
-use crate::math_utils::{apply_bps, mul_div, Rounding};
-use crate::storage::{
-    clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
-    persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD,
-};
-use crate::types::{ContractError, CreditLineData, CreditStatus};
-use soroban_sdk::{token, Address, Env};
+use crate::types::{ContractError, CreditStatus};
 
 /// Map a credit-line status to the draw-time error, if any.
 ///

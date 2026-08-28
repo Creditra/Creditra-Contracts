@@ -63,7 +63,7 @@ use crate::events::{publish_risk_admin_cooldown_configured, publish_risk_paramet
 use crate::storage::{
     assert_not_paused, assert_risk_admin_cooldown_elapsed, get_risk_admin_cooldown_seconds,
     persist_credit_line, rate_cfg_key, rate_formula_key, set_last_risk_admin_action_ts,
-    set_risk_admin_cooldown_seconds, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    set_risk_admin_cooldown_seconds,
 };
 use crate::types::{
     ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig,

@@ -32,12 +32,20 @@ fn test_from_u32_safe_known_codes() {
     assert_eq!(ContractError::from_u32_safe(11), ContractError::Reentrancy);
     assert_eq!(ContractError::from_u32_safe(12), ContractError::Overflow);
     assert_eq!(
+        ContractError::from_u32_safe(13),
+        ContractError::LimitDecreaseRequiresRepayment
+    );
+    assert_eq!(
         ContractError::from_u32_safe(14),
         ContractError::AlreadyInitialized
     );
     assert_eq!(
         ContractError::from_u32_safe(15),
         ContractError::AdminAcceptTooEarly
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(16),
+        ContractError::BorrowerBlocked
     );
     assert_eq!(
         ContractError::from_u32_safe(17),
@@ -64,6 +72,18 @@ fn test_from_u32_safe_known_codes() {
     assert_eq!(
         ContractError::from_u32_safe(24),
         ContractError::InsufficientLiquidityReserve
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(25),
+        ContractError::LiquidityTokenCallFailed
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(26),
+        ContractError::InsufficientRepaymentAllowance
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(27),
+        ContractError::InsufficientRepaymentBalance
     );
     assert_eq!(
         ContractError::from_u32_safe(28),
@@ -126,6 +146,10 @@ fn test_from_u32_safe_known_codes() {
         ContractError::NoPendingTreasuryWithdrawal
     );
     assert_eq!(
+        ContractError::from_u32_safe(43),
+        ContractError::BorrowerExposureCapExceeded
+    );
+    assert_eq!(
         ContractError::from_u32_safe(46),
         ContractError::CreditLineFrozen
     );
@@ -154,6 +178,10 @@ fn test_from_u32_safe_known_codes() {
         ContractError::InvalidRiskWeight
     );
     assert_eq!(
+        ContractError::from_u32_safe(53),
+        ContractError::InvalidAttestation
+    );
+    assert_eq!(
         ContractError::from_u32_safe(54),
         ContractError::RiskAdminCooldownActive
     );
@@ -173,16 +201,25 @@ fn test_from_u32_safe_known_codes() {
         ContractError::from_u32_safe(59),
         ContractError::LiquidationGraceActive
     );
+    assert_eq!(
+        ContractError::from_u32_safe(60),
+        ContractError::UnknownError
+    );
 }
 
 #[test]
 fn test_from_u32_safe_unknown_codes_fallback() {
+    assert_eq!(ContractError::from_u32_safe(0), ContractError::UnknownError);
     assert_eq!(
-        ContractError::from_u32_safe(13),
+        ContractError::from_u32_safe(44),
         ContractError::UnknownError
     );
     assert_eq!(
-        ContractError::from_u32_safe(16),
+        ContractError::from_u32_safe(45),
+        ContractError::UnknownError
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(56),
         ContractError::UnknownError
     );
     assert_eq!(
@@ -210,8 +247,10 @@ fn variant_count_is_known() {
         ContractError::UtilizationNotZero,
         ContractError::Reentrancy,
         ContractError::Overflow,
+        ContractError::LimitDecreaseRequiresRepayment,
         ContractError::AlreadyInitialized,
         ContractError::AdminAcceptTooEarly,
+        ContractError::BorrowerBlocked,
         ContractError::DrawExceedsMaxAmount,
         ContractError::Paused,
         ContractError::DrawsFrozen,
@@ -220,6 +259,9 @@ fn variant_count_is_known() {
         ContractError::MissingLiquidityToken,
         ContractError::MissingLiquiditySource,
         ContractError::InsufficientLiquidityReserve,
+        ContractError::LiquidityTokenCallFailed,
+        ContractError::InsufficientRepaymentAllowance,
+        ContractError::InsufficientRepaymentBalance,
         ContractError::RepayExceedsMaxAmount,
         ContractError::DrawCooldownActive,
         ContractError::TreasuryNotSet,
@@ -235,6 +277,7 @@ fn variant_count_is_known() {
         ContractError::BorrowerFrozen,
         ContractError::BountyNotSet,
         ContractError::NoPendingTreasuryWithdrawal,
+        ContractError::BorrowerExposureCapExceeded,
         ContractError::CreditLineFrozen,
         ContractError::DrawReversalWindowExpired,
         ContractError::OriginalDrawNotFound,
@@ -242,12 +285,13 @@ fn variant_count_is_known() {
         ContractError::OracleQuorumNotMet,
         ContractError::AlreadySettled,
         ContractError::InvalidRiskWeight,
-        ContractError::UnknownError,
+        ContractError::InvalidAttestation,
         ContractError::RiskAdminCooldownActive,
         ContractError::OracleNotFound,
         ContractError::FreezeCooldownActive,
         ContractError::AdminCollateralCooldownActive,
         ContractError::LiquidationGraceActive,
+        ContractError::UnknownError,
     ];
-    assert_eq!(variants.len(), 50, "Variant count must remain stable");
+    assert_eq!(variants.len(), 57, "Variant count must remain stable");
 }

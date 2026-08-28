@@ -259,7 +259,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                         GraceWaiverMode::ReducedRate => prorate_interest(
                             line.utilized_amount as u128,
                             cfg.reduced_rate_bps,
-                            (now - accrual_start) as u64,
+                            ((now - accrual_start)),
                             Rounding::Floor,
                         ),
                     }
@@ -268,13 +268,13 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                     prorate_interest(
                         line.utilized_amount as u128,
                         effective_rate_bps,
-                        (now - accrual_start) as u64,
+                        ((now - accrual_start)),
                         Rounding::Floor,
                     )
                 } else {
                     // Straddles grace boundary — prorate two sub-periods and add.
-                    let in_window_secs = (grace_end - accrual_start) as u64;
-                    let post_window_secs = (now - grace_end) as u64;
+                    let in_window_secs = (grace_end - accrual_start);
+                    let post_window_secs = (now - grace_end);
 
                     let in_window = match cfg.waiver_mode {
                         GraceWaiverMode::FullWaiver => 0u128,
@@ -328,7 +328,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
             _ => prorate_interest(
                 line.utilized_amount as u128,
                 effective_rate_bps,
-                (now - accrual_start) as u64,
+                ((now - accrual_start)),
                 Rounding::Floor,
             ),
         }
@@ -337,7 +337,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         prorate_interest(
             line.utilized_amount as u128,
             effective_rate_bps,
-            (now - accrual_start) as u64,
+            ((now - accrual_start)),
             Rounding::Floor,
         )
     };

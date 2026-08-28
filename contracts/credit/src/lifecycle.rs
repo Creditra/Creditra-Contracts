@@ -91,18 +91,14 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_borrow_lifecycle_event, publish_credit_line_event, publish_debt_forgiven_event,
-    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event,
-    publish_late_fee_charged_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
-    DebtForgivenEvent, DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
+    DebtForgivenEvent, DefaultLiquidationSettledEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
-    bump_credit_line_ttl, clear_repayment_schedule, get_credit_line,
-    get_late_fee_flat as storage_get_late_fee_flat, get_repayment_schedule, persist_credit_line,
-    set_late_fee_flat as storage_set_late_fee_flat,
-    set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
-    CREDIT_LINE_TTL_THRESHOLD,
+    assert_not_paused, assert_ts_monotonic,
+    bump_credit_line_ttl, clear_repayment_schedule, get_credit_line, get_repayment_schedule, persist_credit_line,
+    set_repayment_schedule as storage_set_repayment_schedule,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};

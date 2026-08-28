@@ -189,9 +189,9 @@ proptest! {
                 LifecycleOp::Draw(amount) => {
                     if let Some(line) = client.get_credit_line(&borrower) {
                         let headroom = (line.credit_limit - line.utilized_amount).max(0);
-                        let capped = amount.min(headroom).min(10_000);
-                        if capped > 0 {
-                            let _ = client.try_draw_credit(&borrower, &capped);
+                        let capped = amount.min(&headroom).min(&10_000);
+                        if *capped > 0 {
+                            let _ = client.try_draw_credit(&borrower, &*capped);
                         }
                     }
                 }
@@ -199,8 +199,9 @@ proptest! {
                 LifecycleOp::Repay(amount) => {
                     if let Some(line) = client.get_credit_line(&borrower) {
                         if line.utilized_amount > 0 {
-                            let capped = amount.min(line.utilized_amount + 1_000);
-                            let _ = client.try_repay_credit(&borrower, &capped);
+                            let limit = line.utilized_amount + 1_000;
+                            let capped = amount.min(&limit);
+                            let _ = client.try_repay_credit(&borrower, &*capped);
                         }
                     }
                 }

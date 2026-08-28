@@ -76,7 +76,7 @@ fn drawn_event_shape() {
     publish_drawn_event(
         &env,
         DrawnEvent {
-        timestamp: 0,
+            timestamp: 0,
             borrower: borrower.clone(),
             amount: 500,
             new_utilized_amount: 500,

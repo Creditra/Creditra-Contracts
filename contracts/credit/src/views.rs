@@ -211,7 +211,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     let end_id = total_count.saturating_sub(1);
 
     // Iterate through IDs until we collect enough results or reach the end
-    while credit_lines.len() < limit as u32 && current_id <= end_id {
+    while credit_lines.len() < limit && current_id <= end_id {
         if let Some(borrower) = get_borrower_by_credit_line_id(&env, current_id) {
             if let Some(line) = get_credit_line(&env, &borrower) {
                 credit_lines.push_back(line);
@@ -219,7 +219,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         }
 
         // Prepare next cursor if we might have more results
-        if credit_lines.len() < limit as u32 && current_id < end_id {
+        if credit_lines.len() < limit && current_id < end_id {
             next_cursor = Some(current_id.saturating_add(1));
         } else if current_id < end_id {
             // We've filled the page but there are more results
@@ -230,7 +230,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     }
 
     // If we didn't fill the page, there are no more results
-    if credit_lines.len() < limit as u32 {
+    if credit_lines.len() < limit {
         next_cursor = None;
     }
 
@@ -269,8 +269,8 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
 /// persistent entry is near expiry, but this does not change logical state.
 pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
     let mut credit_line = soroban_sdk::Vec::new(&env);
-    if let Some(line) = get_credit_line(&env, &borrower) {
-        credit_line.push_back(line);
+    if let Some(cl) = get_credit_line(&env, &borrower) {
+        credit_line.push_back(cl);
     }
     let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
     let capabilities = borrow_capabilities(env.clone(), borrower.clone());

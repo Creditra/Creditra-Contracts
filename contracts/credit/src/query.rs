@@ -153,13 +153,9 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     //   collateral * 10_000                 collateral * 100_000_000
     //   ───────────────────────    =    ─────────────────────────────
     //   utilized * min_ratio / 10_000        utilized * min_ratio
-    let numerator = collateral_u128
-        .checked_mul(100_000_000)
-        .unwrap_or(u128::MAX);
+    let numerator = collateral_u128.saturating_mul(100_000_000);
 
-    let denominator = utilized_u128
-        .checked_mul(min_ratio_u128)
-        .unwrap_or(u128::MAX);
+    let denominator = utilized_u128.saturating_mul(min_ratio_u128);
 
     // If the denominator is 0 (due to min_ratio_bps = 0), the position is infinitely healthy.
     // We also guard against division-by-zero.

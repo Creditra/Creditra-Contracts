@@ -1,0 +1,1170 @@
+warning: unused import: `set_liquidation_grace_window`
+  --> gateway-contract/contracts/auction_contract/src/lib.rs:18:27
+   |
+18 |     get_factory_contract, set_liquidation_grace_window, set_reentrancy_guard,
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PERSISTENT_LIFETIME_THRESHOLD` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:51:18
+   |
+51 | pub(crate) const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `get_status` is never used
+  --> gateway-contract/contracts/auction_contract/src/storage.rs:99:8
+   |
+99 | pub fn get_status(env: &Env) -> AuctionStatus {
+   |        ^^^^^^^^^^
+
+warning: function `set_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:106:8
+    |
+106 | pub fn set_status(env: &Env, status: AuctionStatus) {
+    |        ^^^^^^^^^^
+
+warning: function `get_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:110:8
+    |
+110 | pub fn get_highest_bidder(env: &Env) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:114:8
+    |
+114 | pub fn set_highest_bidder(env: &Env, bidder: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `set_liquidation_grace_window` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:186:8
+    |
+186 | pub fn set_liquidation_grace_window(env: &Env, seconds: u64) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:192:8
+    |
+192 | pub fn get_end_time(env: &Env) -> u64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:196:8
+    |
+196 | pub fn set_end_time(env: &Env, end_time: u64) {
+    |        ^^^^^^^^^^^^
+
+warning: function `get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:200:8
+    |
+200 | pub fn get_highest_bid(env: &Env) -> u128 {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:207:8
+    |
+207 | pub fn set_highest_bid(env: &Env, bid: u128) {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `auction_exists` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:223:8
+    |
+223 | pub fn auction_exists(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `auction_get_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:246:8
+    |
+246 | pub fn auction_get_status(env: &Env, id: u32) -> crate::types::AuctionStatus {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_status` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:263:8
+    |
+263 | pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatus) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:282:8
+    |
+282 | pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_seller` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:295:8
+    |
+295 | pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:314:8
+    |
+314 | pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_asset` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:327:8
+    |
+327 | pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:346:8
+    |
+346 | pub fn auction_get_min_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_min_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:359:8
+    |
+359 | pub fn auction_set_min_bid(env: &Env, id: u32, min_bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:378:8
+    |
+378 | pub fn auction_get_end_time(env: &Env, id: u32) -> u64 {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_end_time` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:391:8
+    |
+391 | pub fn auction_set_end_time(env: &Env, id: u32, end_time: u64) {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:410:8
+    |
+410 | pub fn auction_get_highest_bidder(env: &Env, id: u32) -> Option<Address> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bidder` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:423:8
+    |
+423 | pub fn auction_set_highest_bidder(env: &Env, id: u32, bidder: &Address) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_get_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:442:8
+    |
+442 | pub fn auction_get_highest_bid(env: &Env, id: u32) -> i128 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_highest_bid` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:455:8
+    |
+455 | pub fn auction_set_highest_bid(env: &Env, id: u32, bid: i128) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_is_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:475:8
+    |
+475 | pub fn auction_is_claimed(env: &Env, id: u32) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `auction_set_claimed` is never used
+   --> gateway-contract/contracts/auction_contract/src/storage.rs:488:8
+    |
+488 | pub fn auction_set_claimed(env: &Env, id: u32) {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: `gateway-auction` (lib) generated 28 warnings (run `cargo fix --lib -p gateway-auction` to apply 1 suggestion)
+   Compiling creditra-credit v0.1.0 (/Users/solveetcoagula/Desktop/bounty_operations/repos/Creditra-Contracts/contracts/credit)
+warning: unexpected `cfg` condition name: `coverage_nightly`
+ --> contracts/credit/src/events.rs:2:13
+  |
+2 | #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+  |             ^^^^^^^^^^^^^^^^
+  |
+  = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage_nightly)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `coverage_nightly`
+ --> contracts/credit/src/events.rs:3:13
+  |
+3 | #![cfg_attr(coverage_nightly, coverage(off))]
+  |             ^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage_nightly)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `coverage_nightly`
+ --> contracts/credit/src/types.rs:2:13
+  |
+2 | #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+  |             ^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage_nightly)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `coverage_nightly`
+ --> contracts/credit/src/types.rs:3:13
+  |
+3 | #![cfg_attr(coverage_nightly, coverage(off))]
+  |             ^^^^^^^^^^^^^^^^
+  |
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage_nightly)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `kani`
+   --> contracts/credit/src/lib.rs:188:7
+    |
+188 | #[cfg(kani)]
+    |       ^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(kani)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unused import: `crate::collateral`
+ --> contracts/credit/src/borrow.rs:1:5
+  |
+1 | use crate::collateral;
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `DrawnEvent`, `InterestAccruedEvent`, `RepaymentEvent`, `publish_drawn_event`, `publish_interest_accrued_event`, and `publish_repayment_event`
+ --> contracts/credit/src/borrow.rs:3:5
+  |
+3 |     publish_drawn_event, publish_interest_accrued_event, publish_repayment_event, DrawnEvent,
+  |     ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^
+4 |     InterestAccruedEvent, RepaymentEvent,
+  |     ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+
+warning: unused import: `crate::lifecycle`
+ --> contracts/credit/src/borrow.rs:6:5
+  |
+6 | use crate::lifecycle;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Rounding`, `apply_bps`, and `mul_div`
+ --> contracts/credit/src/borrow.rs:7:25
+  |
+7 | use crate::math_utils::{apply_bps, mul_div, Rounding};
+  |                         ^^^^^^^^^  ^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO`, `CREDIT_LINE_TTL_THRESHOLD`, `DataKey`, `clear_reentrancy_guard`, `get_collateral_balance`, `get_credit_line as storage_get_credit_line`, `persist_credit_line`, and `set_reentrancy_guard`
+  --> contracts/credit/src/borrow.rs:9:5
+   |
+ 9 |     clear_reentrancy_guard, get_collateral_balance, get_credit_line as storage_get_credit_line,
+   |     ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 |     persist_credit_line, set_reentrancy_guard, DataKey, CREDIT_LINE_TTL_EXTEND_TO,
+   |     ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+11 |     CREDIT_LINE_TTL_THRESHOLD,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CreditLineData`
+  --> contracts/credit/src/borrow.rs:13:35
+   |
+13 | use crate::types::{ContractError, CreditLineData, CreditStatus};
+   |                                   ^^^^^^^^^^^^^^
+
+warning: unused imports: `Address`, `Env`, and `token`
+  --> contracts/credit/src/borrow.rs:14:19
+   |
+14 | use soroban_sdk::{token, Address, Env};
+   |                   ^^^^^  ^^^^^^^  ^^^
+
+warning: unused import: `get_collateral_risk_weight_bps`
+  --> contracts/credit/src/collateral.rs:51:63
+   |
+51 |     get_collateral_balance, get_collateral_balance_for_token, get_collateral_risk_weight_bps,
+   |                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `LateFeeChargedEvent` and `publish_late_fee_charged_event`
+  --> contracts/credit/src/lifecycle.rs:95:5
+   |
+95 |     publish_late_fee_charged_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+96 |     DebtForgivenEvent, DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+   |                                                        ^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO`, `CREDIT_LINE_TTL_THRESHOLD`, `add_treasury_balance as storage_add_treasury_balance`, `get_late_fee_flat as storage_get_late_fee_flat`, and `set_late_fee_flat as storage_set_late_fee_flat`
+   --> contracts/credit/src/lifecycle.rs:100:5
+    |
+100 |     add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+101 |     bump_credit_line_ttl, clear_repayment_schedule, get_credit_line,
+102 |     get_late_fee_flat as storage_get_late_fee_flat, get_repayment_schedule, persist_credit_line,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+103 |     set_late_fee_flat as storage_set_late_fee_flat,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+104 |     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
+    |                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+105 |     CREDIT_LINE_TTL_THRESHOLD,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::events::LateFeeChargedEvent`
+    --> contracts/credit/src/lifecycle.rs:1084:9
+     |
+1084 |     use crate::events::LateFeeChargedEvent;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Events as _`, `TryFromVal`, and `TryIntoVal`
+    --> contracts/credit/src/lifecycle.rs:1089:35
+     |
+1089 |         testutils::{Address as _, Events as _, Ledger},
+     |                                   ^^^^^^^^^^^
+1090 |         token::StellarAssetClient,
+1091 |         Address, Env, Symbol, TryFromVal, TryIntoVal,
+     |                               ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `CREDIT_LINE_TTL_EXTEND_TO` and `CREDIT_LINE_TTL_THRESHOLD`
+  --> contracts/credit/src/risk.rs:66:38
+   |
+66 |     set_risk_admin_cooldown_seconds, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `DrawsFreezeState` and `TreasuryWithdrawalProposal`
+  --> contracts/credit/src/storage.rs:62:50
+   |
+62 |     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
+   |                                                  ^^^^^^^^^^^^^^^^
+63 |     TreasuryWithdrawalProposal,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+   --> contracts/credit/src/lib.rs:135:43
+    |
+135 | use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
+    |                                           ^^^^^^^^^^^^
+
+warning: unused imports: `TreasuryWithdrawalExecutedEvent`, `TreasuryWithdrawalProposedEvent`, `publish_credit_line_event`, `publish_token_rescued_event`, `publish_treasury_withdrawal_executed`, and `publish_treasury_withdrawal_proposed`
+   --> contracts/credit/src/lib.rs:142:74
+    |
+142 |     publish_close_factor_bps_set_event, publish_contract_upgraded_event, publish_credit_line_event,
+    |                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+147 |     publish_token_rescued_event, publish_treasury_withdrawal_executed,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+148 |     publish_treasury_withdrawal_proposed, BorrowLifecycleEvent, BorrowLifecyclePhase,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+149 |     ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+150 |     RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `MAX_ORACLE_FEEDS` and `resolve_quorum_price`
+   --> contracts/credit/src/lib.rs:153:22
+    |
+153 | use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
+    |                      ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `MAX_ENUMERATION_LIMIT`, `clear_pending_treasury_withdrawal`, `enforce_freeze_cooldown`, `get_borrower_by_credit_line_id`, `get_pending_treasury_withdrawal`, `rate_cfg_key`, and `set_pending_treasury_withdrawal`
+   --> contracts/credit/src/lib.rs:156:58
+    |
+156 |     admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
+    |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+157 |     clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+160 |     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+163 |     proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    |                      ^^^^^^^^^^^^
+...
+166 |     set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+167 |     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
+168 |     MAX_ENUMERATION_LIMIT,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `CreditLineSnapshot` and `TreasuryWithdrawalProposal`
+   --> contracts/credit/src/lib.rs:171:80
+    |
+171 |     BorrowCapabilities, CollateralCapabilities, ContractError, CreditLineData, CreditLineSnapshot,
+    |                                                                                ^^^^^^^^^^^^^^^^^^
+...
+175 |     TreasuryWithdrawalProposal,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ContractError` and `CreditStatus`
+    --> contracts/credit/src/lib.rs:3053:24
+     |
+3053 |     use crate::types::{ContractError, CreditStatus};
+     |                        ^^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused import: `TryIntoVal`
+    --> contracts/credit/src/lib.rs:3061:40
+     |
+3061 |     use soroban_sdk::{Env, TryFromVal, TryIntoVal};
+     |                                        ^^^^^^^^^^
+
+warning: unused imports: `Client as TokenClient` and `StellarAssetClient`
+    --> contracts/credit/src/lib.rs:3848:30
+     |
+3848 |     use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+     |                              ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `symbol_short`
+    --> contracts/credit/src/lib.rs:3910:33
+     |
+3910 |         contract, contractimpl, symbol_short,
+     |                                 ^^^^^^^^^^^^
+
+warning: unused import: `std::boxed::Box`
+    --> contracts/credit/src/lib.rs:4085:9
+     |
+4085 |     use std::boxed::Box;
+     |         ^^^^^^^^^^^^^^^
+
+warning: unused imports: `AssertUnwindSafe` and `catch_unwind`
+    --> contracts/credit/src/lib.rs:4086:22
+     |
+4086 |     use std::panic::{catch_unwind, AssertUnwindSafe};
+     |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::token::StellarAssetClient`
+    --> contracts/credit/src/lib.rs:6005:9
+     |
+6005 |     use soroban_sdk::token::StellarAssetClient;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:16:27
+   |
+16 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:66:27
+   |
+66 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts/credit/src/views_tests.rs:94:27
+   |
+94 |     let contract_id = env.register_contract(None, Credit);
+   |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:125:27
+    |
+125 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:147:27
+    |
+147 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:183:27
+    |
+183 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:245:27
+    |
+245 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:279:27
+    |
+279 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:323:27
+    |
+323 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:347:27
+    |
+347 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts/credit/src/views_tests.rs:377:27
+    |
+377 |     let contract_id = env.register_contract(None, Credit);
+    |                           ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:2891:9
+     |
+2891 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:3056:9
+     |
+3056 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:3058:9
+     |
+3058 |     use soroban_sdk::testutils::Ledger as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:3510:9
+     |
+3510 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:3847:9
+     |
+3847 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `testutils::Address`
+    --> contracts/credit/src/lib.rs:4065:23
+     |
+4065 |     use soroban_sdk::{testutils::Address as _, Env};
+     |                       ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:4080:9
+     |
+4080 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:4457:9
+     |
+4457 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:4521:9
+     |
+4521 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:5611:9
+     |
+5611 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:5853:9
+     |
+5853 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:6003:9
+     |
+6003 |     use soroban_sdk::testutils::Address as _;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:6380:13
+     |
+6380 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:6034:13
+     |
+6034 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Ledger`
+    --> contracts/credit/src/lib.rs:6004:9
+     |
+6004 |     use soroban_sdk::testutils::Ledger;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:6285:13
+     |
+6285 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `soroban_sdk::testutils::Address`
+    --> contracts/credit/src/lib.rs:6179:13
+     |
+6179 |         use soroban_sdk::testutils::Address as _;
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `client`
+   --> contracts/credit/src/attestation.rs:472:14
+    |
+472 |         let (client, _admin, borrower) = setup(&env);
+    |              ^^^^^^ help: if this is intentional, prefix it with an underscore: `_client`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lifecycle.rs:1119:9
+     |
+1119 |         env: &Env,
+     |         ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `hash_zero`
+   --> contracts/credit/src/scoring.rs:240:13
+    |
+240 |         let hash_zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_zero`
+
+warning: unused variable: `hash_max`
+   --> contracts/credit/src/scoring.rs:241:13
+    |
+241 |         let hash_max: BytesN<32> = BytesN::from_array(&env, &[255u8; 32]);
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_max`
+
+warning: unused variable: `hash_mixed`
+   --> contracts/credit/src/scoring.rs:242:13
+    |
+242 |         let hash_mixed: BytesN<32> = BytesN::from_array(
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hash_mixed`
+
+error[E0004]: non-exhaustive patterns: `&types::ContractError::TimestampRegression` not covered
+   --> contracts/credit/src/types.rs:306:15
+    |
+306 |         match self {
+    |               ^^^^ pattern `&types::ContractError::TimestampRegression` not covered
+    |
+note: `types::ContractError` defined here
+   --> contracts/credit/src/types.rs:160:10
+    |
+160 | pub enum ContractError {
+    |          ^^^^^^^^^^^^^
+...
+188 |     TimestampRegression = 33,
+    |     ------------------- not covered
+    = note: the matched value is of type `&types::ContractError`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
+    |
+363 ~             | Self::AttestationBatchNotFound => Misc,
+364 ~             &types::ContractError::TimestampRegression => todo!(),
+    |
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:2897:9
+     |
+2897 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:2913:9
+     |
+2913 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:2951:13
+     |
+2951 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:2970:13
+     |
+2970 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3038:13
+     |
+3038 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3066:13
+     |
+3066 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3091:13
+     |
+3091 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3106:9
+     |
+3106 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3179:9
+     |
+3179 |         borrower: &'a Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3204:13
+     |
+3204 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3218:13
+     |
+3218 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3231:13
+     |
+3231 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3250:13
+     |
+3250 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3282:13
+     |
+3282 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3311:13
+     |
+3311 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3414:13
+     |
+3414 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3463:13
+     |
+3463 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3476:13
+     |
+3476 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3489:13
+     |
+3489 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3518:13
+     |
+3518 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3528:9
+     |
+3528 |         borrower: &'a Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3587:13
+     |
+3587 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3601:13
+     |
+3601 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3613:13
+     |
+3613 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3625:13
+     |
+3625 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3641:13
+     |
+3641 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3853:13
+     |
+3853 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3879:13
+     |
+3879 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3922:17
+     |
+3922 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:3957:17
+     |
+3957 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:4026:50
+     |
+4026 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                  ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:4026:63
+     |
+4026 |         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+     |                                                               ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `from`
+    --> contracts/credit/src/lib.rs:4038:58
+     |
+4038 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                          ^^^^ help: if this is intentional, prefix it with an underscore: `_from`
+
+warning: unused variable: `to`
+    --> contracts/credit/src/lib.rs:4038:73
+     |
+4038 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                         ^^ help: if this is intentional, prefix it with an underscore: `_to`
+
+warning: unused variable: `amount`
+    --> contracts/credit/src/lib.rs:4038:86
+     |
+4038 |         pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+     |                                                                                      ^^^^^^ help: if this is intentional, prefix it with an underscore: `_amount`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:4050:24
+     |
+4050 |         pub fn balance(env: Env, _id: Address) -> i128 {
+     |                        ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `env`
+    --> contracts/credit/src/lib.rs:4054:26
+     |
+4054 |         pub fn allowance(env: Env, _from: Address, _spender: Address) -> i128 {
+     |                          ^^^ help: if this is intentional, prefix it with an underscore: `_env`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4069:13
+     |
+4069 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4091:13
+     |
+4091 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4231:9
+     |
+4231 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4462:13
+     |
+4462 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4488:13
+     |
+4488 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4533:13
+     |
+4533 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4548:9
+     |
+4548 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4565:9
+     |
+4565 |         borrower: &'a Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4585:13
+     |
+4585 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4598:9
+     |
+4598 |         borrower: &Address,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4777:13
+     |
+4777 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4821:13
+     |
+4821 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4842:13
+     |
+4842 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4860:13
+     |
+4860 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4877:13
+     |
+4877 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4920:13
+     |
+4920 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4937:13
+     |
+4937 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4953:13
+     |
+4953 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4971:13
+     |
+4971 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:4992:13
+     |
+4992 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5172:13
+     |
+5172 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5201:13
+     |
+5201 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5247:13
+     |
+5247 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5279:13
+     |
+5279 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5299:13
+     |
+5299 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5334:13
+     |
+5334 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5357:13
+     |
+5357 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5380:13
+     |
+5380 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5401:13
+     |
+5401 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5423:13
+     |
+5423 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5534:13
+     |
+5534 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5593:13
+     |
+5593 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5619:13
+     |
+5619 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5670:13
+     |
+5670 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5736:13
+     |
+5736 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5750:13
+     |
+5750 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5807:13
+     |
+5807 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5827:13
+     |
+5827 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:5861:13
+     |
+5861 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6012:13
+     |
+6012 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6040:13
+     |
+6040 |             borrower: &Address,
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6185:17
+     |
+6185 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6270:13
+     |
+6270 |         let borrower = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6292:17
+     |
+6292 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6393:17
+     |
+6393 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+warning: unused variable: `borrower`
+    --> contracts/credit/src/lib.rs:6418:17
+     |
+6418 |             let borrower = Address::generate(&env);
+     |                 ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_borrower`
+
+For more information about this error, try `rustc --explain E0004`.
+warning: `creditra-credit` (lib test) generated 147 warnings
+error: could not compile `creditra-credit` (lib test) due to 1 previous error; 147 warnings emitted

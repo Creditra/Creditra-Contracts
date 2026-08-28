@@ -59,8 +59,7 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, RepaymentSchedule,
 };
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
@@ -259,7 +258,6 @@ pub enum DataKey {
     /// Global grace period configuration.
     GracePeriodConfig,
     /// Per-borrower absolute exposure cap (i128 amount).
-    BorrowerExposureCap(Address),
     /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
@@ -991,14 +989,14 @@ pub fn get_max_credit_limit(env: &Env) -> Option<i128> {
 pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
     env.storage()
         .instance()
-        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }
 
 /// Set the per-borrower exposure cap (admin only, enforced by caller).
 pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
     env.storage()
         .instance()
-        .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
+        .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
 }
 
 /// Set the maximum credit limit (admin only, enforced by caller).

@@ -128,7 +128,7 @@ pub fn mul_div(a: u128, numerator: u128, denominator: u128, rounding: Rounding) 
     match rounding {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
-            if product % denominator != 0 {
+            if !product.is_multiple_of(denominator) {
                 quotient.checked_add(1).expect("math_utils: ceil overflow")
             } else {
                 quotient
@@ -160,7 +160,7 @@ pub fn scale_down(amount: u128, rounding: Rounding) -> u128 {
     match rounding {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
-            if amount % SCALE != 0 {
+            if !amount.is_multiple_of(SCALE) {
                 quotient
                     .checked_add(1)
                     .expect("math_utils: scale_down ceil overflow")
@@ -285,7 +285,7 @@ pub fn prorate_interest(
     match rounding {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
-            if step2 % BPS_YEAR_DENOM != 0 {
+            if !step2.is_multiple_of(BPS_YEAR_DENOM) {
                 quotient
                     .checked_add(1)
                     .expect("math_utils: prorate ceil overflow")

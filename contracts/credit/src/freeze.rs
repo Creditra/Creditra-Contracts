@@ -121,7 +121,7 @@ pub fn unfreeze_draws(env: Env) {
 /// - `true` if draws are frozen
 /// - `false` if draws are not frozen or the key has never been set
 pub fn is_draws_frozen(env: &Env) -> bool {
-    get_draws_freeze_state(env).map_or(false, |state| state.frozen)
+    get_draws_freeze_state(env).is_some_and(|state| state.frozen)
 }
 
 /// Returns the active global freeze reason, if draws are currently frozen.

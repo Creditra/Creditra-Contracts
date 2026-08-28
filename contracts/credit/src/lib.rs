@@ -132,47 +132,41 @@ mod scoring;
 mod storage;
 pub mod types;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec};
 
 use crate::attestation::AttestationBatch;
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrow_lifecycle_event, publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event, publish_contract_upgraded_event, publish_credit_line_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
     publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
-    publish_paused_event, publish_rate_formula_config_event, publish_repayment_event,
-    publish_token_rescued_event, publish_treasury_withdrawal_executed,
-    publish_treasury_withdrawal_proposed, BorrowLifecycleEvent, BorrowLifecyclePhase,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    publish_paused_event, publish_rate_formula_config_event, publish_repayment_event, BorrowLifecycleEvent, BorrowLifecyclePhase,
+    ContractUpgradedEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
-use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    admin_key, assert_not_paused, clear_borrower_frozen,
+    clear_reentrancy_guard,
     get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
-    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    proposed_at_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_oracle_quorum_config, set_reentrancy_guard,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
-    MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, CollateralCapabilities, ContractError, CreditLineData, CreditLineSnapshot,
+    BorrowCapabilities, CollateralCapabilities, ContractError, CreditLineData,
     CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities,
     OracleConfig, OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary,
     ProtocolSummaryView, QueryCapabilities, RateChangeConfig, RateFormulaConfig,
-    TreasuryWithdrawalProposal,
 };
 
 #[cfg(test)]
@@ -2388,7 +2382,7 @@ impl Credit {
     /// emit `InterestAccruedEvent`.
     pub fn accrue_batch(env: Env, borrowers: Vec<Address>) {
         assert_not_paused(&env);
-        if borrowers.len() as u32 > ACCRUE_BATCH_MAX {
+        if borrowers.len() > ACCRUE_BATCH_MAX {
             env.panic_with_error(ContractError::InvalidAmount);
         }
 
