@@ -2352,16 +2352,15 @@ mod reentrancy_preservation {
 mod version_test {
     use super::*;
     use crate::{Auction, AuctionClient, ProtocolVersion};
-    use soroban_sdk::{Env};
+    use soroban_sdk::Env;
 
     #[test]
     fn test_get_version() {
         let env = Env::default();
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
-        
+
         let version = client.get_version();
         assert_eq!(version, ProtocolVersion { major: 1, minor: 0 });
     }
 }
-

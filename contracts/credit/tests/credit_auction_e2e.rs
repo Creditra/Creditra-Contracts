@@ -154,7 +154,10 @@ fn assert_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &s
         actual0 == expected0 && actual1 == expected1
     });
 
-    if !matched { std::println!("Events len: {}", env.events().all().len()); panic!("missing event topic ({topic0}, {topic1})"); }
+    if !matched {
+        std::println!("Events len: {}", env.events().all().len());
+        panic!("missing event topic ({topic0}, {topic1})");
+    }
 }
 
 fn auction_settlement_event(env: &Env, auction_id: &Address) -> AuctionSettlementEvent {

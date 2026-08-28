@@ -72,6 +72,12 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
 
     let borrower = Address::generate(&env);
     sac.mint(&borrower, &LIQUIDITY);
+    soroban_sdk::token::Client::new(&env, &token).approve(
+        &borrower,
+        &contract_id,
+        &i128::MAX,
+        &(env.ledger().sequence() + 100_000),
+    );
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &RISK_SCORE);
 
     (env, client, admin, borrower)

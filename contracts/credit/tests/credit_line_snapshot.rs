@@ -22,7 +22,7 @@ use creditra_credit::types::{CreditStatus, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    token::{self, StellarAssetClient},
+    token::StellarAssetClient,
     Address, Env,
 };
 
@@ -30,7 +30,7 @@ use soroban_sdk::{
 
 /// Minimal setup: init contract with a real SAC token (so draws/repays work).
 fn setup(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     env.ledger().with_mut(|li| li.timestamp = 1_000);
 
     let admin = Address::generate(env);
@@ -145,8 +145,8 @@ fn health_factor_computed_with_debt_and_collateral() {
 
     assert_eq!(snap.line.utilized_amount, 1_000);
     assert_eq!(snap.collateral_balance, 3_000);
-    // Health factor should be 20 (well above 10_000 minimum → healthy).
-    assert_eq!(snap.health_factor_bps, 20);
+    // Health factor should be 20_000 bps (200% of min required ratio -> healthy).
+    assert_eq!(snap.health_factor_bps, 20_000);
 }
 
 #[test]

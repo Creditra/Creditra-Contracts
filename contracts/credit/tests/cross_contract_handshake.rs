@@ -104,14 +104,19 @@ fn setup_closed_auction(
 fn assert_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &str) -> bool {
     let expected0 = Symbol::new(env, topic0);
     let expected1 = Symbol::new(env, topic1);
+    let all_events = env.events().all();
 
-    env.events().all().iter().any(|(contract, topics, _data)| {
-        if contract != contract_id.clone() || topics.len() < 2 {
+    all_events.iter().any(|(contract, topics, _data)| {
+        if contract != *contract_id || topics.len() < 2 {
             return false;
         }
 
-        let actual0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
-        let actual1: Symbol = Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap();
+        let Ok(actual0) = Symbol::try_from_val(env, &topics.get(0).unwrap()) else {
+            return false;
+        };
+        let Ok(actual1) = Symbol::try_from_val(env, &topics.get(1).unwrap()) else {
+            return false;
+        };
         actual0 == expected0 && actual1 == expected1
     })
 }
@@ -163,14 +168,14 @@ fn happy_path_settlement_with_auction_configured() {
         &None,
     );
 
+    assert!(assert_event_topic(&env, &credit_id, "credit", "liq_setl"));
+
     // Verify settlement completed:
     // - Line is closed (full recovery)
     // - No debt remains
-    // - Event emitted
     let line = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Closed);
     assert_eq!(line.utilized_amount, 0);
-    assert!(assert_event_topic(&env, &credit_id, "credit", "liq_setl"));
 }
 
 #[test]
@@ -601,13 +606,13 @@ fn return_value_zero_bid_settlement() {
     env.ledger().set_timestamp(end_time);
     auction.close_auction(&settlement_id);
 
-    // Settle with 0 recovery
-    credit.settle_default_liquidation(
-        &borrower,
-        &0_i128, // Matches auction's 0 return
-        &settlement_id,
-        &10_000_u32,
-        &None,
+    // Settle with 0 recovery should fail with InvalidAmount (ContractError #5)
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        credit.settle_default_liquidation(&borrower, &0_i128, &settlement_id, &10_000_u32, &None);
+    }));
+    assert!(
+        result.is_err(),
+        "settling zero recovered amount should fail"
     );
 
     // Line should still be Defaulted with original utilized_amount
@@ -680,8 +685,9 @@ fn edge_case_full_settlement_closes_line() {
 
     credit.settle_default_liquidation(&borrower, &draw_amount, &settlement_id, &10_000_u32, &None);
 
+    assert!(assert_event_topic(&env, &credit_id, "credit", "closed"));
+
     let line = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Closed);
     assert_eq!(line.utilized_amount, 0);
-    assert!(assert_event_topic(&env, &credit_id, "credit", "closed"));
 }

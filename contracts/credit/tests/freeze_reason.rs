@@ -73,7 +73,7 @@ fn freeze_credit_line_blocks_draws_with_reason() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #41)")]
+#[should_panic(expected = "Error(Contract, #46)")]
 fn draw_credit_reverts_with_credit_line_frozen_error() {
     let (env, _admin, contract_id, token_address) = setup_with_token();
     let client = CreditClient::new(&env, &contract_id);
@@ -164,7 +164,7 @@ fn freeze_credit_line_emits_event_with_reason() {
     let (_contract, topics, data) = events.last().unwrap();
     assert_eq!(
         Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-        Symbol::new(&env, "line_frz")
+        Symbol::new(&env, "cl_freeze")
     );
     let event: CreditLineFreezeEvent = data.try_into_val(&env).unwrap();
     assert!(event.frozen);

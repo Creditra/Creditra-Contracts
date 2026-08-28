@@ -35,7 +35,7 @@ fn setup_full_waiver(grace_mode: GraceWaiverMode, reduced_bps: u32) -> (Env, Add
     client.draw_credit(&borrower, &100_000_i128);
     client.suspend_credit_line(&borrower);
 
-    client.set_grace_period_config(&31_536_000_u64, &grace_mode, &reduced_bps);
+    client.set_grace_period_config(&31_557_600_u64, &grace_mode, &reduced_bps);
 
     (env, contract_id, borrower)
 }
@@ -71,7 +71,7 @@ fn full_waiver_event_payload_is_correct() {
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all(); // clear setup events
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver(&env)
@@ -103,7 +103,7 @@ fn reduced_rate_event_payload_is_correct() {
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver(&env)
@@ -131,7 +131,7 @@ fn event_topics_are_credit_grace_wv() {
     let client = CreditClient::new(&env, &contract_id);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let all = env.events().all();
@@ -172,10 +172,10 @@ fn no_event_for_non_suspended_line() {
     client.draw_credit(&borrower, &100_000);
 
     // Grace config set — line is Active, not suspended.
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(1 + 31_536_000);
+    env.ledger().set_timestamp(1 + 31_557_600);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(

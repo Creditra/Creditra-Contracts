@@ -62,8 +62,8 @@ const RATE_BPS: u32 = 500;
 const TOKEN_BALANCE: i128 = 10_000_000;
 
 /// Seconds per year used by the contract's `prorate_interest` helper.
-/// Matches `accrual::SECONDS_PER_YEAR` (non-Julian 365-day year).
-const SECONDS_PER_YEAR: u64 = 31_536_000;
+/// Matches `accrual::SECONDS_PER_YEAR` (365.25-day year).
+const SECONDS_PER_YEAR: u64 = 31_557_600;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test harness
@@ -72,6 +72,7 @@ const SECONDS_PER_YEAR: u64 = 31_536_000;
 /// Everything a single-borrower test needs.
 struct Ctx {
     env: Env,
+    admin: Address,
     contract_id: Address,
     token_address: Address,
     borrower: Address,
@@ -112,6 +113,7 @@ fn setup() -> Ctx {
 
     Ctx {
         env,
+        admin,
         contract_id,
         token_address,
         borrower,
@@ -453,11 +455,7 @@ mod edge_cases {
         ctx.client().repay_credit(&ctx.borrower, &DRAW_AMOUNT);
 
         // Admin-close (closer == admin is always allowed regardless of balance).
-        // Since mock_all_auths is active the admin address is not tracked; we
-        // generate a fresh address and use it as the `closer` argument — the
-        // contract will accept it as the admin under `mock_all_auths`.
-        let admin_closer = Address::generate(&ctx.env);
-        ctx.client().close_credit_line(&ctx.borrower, &admin_closer);
+        ctx.client().close_credit_line(&ctx.borrower, &ctx.admin);
 
         assert!(
             ctx.client().get_repayment_schedule(&ctx.borrower).is_none(),

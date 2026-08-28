@@ -9,7 +9,7 @@
 //! Covered scenarios:
 //! - Happy path: draw succeeds when under cap
 //! - Draw exactly at cap succeeds (boundary)
-//! - Draw that would exceed cap reverts with `ExposureCapExceeded` (#30)
+//! - Draw that would exceed cap reverts with `ExposureCapExceeded` (#31)
 //! - Cap is admin-configurable; non-admin is rejected
 //! - Setting cap = 0 removes it (draws unrestricted again)
 //! - Negative cap value reverts with `InvalidAmount`
@@ -162,7 +162,7 @@ fn draw_succeeds_at_exact_cap_boundary() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #30)")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn draw_reverts_when_exceeding_cap_by_one() {
     let env = Env::default();
     let (client, _admin, borrower, _cid) = setup(&env);
@@ -172,7 +172,7 @@ fn draw_reverts_when_exceeding_cap_by_one() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #30)")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn draw_reverts_when_second_draw_would_exceed_cap() {
     let env = Env::default();
     let (client, _admin, borrower, _cid) = setup(&env);
@@ -310,7 +310,7 @@ fn cap_applies_across_multiple_borrowers() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #30)")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn cap_blocks_third_borrower_that_would_exceed_aggregate() {
     let env = Env::default();
     let (client, _admin, borrowers, _cid) = setup_multi(&env, 3);
@@ -440,8 +440,8 @@ fn total_utilized_stays_consistent_after_mixed_draw_repay_forgive() {
 // ── Error discriminant stability ──────────────────────────────────────────────
 
 #[test]
-fn exposure_cap_error_discriminant_is_30() {
+fn exposure_cap_error_discriminant_is_31() {
     // The ContractError discriminants are frozen per the stability guarantee.
     // This test pins the numeric value so a rename or reorder is caught immediately.
-    assert_eq!(ContractError::ExposureCapExceeded as u32, 30);
+    assert_eq!(ContractError::ExposureCapExceeded as u32, 31);
 }
