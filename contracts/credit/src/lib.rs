@@ -1840,6 +1840,9 @@ impl Credit {
     ) {
         // Reentrancy guard: settlement touches accounting and may interact
         // with an external auction contract, so we guard the full path.
+        // INVARIANT: every exit path below must clear the guard before
+        // propagating a panic; CPI calls use try_* variants so a remote
+        // contract panic cannot escape without clearing.
         set_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.
@@ -1879,20 +1882,62 @@ impl Credit {
             publish_oracle_price_accepted_event(&env, price, now);
         }
 
-        // Wire the auction contract settlement hook if configured.
+        // Cross-contract auction settlement hook (when configured).
+        //
+        // Both CPI calls use the try_* variants so that a panic or error
+        // inside the auction contract is caught here and the reentrancy guard
+        // is cleared before we re-panic with a typed ContractError.  Without
+        // this, any panic in the remote contract would unwind through this
+        // frame leaving the guard permanently set — bricking all subsequent
+        // settlement calls.
         if let Some(auction_addr) = crate::storage::get_auction_contract(&env) {
             let auction_client = AuctionClient::new(&env, &auction_addr);
-            // Version Handshake Check
-            let remote_version = auction_client.get_version();
-            assert!(handshake::verify_version(&env, remote_version), "Incompatible Version");
-            let auction_recovered = auction_client.settle_default_liquidation(
+
+            // ── Step 1: Version handshake ────────────────────────────────────
+            // try_get_version returns Err if the CPI itself panics (e.g. the
+            // auction contract is undeployed, runs out of budget, or panics
+            // internally).  A version mismatch (wrong major) is a logic error;
+            // a CPI failure is an infrastructure error — both clear the guard
+            // and surface a distinct, diagnosable error code.
+            let remote_version = match auction_client.try_get_version() {
+                Ok(Ok(v)) => v,
+                Ok(Err(_)) | Err(_) => {
+                    // CPI call itself failed (contract panic, missing contract,
+                    // budget exceeded, …).  Guard cleared; caller can retry
+                    // after resolving the auction contract issue.
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::AuctionCallFailed);
+                }
+            };
+
+            if !handshake::verify_version(&env, remote_version) {
+                // Version handshake failed.  No state was mutated.
+                // Guard cleared; retry after upgrading to a compatible version.
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::IncompatibleVersion);
+            }
+
+            // ── Step 2: Settlement CPI ───────────────────────────────────────
+            // Same guard-clearing pattern for the main settlement call.
+            let auction_recovered = match auction_client.try_settle_default_liquidation(
                 &settlement_id,
                 &env.current_contract_address(),
                 &borrower,
-            );
+            ) {
+                Ok(Ok(amount)) => amount,
+                Ok(Err(_)) | Err(_) => {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::AuctionCallFailed);
+                }
+            };
+
+            // ── Step 3: Amount assertion ─────────────────────────────────────
+            // The auction must return exactly the admin-supplied recovered_amount.
+            // A mismatch means the auction state and the credit-contract call
+            // are out of sync; reject atomically before any accounting mutation.
             if auction_recovered != recovered_amount {
                 clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::InvalidAmount);
+                env.panic_with_error(ContractError::AuctionCallFailed);
             }
         }
 

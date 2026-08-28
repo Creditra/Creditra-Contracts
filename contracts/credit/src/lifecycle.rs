@@ -106,27 +106,6 @@ use crate::storage::{
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
-
-/// Generate a unique key for tracking liquidation settlements.
-///
-/// # Storage
-/// - **Type**: Persistent storage (independent TTL per settlement)
-/// - **Key**: `(Symbol("liq_seen"), borrower, settlement_id)`
-/// - **Purpose**: Prevents replay of the same liquidation settlement
-fn liquidation_settlement_key(
-    borrower: &Address,
-    settlement_id: &Symbol,
-) -> (Symbol, Address, Symbol) {
-    (
-        symbol_short!("liq_seen"),
-        borrower.clone(),
-        settlement_id.clone(),
-    )
-}
-
-
-
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Open a new credit line for a borrower (admin only).
@@ -766,7 +745,7 @@ pub fn settle_default_liquidation(
 
     credit_line.utilized_amount = credit_line
         .utilized_amount
-        .checked_sub(actual_recovery)
+        .checked_sub(recovered_amount)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
     let previous_status = credit_line.status;
@@ -805,7 +784,7 @@ pub fn settle_default_liquidation(
         DefaultLiquidationSettledEvent {
             borrower,
             settlement_id,
-            recovered_amount: actual_recovery,
+            recovered_amount: recovered_amount,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
             close_factor_bps,
