@@ -121,7 +121,6 @@ mod lifecycle_views;
 
 mod limits;
 pub mod math_utils;
-mod oracles;
 mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
@@ -132,7 +131,6 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
-mod views;
 
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
@@ -148,15 +146,14 @@ use crate::events::{
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
     publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
-    publish_paused_event, publish_protocol_fee_bounds_set_event,
-    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
+    publish_paused_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
     BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
     CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
     RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
@@ -166,22 +163,20 @@ use crate::storage::{
     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
-    set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
+    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
+    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig,
-    GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, CollateralCapabilities, ContractError, CreditLineData, CreditLineSnapshot,
+    CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities,
+    OracleConfig, OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary,
+    ProtocolSummaryView, QueryCapabilities, RateChangeConfig, RateFormulaConfig,
+    TreasuryWithdrawalProposal,
 };
-
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
-use auth::require_admin_auth;
 
 
 #[cfg(test)]
@@ -197,48 +192,6 @@ mod views_tests;
 #[cfg(kani)]
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
-
-use crate::auth::{require_admin, require_admin_auth};
-use crate::attestation::AttestationBatch;
-use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
-    publish_oracle_quorum_price_set_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
-};
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
-use crate::penalties::LateFeeConfig;
-use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
-    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
-    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
-    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
-    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
-};
-use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
-};
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -312,14 +265,96 @@ fn enforce_accrual_admin_cooldown(env: &Env, borrower: &Address) {
     crate::storage::set_last_accrual_admin_action_ts(env, borrower, now);
 }
 
+/// Cross-contract interface for the auction contract.
+///
+/// This trait defines the minimal set of entrypoints that the credit contract
+/// calls on the auction contract during default liquidation settlement.
+/// Both contracts are versioned using a `ProtocolVersion` handshake to ensure
+/// compatibility before cross-contract calls are made.
+///
+/// # Security Note
+///
+/// - The credit contract verifies `get_version()` before calling `settle_default_liquidation()`.
+/// - All calls are protected by reentrancy guards in the credit contract.
+/// - Auction contract verifies caller identity via `require_auth(factory_contract)`.
 #[soroban_sdk::contractclient(name = "AuctionClient")]
 pub trait Auction {
+    /// Settle a default liquidation auction and return the recovered amount.
+    ///
+    /// This function is called by the credit contract when a borrower's position is
+    /// defaulted and collateral has been auctioned. The auction contract atomically:
+    /// 1. Verifies the auction is in `Closed` state
+    /// 2. Prevents replay (one-time settlement per `auction_id`)
+    /// 3. Transfers the highest bid to the credit contract
+    /// 4. Returns the settled amount for validation
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `auction_id`: Unique identifier for the auction (typically a `Symbol`)
+    /// - `credit_contract`: Address of the calling credit contract (for identity verification)
+    /// - `borrower`: Address of the borrower whose collateral was liquidated
+    ///
+    /// # Returns
+    ///
+    /// The `highest_bid` amount settled from the auction (i128, may be 0 if no bids).
+    /// The credit contract asserts this value matches its expected `recovered_amount`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `AuctionError::NoFactoryContract` — Factory not configured
+    /// - `AuctionError::Unauthorized` — Caller is not the registered factory
+    /// - `AuctionError::NotFound` — Auction with `auction_id` does not exist
+    /// - `AuctionError::NotClosed` — Auction is not in `Closed` state
+    /// - `AuctionError::AlreadySettled` — Auction already settled (replay protection)
+    ///
+    /// # Reentrancy
+    ///
+    /// This function may perform token transfers. The credit contract sets a reentrancy
+    /// guard before calling this function to prevent nested re-entrance.
+    ///
+    /// # Example Usage
+    ///
+    /// Called from `Credit::settle_default_liquidation()`:
+    /// ```ignore
+    /// let auction_client = AuctionClient::new(&env, &auction_address);
+    /// let recovered = auction_client.settle_default_liquidation(
+    ///     &settlement_id,
+    ///     &env.current_contract_address(),
+    ///     &borrower,
+    /// );
+    /// assert_eq!(recovered, admin_supplied_amount, "amount mismatch");
+    /// ```
     fn settle_default_liquidation(
         env: soroban_sdk::Env,
         auction_id: soroban_sdk::Symbol,
         credit_contract: soroban_sdk::Address,
         borrower: soroban_sdk::Address,
     ) -> i128;
+
+    /// Get the protocol version of the auction contract.
+    ///
+    /// This function is called by the credit contract as part of the version handshake
+    /// before invoking `settle_default_liquidation()`. Version compatibility ensures
+    /// both contracts speak the same protocol.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// A `ProtocolVersion` struct with `major` and `minor` fields.
+    /// Current version: `{ major: 1, minor: 0 }`.
+    ///
+    /// # Compatibility Rules
+    ///
+    /// The credit contract asserts:
+    /// - `remote.major == current.major` — Breaking changes require major bump
+    /// - `remote.minor >= current.minor` — Forward compatibility on minor versions
+    ///
+    /// If the check fails, `settle_default_liquidation()` is **not** called.
     fn get_version(env: soroban_sdk::Env) -> crate::handshake::ProtocolVersion;
 }
 
@@ -328,6 +363,10 @@ pub struct Credit;
 
 #[contractimpl]
 impl Credit {
+    pub fn init(env: Env, admin: Address) {
+        config::init(env, admin)
+    }
+
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
     }
@@ -399,20 +438,6 @@ impl Credit {
         config::set_liquidity_source(env, reserve_address)
     }
 
-    /// Sets the minimum collateral ratio in basis points (admin only).
-    /// Set the minimum collateral ratio required for borrowing (admin only).
-    ///
-    /// # Arguments
-    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
-    ///
-    /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
-    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
-    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
-        require_admin_auth(&env);
-        assert_not_paused(&env);
-        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
-    }
 
 
     /// Open a new credit line for a borrower (admin only).
@@ -1043,7 +1068,7 @@ impl Credit {
     }
 
     /// Return the per-borrower liquidation grace period in seconds for `borrower`.
-    pub fn get_borrower_liq_grace(env: Env, borrower: Address) -> u64 {
+    pub fn get_borrower_liq_grace(env: Env, borrower: Address) -> Option<u64> {
         lifecycle::get_per_borrower_liquidation_grace(&env, borrower)
     }
 
@@ -1440,6 +1465,51 @@ impl Credit {
         lifecycle_views::capabilities(env, borrower)
     }
 
+    /// Return the query-subsystem capabilities bitmap for `borrower` (v7).
+    ///
+    /// Read-only view reporting which borrower-scoped query results are
+    /// currently meaningful: whether a credit line / repayment schedule
+    /// exists, whether the health factor is debt-sensitive, and whether
+    /// delinquency checks are applicable. See [`QueryCapabilities`] for the
+    /// exact precondition each flag mirrors.
+    ///
+    /// # Authentication
+    /// No authentication required. This is a pure read-only query.
+    ///
+    /// # Returns
+    /// A [`QueryCapabilities`] bitmap.
+    pub fn query_capabilities(env: Env, borrower: Address) -> QueryCapabilities {
+        query_views::capabilities(env, borrower)
+    }
+
+    /// Return a borrower's current collateral capabilities bitmap.
+    ///
+    /// Read-only view that reports whether collateral deposit, withdrawal, or
+    /// partial release are currently possible for the borrower.
+    pub fn capabilities(env: Env, borrower: Address) -> CollateralCapabilities {
+        views::capabilities(env, borrower)
+    }
+
+    /// Commit an attestation batch for a borrower.
+    pub fn commit_attestation_batch(
+        env: Env,
+        borrower: Address,
+        merkle_root: BytesN<32>,
+        count: u32,
+    ) {
+        crate::attestation::commit_attestation_batch(env, borrower, merkle_root, count);
+    }
+
+    /// Return the attestation batch associated with a borrower, if any.
+    pub fn get_attestation_batch(env: Env, borrower: Address) -> Option<AttestationBatch> {
+        crate::attestation::get_attestation_batch(env, borrower)
+    }
+
+    /// Clear the attestation batch associated with a borrower.
+    pub fn clear_attestation_batch(env: Env, borrower: Address) {
+        crate::attestation::clear_attestation_batch(env, borrower);
+    }
+
     /// Deposit collateral tokens from the borrower into the contract.
     ///
     /// # Authorization
@@ -1729,40 +1799,24 @@ impl Credit {
         crate::storage::get_credit_line_count(&env)
     }
 
-    /// Enumerate credit lines in stable insertion order.
+    /// Cursor-based pagination over all credit lines.
     ///
-    /// `start_after` is an exclusive cursor over the stable numeric id.
-    /// Results are capped by `MAX_ENUMERATION_LIMIT` for predictable cost.
+    /// Walks `CreditLineBorrowerById` starting at `cursor` (inclusive) and
+    /// yields up to `limit` lines. Returns `(lines, next_cursor)` where
+    /// `next_cursor` is `None` when the end of the enumeration space is reached.
+    ///
+    /// `limit` is capped at `MAX_ENUMERATION_LIMIT` (100) regardless of the
+    /// caller-supplied value. When `skip_closed` is `true`, lines with
+    /// `status == Closed` are omitted.
+    ///
+    /// No authentication required — this is a pure read.
     pub fn enumerate_credit_lines(
         env: Env,
-        start_after: Option<u32>,
+        cursor: u32,
         limit: u32,
-    ) -> Vec<(u32, CreditLineData)> {
-        let count = crate::storage::get_credit_line_count(&env);
-        let capped_limit = limit.min(MAX_ENUMERATION_LIMIT);
-        let mut out = Vec::new(&env);
-
-        if capped_limit == 0 || count == 0 {
-            return out;
-        }
-
-        let mut next_id = start_after.map(|id| id.saturating_add(1)).unwrap_or(0);
-        let mut returned = 0_u32;
-        while next_id < count && returned < capped_limit {
-            if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
-                if let Some(line) = env
-                    .storage()
-                    .persistent()
-                    .get::<Address, CreditLineData>(&borrower)
-                {
-                    out.push_back((next_id, line));
-                    returned = returned.saturating_add(1);
-                }
-            }
-            next_id = next_id.saturating_add(1);
-        }
-
-        out
+        skip_closed: bool,
+    ) -> (soroban_sdk::Vec<CreditLineData>, Option<u32>) {
+        query::enumerate_credit_lines(env, cursor, limit, skip_closed)
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
@@ -1830,6 +1884,129 @@ impl Credit {
     /// # Reentrancy
     /// Protected by the contract-wide reentrancy guard to prevent cross-contract
     /// callback attacks during settlement.
+    /// Settle a defaulted credit line using recovered amount from a completed auction.
+    ///
+    /// This is the primary cross-contract settlement entrypoint. It coordinates with the
+    /// auction contract to atomically reconcile the recovered amount and update the
+    /// borrower's debt. This function is guarded by reentrancy protection and oracle
+    /// circuit-breaker validation (if configured).
+    ///
+    /// # Authorization
+    ///
+    /// Requires admin authentication via `require_admin_auth()`.
+    /// Only the contract admin can initiate settlement.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `borrower`: Address of the borrower whose line is being settled
+    /// - `recovered_amount`: Amount recovered from the auction (validated against auction return)
+    /// - `settlement_id`: Unique identifier for this settlement (prevents replay)
+    /// - `close_factor_bps`: Maximum percentage of debt that can be recovered (basis points, 0-10000)
+    /// - `oracle_price`: Optional oracle price for circuit-breaker validation
+    ///
+    /// # Preconditions
+    ///
+    /// All of the following must be true:
+    /// 1. Caller must be authenticated as the admin
+    /// 2. Reentrancy guard must not be set
+    /// 3. Contract must not be paused
+    /// 4. Credit line status must be `Defaulted`
+    /// 5. `recovered_amount > 0` and `recovered_amount <= target_recovery`
+    ///    (where `target_recovery = utilized_amount * close_factor_bps / 10_000`)
+    /// 6. Settlement ID `(borrower, settlement_id)` must not have been previously settled
+    /// 7. If oracle circuit-breaker is configured:
+    ///    - Oracle price must be > 0 or panic with `OraclePriceInvalid`
+    ///    - Oracle price age must be ≤ `max_age_seconds` or panic with `OraclePriceStale`
+    ///    - Oracle price deviation from last price must be ≤ `max_deviation_bps` or panic with `OraclePriceDeviation`
+    ///
+    /// # Cross-Contract Handshake
+    ///
+    /// If an auction contract is configured:
+    ///
+    /// 1. **Version check**: Calls `AuctionClient::get_version()` and verifies major version match
+    ///    - Current version: `{ major: 1, minor: 0 }`
+    ///    - Reverts with `IncompatibleVersion` if major versions don't match
+    ///
+    /// 2. **Settlement call**: Invokes `AuctionClient::settle_default_liquidation()`
+    ///    - Parameters: `(settlement_id, env.current_contract_address(), borrower)`
+    ///    - Receives: `highest_bid` amount from auction
+    ///    - Validates: `highest_bid == recovered_amount`, else panics with `InvalidAmount`
+    ///
+    /// # Effects (on success)
+    ///
+    /// 1. Sets reentrancy guard at entry (cleared at exit)
+    /// 2. Validates oracle configuration (if set)
+    /// 3. Invokes auction contract (if configured) and validates return value
+    /// 4. Allocates `recovered_amount` to:
+    ///    - First: Accrued interest (if any)
+    ///    - Remainder: Utilized principal
+    /// 5. Persists replay marker: `(borrower, settlement_id)` → settled
+    /// 6. If `utilized_amount == 0` after settlement, transitions status to `Closed`
+    /// 7. Emits `("credit", "liq_setl")` event with settlement details
+    /// 8. Clears reentrancy guard at exit (success or panic)
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `ContractError::Unauthorized` — Caller is not the admin
+    /// - `ContractError::Reentrancy` — Reentrancy guard already set
+    /// - `ContractError::Paused` — Protocol is paused
+    /// - `ContractError::CreditLineNotFound` — Borrower has no credit line
+    /// - `ContractError::CreditLineDefaulted` — Credit line is not in `Defaulted` status (pre-condition)
+    /// - `ContractError::InvalidAmount` — Auction return value doesn't match `recovered_amount`
+    /// - `ContractError::OraclePriceInvalid` — Oracle price invalid or missing
+    /// - `ContractError::OraclePriceStale` — Oracle price exceeds max age
+    /// - `ContractError::OraclePriceDeviation` — Oracle price change exceeds max deviation
+    /// - Auction errors (if configured):
+    ///   - `AuctionError::NoFactoryContract`
+    ///   - `AuctionError::Unauthorized`
+    ///   - `AuctionError::NotFound`
+    ///   - `AuctionError::NotClosed`
+    ///   - `AuctionError::AlreadySettled`
+    ///
+    /// # Reentrancy Safety
+    ///
+    /// This function sets a contract-wide reentrancy guard at entry and clears it on exit
+    /// (whether success or panic). The guard prevents:
+    /// - Re-entrance through `draw_credit` or `repay_credit` during settlement
+    /// - Multiple concurrent settlements
+    /// - Callbacks from auction or oracle contracts
+    ///
+    /// # Replay Protection
+    ///
+    /// Settlement is protected against replay on both sides:
+    /// - **Credit side**: `(borrower, settlement_id)` pair can only be settled once
+    /// - **Auction side**: `auction_id` can only be settled once (within auction contract)
+    ///
+    /// If replayed with the same `(borrower, settlement_id)`, this function panics before
+    /// any state mutation.
+    ///
+    /// # Example Usage
+    ///
+    /// ```ignore
+    /// let credit = CreditClient::new(&env, &credit_address);
+    ///
+    /// // Prerequisites:
+    /// // 1. Borrower has defaulted credit line
+    /// // 2. Auction is closed with highest_bid = 500
+    /// // 3. Admin supplies matching recovered_amount
+    ///
+    /// credit.settle_default_liquidation(
+    ///     &borrower,
+    ///     &500_i128,                    // recovered_amount
+    ///     &Symbol::new(&env, "auc_1"),  // settlement_id (unique per settlement)
+    ///     &10_000_u32,                  // close_factor_bps (100% recovery)
+    ///     &None,                        // oracle_price (if oracle configured)
+    /// );
+    /// // Line is now settled; if full recovery, status becomes Closed
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - `docs/CROSS_CONTRACT_HANDSHAKE.md` — Protocol specification
+    /// - `docs/default-liquidation-auction-hook.md` — Settlement interface
+    /// - `contracts/credit/src/handshake.rs` — Version negotiation
     pub fn settle_default_liquidation(
         env: Env,
         borrower: Address,
@@ -1908,21 +2085,68 @@ impl Credit {
 
     // ── Auction contract admin ────────────────────────────────────────────────
 
-    /// Configure the auction contract address for default-liquidation hooks.
+    /// Configure the auction contract address for default-liquidation settlements.
     ///
-    /// When set, the credit contract records which auction contract is
-    /// authorized to participate in the liquidation settlement flow. This
-    /// address is stored in instance storage and can be updated by the admin.
+    /// When set, this address is stored in instance storage and used by
+    /// `settle_default_liquidation()` to perform version negotiation and cross-contract
+    /// settlement calls. If not set, `settle_default_liquidation()` will execute
+    /// settlement accounting without calling the auction contract.
     ///
     /// # Authorization
-    /// Admin only.
+    ///
+    /// Requires admin authentication via `require_admin_auth()`.
+    /// Only the contract admin can configure the auction address.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `auction_address`: Address of the auction contract to integrate
+    ///
+    /// # Preconditions
+    ///
+    /// 1. Caller must be authenticated as the admin
+    /// 2. Contract must not be paused
+    ///
+    /// # Effects
+    ///
+    /// Stores `auction_address` in instance storage at key `DataKey::AuctionContract`.
+    /// Can be called multiple times to update the address; overwrites previous value.
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `ContractError::Unauthorized` — Caller is not the admin
+    /// - `ContractError::Paused` — Protocol is paused
+    /// - `ContractError::NotAdmin` — Admin has not been initialized
+    ///
+    /// # See Also
+    ///
+    /// - `get_auction_contract()` — Retrieve the configured address
+    /// - `settle_default_liquidation()` — Uses this address for cross-contract calls
     pub fn set_auction_contract(env: Env, auction_address: Address) {
         assert_not_paused(&env);
         require_admin_auth(&env);
         crate::storage::set_auction_contract(&env, &auction_address);
     }
 
-    /// Return the configured auction contract address, if set.
+    /// Retrieve the configured auction contract address, if set.
+    ///
+    /// Returns the auction contract address that was previously set via
+    /// `set_auction_contract()`. If no address has been set, returns `None`.
+    /// This function does not require authentication (read-only query).
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Address)` — The configured auction contract address
+    /// - `None` — No auction contract has been configured
+    ///
+    /// # See Also
+    ///
+    /// - `set_auction_contract()` — Configure the auction address
     pub fn get_auction_contract(env: Env) -> Option<Address> {
         crate::storage::get_auction_contract(&env)
     }

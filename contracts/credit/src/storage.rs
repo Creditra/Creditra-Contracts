@@ -232,6 +232,8 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Quorum-of-K oracle price configuration.
+    OracleQuorumConfig,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
     /// Pending treasury withdrawal proposal (at most one at a time).
@@ -254,12 +256,12 @@ pub enum DataKey {
     /// Per-borrower liquidation grace period in seconds.
     /// Specifies a grace window before a credit line can be defaulted or liquidated.
     LiquidationGracePeriod(Address),
+    /// Global grace period configuration.
+    GracePeriodConfig,
     /// Per-borrower absolute exposure cap (i128 amount).
     BorrowerExposureCap(Address),
     /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
-    /// Per-borrower, per-token collateral balance (multi-collateral path).
-    CollateralBalanceV2(Address, Address),
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
 }
@@ -665,6 +667,21 @@ pub fn add_treasury_balance(env: &Env, amount: i128) {
         .set(&DataKey::TreasuryBalance, &updated_balance);
 }
 
+/// Get the pending treasury withdrawal proposal, if any.
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<crate::types::TreasuryWithdrawalProposal> {
+    env.storage().instance().get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+/// Store a pending treasury withdrawal proposal.
+pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &crate::types::TreasuryWithdrawalProposal) {
+    env.storage().instance().set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+/// Clear the pending treasury withdrawal proposal after execution or cancellation.
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage().instance().remove(&DataKey::PendingTreasuryWithdrawal);
+}
+
 /// Clear accumulated treasury balance after withdrawal.
 pub fn clear_treasury_balance(env: &Env) {
     env.storage()
@@ -757,6 +774,26 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Instance storage key for the grace period configuration.
 pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
+}
+
+/// Get the global grace period configuration, if set.
+pub fn get_grace_period_config(env: &Env) -> Option<crate::types::GracePeriodConfig> {
+    env.storage().instance().get(&DataKey::GracePeriodConfig)
+}
+
+/// Set the global grace period configuration.
+pub fn set_grace_period_config(env: &Env, cfg: &crate::types::GracePeriodConfig) {
+    env.storage().instance().set(&DataKey::GracePeriodConfig, cfg);
+}
+
+/// Get the per-borrower liquidation grace period in seconds, if set.
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage().instance().get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+}
+
+/// Set the per-borrower liquidation grace period in seconds.
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, seconds: u64) {
+    env.storage().instance().set(&DataKey::LiquidationGracePeriod(borrower.clone()), &seconds);
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.
@@ -948,6 +985,16 @@ pub fn set_min_credit_limit(env: &Env, min: i128) {
 /// Get the configured maximum credit limit, if set.
 pub fn get_max_credit_limit(env: &Env) -> Option<i128> {
     env.storage().instance().get(&DataKey::MaxCreditLimit)
+}
+
+/// Get the per-borrower exposure cap, if set.
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage().instance().get(&DataKey::BorrowerExposureCap(borrower.clone()))
+}
+
+/// Set the per-borrower exposure cap (admin only, enforced by caller).
+pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
+    env.storage().instance().set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
 }
 
 /// Set the maximum credit limit (admin only, enforced by caller).
@@ -1182,6 +1229,16 @@ pub fn get_oracle_config(env: &Env) -> Option<crate::types::OracleConfig> {
 /// config satisfies the invariants documented on [`crate::types::OracleConfig`].
 pub fn set_oracle_config(env: &Env, cfg: &crate::types::OracleConfig) {
     env.storage().instance().set(&DataKey::OracleConfig, cfg);
+}
+
+/// Get the quorum-of-K oracle configuration, if set.
+pub fn get_oracle_quorum_config(env: &Env) -> Option<crate::types::OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+/// Set the quorum-of-K oracle configuration.
+pub fn set_oracle_quorum_config(env: &Env, cfg: &crate::types::OracleQuorumConfig) {
+    env.storage().instance().set(&DataKey::OracleQuorumConfig, cfg);
 }
 
 /// Get the last accepted oracle price, if any.

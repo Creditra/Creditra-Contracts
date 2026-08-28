@@ -298,7 +298,7 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
             borrower: borrower.clone(),
             amount_released: amount,
             new_balance: post_balance,
-            health_factor_bps,
+            health_factor_bps: health_factor_bps as u64,
         },
     );
     publish_collateral_lifecycle_event(

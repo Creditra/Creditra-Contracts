@@ -165,13 +165,13 @@ const ANCHORS: &[(u128, u32, u32)] = &[
     // → exact result with no remainder
     (315_360_000_000_u128, 10_000, SECONDS_PER_YEAR as u32),
     // ── Common human-scale time deltas ──────────────────────────────────────
-    (10_000, 300, 86_400),     // 1 day
-    (1_000_000, 500, 3_600),   // 1 hour
-    (1_000_000_000, 9_999, 1), // 1 second, near-max rate
+    (10_000, 300, 86_400),          // 1 day
+    (1_000_000, 500, 3_600),        // 1 hour
+    (1_000_000_000, 9_999, 1),      // 1 second, near-max rate
     // ── Large principal, moderate rate, 1 year ──────────────────────────────
     (1_000_000_000, 500, SECONDS_PER_YEAR as u32),
     // ── Floor-to-zero cases (result < 1 token) ──────────────────────────────
-    (1, 1, SECONDS_PER_YEAR as u32), // 1 · 1 / 315_360_000_000 → 0
+    (1, 1, SECONDS_PER_YEAR as u32),  // 1 · 1 / 315_360_000_000 → 0
     (100, 50, 3_600),
     // ── Multi-year time deltas (u32-representable) ───────────────────────────
     (10_000, 300, SECONDS_PER_YEAR as u32 * 2),
@@ -197,9 +197,7 @@ fn compute_entry(principal: u128, rate_bps: u32, seconds: u32) -> SnapshotEntry 
             expected: "0".to_string(),
             overflow: true,
         },
-        Err(e) => {
-            panic!("unexpected error for principal={principal} rate={rate_bps} sec={seconds}: {e}")
-        }
+        Err(e) => panic!("unexpected error for principal={principal} rate={rate_bps} sec={seconds}: {e}"),
     }
 }
 
@@ -389,7 +387,8 @@ fn regenerate_accrued_interest_snapshot() {
             .unwrap_or_else(|e| panic!("could not create snapshots dir: {e}"));
     }
 
-    let json = serde_json::to_string_pretty(&entries).expect("failed to serialise snapshot");
+    let json =
+        serde_json::to_string_pretty(&entries).expect("failed to serialise snapshot");
     fs::write(&path, &json)
         .unwrap_or_else(|e| panic!("failed to write snapshot to '{}': {e}", path.display()));
 
@@ -399,11 +398,7 @@ fn regenerate_accrued_interest_snapshot() {
     assert_eq!(entries.len(), 4096);
     for (i, entry) in entries.iter().enumerate() {
         let principal: u128 = entry.principal.parse().unwrap();
-        let live = accrued_interest(
-            Uint128::new(principal),
-            entry.rate_bps,
-            entry.seconds as u64,
-        );
+        let live = accrued_interest(Uint128::new(principal), entry.rate_bps, entry.seconds as u64);
         if entry.overflow {
             assert_eq!(
                 live,
@@ -589,7 +584,10 @@ mod deterministic {
         let mut prev = Uint128::zero();
         for days in 0u64..=365 {
             let cur = accrued_interest(principal, rate, days * 86_400).unwrap();
-            assert!(cur >= prev, "day {days}: accrued {cur} < previous {prev}");
+            assert!(
+                cur >= prev,
+                "day {days}: accrued {cur} < previous {prev}"
+            );
             prev = cur;
         }
         // Sanity-check the final value matches the direct 1-year call.

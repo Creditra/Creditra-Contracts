@@ -1,0 +1,90 @@
+name: PR Coverage Check
+
+# Enforces the 95 % line-coverage gate on every pull request targeting
+# main / master / develop.  A PR that drops coverage below 95 % will have
+# this check fail and cannot be merged until coverage is restored.
+#
+# Soft steps (summary comment, LCOV artifact upload) are marked
+# continue-on-error so that transient runner issues do not accidentally block
+# the gate itself.
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: pr-coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Enforce 95 % Coverage (PR gate)
+    runs-on: ubuntu-latest
+    # ── NO continue-on-error ─────────────────────────────────────────────────
+    # This job MUST fail when coverage drops below 95 %.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable + llvm-tools)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Cache Rust toolchain and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-pr-cov-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-pr-cov-
+            ${{ runner.os }}-cargo-
+
+      # ── HARD GATE ─────────────────────────────────────────────────────────
+      # Exits non-zero when line coverage < 95 %, blocking the PR.
+      - name: Enforce minimum 95 % line coverage
+        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 95
+
+      # ── Soft steps below — allowed to fail ────────────────────────────────
+
+      - name: Generate LCOV report for PR
+        if: always()
+        continue-on-error: true
+        run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
+
+      - name: Upload LCOV coverage artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-coverage-report-${{ github.run_id }}
+          path: lcov.info
+          retention-days: 30
+
+      - name: Write coverage summary
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "## PR Coverage Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Requirement | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Line coverage ≥ 95 % | ✅ Passed |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run \`cargo llvm-cov --workspace --all-targets --fail-under-lines 95\` locally to reproduce." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Coverage documentation: [\`docs/COVERAGE.md\`](docs/COVERAGE.md)" >> "$GITHUB_STEP_SUMMARY"

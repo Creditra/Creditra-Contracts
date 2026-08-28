@@ -17,19 +17,6 @@ fn setup(env: &Env) -> (CreditClient<'_>, Address) {
     (client, admin)
 }
 
-fn credit_line_id_for(client: &CreditClient<'_>, borrower: &Address) -> u32 {
-    let lines = client.enumerate_credit_lines(&None, &10);
-
-    for index in 0..lines.len() {
-        let (id, line) = lines.get(index).unwrap();
-        if line.borrower == *borrower {
-            return id;
-        }
-    }
-
-    panic!("borrower must have an enumerated credit line id");
-}
-
 fn assert_last_event_topic(env: &Env, expected: Symbol) {
     let events = env.events().all();
     let (_contract_id, topics, _data) = events.last().unwrap();
@@ -39,6 +26,29 @@ fn assert_last_event_topic(env: &Env, expected: Symbol) {
 
     assert_eq!(namespace, symbol_short!("credit"));
     assert_eq!(event_name, expected);
+}
+
+fn find_borrower_index(client: &CreditClient<'_>, target: &Address) -> usize {
+    let mut cursor = 0_u32;
+    let mut idx = 0_usize;
+    loop {
+        let (lines, next_cursor) = client.enumerate_credit_lines(&cursor, &10, &false);
+        if lines.is_empty() {
+            break;
+        }
+        for i in 0..lines.len() {
+            let line = lines.get(i).unwrap();
+            if line.borrower == *target {
+                return idx;
+            }
+            idx += 1;
+        }
+        match next_cursor {
+            Some(c) => cursor = c,
+            None => break,
+        }
+    }
+    panic!("borrower not found");
 }
 
 #[test]
@@ -55,13 +65,10 @@ fn reopen_closed_line_reuses_existing_nonzero_id() {
     client.open_credit_line(&borrower, &1_000_i128, &350_u32, &60_u32);
     assert_last_event_topic(&env, symbol_short!("opened"));
 
-    let original_id = credit_line_id_for(&client, &borrower);
     let original_count = client.get_credit_line_count();
-    assert_eq!(
-        original_id, 1,
-        "target borrower should exercise non-zero id path"
-    );
     assert_eq!(original_count, 2);
+    // The borrower is the second line opened → index 1
+    assert_eq!(find_borrower_index(&client, &borrower), 1);
 
     client.close_credit_line(&borrower, &admin);
     assert_last_event_topic(&env, symbol_short!("closed"));
@@ -73,6 +80,8 @@ fn reopen_closed_line_reuses_existing_nonzero_id() {
     let reopened = client.get_credit_line(&borrower).unwrap();
     assert_eq!(reopened.status, CreditStatus::Active);
     assert_eq!(reopened.credit_limit, 2_000);
+    // Count unchanged → ID reused (no new ID allocated)
     assert_eq!(client.get_credit_line_count(), original_count);
-    assert_eq!(credit_line_id_for(&client, &borrower), original_id);
+    // Borrower is still at index 1 in enumeration
+    assert_eq!(find_borrower_index(&client, &borrower), 1);
 }

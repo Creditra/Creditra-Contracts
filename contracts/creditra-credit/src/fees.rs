@@ -12,7 +12,7 @@
 //! The treasury share is computed with floor rounding; the bounty pool receives
 //! the remainder so no tokens are lost to integer division.
 
-use cosmwasm_std::{Addr, Deps, DepsMut, Uint128};
+use cosmwasm_std::{Deps, DepsMut, Uint128};
 use cw_storage_plus::Item;
 
 use crate::error::ContractError;
@@ -34,6 +34,11 @@ pub const MAX_FEE_SHARE_BPS: u32 = 10_000;
 
 /// Default treasury share when unset: 100% to treasury (backward compatible).
 pub const DEFAULT_TREASURY_FEE_SHARE_BPS: u32 = 10_000;
+
+/// Protocol fee in basis points charged on draw repayment.
+///
+/// When absent no fee is charged. Stored as an `Item<u32>` in instance storage.
+pub const PROTOCOL_FEE_BPS: Item<u32> = Item::new("pfb");
 
 /// Result of splitting a protocol fee between treasury and bounty accumulators.
 #[derive(Clone, Debug, PartialEq)]
@@ -186,7 +191,11 @@ pub fn accrue_protocol_fee(
 ///
 /// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
 /// - [`ContractError::ProtocolFeeBpsExceeded`] if `bps` exceeds the ceiling.
-pub fn set_protocol_fee_bps(deps: DepsMut, sender: &Addr, bps: u32) -> Result<(), ContractError> {
+pub fn set_protocol_fee_bps(
+    deps: DepsMut,
+    sender: &Addr,
+    bps: u32,
+) -> Result<(), ContractError> {
     assert_owner(deps.as_ref(), sender)?;
     if bps > MAX_PROTOCOL_FEE_BPS {
         return Err(ContractError::ProtocolFeeBpsExceeded);

@@ -99,14 +99,15 @@ use crate::events::{
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
     add_treasury_balance as storage_add_treasury_balance,
-    assert_not_paused, clear_repayment_schedule, get_late_fee_flat as storage_get_late_fee_flat,
-    get_repayment_schedule, liquidation_settlement_key, persist_credit_line,
+    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
+    get_credit_line, get_late_fee_flat as storage_get_late_fee_flat,
+    get_repayment_schedule, persist_credit_line,
     set_late_fee_flat as storage_set_late_fee_flat,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Generate a unique key for tracking liquidation settlements.
 ///
@@ -126,8 +127,6 @@ fn liquidation_settlement_key(
 }
 
 
-
-use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Open a new credit line for a borrower (admin only).
 ///
@@ -273,7 +272,7 @@ pub fn set_per_borrower_liquidation_grace(
 }
 
 /// Return the per-borrower liquidation grace period in seconds for `borrower`.
-pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> Option<u64> {
     crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
 }
 
@@ -607,21 +606,22 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    let grace_seconds = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower);
-    if grace_seconds > 0 {
-        let now = env.ledger().timestamp();
-        let base_ts = if credit_line.suspension_ts > 0 {
-            credit_line.suspension_ts
-        } else if let Some(schedule) = get_repayment_schedule(&env, &borrower) {
-            schedule.next_due_ts
-        } else if credit_line.last_rate_update_ts > 0 {
-            credit_line.last_rate_update_ts
-        } else {
-            credit_line.last_accrual_ts
-        };
+    if let Some(grace_seconds) = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower) {
+        if grace_seconds > 0 {
+            let now = env.ledger().timestamp();
+            let base_ts = if credit_line.suspension_ts > 0 {
+                credit_line.suspension_ts
+            } else if let Some(schedule) = get_repayment_schedule(&env, &borrower) {
+                schedule.next_due_ts
+            } else if credit_line.last_rate_update_ts > 0 {
+                credit_line.last_rate_update_ts
+            } else {
+                credit_line.last_accrual_ts
+            };
 
-        if now < base_ts.saturating_add(grace_seconds) {
-            env.panic_with_error(ContractError::LiquidationGraceActive);
+            if now < base_ts.saturating_add(grace_seconds) {
+                env.panic_with_error(ContractError::LiquidationGraceActive);
+            }
         }
     }
 
@@ -752,7 +752,9 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
-    // Compute the maximum recoverable amount for this settlement
+    // Compute the maximum recoverable amount for this settlement. The supplied
+    // `recovered_amount` may exceed the effective cap, in which case we clamp to
+    // the configured close factor and treat the remainder as unrecoverable.
     let max_recoverable = credit_line
         .utilized_amount
         .checked_mul(close_factor_bps as i128)
@@ -760,9 +762,7 @@ pub fn settle_default_liquidation(
         .checked_div(10_000)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
-    if recovered_amount > max_recoverable {
-        env.panic_with_error(ContractError::OverLimit);
-    }
+    let actual_recovery = recovered_amount.min(max_recoverable);
 
     credit_line.utilized_amount = credit_line
         .utilized_amount
