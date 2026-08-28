@@ -12,7 +12,7 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Events};
+use soroban_sdk::testutils::{Address as _, Events, Ledger as _};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
     let admin = Address::generate(&env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
@@ -489,7 +490,7 @@ fn pause_with_reason_stores_reason() {
 
     assert!(!client.is_protocol_paused());
 
-    let reason = soroban_sdk::Symbol::new(&env, "oracle-outage");
+    let reason = soroban_sdk::Symbol::new(&env, "oracle_outage");
     client.set_protocol_paused_with_reason(&true, &reason);
 
     assert!(client.is_protocol_paused());
@@ -505,7 +506,7 @@ fn pause_with_reason_unpause_clears_reason() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    let reason = soroban_sdk::Symbol::new(&env, "token-migration");
+    let reason = soroban_sdk::Symbol::new(&env, "token_migration");
     client.set_protocol_paused_with_reason(&true, &reason);
     assert!(client.get_protocol_pause_reason().is_some());
 
@@ -540,7 +541,7 @@ fn later_reasonless_pause_clears_stale_reason() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
 
-    let reason = soroban_sdk::Symbol::new(&env, "oracle-outage");
+    let reason = soroban_sdk::Symbol::new(&env, "oracle_outage");
     client.set_protocol_paused_with_reason(&true, &reason);
     assert!(client.get_protocol_pause_reason().is_some());
 
@@ -589,6 +590,6 @@ fn pause_with_reason_requires_admin() {
     let client = CreditClient::new(&env, &contract_id);
 
     non_admin.require_auth();
-    let reason = soroban_sdk::Symbol::new(&env, "bad-actor");
+    let reason = soroban_sdk::Symbol::new(&env, "bad_actor");
     client.set_protocol_paused_with_reason(&true, &reason);
 }

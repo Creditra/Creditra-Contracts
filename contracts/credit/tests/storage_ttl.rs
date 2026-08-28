@@ -7,8 +7,8 @@
 //! paths so that active credit lines are not silently archived by the network.
 
 use creditra_credit::storage::{
-    DataKey, DrawAuditKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, LEDGER_BUMP_AMOUNT,
-    LEDGER_BUMP_THRESHOLD,
+    DataKey, DrawAuditKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD,
 };
 use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
@@ -39,10 +39,7 @@ fn ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
     env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
 }
 
-fn instance_ttl(
-    env: &Env,
-    contract_id: &Address,
-) -> u32 {
+fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
     env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
@@ -352,10 +349,7 @@ fn reverse_draw_bumps_credit_line_ttl_on_accrual_read() {
         timestamp: original_ts,
     });
     env.as_contract(&contract_id, || {
-        env.storage().persistent().set(
-            &draw_key,
-            &200_i128,
-        );
+        env.storage().persistent().set(&draw_key, &200_i128);
         creditra_credit::storage::bump_persistent_ttl(&env, &draw_key);
         let mut line = creditra_credit::storage::get_credit_line(&env, &borrower).unwrap();
         line.utilized_amount = 200;

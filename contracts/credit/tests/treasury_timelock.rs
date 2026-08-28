@@ -51,7 +51,12 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let repay = 11_000_i128;
     asset.mint(&borrower, &repay);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &(env.ledger().sequence() + 1000));
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &repay,
+        &(env.ledger().sequence() + 1000),
+    );
     client.repay_credit(&borrower, &repay);
 
     // Sanity: contract holds a treasury balance now.

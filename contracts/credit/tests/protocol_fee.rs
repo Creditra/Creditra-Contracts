@@ -54,7 +54,12 @@ fn prepare_repay<'a>(
         .with_mut(|ledger| ledger.timestamp = 31_536_000);
 
     asset.mint(borrower, &repay_amount);
-    token::Client::new(env, token_address).approve(borrower, contract_id, &repay_amount, &10_000_u32);
+    token::Client::new(env, token_address).approve(
+        borrower,
+        contract_id,
+        &repay_amount,
+        &10_000_u32,
+    );
 
     client
 }
@@ -116,7 +121,10 @@ fn protocol_fee_on_total_repayment_accrues_expected_fee_amount() {
         token_client.balance(&contract_id),
         contract_balance_before + 9
     );
-    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 1_090);
+    assert_eq!(
+        token_client.balance(&reserve),
+        reserve_balance_before + 1_090
+    );
 }
 
 #[test]

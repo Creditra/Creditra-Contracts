@@ -125,7 +125,7 @@ fn fund_repayment(ctx: &Ctx, amount: i128) {
         &ctx.borrower,
         &ctx.contract_id,
         &amount,
-        &u32::MAX,
+        &(ctx.env.ledger().sequence() + 100_000),
     );
 }
 
@@ -360,11 +360,15 @@ proptest! {
             schedule.next_due_ts,
             expected,
             "contract={} model={} \
-             (amount_per_period={amount_per_period}, period_seconds={period_seconds}, \
-              elapsed_secs={elapsed_secs}, repay={repay}, accrued={accrued}, \
-              effective_repay={effective_repay}, interest_repaid={interest_repaid}, \
-              principal_repaid={principal_repaid})",
+             (amount_per_period={}, period_seconds={}, \
+              elapsed_secs={}, repay={}, accrued={}, \
+              effective_repay={}, interest_repaid={}, \
+              principal_repaid={})",
             schedule.next_due_ts, expected,
+            amount_per_period, period_seconds,
+            elapsed_secs, repay, accrued,
+            effective_repay, interest_repaid,
+            principal_repaid
         );
     }
 

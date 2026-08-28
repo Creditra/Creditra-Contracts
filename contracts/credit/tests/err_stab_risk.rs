@@ -79,10 +79,12 @@ fn risk_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::AdminCooldownActive.category(), Risk);
 
     // Lifecycle bucket (2)
-    assert_eq!(ContractError::CreditLineNotFound.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineClosed.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineSuspended.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineDefaulted.category(), Lifecycle);
+
+    // Misc bucket
+    assert_eq!(ContractError::CreditLineNotFound.category(), Misc);
 }
 
 // Snapshot: JSON file stores variant→code mapping
@@ -216,7 +218,7 @@ fn risk_v7_subset_variant_count_is_known() {
 mod integration {
     use super::*;
 
-    fn setup() -> (Env, CreditClient<'_>, Address) {
+    fn setup() -> (Env, CreditClient<'static>, Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -228,7 +230,7 @@ mod integration {
         (env, client, admin)
     }
 
-    fn setup_with_borrower() -> (Env, CreditClient<'_>, Address, Address) {
+    fn setup_with_borrower() -> (Env, CreditClient<'static>, Address, Address) {
         let (env, client, admin) = setup();
         let borrower = Address::generate(&env);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
@@ -399,9 +401,8 @@ mod integration {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
         client.set_liquidity_token(&token_address);
-        client.set_liquidity_source(&env.current_contract_address());
-        token::StellarAssetClient::new(&env, &token_address)
-            .mint(&env.current_contract_address(), &10_000_i128);
+        client.set_liquidity_source(&client.address);
+        token::StellarAssetClient::new(&env, &token_address).mint(&client.address, &10_000_i128);
 
         client.draw_credit(&borrower, &500_i128);
         client.update_risk_parameters(&borrower, &300_i128, &500_u32, &50_u32);

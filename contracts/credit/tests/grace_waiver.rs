@@ -245,7 +245,10 @@ fn no_event_when_entirely_post_grace() {
             let t1_match = Symbol::try_from_val(&env, &topics.get(1).unwrap())
                 .map(|s| s == symbol_short!("grace_wv"))
                 .unwrap_or(false);
-            assert!(!t1_match, "No GraceWaiverReceiptEvent when accrual is entirely post-grace");
+            assert!(
+                !t1_match,
+                "No GraceWaiverReceiptEvent when accrual is entirely post-grace"
+            );
         }
     }
 }

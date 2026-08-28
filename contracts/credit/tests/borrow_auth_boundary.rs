@@ -53,6 +53,12 @@ fn setup_with_token(env: &Env) -> (CreditClient<'_>, Address, Address, Address) 
     // Mint reserves to the contract and borrower
     token::StellarAssetClient::new(env, &token_address).mint(&contract_id, &1_000_000_i128);
     token::StellarAssetClient::new(env, &token_address).mint(&borrower, &1_000_000_i128);
+    token::Client::new(env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &100_000_u32,
+    );
 
     client.open_credit_line(&borrower, &10_000_i128, &500_u32, &50_u32);
 

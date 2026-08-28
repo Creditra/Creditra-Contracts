@@ -130,6 +130,10 @@ impl Collateral {
         let key = DataKey::Balance(user.clone());
         let current_balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
 
+        if current_balance < amount {
+            return Err(CollateralError::InsufficientCollateralBalance);
+        }
+
         let new_balance = current_balance
             .checked_sub(amount)
             .ok_or(CollateralError::InsufficientCollateralBalance)?;

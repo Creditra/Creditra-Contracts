@@ -51,9 +51,9 @@ fn test_withdraw_emits_collateral_withdrawn_event() {
     client.withdraw(&user, &400_i128);
 
     let events = env.events().all();
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 1);
 
-    let withdraw_event = events.get(1).unwrap();
+    let withdraw_event = events.get(0).unwrap();
     assert_eq!(
         withdraw_event.1,
         (symbol_short!("collat"), symbol_short!("withdraw")).into_val(&env)
@@ -69,15 +69,11 @@ fn test_withdraw_emits_collateral_withdrawn_event() {
 fn test_multiple_operations_maintain_event_ordering() {
     let (env, client, user) = setup_env();
 
+    // Operation 1: Deposit 500 -> new_balance 500
     client.deposit(&user, &500_i128);
-    client.deposit(&user, &300_i128);
-    client.withdraw(&user, &200_i128);
-
-    let events = env.events().all();
-    assert_eq!(events.len(), 3);
-
-    // Event 1: Deposit 500 -> new_balance 500
-    let e1 = events.get(0).unwrap();
+    let events1 = env.events().all();
+    assert_eq!(events1.len(), 1);
+    let e1 = events1.get(0).unwrap();
     assert_eq!(
         e1.1,
         (symbol_short!("collat"), symbol_short!("deposit")).into_val(&env)
@@ -86,8 +82,11 @@ fn test_multiple_operations_maintain_event_ordering() {
     assert_eq!(p1.amount, 500);
     assert_eq!(p1.new_balance, 500);
 
-    // Event 2: Deposit 300 -> new_balance 800
-    let e2 = events.get(1).unwrap();
+    // Operation 2: Deposit 300 -> new_balance 800
+    client.deposit(&user, &300_i128);
+    let events2 = env.events().all();
+    assert_eq!(events2.len(), 1);
+    let e2 = events2.get(0).unwrap();
     assert_eq!(
         e2.1,
         (symbol_short!("collat"), symbol_short!("deposit")).into_val(&env)
@@ -96,8 +95,11 @@ fn test_multiple_operations_maintain_event_ordering() {
     assert_eq!(p2.amount, 300);
     assert_eq!(p2.new_balance, 800);
 
-    // Event 3: Withdraw 200 -> new_balance 600
-    let e3 = events.get(2).unwrap();
+    // Operation 3: Withdraw 200 -> new_balance 600
+    client.withdraw(&user, &200_i128);
+    let events3 = env.events().all();
+    assert_eq!(events3.len(), 1);
+    let e3 = events3.get(0).unwrap();
     assert_eq!(
         e3.1,
         (symbol_short!("collat"), symbol_short!("withdraw")).into_val(&env)
@@ -123,31 +125,33 @@ fn test_failed_withdraw_does_not_emit_event() {
     let (env, client, user) = setup_env();
 
     client.deposit(&user, &100_i128);
-    let initial_event_count = env.events().all().len();
 
     let res = client.try_withdraw(&user, &500_i128);
     assert_eq!(res, Err(Ok(CollateralError::InsufficientCollateralBalance)));
 
     let events_after = env.events().all();
-    assert_eq!(events_after.len(), initial_event_count);
+    assert_eq!(events_after.len(), 0);
 }
 
 #[test]
 fn test_helper_publishers_format_and_emit_correctly() {
     let env = Env::default();
+    let contract_id = env.register(Collateral, ());
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
-    // Publish updated
-    publish_collateral_updated(&env, &user1, 100, 200);
-    // Publish released
-    publish_collateral_released(&env, &user1, 50, 150);
-    // Publish liquidated
-    publish_collateral_liquidated(&env, &user1, &user2, 50, 100);
-    // Publish transferred
-    publish_collateral_transferred(&env, &user1, &user2, 30);
-    // Publish closed
-    publish_collateral_closed(&env, &user1, 0);
+    env.as_contract(&contract_id, || {
+        // Publish updated
+        publish_collateral_updated(&env, &user1, 100, 200);
+        // Publish released
+        publish_collateral_released(&env, &user1, 50, 150);
+        // Publish liquidated
+        publish_collateral_liquidated(&env, &user1, &user2, 50, 100);
+        // Publish transferred
+        publish_collateral_transferred(&env, &user1, &user2, 30);
+        // Publish closed
+        publish_collateral_closed(&env, &user1, 0);
+    });
 
     let events = env.events().all();
     assert_eq!(events.len(), 5);

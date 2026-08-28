@@ -58,7 +58,7 @@ use crate::events::{
     publish_grace_waiver_applied_event, publish_interest_accrued_event,
     publish_penalty_rate_entered_event, publish_penalty_rate_exited_event, InterestAccruedEvent,
 };
-use crate::math_utils::{prorate_interest, Rounding};
+use crate::math_utils::Rounding;
 use crate::storage::get_credit_line;
 use crate::storage::persist_credit_line;
 use crate::types::{
@@ -109,7 +109,7 @@ use soroban_sdk::{Address, Env, Vec};
 /// // interest = 1_000_000 * 500 * 86_400 / 315_360_000_000 = 137
 /// // After call: accrued_interest += 137, last_accrual_ts = 86_400
 /// ```
-pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
+pub(crate) const SECONDS_PER_YEAR: u64 = 31_557_600;
 
 /// Compute simple interest: `utilized * rate_bps * seconds / (10_000 * SECONDS_PER_YEAR)`.
 ///
@@ -248,10 +248,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
     // Compute accrued interest using the audited prorate helper with floor rounding.
     let accrued_u: u128 = if line.status == CreditStatus::Suspended {
-        let grace_cfg: Option<GracePeriodConfig> = env
-            .storage()
-            .instance()
-            .get(&crate::storage::grace_period_key(env));
+        let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(env);
 
         match grace_cfg {
             Some(cfg) if cfg.grace_period_seconds > 0 => {
@@ -387,7 +384,9 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
             },
         );
 
-        // Only update last_accrual_ts when we actually applied accrual.
+        // Only update last_accrual_ts when we actually applied accrual or waived interest during suspension.
+        line.last_accrual_ts = now;
+    } else if line.status == CreditStatus::Suspended {
         line.last_accrual_ts = now;
     }
 

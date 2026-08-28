@@ -59,7 +59,7 @@
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::xdr::{FromXdr, ToXdr};
 use soroban_sdk::{Address, Bytes, BytesN, Env, IntoVal, Val};
 use std::collections::HashSet;
 
@@ -89,11 +89,7 @@ fn gen_addresses(env: &Env, count: usize) -> Vec<Address> {
 /// Generate `count` deterministic Contract-type `Address` values from
 /// sequential seed bytes, distributed across all 32 bytes.
 fn gen_contract_addresses(env: &Env, count: usize) -> Vec<Address> {
-    (0..count)
-        .map(|_| {
-            Address::generate(env)
-        })
-        .collect()
+    (0..count).map(|_| Address::generate(env)).collect()
 }
 
 /// Return `true` when two byte slices are identical.
@@ -314,7 +310,7 @@ fn deploy_and_open_lines(env: &Env, n: usize) -> (CreditClient<'_>, Vec<Address>
             let b = Address::generate(env);
             let limit = 10_000_i128 + i as i128 * 1_000;
             let rate = 300_u32 + i as u32 * 10;
-            let score = 50_u32 + i as u32;
+            let score = 50_u32 + (i as u32 % 50);
             client.open_credit_line(&b, &limit, &rate, &score);
             b
         })
@@ -338,7 +334,7 @@ fn contract_storage_isolation_100_borrowers() {
 
         let expected_limit = 10_000_i128 + i as i128 * 1_000;
         let expected_rate = 300_u32 + i as u32 * 10;
-        let expected_score = 50_u32 + i as u32;
+        let expected_score = 50_u32 + (i as u32 % 50);
 
         assert_eq!(
             line.credit_limit, expected_limit,
@@ -604,12 +600,16 @@ fn edge_case_block_unblock_cycle_does_not_corrupt_credit_line() {
 #[test]
 fn edge_case_different_env_instances_produce_same_key() {
     let env1 = Env::default();
-    let addr = Address::generate(&env1);
+    let addr1 = Address::generate(&env1);
 
-    let key1 = serialize_val(&env1, addr.clone());
+    let key1 = serialize_val(&env1, addr1.clone());
 
     let env2 = Env::default();
-    let key2 = serialize_val(&env2, addr.clone());
+    let addr_xdr = addr1.to_xdr(&env1);
+    let mut bytes = std::vec![0u8; addr_xdr.len() as usize];
+    addr_xdr.copy_into_slice(&mut bytes);
+    let addr2 = Address::from_xdr(&env2, &Bytes::from_slice(&env2, &bytes)).unwrap();
+    let key2 = serialize_val(&env2, addr2);
 
     assert_eq!(
         key1, key2,

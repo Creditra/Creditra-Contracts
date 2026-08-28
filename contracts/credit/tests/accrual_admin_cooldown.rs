@@ -38,7 +38,7 @@ fn accrual_admin_cooldown_rejects_second_action_until_boundary() {
 
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
     set_timestamp(&env, START_TS + 1);
-    client.suspend_credit_line(&borrower);
+    client.default_credit_line(&borrower);
 
     set_timestamp(&env, START_TS + COOLDOWN_SECONDS);
     let result = client.try_reinstate_credit_line(&borrower, &CreditStatus::Active);
@@ -89,7 +89,7 @@ fn accrual_admin_cooldown_zero_disables_guard() {
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
     set_timestamp(&env, START_TS + 1);
-    client.suspend_credit_line(&borrower);
+    client.default_credit_line(&borrower);
     set_timestamp(&env, START_TS + 1);
     client.reinstate_credit_line(&borrower, &CreditStatus::Active);
 

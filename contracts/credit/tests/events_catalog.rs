@@ -48,22 +48,20 @@ fn second_topic(env: &Env, index: u32) -> Symbol {
 fn credit_line_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    for suffix in ["opened", "suspend", "closed", "defaulted", "reinstate"] {
-        let ev = CreditLineEvent {
-            borrower: borrower.clone(),
-            status: CreditStatus::Active,
-            credit_limit: 1_000,
-            interest_rate_bps: 500,
-            risk_score: 70,
-        };
-        publish_credit_line_event(
-            &env,
-            (symbol_short!("credit"), Symbol::new(&env, suffix)),
-            ev,
-        );
-    }
-
+        for suffix in ["opened", "suspend", "closed", "defaulted", "reinstate"] {
+            let ev = CreditLineEvent {
+                borrower: borrower.clone(),
+                status: CreditStatus::Active,
+                credit_limit: 1_000,
+                interest_rate_bps: 500,
+                risk_score: 70,
+            };
+            publish_credit_line_event(
+                &env,
+                (symbol_short!("credit"), Symbol::new(&env, suffix)),
+                ev,
+            );
+        }
     });
 
     let events = env.events().all();
@@ -78,17 +76,15 @@ fn credit_line_event_shape() {
 fn drawn_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_drawn_event(
-        &env,
-        DrawnEvent {
-            timestamp: 0,
-            borrower: borrower.clone(),
-            amount: 500,
-            new_utilized_amount: 500,
-        },
-    );
-
+        publish_drawn_event(
+            &env,
+            DrawnEvent {
+                timestamp: 0,
+                borrower: borrower.clone(),
+                amount: 500,
+                new_utilized_amount: 500,
+            },
+        );
     });
 
     let ev = env.events().all().get(0).unwrap();
@@ -100,19 +96,17 @@ fn drawn_event_shape() {
 fn drawn_event_v2_shape() {
     let (env, borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_drawn_event_v2(
-        &env,
-        DrawnEventV2 {
-            borrower: borrower.clone(),
-            recipient: borrower.clone(),
-            reserve_source: admin.clone(),
-            amount: 500,
-            new_utilized_amount: 500,
-            timestamp: 100,
-        },
-    );
-
+        publish_drawn_event_v2(
+            &env,
+            DrawnEventV2 {
+                borrower: borrower.clone(),
+                recipient: borrower.clone(),
+                reserve_source: admin.clone(),
+                amount: 500,
+                new_utilized_amount: 500,
+                timestamp: 100,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -123,16 +117,14 @@ fn drawn_event_v2_shape() {
 fn repayment_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_repayment_event(
-        &env,
-        RepaymentEvent {
-            borrower: borrower.clone(),
-            amount: 100,
-            new_utilized_amount: 400,
-        },
-    );
-
+        publish_repayment_event(
+            &env,
+            RepaymentEvent {
+                borrower: borrower.clone(),
+                amount: 100,
+                new_utilized_amount: 400,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -143,16 +135,14 @@ fn repayment_event_shape() {
 fn interest_accrued_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_interest_accrued_event(
-        &env,
-        InterestAccruedEvent {
-            borrower: borrower.clone(),
-            accrued_amount: 25,
-            new_utilized_amount: 425,
-        },
-    );
-
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 25,
+                new_utilized_amount: 425,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -163,19 +153,17 @@ fn interest_accrued_event_shape() {
 fn fee_accrued_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_fee_accrued_event(
-        &env,
-        FeeAccruedEvent {
-            borrower: borrower.clone(),
-            fee_amount: 10,
-            treasury_amount: 6,
-            bounty_amount: 4,
-            new_treasury_balance: 106,
-            new_bounty_balance: 204,
-        },
-    );
-
+        publish_fee_accrued_event(
+            &env,
+            FeeAccruedEvent {
+                borrower: borrower.clone(),
+                fee_amount: 10,
+                treasury_amount: 6,
+                bounty_amount: 4,
+                new_treasury_balance: 106,
+                new_bounty_balance: 204,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -186,16 +174,14 @@ fn fee_accrued_event_shape() {
 fn late_fee_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_late_fee_charged_event(
-        &env,
-        LateFeeChargedEvent {
-            borrower: borrower.clone(),
-            fee: 50,
-            installment_index: 3,
-        },
-    );
-
+        publish_late_fee_charged_event(
+            &env,
+            LateFeeChargedEvent {
+                borrower: borrower.clone(),
+                fee: 50,
+                installment_index: 3,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -206,9 +192,7 @@ fn late_fee_event_shape() {
 fn risk_parameters_updated_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_risk_parameters_updated(&env, &borrower, 2_000, 750, 80);
-
+        publish_risk_parameters_updated(&env, &borrower, 2_000, 750, 80);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -219,21 +203,19 @@ fn risk_parameters_updated_shape() {
 fn draw_reversed_event_shape() {
     let (env, borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_draw_reversed_event(
-        &env,
-        DrawReversedEvent {
-            borrower: borrower.clone(),
-            amount: 100,
-            original_ts: 10,
-            reason_code: 1,
-            new_utilized_amount: 0,
-            timestamp: 20,
-            admin: admin.clone(),
-            accounting_only: false,
-        },
-    );
-
+        publish_draw_reversed_event(
+            &env,
+            DrawReversedEvent {
+                borrower: borrower.clone(),
+                amount: 100,
+                original_ts: 10,
+                reason_code: 1,
+                new_utilized_amount: 0,
+                timestamp: 20,
+                admin: admin.clone(),
+                accounting_only: false,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -244,9 +226,7 @@ fn draw_reversed_event_shape() {
 fn credit_line_freeze_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_credit_line_freeze_event(&env, &borrower, FreezeReason::RiskInvestigation, true);
-
+        publish_credit_line_freeze_event(&env, &borrower, FreezeReason::RiskInvestigation, true);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -257,10 +237,9 @@ fn credit_line_freeze_event_shape() {
 fn borrower_frozen_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
+        publish_borrower_frozen_event(&env, &borrower, 1_000_000);
 
-    publish_borrower_frozen_event(&env, &borrower, 1_000_000);
-
-    // Published on a single-element topic tuple ("br_freeze",)
+        // Published on a single-element topic tuple ("br_freeze",)
     });
 
     let ev = env.events().all().get(0).unwrap();
@@ -276,9 +255,7 @@ fn borrower_frozen_event_shape() {
 fn penalty_rate_entered_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_penalty_rate_entered_event(&env, &borrower, 500, 200, 700);
-
+        publish_penalty_rate_entered_event(&env, &borrower, 500, 200, 700);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -289,9 +266,7 @@ fn penalty_rate_entered_shape() {
 fn penalty_rate_exited_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_penalty_rate_exited_event(&env, &borrower, 700, 500);
-
+        publish_penalty_rate_exited_event(&env, &borrower, 700, 500);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -302,14 +277,12 @@ fn penalty_rate_exited_shape() {
 fn grace_waiver_event_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_grace_waiver_applied_event(
-        &env,
-        &borrower,
-        10,
-        creditra_credit::types::GraceWaiverMode::FullWaiver,
-    );
-
+        publish_grace_waiver_applied_event(
+            &env,
+            &borrower,
+            10,
+            creditra_credit::types::GraceWaiverMode::FullWaiver,
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -320,9 +293,7 @@ fn grace_waiver_event_shape() {
 fn admin_rotation_proposed_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_admin_rotation_proposed(&env, &admin, 200);
-
+        publish_admin_rotation_proposed(&env, &admin, 200);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -333,9 +304,7 @@ fn admin_rotation_proposed_shape() {
 fn admin_rotation_accepted_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_admin_rotation_accepted(&env, &admin);
-
+        publish_admin_rotation_accepted(&env, &admin);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -346,18 +315,16 @@ fn admin_rotation_accepted_shape() {
 fn treasury_withdrawal_proposed_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_treasury_withdrawal_proposed(
-        &env,
-        TreasuryWithdrawalProposedEvent {
-            recipient: admin.clone(),
-            amount: 1_000,
-            proposer: admin.clone(),
-            proposed_at: 100,
-            execute_after: 100 + 86_400,
-        },
-    );
-
+        publish_treasury_withdrawal_proposed(
+            &env,
+            TreasuryWithdrawalProposedEvent {
+                recipient: admin.clone(),
+                amount: 1_000,
+                proposer: admin.clone(),
+                proposed_at: 100,
+                execute_after: 100 + 86_400,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -368,17 +335,15 @@ fn treasury_withdrawal_proposed_shape() {
 fn treasury_withdrawal_executed_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_treasury_withdrawal_executed(
-        &env,
-        TreasuryWithdrawalExecutedEvent {
-            recipient: admin.clone(),
-            amount: 500,
-            executor: admin.clone(),
-            executed_at: 200,
-        },
-    );
-
+        publish_treasury_withdrawal_executed(
+            &env,
+            TreasuryWithdrawalExecutedEvent {
+                recipient: admin.clone(),
+                amount: 500,
+                executor: admin.clone(),
+                executed_at: 200,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -389,9 +354,7 @@ fn treasury_withdrawal_executed_shape() {
 fn borrower_blocked_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_borrower_blocked_event(&env, &borrower, true);
-
+        publish_borrower_blocked_event(&env, &borrower, true);
     });
 
     let ev = env.events().all().get(0).unwrap();
@@ -407,16 +370,14 @@ fn borrower_blocked_shape() {
 fn collateral_deposited_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_collateral_deposited_event(
-        &env,
-        CollateralDepositedEvent {
-            borrower: borrower.clone(),
-            amount: 1_000,
-            new_balance: 1_000,
-        },
-    );
-
+        publish_collateral_deposited_event(
+            &env,
+            CollateralDepositedEvent {
+                borrower: borrower.clone(),
+                amount: 1_000,
+                new_balance: 1_000,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -427,16 +388,14 @@ fn collateral_deposited_shape() {
 fn collateral_withdrawn_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_collateral_withdrawn_event(
-        &env,
-        CollateralWithdrawnEvent {
-            borrower: borrower.clone(),
-            amount: 500,
-            new_balance: 500,
-        },
-    );
-
+        publish_collateral_withdrawn_event(
+            &env,
+            CollateralWithdrawnEvent {
+                borrower: borrower.clone(),
+                amount: 500,
+                new_balance: 500,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -447,17 +406,15 @@ fn collateral_withdrawn_shape() {
 fn collateral_partial_released_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_collateral_partial_released_event(
-        &env,
-        CollateralPartialReleasedEvent {
-            borrower: borrower.clone(),
-            amount_released: 200,
-            new_balance: 300,
-            health_factor_bps: 12_000,
-        },
-    );
-
+        publish_collateral_partial_released_event(
+            &env,
+            CollateralPartialReleasedEvent {
+                borrower: borrower.clone(),
+                amount_released: 200,
+                new_balance: 300,
+                health_factor_bps: 12_000,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -468,16 +425,14 @@ fn collateral_partial_released_shape() {
 fn token_rescued_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_token_rescued_event(
-        &env,
-        TokenRescuedEvent {
-            token: admin.clone(),
-            recipient: admin.clone(),
-            amount: 100,
-        },
-    );
-
+        publish_token_rescued_event(
+            &env,
+            TokenRescuedEvent {
+                token: admin.clone(),
+                recipient: admin.clone(),
+                amount: 100,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -488,15 +443,13 @@ fn token_rescued_shape() {
 fn contract_upgraded_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_contract_upgraded_event(
-        &env,
-        ContractUpgradedEvent {
-            old_wasm_hash: BytesN::from_array(&env, &[0xAA; 32]),
-            new_wasm_hash: BytesN::from_array(&env, &[0xBB; 32]),
-        },
-    );
-
+        publish_contract_upgraded_event(
+            &env,
+            ContractUpgradedEvent {
+                old_wasm_hash: BytesN::from_array(&env, &[0xAA; 32]),
+                new_wasm_hash: BytesN::from_array(&env, &[0xBB; 32]),
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -507,19 +460,17 @@ fn contract_upgraded_shape() {
 fn default_liquidation_settled_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_default_liquidation_settled_event(
-        &env,
-        DefaultLiquidationSettledEvent {
-            borrower: borrower.clone(),
-            settlement_id: Symbol::new(&env, "auction_1"),
-            recovered_amount: 500,
-            remaining_utilized_amount: 500,
-            status: CreditStatus::Closed,
-            close_factor_bps: 5000,
-        },
-    );
-
+        publish_default_liquidation_settled_event(
+            &env,
+            DefaultLiquidationSettledEvent {
+                borrower: borrower.clone(),
+                settlement_id: Symbol::new(&env, "auction_1"),
+                recovered_amount: 500,
+                remaining_utilized_amount: 500,
+                status: CreditStatus::Closed,
+                close_factor_bps: 5000,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -530,9 +481,7 @@ fn default_liquidation_settled_shape() {
 fn default_liquidation_requested_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_default_liquidation_requested_event(&env, &borrower, 1_500);
-
+        publish_default_liquidation_requested_event(&env, &borrower, 1_500);
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -543,16 +492,14 @@ fn default_liquidation_requested_shape() {
 fn attestation_batch_committed_shape() {
     let (env, borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_attestation_batch_committed(
-        &env,
-        AttestationBatchCommittedEvent {
-            borrower: borrower.clone(),
-            merkle_root: BytesN::from_array(&env, &[0xCC; 32]),
-            count: 42,
-        },
-    );
-
+        publish_attestation_batch_committed(
+            &env,
+            AttestationBatchCommittedEvent {
+                borrower: borrower.clone(),
+                merkle_root: BytesN::from_array(&env, &[0xCC; 32]),
+                count: 42,
+            },
+        );
     });
 
     assert_eq!(first_topic(&env, 0), symbol_short!("credit"));
@@ -563,18 +510,16 @@ fn attestation_batch_committed_shape() {
 fn raw_value_events_shape() {
     let (env, _borrower, _admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_rate_formula_config_event(&env, true);
-    publish_paused_event(&env, true);
-    publish_paused_event(&env, false);
-    publish_protocol_fee_bps_set_event(&env, 500);
-    publish_protocol_fee_bounds_set_event(&env, 100, 2_000);
-    publish_close_factor_bps_set_event(&env, 5_000);
-    publish_oracle_config_set_event(&env, 500, 3_600);
-    publish_oracle_quorum_config_set_event(&env, 3, 500, 3_600);
-    publish_oracle_quorum_price_set_event(&env, 1_000_000, 3, 1_000);
-    publish_oracle_price_accepted_event(&env, 1_000_000, 1_000);
-
+        publish_rate_formula_config_event(&env, true);
+        publish_paused_event(&env, true);
+        publish_paused_event(&env, false);
+        publish_protocol_fee_bps_set_event(&env, 500);
+        publish_protocol_fee_bounds_set_event(&env, 100, 2_000);
+        publish_close_factor_bps_set_event(&env, 5_000);
+        publish_oracle_config_set_event(&env, 500, 3_600);
+        publish_oracle_quorum_config_set_event(&env, 3, 500, 3_600);
+        publish_oracle_quorum_price_set_event(&env, 1_000_000, 3, 1_000);
+        publish_oracle_price_accepted_event(&env, 1_000_000, 1_000);
     });
 
     let events = env.events().all();
@@ -615,9 +560,7 @@ fn raw_value_events_shape() {
 fn auction_bid_refunded_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_bid_refunded_event(&env, admin.clone(), 1_000);
-
+        publish_bid_refunded_event(&env, admin.clone(), 1_000);
     });
 
     assert_eq!(
@@ -636,9 +579,7 @@ fn auction_bid_refunded_shape() {
 fn auction_closed_shape() {
     let (env, _borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_auction_closed_event(&env, Symbol::new(&env, "auc_1"), Some(admin.clone()), 5_000);
-
+        publish_auction_closed_event(&env, Symbol::new(&env, "auc_1"), Some(admin.clone()), 5_000);
     });
 
     assert_eq!(
@@ -657,16 +598,14 @@ fn auction_closed_shape() {
 fn auction_default_liquidation_settlement_shape() {
     let (env, borrower, admin, contract_id) = env_and_addresses();
     env.as_contract(&contract_id, || {
-
-    publish_default_liquidation_settlement_event(
-        &env,
-        Symbol::new(&env, "auction_1"),
-        admin.clone(),
-        borrower.clone(),
-        admin.clone(),
-        3_000,
-    );
-
+        publish_default_liquidation_settlement_event(
+            &env,
+            Symbol::new(&env, "auction_1"),
+            admin.clone(),
+            borrower.clone(),
+            admin.clone(),
+            3_000,
+        );
     });
 
     assert_eq!(

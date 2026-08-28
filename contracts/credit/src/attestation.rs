@@ -412,12 +412,10 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &l, &1);
 
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower.clone(),
-            l.clone(),
-            vec![&env]
-        ));
+        let verified = env.as_contract(&client.address, || {
+            verify_attestation_proof(env.clone(), borrower.clone(), l.clone(), vec![&env])
+        });
+        assert!(verified);
     }
 
     #[test]
@@ -431,18 +429,19 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower.clone(),
-            l0.clone(),
-            vec![&env, l1.clone()]
-        ));
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower.clone(),
-            l1.clone(),
-            vec![&env, l0]
-        ));
+        let (v0, v1) = env.as_contract(&client.address, || {
+            let res0 = verify_attestation_proof(
+                env.clone(),
+                borrower.clone(),
+                l0.clone(),
+                vec![&env, l1.clone()],
+            );
+            let res1 =
+                verify_attestation_proof(env.clone(), borrower.clone(), l1.clone(), vec![&env, l0]);
+            (res0, res1)
+        });
+        assert!(v0);
+        assert!(v1);
     }
 
     #[test]
@@ -457,21 +456,26 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(!verify_attestation_proof(
-            env.clone(),
-            borrower.clone(),
-            wrong_leaf.clone(),
-            vec![&env, l1]
-        ));
+        let verified = env.as_contract(&client.address, || {
+            verify_attestation_proof(
+                env.clone(),
+                borrower.clone(),
+                wrong_leaf.clone(),
+                vec![&env, l1],
+            )
+        });
+        assert!(!verified);
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #53)")]
+    #[should_panic(expected = "Error(Contract, #49)")]
     fn verify_no_batch_panics() {
         let env = Env::default();
         let (client, _admin, borrower) = setup(&env);
         let l = leaf(&env, 0xDD);
-        // No batch committed — must panic with InvalidAttestation.
-        verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+        // No batch committed — must panic with AttestationBatchNotFound.
+        env.as_contract(&client.address, || {
+            verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+        });
     }
 }

@@ -73,6 +73,12 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
     client.set_liquidity_source(&contract_id);
     token::StellarAssetClient::new(&env, &token_addr).mint(&contract_id, &10_000_000_i128);
     token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
+    token::Client::new(&env, &token_addr).approve(
+        &borrower,
+        &contract_id,
+        &10_000_000_i128,
+        &20_000_u32,
+    );
 
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
 
@@ -104,10 +110,16 @@ fn setup_no_mock() -> (Env, CreditClient<'static>, Address, Address) {
         client.set_liquidity_source(&contract_id);
         token::StellarAssetClient::new(&env, &token_addr).mint(&contract_id, &10_000_000_i128);
         token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
+        token::Client::new(&env, &token_addr).approve(
+            &borrower,
+            &contract_id,
+            &10_000_000_i128,
+            &20_000_u32,
+        );
 
         client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
     }
-    // mock_all_auths is scoped: after the block, new invocations require real auth.
+    env.mock_auths(&[]);
     (env, client, admin, borrower)
 }
 
@@ -184,6 +196,7 @@ fn open_credit_line_without_admin_auth_panics() {
         env.mock_all_auths();
         client.close_credit_line(&borrower, &admin);
     }
+    env.mock_auths(&[]);
     // Now call without any auth — must panic.
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
 }
@@ -236,6 +249,7 @@ fn repay_credit_without_borrower_auth_panics() {
         env.mock_all_auths();
         client.draw_credit(&borrower, &1_000_i128);
     }
+    env.mock_auths(&[]);
     client.repay_credit(&borrower, &500_i128);
 }
 
@@ -372,6 +386,7 @@ fn reinstate_credit_line_without_admin_auth_panics() {
         env.mock_all_auths();
         client.default_credit_line(&borrower);
     }
+    env.mock_auths(&[]);
     client.reinstate_credit_line(&borrower, &CreditStatus::Active);
 }
 
@@ -397,6 +412,7 @@ fn forgive_debt_without_admin_auth_panics() {
         env.mock_all_auths();
         client.draw_credit(&borrower, &1_000_i128);
     }
+    env.mock_auths(&[]);
     client.forgive_debt(&borrower, &500_i128);
 }
 
@@ -430,6 +446,7 @@ fn settle_default_liquidation_without_admin_auth_panics() {
         client.draw_credit(&borrower, &1_000_i128);
         client.default_credit_line(&borrower);
     }
+    env.mock_auths(&[]);
     let settlement_id = Symbol::new(&env, "settle01");
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
 }

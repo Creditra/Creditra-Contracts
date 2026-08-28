@@ -98,7 +98,9 @@ fn test_event_topics_stability() {
     // Assert topic pairs
     let assert_topic = |index: usize, _expected_t0: &str, expected_t1: &str| {
         println!("Asserting topic index {}", index);
-        let ev = all_events.get(index as u32).expect(&format!("Event at index {} missing", index));
+        let ev = all_events
+            .get(index as u32)
+            .expect(&format!("Event at index {} missing", index));
         let topics = ev.1;
         let t0 = topics.get(0).expect("topic 0 missing");
         let t1 = topics.get(1).expect("topic 1 missing");

@@ -201,7 +201,7 @@ fn test_self_suspend_success_from_active_status() {
 /// - Suspended → Suspended transition is not allowed
 /// - Idempotency is not supported (explicit error on duplicate suspension)
 #[test]
-#[should_panic(expected = "Only active credit lines can be suspended")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_self_suspend_fails_from_suspended_status() {
     #[allow(unused_variables)]
     let (env, _admin, borrower, contract_id, token_address) =
@@ -220,7 +220,7 @@ fn test_self_suspend_fails_from_suspended_status() {
 /// - Defaulted → Suspended transition is not allowed
 /// - Borrowers cannot self-suspend defaulted lines
 #[test]
-#[should_panic(expected = "Only active credit lines can be suspended")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_self_suspend_fails_from_defaulted_status() {
     #[allow(unused_variables)]
     let (env, _admin, borrower, contract_id, token_address) =
@@ -239,7 +239,7 @@ fn test_self_suspend_fails_from_defaulted_status() {
 /// - Closed → Suspended transition is not allowed
 /// - Closed lines cannot be self-suspended
 #[test]
-#[should_panic(expected = "Only active credit lines can be suspended")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_self_suspend_fails_from_closed_status() {
     #[allow(unused_variables)]
     let (env, _admin, borrower, contract_id, token_address) =
@@ -258,7 +258,7 @@ fn test_self_suspend_fails_from_closed_status() {
 /// - Cannot self-suspend a non-existent credit line
 /// - Proper error handling for missing credit lines
 #[test]
-#[should_panic(expected = "Credit line not found")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_self_suspend_fails_when_credit_line_not_found() {
     // Create a new borrower with no credit line
     let env = Env::default();
@@ -565,7 +565,7 @@ fn test_self_suspend_preserves_credit_parameters() {
 /// - Attempting to self-suspend an already suspended line results in explicit error
 /// - No state changes occur on failed self-suspension attempt
 #[test]
-#[should_panic(expected = "Only active credit lines can be suspended")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_self_suspend_idempotency_check() {
     #[allow(unused_variables)]
     let (env, _admin, borrower, contract_id, token_address) = setup_with_active_line();

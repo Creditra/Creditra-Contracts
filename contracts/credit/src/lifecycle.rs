@@ -91,13 +91,14 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_borrow_lifecycle_event, publish_credit_line_event, publish_debt_forgiven_event,
-    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
-    DebtForgivenEvent, DefaultLiquidationSettledEvent,
+    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent, DebtForgivenEvent,
+    DefaultLiquidationSettledEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    assert_not_paused, assert_ts_monotonic,
-    bump_credit_line_ttl, clear_repayment_schedule, get_credit_line, get_repayment_schedule, persist_credit_line,
+    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
+    get_credit_line, get_repayment_schedule, persist_credit_line,
     set_repayment_schedule as storage_set_repayment_schedule,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
@@ -770,12 +771,6 @@ pub fn settle_default_liquidation(
         },
     );
 }
-
-/// Forgive outstanding debt without transferring tokens (admin only).
-///
-/// This is an accounting-only write-off path intended for explicit admin debt
-/// relief or off-chain settlements that have already been handled elsewhere.
-/// The forgiven amount is capped to the current `utilized_amount`.
 
 // ── reinstate_credit_line ─────────────────────────────────────────────────────
 

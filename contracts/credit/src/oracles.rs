@@ -288,7 +288,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Oracle weight must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_add_oracle_zero_weight_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -324,7 +324,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Oracle not found in registry")]
+    #[should_panic(expected = "Error(Contract, #55)")]
     fn test_remove_nonexistent_oracle_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -354,7 +354,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Oracle is not approved")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn test_report_unregistered_oracle_panics() {
         let env = Env::default();
         env.mock_all_auths();

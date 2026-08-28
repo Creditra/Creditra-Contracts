@@ -57,6 +57,13 @@ fn setup(token_mint: i128, credit_limit: i128) -> (Env, Address, Address, Addres
     client.set_liquidity_source(&contract_id);
 
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &token_mint);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &token_mint);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &token_mint,
+        &100_000_u32,
+    );
 
     client.open_credit_line(&borrower, &credit_limit, &500_u32, &50_u32);
 
@@ -338,15 +345,17 @@ fn gas_repay_and_release_full_with_collateral() {
 /// same resources (deterministic cost model).
 #[test]
 fn gas_draw_credit_deterministic() {
-    let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
-    let client = CreditClient::new(&env, &contract_id);
+    let (env1, contract_id1, _admin1, borrower1) = setup(1_000_000_i128, 10_000_i128);
+    let client1 = CreditClient::new(&env1, &contract_id1);
+    let (env2, contract_id2, _admin2, borrower2) = setup(1_000_000_i128, 10_000_i128);
+    let client2 = CreditClient::new(&env2, &contract_id2);
 
-    let (cpu1, mem1) = measure(&env, || {
-        client.draw_credit(&borrower, &1_000_i128);
+    let (cpu1, mem1) = measure(&env1, || {
+        client1.draw_credit(&borrower1, &1_000_i128);
     });
 
-    let (cpu2, mem2) = measure(&env, || {
-        client.draw_credit(&borrower, &1_000_i128);
+    let (cpu2, mem2) = measure(&env2, || {
+        client2.draw_credit(&borrower2, &1_000_i128);
     });
 
     assert_eq!(cpu1, cpu2, "draw_credit CPU must be deterministic");
@@ -361,17 +370,20 @@ fn gas_draw_credit_deterministic() {
 /// same resources (deterministic cost model).
 #[test]
 fn gas_repay_credit_deterministic() {
-    let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
-    let client = CreditClient::new(&env, &contract_id);
+    let (env1, contract_id1, _admin1, borrower1) = setup(1_000_000_i128, 10_000_i128);
+    let client1 = CreditClient::new(&env1, &contract_id1);
+    client1.draw_credit(&borrower1, &2_000_i128);
 
-    client.draw_credit(&borrower, &2_000_i128);
+    let (env2, contract_id2, _admin2, borrower2) = setup(1_000_000_i128, 10_000_i128);
+    let client2 = CreditClient::new(&env2, &contract_id2);
+    client2.draw_credit(&borrower2, &2_000_i128);
 
-    let (cpu1, mem1) = measure(&env, || {
-        client.repay_credit(&borrower, &500_i128);
+    let (cpu1, mem1) = measure(&env1, || {
+        client1.repay_credit(&borrower1, &500_i128);
     });
 
-    let (cpu2, mem2) = measure(&env, || {
-        client.repay_credit(&borrower, &500_i128);
+    let (cpu2, mem2) = measure(&env2, || {
+        client2.repay_credit(&borrower2, &500_i128);
     });
 
     assert_eq!(cpu1, cpu2, "repay_credit CPU must be deterministic");

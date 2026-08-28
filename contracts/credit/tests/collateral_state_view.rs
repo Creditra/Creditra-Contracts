@@ -5,7 +5,7 @@ use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env};
 
 fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     let admin = Address::generate(env);
     let borrower = Address::generate(env);
 
@@ -21,6 +21,13 @@ fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
     let token_admin = StellarAssetClient::new(env, &token);
     token_admin.mint(&borrower, &100_000_i128);
     token_admin.mint(&token, &100_000_i128);
+
+    soroban_sdk::token::Client::new(env, &token).approve(
+        &borrower,
+        &contract_id,
+        &1_000_000_i128,
+        &1_000_000_u32,
+    );
 
     (client, admin, borrower, token)
 }

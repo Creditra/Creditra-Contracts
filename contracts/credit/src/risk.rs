@@ -112,6 +112,12 @@ pub fn set_borrower_rate_floor(env: Env, borrower: Address, floor_bps: Option<u3
     require_admin_auth(&env);
     if let Some(floor) = floor_bps {
         assert!(floor <= MAX_INTEREST_RATE_BPS, "floor exceeds max rate");
+        // Reject floor > ceiling at config-set time
+        if let Some(ceiling) = crate::storage::get_borrower_rate_ceiling(&env, &borrower) {
+            if floor > ceiling {
+                env.panic_with_error(ContractError::RateTooHigh);
+            }
+        }
     }
     crate::storage::set_borrower_rate_floor(&env, &borrower, floor_bps);
 }

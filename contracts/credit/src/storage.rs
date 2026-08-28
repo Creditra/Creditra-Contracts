@@ -58,9 +58,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{
-    ContractError, CreditLineData, CreditStatus, RepaymentSchedule,
-};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -312,9 +310,11 @@ where
     K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
 {
     bump_instance_ttl(env);
-    env.storage()
-        .persistent()
-        .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+    if env.storage().persistent().has(key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+    }
 }
 
 pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
@@ -465,13 +465,9 @@ pub fn ensure_credit_line_id(env: &Env, borrower: &Address) -> u32 {
     let next_id = get_credit_line_count(env);
     let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
     let borrower_key = DataKey::CreditLineBorrowerById(next_id);
-    env.storage()
-        .persistent()
-        .set(&id_key, &next_id);
+    env.storage().persistent().set(&id_key, &next_id);
     bump_persistent_ttl(env, &id_key);
-    env.storage()
-        .persistent()
-        .set(&borrower_key, borrower);
+    env.storage().persistent().set(&borrower_key, borrower);
     bump_persistent_ttl(env, &borrower_key);
     env.storage()
         .instance()
@@ -983,10 +979,11 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     let key = DataKey::BlockedBorrower(borrower.clone());
     if blocked {
         env.storage().persistent().set(&key, &true);
+        bump_persistent_ttl(env, &key);
     } else {
         env.storage().persistent().remove(&key);
+        bump_instance_ttl(env);
     }
-    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.
@@ -1083,17 +1080,13 @@ pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<Repayment
     if env.storage().persistent().has(&key) {
         bump_persistent_ttl(env, &key);
     }
-    env.storage()
-        .persistent()
-        .get(&key)
+    env.storage().persistent().get(&key)
 }
 
 /// Persist the installment schedule for a borrower.
 pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &RepaymentSchedule) {
     let key = DataKey::RepaymentSchedule(borrower.clone());
-    env.storage()
-        .persistent()
-        .set(&key, schedule);
+    env.storage().persistent().set(&key, schedule);
     bump_persistent_ttl(env, &key);
 }
 
@@ -1227,6 +1220,11 @@ pub fn get_pause_reason(env: &Env) -> Option<crate::types::PauseReason> {
 /// and the flag are written atomically within the same host transaction.
 pub fn set_pause_reason(env: &Env, reason: &crate::types::PauseReason) {
     env.storage().instance().set(&DataKey::PauseReason, reason);
+}
+
+/// Clear the structured pause reason from instance storage.
+pub fn clear_pause_reason(env: &Env) {
+    env.storage().instance().remove(&DataKey::PauseReason);
 }
 
 /// Assert the protocol is not paused. Reverts with ContractError::Paused if paused.
@@ -1638,22 +1636,31 @@ pub fn enforce_freeze_cooldown(env: &Env) {
 }
 
 pub fn get_admin_query_cooldown_seconds(env: &Env) -> Option<u64> {
-    env.storage().instance().get(&DataKey::AdminQueryCooldownSeconds)
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryCooldownSeconds)
 }
 
 pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
     if seconds == 0 {
-        env.storage().instance().remove(&DataKey::AdminQueryCooldownSeconds);
+        env.storage()
+            .instance()
+            .remove(&DataKey::AdminQueryCooldownSeconds);
     } else {
-        env.storage().instance().set(&DataKey::AdminQueryCooldownSeconds, &seconds);
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminQueryCooldownSeconds, &seconds);
     }
 }
 
 pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
-    env.storage().instance().get(&DataKey::AdminQueryLastActionTs)
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryLastActionTs)
 }
 
 pub fn set_admin_query_last_action_ts(env: &Env, ts: u64) {
-    env.storage().instance().set(&DataKey::AdminQueryLastActionTs, &ts);
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminQueryLastActionTs, &ts);
 }
-

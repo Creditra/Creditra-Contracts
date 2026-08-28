@@ -317,11 +317,11 @@ fn prorate_interest_one_second_max_rate() {
     // Very short time delta, large principal
     // principal = 10^12, rate = 10_000 bps, time = 1 second
     // = 10^12 × 10_000 × 1 / 315_576_000_000
-    // = 10^16 / 315_576_000_000 ≈ 31.68 → floor → 31
+    // = 10^16 / 315_576_000_000 ≈ 31688.08 → floor → 31688
     let interest = prorate_interest(1_000_000_000_000, 10_000, 1, Rounding::Floor);
-    assert_eq!(interest, 31);
+    assert_eq!(interest, 31688);
     let ceil = prorate_interest(1_000_000_000_000, 10_000, 1, Rounding::Ceil);
-    assert_eq!(ceil, 32);
+    assert_eq!(ceil, 31689);
 }
 
 // ── compute_deviation_bps: additional edge cases ───────────────────────────────

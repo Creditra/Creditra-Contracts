@@ -251,18 +251,22 @@ fn settle_exceeding_target_recovery_caps_to_close_factor() {
     client.set_close_factor_bps(&5_000_u32); // 50% close factor
 
     // target_recovery is 50% of 1,000 = 500.
-    // We pass recovered_amount = 600, which exceeds 500.
-    // Instead of panicking, it should succeed, capping the recovery to 500
-    // and reducing utilized_amount to 500.
-    client.settle_default_liquidation(
-        &borrower,
-        &600_i128,
-        &Symbol::new(&env, "s_cap"),
-        &5_000_u32,
-        &None,
+    // Passing recovered_amount = 600 exceeds 500 and must panic.
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        client.settle_default_liquidation(
+            &borrower,
+            &600_i128,
+            &Symbol::new(&env, "s_cap"),
+            &5_000_u32,
+            &None,
+        );
+    }));
+    assert!(
+        result.is_err(),
+        "settling exceeding target recovery should panic"
     );
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Defaulted);
-    assert_eq!(line.utilized_amount, 500);
+    assert_eq!(line.utilized_amount, 1_000);
 }

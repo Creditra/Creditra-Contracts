@@ -474,8 +474,6 @@ pub fn publish_borrower_frozen_event(env: &Env, borrower: &Address, frozen_until
 }
 
 /// Publish a penalty rate entered event when a line becomes delinquent.
-
-/// Publish a penalty rate entered event when a line becomes delinquent.
 pub fn publish_penalty_rate_entered_event(
     env: &Env,
     borrower: &Address,
@@ -622,10 +620,8 @@ pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) 
 }
 
 pub fn publish_protocol_fee_bps_set_event(env: &Env, bps: u32) {
-    env.events().publish(
-        (symbol_short!("credit"), Symbol::new(env, "fee_set")),
-        bps,
-    );
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "fee_set")), bps);
 }
 
 pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u32) {

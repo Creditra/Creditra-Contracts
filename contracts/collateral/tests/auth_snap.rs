@@ -219,11 +219,7 @@ fn set_admin_collateral_cooldown_seconds_auth_snapshot() {
 
     fixture.client.set_col_admin_cooldown_secs(&120);
 
-    assert_single_auth(
-        &env,
-        &fixture.admin,
-        "set_col_admin_cooldown_secs",
-    );
+    assert_single_auth(&env, &fixture.admin, "set_col_admin_cooldown_secs");
 }
 
 #[test]
@@ -246,9 +242,7 @@ fn collateral_queries_require_no_auth() {
         "get_col_admin_cooldown_secs must be auth-free"
     );
 
-    let _ = fixture
-        .client
-        .get_last_col_admin_action_ts();
+    let _ = fixture.client.get_last_col_admin_action_ts();
     assert!(
         env.auths().is_empty(),
         "get_last_col_admin_action_ts must be auth-free"

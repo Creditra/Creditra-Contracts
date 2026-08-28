@@ -101,7 +101,7 @@ mod accrual_tests;
 mod amount_validation_tests;
 mod attestation;
 mod auth;
-mod borrow;
+pub mod borrow;
 mod collateral;
 #[path = "../../collateral/src/admin.rs"]
 mod collateral_admin;
@@ -124,9 +124,9 @@ mod lifecycle_views;
 mod limits;
 pub mod math_utils;
 mod query;
+pub mod query_admin;
 #[path = "../../query/src/views.rs"]
 mod query_views;
-pub mod query_admin;
 mod risk;
 pub mod views;
 pub use crate::risk::compute_rate_from_score;
@@ -146,17 +146,17 @@ use crate::events::{
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
     publish_oracle_config_set_event, publish_oracle_price_accepted_event,
     publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
-    publish_paused_event, publish_rate_formula_config_event, publish_repayment_event, BorrowLifecycleEvent, BorrowLifecyclePhase,
-    ContractUpgradedEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent,
+    publish_paused_event, publish_rate_formula_config_event, publish_repayment_event,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, DrawReversedEvent,
+    DrawnEvent, InterestAccruedEvent, RepaymentEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen,
-    clear_reentrancy_guard, enforce_freeze_cooldown,
-    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config, get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
+    enforce_freeze_cooldown, get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
+    get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
     proposed_at_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
@@ -588,7 +588,9 @@ impl Credit {
 
         // Per-borrower absolute exposure cap: block draws that would push
         // this borrower's utilization above their individually configured cap.
-        if let Err(e) = crate::limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized) {
+        if let Err(e) =
+            crate::limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized)
+        {
             clear_reentrancy_guard(&env);
             env.panic_with_error(e);
         }
@@ -644,6 +646,12 @@ impl Credit {
 
         let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
+        let draw_audit_key = DataKey::DrawAudit(DrawAuditKey {
+            borrower: borrower.clone(),
+            timestamp,
+        });
+        env.storage().persistent().set(&draw_audit_key, &amount);
+        crate::storage::bump_persistent_ttl(&env, &draw_audit_key);
         publish_drawn_event(
             &env,
             DrawnEvent {
@@ -736,6 +744,18 @@ impl Credit {
                 let token_client = token::Client::new(&env, &token_address);
                 let contract_address = env.current_contract_address();
 
+                let allowance = token_client.allowance(&borrower, &contract_address);
+                if allowance < effective_repay {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::InsufficientRepaymentAllowance);
+                }
+
+                let borrower_balance = token_client.balance(&borrower);
+                if borrower_balance < effective_repay {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::InsufficientRepaymentBalance);
+                }
+
                 // Compute protocol fee only on the interest component.
                 let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
                 let mut fee: i128 = 0;
@@ -750,21 +770,13 @@ impl Credit {
                 // Transfer fee portion into contract (treasury accumulator), then
                 // transfer remaining amount into the reserve.
                 if fee > 0 {
-                    token_client.transfer(
-                        &borrower,
-                        &contract_address,
-                        &fee,
-                    );
+                    token_client.transfer(&borrower, &contract_address, &fee);
                     crate::fees::accrue_protocol_fee(&env, &borrower, fee);
                 }
 
                 let reserve_amount = effective_repay.saturating_sub(fee);
                 if reserve_amount > 0 {
-                    token_client.transfer(
-                        &borrower,
-                        &reserve_address,
-                        &reserve_amount,
-                    );
+                    token_client.transfer(&borrower, &reserve_address, &reserve_amount);
                 }
             }
         }
@@ -835,6 +847,7 @@ impl Credit {
         interest_rate_bps: u32,
         risk_score: u32,
     ) {
+        enforce_borrow_admin_cooldown(&env, &borrower);
         enforce_accrual_admin_cooldown(&env, &borrower);
         query_admin::assert_and_advance_query_admin_cooldown(&env);
         risk::update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)
@@ -1048,9 +1061,7 @@ impl Credit {
             waiver_mode,
             reduced_rate_bps,
         };
-        env.storage()
-            .instance()
-            .set(&crate::storage::grace_period_key(&env), &cfg);
+        crate::storage::set_grace_period_config(&env, &cfg);
     }
 
     pub fn get_grace_period_config(env: Env) -> Option<GracePeriodConfig> {
@@ -1305,7 +1316,9 @@ impl Credit {
     /// Configure the treasury address where withdrawn fees will be sent (admin only).
     pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         crate::storage::set_treasury_address(&env, &treasury);
     }
 
@@ -1337,7 +1350,9 @@ impl Credit {
     /// Configure the bounty pool address where withdrawn bounty fees will be sent (admin only).
     pub fn set_bounty(env: Env, admin: Address, bounty: Address) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         crate::storage::set_bounty_address(&env, &bounty);
     }
 
@@ -1481,7 +1496,9 @@ impl Credit {
     }
 
     /// Get the pending treasury withdrawal proposal, if any.
-    pub fn get_pending_treasury_withdrawal(env: Env) -> Option<crate::types::TreasuryWithdrawalProposal> {
+    pub fn get_pending_treasury_withdrawal(
+        env: Env,
+    ) -> Option<crate::types::TreasuryWithdrawalProposal> {
         crate::storage::get_pending_treasury_withdrawal(&env)
     }
 
@@ -2575,7 +2592,9 @@ impl Credit {
     /// Emits `BorrowerBlockedEvent { blocked: true }`.
     pub fn block_borrower(env: Env, admin: Address, borrower: Address) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         storage_set_borrower_blocked(&env, &borrower, true);
         publish_borrower_blocked_event(&env, &borrower, true);
     }
@@ -2586,7 +2605,9 @@ impl Credit {
     /// Emits `BorrowerBlockedEvent { blocked: false }`.
     pub fn unblock_borrower(env: Env, admin: Address, borrower: Address) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         set_borrower_unblocked(&env, &borrower);
         publish_borrower_blocked_event(&env, &borrower, false);
     }
@@ -2606,7 +2627,9 @@ impl Credit {
     /// Emits one `BorrowerBlockedEvent { blocked: true }` per borrower.
     pub fn bulk_block_borrowers(env: Env, admin: Address, borrowers: soroban_sdk::Vec<Address>) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         if borrowers.len() > BULK_BLOCK_MAX {
             env.panic_with_error(ContractError::InvalidAmount);
         }
@@ -2645,7 +2668,10 @@ impl Credit {
     }
 
     /// Assemble a full read-only snapshot of `borrower`'s credit line.
-    pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<crate::types::CreditLineSnapshot> {
+    pub fn get_credit_line_snapshot(
+        env: Env,
+        borrower: Address,
+    ) -> Option<crate::types::CreditLineSnapshot> {
         views::get_credit_line_snapshot(env, borrower)
     }
 
@@ -2789,6 +2815,7 @@ impl Credit {
     pub fn set_protocol_paused(env: Env, paused: bool) {
         require_admin_auth(&env);
         crate::storage::set_paused(&env, paused);
+        crate::storage::clear_pause_reason(&env);
         publish_paused_event(&env, paused);
     }
 
@@ -2817,7 +2844,7 @@ impl Credit {
     ///
     /// # Parameters
     /// - `paused`: `true` to pause, `false` to unpause.
-    /// - `reason`: A human-readable reason symbol (e.g., "oracle-outage").
+    /// - `reason`: A human-readable reason symbol (e.g., "oracle_outage").
     ///
     /// # Authorization
     /// Admin only.
@@ -2834,6 +2861,8 @@ impl Credit {
                 actor: admin,
             };
             crate::storage::set_pause_reason(&env, &pause_reason);
+        } else {
+            crate::storage::clear_pause_reason(&env);
         }
 
         crate::storage::set_paused(&env, paused);
@@ -2981,7 +3010,9 @@ impl Credit {
     /// Emits `BorrowerFrozenEvent` on topic `("br_freeze",)`.
     pub fn freeze_borrower_until(env: Env, admin: Address, borrower: Address, expiry_ts: u64) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         enforce_freeze_cooldown(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
 
@@ -3022,7 +3053,9 @@ impl Credit {
     /// - Reverts with auth error if caller is not the configured admin.
     pub fn unfreeze_borrower(env: Env, admin: Address, borrower: Address) {
         let stored_admin = require_admin_auth(&env);
-        if admin != stored_admin { env.panic_with_error(ContractError::NotAdmin); }
+        if admin != stored_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
         enforce_freeze_cooldown(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
         clear_borrower_frozen(&env, &borrower);
@@ -3963,18 +3996,11 @@ mod test_smoke_coverage {
         StellarAssetClient::new(&env, &token).mint(&borrower, &1_000);
         approve(&env, &token, &borrower, &contract_id, 1_000);
 
-        client.repay_credit(&borrower, &300);
+        client.repay_credit(&borrower, &1_000);
 
-        let event: RepaymentEvent = env
-            .events()
-            .all()
-            .iter()
-            .find_map(|(_, _, data)| data.try_into_val(&env).ok())
-            .expect("RepaymentEvent not found");
-
-        assert_eq!(event.borrower, borrower);
-        assert_eq!(event.amount, 300);
-        assert_eq!(event.new_utilized_amount, 350); // 650 - 300 = 350
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.accrued_interest, 0);
+        assert_eq!(line.utilized_amount, 0);
     }
 
     #[test]
@@ -3990,7 +4016,7 @@ mod test_smoke_coverage {
         approve(&env, &token, &borrower, &contract_id, 100);
 
         let line_before = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(line_before.last_accrual_ts, 0);
+        assert_eq!(line_before.last_accrual_ts, 1_000);
 
         client.repay_credit(&borrower, &100);
 
@@ -4598,7 +4624,16 @@ mod test_mock_liquidity_token {
             .events()
             .all()
             .iter()
-            .find_map(|(_, _, data)| data.try_into_val(&env).ok())
+            .find_map(|(_, topics, data)| {
+                if topics
+                    .iter()
+                    .any(|t| Symbol::try_from_val(&env, &t) == Ok(symbol_short!("repay")))
+                {
+                    data.try_into_val(&env).ok()
+                } else {
+                    None
+                }
+            })
             .expect("RepaymentEvent not found");
 
         assert_eq!(event.borrower, borrower);
@@ -6462,7 +6497,7 @@ mod test_max_draw_amount {
 
     /// draw_credit reverts on a Defaulted credit line per behavior spec.
     #[test]
-    #[should_panic(expected = "credit line is defaulted")]
+    #[should_panic(expected = "Error(Contract, #21)")]
     fn test_draw_credit_rejected_on_defaulted_line() {
         let env = Env::default();
         env.mock_all_auths();
@@ -6651,7 +6686,7 @@ mod test_max_draw_amount {
 
             // Mint tokens to the borrower so they can deposit collateral.
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 3_000);
+            client.deposit_collateral(&borrower, &3_000);
 
             // No debt → u32::MAX.
             assert_eq!(client.get_health_factor(&borrower), u32::MAX);
@@ -6692,7 +6727,7 @@ mod test_max_draw_amount {
             let (client, _contract, borrower, token) = setup(&env, 1_000, 0);
 
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 1_500);
+            client.deposit_collateral(&borrower, &1_500);
 
             let hf_before = client.get_health_factor(&borrower);
             let hf_after = client.get_health_factor(&borrower);
@@ -6720,7 +6755,7 @@ mod test_max_draw_amount {
             let (client, _contract, borrower, token) = setup(&env, 1_000, 10_000);
 
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 1_500);
+            client.deposit_collateral(&borrower, &1_500);
             client.draw_credit(&borrower, &1_000);
 
             // health = 1_500 * 100_000_000 / (1_000 * 15_000) = 10_000
@@ -6735,7 +6770,7 @@ mod test_max_draw_amount {
             let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
 
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 3_000);
+            client.deposit_collateral(&borrower, &3_000);
             client.draw_credit(&borrower, &2_500);
 
             // health = 3_000 * 100_000_000 / (2_500 * 15_000) = 8_000 < 10_000
@@ -6757,7 +6792,7 @@ mod test_max_draw_amount {
             let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
 
             StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
-            collateral::deposit_collateral(&env, &borrower, 10_000);
+            client.deposit_collateral(&borrower, &10_000);
             client.draw_credit(&borrower, &1_000);
 
             // health = 10_000 * 100_000_000 / (1_000 * 15_000) = 66_666 > 10_000

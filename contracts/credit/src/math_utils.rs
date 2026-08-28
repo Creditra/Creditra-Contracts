@@ -137,6 +137,32 @@ pub fn mul_div(a: u128, numerator: u128, denominator: u128, rounding: Rounding) 
     }
 }
 
+/// Non-panicking version of [`mul_div`].
+///
+/// Returns `None` if `denominator == 0` or if `a * numerator` overflows `u128`.
+pub fn safe_mul_div(
+    a: u128,
+    numerator: u128,
+    denominator: u128,
+    rounding: Rounding,
+) -> Option<u128> {
+    if denominator == 0 {
+        return None;
+    }
+    let product = a.checked_mul(numerator)?;
+    let quotient = product / denominator;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if !product.is_multiple_of(denominator) {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
+            }
+        }
+    }
+}
+
 /// Scale `amount` up by [`SCALE`] (multiply by 10^18).
 ///
 /// Used to convert a raw integer into a fixed-point representation before
@@ -329,8 +355,10 @@ pub fn compute_deviation_bps(new_price: i128, last_price: i128) -> Option<u32> {
     }
     let diff = (new_price - last_price).unsigned_abs();
     // diff * 10_000 / last_price — both operands are u128
-    let numerator = diff.checked_mul(BPS_DENOMINATOR)?;
-    let deviation = numerator / (last_price as u128);
+    let deviation = match diff.checked_mul(BPS_DENOMINATOR) {
+        Some(num) => num / (last_price as u128),
+        None => (diff / (last_price as u128)).saturating_mul(BPS_DENOMINATOR),
+    };
     // Cap at u32::MAX to avoid truncation; any value > 10_000 already exceeds any threshold
     Some(deviation.min(u32::MAX as u128) as u32)
 }

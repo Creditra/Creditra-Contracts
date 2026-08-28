@@ -604,7 +604,9 @@ fn draw_with_insufficient_collateral_fails() {
     asset.mint(&contract_id, &INITIAL_TOKEN_BALANCE);
     asset.mint(&borrower, &10_000_i128);
 
-    // Deposit very little collateral relative to the credit limit
+    // Set minimum collateral ratio to 50% (5000 bps)
+    client.set_min_collateral_ratio_bps(&5000_u32);
+    // Deposit very little collateral (100) relative to the draw amount (1_000, requiring 500)
     client.deposit_collateral(&borrower, &100_i128);
     client.open_credit_line(&borrower, &10_000, &INTEREST_RATE_BPS, &RISK_SCORE);
 

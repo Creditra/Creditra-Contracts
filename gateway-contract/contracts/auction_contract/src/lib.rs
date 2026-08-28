@@ -9,7 +9,7 @@ mod types;
 pub use curves::{calculate_price, CurveError, DecayCurve};
 pub use errors::AuctionError;
 pub use events::BidRefundedEvent;
-pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
+pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay, ProtocolVersion};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
@@ -204,6 +204,7 @@ pub enum AuctionKey {
     LiquidationSettled(Symbol),
 }
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl Auction {
     /// Initializes a new auction.
@@ -223,6 +224,7 @@ impl Auction {
     ///
     /// # Panics
     /// Panics if `start_time >= end_time`, if `min_increment_bps > 10_000`, or if Dutch auction parameters are invalid.
+    #[allow(clippy::too_many_arguments)]
     pub fn init_auction(
         env: Env,
         auction_id: Symbol,
@@ -741,6 +743,11 @@ impl Auction {
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
+    }
+
+    /// Get the protocol version of the auction contract.
+    pub fn get_version(_env: Env) -> ProtocolVersion {
+        ProtocolVersion { major: 1, minor: 0 }
     }
 }
 

@@ -48,9 +48,9 @@ use crate::events::{
     CollateralDepositedEvent, CollateralPartialReleasedEvent, CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_balance_for_token,
-    get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
-    is_collateral_token_allowed, set_collateral_balance, set_collateral_balance_for_token,
+    get_collateral_balance, get_collateral_balance_for_token, get_collateral_token,
+    get_credit_line, get_min_collateral_ratio_bps, is_collateral_token_allowed,
+    set_collateral_balance, set_collateral_balance_for_token,
 };
 use crate::types::{CollateralEventKind, ContractError};
 use soroban_sdk::{token, Address, Env};
@@ -128,7 +128,8 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
         if credit_line.utilized_amount > 0 {
             // Compute required collateral after withdrawal
             let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15000);
-            let required = credit_line.utilized_amount
+            let required = credit_line
+                .utilized_amount
                 .checked_mul(min_ratio_bps as i128)
                 .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
                 / 10_000;

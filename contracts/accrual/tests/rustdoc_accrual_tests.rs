@@ -15,6 +15,7 @@ use soroban_sdk::{
 #[test]
 fn test_publish_accrual_batch_completed_event() {
     let env = Env::default();
+    let contract_id = env.register(Credit, ());
     let event_payload = AccrualBatchCompletedEvent {
         borrowers_processed: 5,
         lines_accrued: 3,
@@ -22,7 +23,9 @@ fn test_publish_accrual_batch_completed_event() {
         timestamp: 1_700_000_000,
     };
 
-    publish_accrual_batch_completed(&env, event_payload.clone());
+    env.as_contract(&contract_id, || {
+        publish_accrual_batch_completed(&env, event_payload.clone());
+    });
 
     let events = env.events().all();
     assert_eq!(events.len(), 1);
@@ -36,6 +39,7 @@ fn test_publish_accrual_batch_completed_event() {
 #[test]
 fn test_publish_interest_accrued_event() {
     let env = Env::default();
+    let contract_id = env.register(Credit, ());
     let borrower = Address::generate(&env);
     let event_payload = InterestAccruedEvent {
         borrower: borrower.clone(),
@@ -46,7 +50,9 @@ fn test_publish_interest_accrued_event() {
         timestamp: 1_700_000_000,
     };
 
-    publish_interest_accrued(&env, event_payload.clone());
+    env.as_contract(&contract_id, || {
+        publish_interest_accrued(&env, event_payload.clone());
+    });
 
     let events = env.events().all();
     assert_eq!(events.len(), 1);

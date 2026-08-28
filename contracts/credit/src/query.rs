@@ -1,4 +1,4 @@
-use crate::storage::{get_borrower_by_credit_line_id, grace_period_key, MAX_ENUMERATION_LIMIT};
+use crate::storage::{get_borrower_by_credit_line_id, MAX_ENUMERATION_LIMIT};
 use crate::types::{
     CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
 };
@@ -197,8 +197,7 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     };
 
-    let grace_cfg: Option<GracePeriodConfig> =
-        env.storage().instance().get(&grace_period_key(&env));
+    let grace_cfg: Option<GracePeriodConfig> = crate::storage::get_grace_period_config(&env);
     let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 

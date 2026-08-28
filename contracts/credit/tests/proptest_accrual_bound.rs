@@ -1,5 +1,5 @@
-use proptest::prelude::*;
 use creditra_credit::math_utils::{prorate_interest, Rounding, SECONDS_PER_YEAR};
+use proptest::prelude::*;
 
 /// Asserts that for any valid borrower configuration over up to 1 year,
 /// the accrued interest never exceeds the total utilized principal amount.
