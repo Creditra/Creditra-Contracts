@@ -711,15 +711,56 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     );
 }
 
+/// Settle a defaulted credit line with optional oracle price validation.
+///
+/// # Parameters
+/// - `env`: Soroban environment
+/// - `borrower`: Address of the defaulted borrower
+/// - `recovered_amount`: Amount recovered from liquidation (must be > 0)
+/// - `settlement_id`: Unique settlement identifier for replay protection
+/// - `close_factor_bps`: Percentage of utilized amount to recover (1..=10_000)
+/// - `oracle_price`: Optional single-oracle price (ignored if quorum config is set)
+///
+/// # Behavior
+///
+/// 1. Validates authorization (admin auth required)
+/// 2. Validates replay protection: settlement_id not previously used for this borrower
+/// 3. Validates numeric bounds: recovered_amount, close_factor_bps
+/// 4. **Validates oracle price** (NEW):
+///    - If quorum config set: uses stored quorum price (oracle_price arg ignored)
+///    - Else if single-oracle config set: validates supplied oracle_price
+///    - Else: proceeds without oracle gating (backward compatible)
+/// 5. Loads and accrues credit line
+/// 6. Verifies credit line status is Defaulted
+/// 7. Validates recovery amount vs. maximum recoverable
+/// 8. Reduces utilized_amount and transitions to Closed if needed
+/// 9. Records accepted oracle price for next settlement's deviation check
+/// 10. Emits settlement event
+///
+/// # Errors
+/// Panics with typed [`ContractError`] on any validation failure (before state mutation):
+/// - `NotAdmin` (2) — caller is not admin
+/// - `InvalidAmount` (5) — recovered_amount ≤ 0 or close_factor_bps invalid
+/// - `OverLimit` (6) — recovered_amount > max_recoverable or close_factor > protocol max
+/// - `AlreadyInitialized` (14) — settlement already processed for (borrower, settlement_id)
+/// - `CreditLineNotFound` (3) — no credit line exists for borrower
+/// - `CreditLineDefaulted` (21) — credit line status is not Defaulted
+/// - `OraclePriceInvalid` (36) — oracle price is invalid (zero, negative, or missing)
+/// - `OraclePriceStale` (37) — oracle price exceeds max_age_seconds
+/// - `OraclePriceDeviation` (38) — oracle price deviates from last accepted price
+/// - `OracleQuorumNotMet` (50) — quorum price not submitted yet
 pub fn settle_default_liquidation(
     env: Env,
     borrower: Address,
     recovered_amount: i128,
     settlement_id: Symbol,
     close_factor_bps: u32,
+    oracle_price: Option<i128>,
 ) {
+    // Step 1: Authorization
     require_admin_auth(&env);
 
+    // Step 2: Numeric validation (cheap checks before any storage reads)
     if recovered_amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }
@@ -734,11 +775,19 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
+    // Step 3: Replay protection (gate before credit line reads)
     let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
 
+    // Step 4: Oracle validation (BEFORE any state mutation)
+    let oracle_result = crate::oracle_validation::validate_settlement_oracle_price(
+        &env,
+        oracle_price,
+    );
+
+    // Step 5: Credit line read & accrual
     // Bump TTL on read: this is a hot accrual read path, so an active
     // borrower's entry must never be archived independently of draw/repay.
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
@@ -748,10 +797,12 @@ pub fn settle_default_liquidation(
     // Apply interest accrual before any mutation
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 
+    // Step 6: Verify defaulted status
     if credit_line.status != CreditStatus::Defaulted {
         env.panic_with_error(ContractError::CreditLineDefaulted);
     }
 
+    // Step 7: Economic validation
     // Compute the maximum recoverable amount for this settlement
     let max_recoverable = credit_line
         .utilized_amount
@@ -764,9 +815,10 @@ pub fn settle_default_liquidation(
         env.panic_with_error(ContractError::OverLimit);
     }
 
+    // Step 8: State mutation (after all validation succeeds)
     credit_line.utilized_amount = credit_line
         .utilized_amount
-        .checked_sub(actual_recovery)
+        .checked_sub(recovered_amount)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
     let previous_status = credit_line.status;
@@ -784,8 +836,14 @@ pub fn settle_default_liquidation(
     if credit_line.status == CreditStatus::Closed {
         clear_repayment_schedule(&env, &borrower);
     }
-    env.storage().persistent().set(&settlement_key, &true);
 
+    // Step 9: Replay protection & oracle price recording
+    env.storage().persistent().set(&settlement_key, &true);
+    if let Some(price) = oracle_result.price() {
+        crate::oracle_validation::record_accepted_oracle_price(&env, price);
+    }
+
+    // Step 10: Events
     if credit_line.status == CreditStatus::Closed {
         publish_credit_line_event(
             &env,
@@ -805,7 +863,7 @@ pub fn settle_default_liquidation(
         DefaultLiquidationSettledEvent {
             borrower,
             settlement_id,
-            recovered_amount: actual_recovery,
+            recovered_amount,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
             close_factor_bps,
