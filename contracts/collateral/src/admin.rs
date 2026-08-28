@@ -80,6 +80,14 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &Vec<Address>) {
     assert_not_paused(env);
     require_admin_auth(env);
     enforce_admin_collateral_cooldown(env);
+
+    // Validate factory-created contract addresses before registration.
+    // Ensure every address is a valid contract using the Soroban host environment.
+    for token in tokens.iter() {
+        // Invoking a standard method lets the host trap if the address is not a contract.
+        let _ = soroban_sdk::token::Client::new(env, &token).decimals();
+    }
+
     storage::set_collateral_token_allowlist(env, tokens);
     touch_admin_collateral_critical_action_ts(env);
 }
