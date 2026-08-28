@@ -154,6 +154,7 @@ pub enum CreditStatus {
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
 /// | 54   | `RiskAdminCooldownActive`      | Risk          | Risk admin cooldown has not yet elapsed since the last mutation |
+/// | 60   | `StaleStateTransition`         | Lifecycle     | Transition rejected: the credit line is already in the requested target state |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -208,6 +209,11 @@ pub enum ContractError {
     FreezeCooldownActive = 57,
     AdminCollateralCooldownActive = 58,
     LiquidationGraceActive = 59,
+    /// Transition rejected: the credit line is already in the requested target
+    /// state (stale/duplicate), or the current state makes the operation a
+    /// no-op that would silently corrupt caller expectations. The caller must
+    /// re-fetch the credit line state before retrying.
+    StaleStateTransition = 60,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -240,7 +246,8 @@ impl ContractError {
             | Self::CreditLineSuspended
             | Self::CreditLineDefaulted
             | Self::AlreadySettled
-            | Self::LiquidationGraceActive => Lifecycle,
+            | Self::LiquidationGraceActive
+            | Self::StaleStateTransition => Lifecycle,
 
             Self::InvalidAmount
             | Self::NegativeLimit
