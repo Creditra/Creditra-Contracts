@@ -36,7 +36,7 @@
 //! - [`crate::storage::DataKey::CreditLineBorrowerById`]
 //! - Issue #583
 
-use creditra_credit::test_helpers::{
+use creditra_credit::storage::{
     ensure_credit_line_id, get_borrower_by_credit_line_id, get_credit_line_id,
 };
 use proptest::prelude::*;
@@ -260,7 +260,7 @@ mod edge_cases {
 
         // All roundtrips succeed
         for (addr, &id) in addrs.iter().zip(ids.iter()) {
-            let recovered =
+            let recovered: Option<Address> =
                 env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
             assert_eq!(recovered, Some(addr.clone()));
 
