@@ -202,7 +202,7 @@ pub enum ContractError {
     OracleQuorumNotMet = 50,
     AlreadySettled = 51,
     InvalidRiskWeight = 52,
-    InvalidAttestation = 53,
+    UnknownError = 60,
     RiskAdminCooldownActive = 54,
     OracleNotFound = 55,
     FreezeCooldownActive = 57,
@@ -223,6 +223,7 @@ pub enum ContractError {
 ///
 /// # Usage
 /// Stable error categories for client-side grouping.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ContractErrorCategory {
     Auth,
     Lifecycle,
@@ -243,6 +244,63 @@ pub enum ContractErrorCategory {
 
 impl ContractError {
     /// Return the stable category for this error variant.
+
+    /// Safely decodes a u32 into a ContractError, falling back to UnknownError if the code is not recognized.
+    pub fn from_u32_safe(code: u32) -> Self {
+        match code {
+            1 => Self::Unauthorized,
+            2 => Self::NotAdmin,
+            3 => Self::CreditLineNotFound,
+            4 => Self::CreditLineClosed,
+            5 => Self::InvalidAmount,
+            6 => Self::OverLimit,
+            7 => Self::NegativeLimit,
+            8 => Self::RateTooHigh,
+            9 => Self::ScoreTooHigh,
+            10 => Self::UtilizationNotZero,
+            11 => Self::Reentrancy,
+            12 => Self::Overflow,
+            14 => Self::AlreadyInitialized,
+            15 => Self::AdminAcceptTooEarly,
+            17 => Self::DrawExceedsMaxAmount,
+            18 => Self::Paused,
+            19 => Self::DrawsFrozen,
+            20 => Self::CreditLineSuspended,
+            21 => Self::CreditLineDefaulted,
+            22 => Self::MissingLiquidityToken,
+            23 => Self::MissingLiquiditySource,
+            24 => Self::InsufficientLiquidityReserve,
+            28 => Self::RepayExceedsMaxAmount,
+            29 => Self::DrawCooldownActive,
+            30 => Self::TreasuryNotSet,
+            31 => Self::ExposureCapExceeded,
+            32 => Self::AdminNotInitialized,
+            33 => Self::TimestampRegression,
+            34 => Self::LimitOutOfBounds,
+            35 => Self::CollateralRatioBelowMinimum,
+            36 => Self::OraclePriceInvalid,
+            37 => Self::OraclePriceStale,
+            38 => Self::OraclePriceDeviation,
+            39 => Self::InsufficientCollateralBalance,
+            40 => Self::BorrowerFrozen,
+            41 => Self::BountyNotSet,
+            42 => Self::NoPendingTreasuryWithdrawal,
+            46 => Self::CreditLineFrozen,
+            47 => Self::DrawReversalWindowExpired,
+            48 => Self::OriginalDrawNotFound,
+            49 => Self::AttestationBatchNotFound,
+            50 => Self::OracleQuorumNotMet,
+            51 => Self::AlreadySettled,
+            52 => Self::InvalidRiskWeight,
+            54 => Self::RiskAdminCooldownActive,
+            55 => Self::OracleNotFound,
+            57 => Self::FreezeCooldownActive,
+            58 => Self::AdminCollateralCooldownActive,
+            59 => Self::LiquidationGraceActive,
+            60 => Self::UnknownError,
+            _ => Self::UnknownError,
+        }
+    }
     pub fn category(&self) -> ContractErrorCategory {
         use ContractErrorCategory::*;
         match self {
@@ -302,7 +360,7 @@ impl ContractError {
 
             Self::CreditLineNotFound
             | Self::AdminAcceptTooEarly
-            | Self::InvalidAttestation
+            | Self::UnknownError
             | Self::NoPendingTreasuryWithdrawal
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound => Misc,
