@@ -69,9 +69,11 @@ fn setup_env() -> (Env, CreditClient<'static>, std::vec::Vec<Address>) {
     sac.mint(&contract_id, &LIQUIDITY_AMOUNT);
 
     let mut borrowers = std::vec::Vec::with_capacity(BORROWER_COUNT);
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
     for i in 0..BORROWER_COUNT {
         let borrower = Address::generate(&env);
         sac.mint(&borrower, &50_000_000_i128);
+        token_client.approve(&borrower, &contract_id, &50_000_000_i128, &1_000_000_u32);
         let credit_limit = 50_000_i128 + (i as i128 * 20_000_i128);
         let rate_bps = 1_000_u32 + (i as u32 * 500_u32);
         let score = 30_u32 + (i as u32 * 10_u32);
@@ -335,8 +337,8 @@ fn max_rate_one_year_bound() {
     let (env, client, borrowers) = setup_env();
     let borrower = &borrowers[0];
 
-    // Reopen with max rate (100% APR).
-    client.open_credit_line(borrower, &1_000_000_i128, &10_000_u32, &50_u32);
+    // Set max rate (100% APR) and higher limit.
+    client.update_risk_parameters(borrower, &1_000_000_i128, &10_000_u32, &50_u32);
     client.draw_credit(borrower, &100_000_i128);
 
     env.ledger().with_mut(|l| l.timestamp += 31_536_000);

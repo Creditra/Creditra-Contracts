@@ -305,6 +305,7 @@ pub fn open_credit_line(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
+    require_admin_auth(&env);
 
     if credit_limit <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -325,9 +326,6 @@ pub fn open_credit_line(
         if existing.status == CreditStatus::Active {
             env.panic_with_error(ContractError::AlreadyInitialized);
         }
-
-        // Prevent borrower-controlled status bypasses on existing lines.
-        require_admin_auth(&env);
     }
 
     let previous_utilized = existing_line
@@ -378,37 +376,8 @@ pub fn open_credit_line(
 /// Emits a `("credit", "suspend")` [`CreditLineEvent`].
 pub fn suspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
-    // Admin auth is enforced by the `lib.rs` `suspend_credit_line` entrypoint
-    // wrapper before this is called; not re-checked here to avoid a double
-    // `require_auth` on the same address within one invocation (Soroban's
-    // auth-mock treats a second `require_auth` for an already-authorized
-    // address in the same frame as an error).
-    let mut credit_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
-        .expect("Credit line not found");
-
-    if credit_line.status != CreditStatus::Active {
-        panic!("Only active credit lines can be suspended");
-    }
-
-    credit_line.status = CreditStatus::Suspended;
-    env.storage().persistent().set(&borrower, &credit_line);
-    // Bump TTL: interacting with a suspended line keeps it live.
-    bump_credit_line_ttl(&env, &borrower);
-
-    publish_credit_line_event(
-        &env,
-        (symbol_short!("credit"), symbol_short!("suspend")),
-        CreditLineEvent {
-            borrower: borrower.clone(),
-            status: CreditStatus::Suspended,
-            credit_limit: credit_line.credit_limit,
-            interest_rate_bps: credit_line.interest_rate_bps,
-            risk_score: credit_line.risk_score,
-        },
-    );
+    require_admin_auth(&env);
+    suspend_credit_line_internal(&env, borrower);
 }
 
 /// Suspend the caller's own active credit line.
@@ -740,8 +709,6 @@ pub fn settle_default_liquidation(
     }
 
     // Compute the maximum recoverable amount for this settlement. The supplied
-    // `recovered_amount` may exceed the effective cap, in which case we clamp to
-    // the configured close factor and treat the remainder as unrecoverable.
     let max_recoverable = credit_line
         .utilized_amount
         .checked_mul(close_factor_bps as i128)
@@ -749,7 +716,11 @@ pub fn settle_default_liquidation(
         .checked_div(10_000)
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
-    let actual_recovery = recovered_amount.min(max_recoverable);
+    if recovered_amount > max_recoverable {
+        env.panic_with_error(ContractError::OverLimit);
+    }
+
+    let actual_recovery = recovered_amount;
 
     credit_line.utilized_amount = credit_line
         .utilized_amount
@@ -1348,15 +1319,8 @@ mod installment {
     #[test]
     fn test_settle_default_liquidation_partial_50_percent() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &500_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 500_000, 100);
 
         env.ledger().set_timestamp(3600);
         client.default_credit_line(&borrower);
@@ -1386,15 +1350,8 @@ mod installment {
     #[test]
     fn test_settle_default_liquidation_full_close_factor() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         env.ledger().set_timestamp(3600);
         client.default_credit_line(&borrower);
@@ -1419,19 +1376,12 @@ mod installment {
 
     /// Partial liquidation respects close_factor_bps limit.
     #[test]
-    #[should_panic(expected = "Error(Contract, #7)")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_settle_default_liquidation_exceeds_close_factor_limit() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
+        let (client, borrower) = setup_borrower(&env);
         client.set_close_factor_bps(&5_000); // Max 50%
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         env.ledger().set_timestamp(3600);
         client.default_credit_line(&borrower);
@@ -1451,18 +1401,11 @@ mod installment {
 
     /// Recovered amount must not exceed max_recoverable.
     #[test]
-    #[should_panic(expected = "Error(Contract, #7)")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn test_settle_default_liquidation_exceeds_max_recoverable() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
@@ -1482,15 +1425,8 @@ mod installment {
     #[should_panic(expected = "Error(Contract, #5)")]
     fn test_settle_default_liquidation_zero_close_factor() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
@@ -1509,15 +1445,8 @@ mod installment {
     #[should_panic(expected = "Error(Contract, #5)")]
     fn test_settle_default_liquidation_excessive_close_factor() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
@@ -1536,15 +1465,8 @@ mod installment {
     #[should_panic(expected = "Error(Contract, #14)")]
     fn test_settle_default_liquidation_replay_protection() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
@@ -1567,24 +1489,17 @@ mod installment {
     #[test]
     fn test_settle_default_liquidation_multiple_rounds() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
         let before = client.get_credit_line(&borrower).unwrap();
         let total_utilized = before.utilized_amount;
 
-        // Round 1: Recover 33%
+        // Round 1: Recover 33.33% (3333 bps of 100_000 = 33_330)
         let settlement_id_1 = Symbol::new(&env, "settle_1");
-        let recovery_1 = total_utilized / 3;
+        let recovery_1 = 33_330_i128;
         client.settle_default_liquidation(
             &borrower,
             &recovery_1,
@@ -1597,9 +1512,9 @@ mod installment {
         assert_eq!(after_round_1.utilized_amount, total_utilized - recovery_1);
         assert_eq!(after_round_1.status, CreditStatus::Defaulted);
 
-        // Round 2: Recover another 33%
+        // Round 2: Recover 50% of remaining 66_670 (5000 bps of 66_670 = 33_335)
         let settlement_id_2 = Symbol::new(&env, "settle_2");
-        let recovery_2 = (total_utilized - recovery_1) / 2;
+        let recovery_2 = 33_335_i128;
         client.settle_default_liquidation(
             &borrower,
             &recovery_2,
@@ -1615,7 +1530,7 @@ mod installment {
         );
         assert_eq!(after_round_2.status, CreditStatus::Defaulted);
 
-        // Round 3: Recover remaining to close
+        // Round 3: Recover remaining 33_335 to close
         let settlement_id_3 = Symbol::new(&env, "settle_3");
         let recovery_3 = after_round_2.utilized_amount;
         client.settle_default_liquidation(
@@ -1636,15 +1551,8 @@ mod installment {
     #[should_panic(expected = "Error(Contract, #5)")]
     fn test_settle_default_liquidation_zero_recovered_amount() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         client.default_credit_line(&borrower);
 
@@ -1660,18 +1568,11 @@ mod installment {
 
     /// Settlement on non-defaulted line fails.
     #[test]
-    #[should_panic(expected = "Error(Contract, #2)")]
+    #[should_panic(expected = "Error(Contract, #21)")]
     fn test_settle_default_liquidation_not_defaulted() {
         let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-
-        client.init(&admin);
-        client.open_credit_line(&borrower, &1_000_000, &500, &100);
-        client.draw_credit(&borrower, &100_000);
+        let (client, borrower) = setup_borrower(&env);
+        setup_draw(&env, &client, &borrower, 100_000, 100);
 
         // No default call - line is still Active
 

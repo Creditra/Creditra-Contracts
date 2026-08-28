@@ -49,7 +49,7 @@ const START_TS: u64 = 10_000;
 
 /// Reset the budget to unlimited, run `f`, return (cpu, mem).
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())

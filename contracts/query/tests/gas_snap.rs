@@ -83,7 +83,7 @@ const START_TS: u64 = 1_000_000;
 /// Resetting before each measurement ensures that setup cost does not
 /// accumulate in the reading of interest.
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
@@ -352,10 +352,9 @@ fn gas_get_repayment_schedule_existing() {
     // Configure a repayment schedule: 12 monthly installments.
     f.client.set_repayment_schedule(
         &f.borrower_idle,
-        &START_TS,                 // start timestamp
-        &(START_TS + 86_400 * 30), // first due
-        &12_u32,                   // installments
         &(CREDIT_LIMIT / 12),      // amount per installment
+        &(86_400 * 30),            // period seconds
+        &(START_TS + 86_400 * 30), // first due
     );
 
     let (cpu, mem) = measure(&env, || {
@@ -506,10 +505,9 @@ fn gas_is_delinquent_not_past_due() {
     let next_due = START_TS + 86_400 * 30;
     f.client.set_repayment_schedule(
         &f.borrower_active,
-        &START_TS,
-        &next_due,
-        &12_u32,
         &(CREDIT_LIMIT / 12),
+        &(86_400 * 30),
+        &next_due,
     );
 
     let (cpu, mem) = measure(&env, || {
@@ -537,10 +535,9 @@ fn gas_is_delinquent_past_due() {
     let next_due = START_TS + 1; // due almost immediately
     f.client.set_repayment_schedule(
         &f.borrower_active,
-        &START_TS,
-        &next_due,
-        &12_u32,
         &(CREDIT_LIMIT / 12),
+        &(86_400 * 30),
+        &next_due,
     );
 
     // Advance time past due + default grace of 0 seconds.
@@ -574,7 +571,7 @@ fn gas_get_credit_lines_paginated_limit_1() {
 
     let (cpu, mem) = measure(&env, || {
         let page = f.client.get_credit_lines_paginated(&None, &1_u32);
-        assert!(page.items.len() <= 1, "limit=1 must return at most 1 item");
+        assert!(page.lines.len() <= 1, "limit=1 must return at most 1 item");
     });
 
     assert!(cpu > 0);
@@ -596,7 +593,7 @@ fn gas_get_credit_lines_paginated_limit_10() {
     let (cpu, mem) = measure(&env, || {
         let page = f.client.get_credit_lines_paginated(&None, &10_u32);
         // Only 2 lines exist from setup, so the page will be shorter.
-        assert!(page.items.len() <= 10);
+        assert!(page.lines.len() <= 10);
     });
 
     assert!(cpu > 0);
@@ -618,7 +615,7 @@ fn gas_get_credit_lines_paginated_limit_100() {
 
     let (cpu, mem) = measure(&env, || {
         let page = f.client.get_credit_lines_paginated(&None, &100_u32);
-        assert!(page.items.len() <= 100);
+        assert!(page.lines.len() <= 100);
     });
 
     assert!(cpu > 0);
@@ -798,10 +795,9 @@ fn gas_query_capabilities_full_path_with_schedule() {
     let next_due = START_TS + 86_400 * 30;
     f.client.set_repayment_schedule(
         &f.borrower_active,
-        &START_TS,
-        &next_due,
-        &12_u32,
         &(CREDIT_LIMIT / 12),
+        &(86_400 * 30),
+        &next_due,
     );
 
     let (cpu, mem) = measure(&env, || {
@@ -998,10 +994,9 @@ fn gas_query_all_entrypoints_summary() {
     let next_due = START_TS + 86_400 * 30;
     f.client.set_repayment_schedule(
         &f.borrower_active,
-        &START_TS,
-        &next_due,
-        &12_u32,
         &(CREDIT_LIMIT / 12),
+        &(86_400 * 30),
+        &next_due,
     );
 
     let mut table: std::vec::Vec<(&str, u64, u64)> = std::vec::Vec::new();

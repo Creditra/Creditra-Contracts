@@ -241,6 +241,11 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         );
     }
 
+    let prorate = |p: u128, r: u32, t: u64, rnd: Rounding| -> u128 {
+        crate::math_utils::prorate_interest_checked(p, r, t, rnd)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
+    };
+
     // Compute accrued interest using the audited prorate helper with floor rounding.
     let accrued_u: u128 = if line.status == CreditStatus::Suspended {
         let grace_cfg: Option<GracePeriodConfig> = env
@@ -253,32 +258,49 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                 let grace_end = line.suspension_ts.saturating_add(cfg.grace_period_seconds);
 
                 if now <= grace_end {
-                    // Entire period in grace window
-                    match cfg.waiver_mode {
-                        GraceWaiverMode::FullWaiver => 0u128,
-                        GraceWaiverMode::ReducedRate => prorate_interest(
-                            line.utilized_amount as u128,
-                            cfg.reduced_rate_bps,
-                            ((now - accrual_start)),
-                            Rounding::Floor,
-                        ),
-                    }
-                } else if accrual_start >= grace_end {
-                    // Entire period after grace window - use effective rate (may include penalty)
-                    prorate_interest(
+                    // Entire period in grace window — compute waived amount and emit receipt.
+                    let elapsed_secs = (now - accrual_start) as u64;
+                    let full_rate_interest = prorate(
                         line.utilized_amount as u128,
                         effective_rate_bps,
-                        ((now - accrual_start)),
+                        elapsed_secs,
+                        Rounding::Floor,
+                    ) as i128;
+                    let actual_interest = match cfg.waiver_mode {
+                        GraceWaiverMode::FullWaiver => 0i128,
+                        GraceWaiverMode::ReducedRate => prorate(
+                            line.utilized_amount as u128,
+                            cfg.reduced_rate_bps,
+                            elapsed_secs,
+                            Rounding::Floor,
+                        ) as i128,
+                    };
+                    let waived_amount = full_rate_interest.saturating_sub(actual_interest);
+                    if waived_amount > 0 {
+                        publish_grace_waiver_applied_event(
+                            env,
+                            &line.borrower,
+                            waived_amount,
+                            cfg.waiver_mode,
+                        );
+                    }
+                    actual_interest as u128
+                } else if accrual_start >= grace_end {
+                    // Entire period after grace window - use effective rate (may include penalty)
+                    prorate(
+                        line.utilized_amount as u128,
+                        effective_rate_bps,
+                        now - accrual_start,
                         Rounding::Floor,
                     )
                 } else {
                     // Straddles grace boundary — prorate two sub-periods and add.
-                    let in_window_secs = (grace_end - accrual_start);
-                    let post_window_secs = (now - grace_end);
+                    let in_window_secs = grace_end - accrual_start;
+                    let post_window_secs = now - grace_end;
 
                     let in_window = match cfg.waiver_mode {
                         GraceWaiverMode::FullWaiver => 0u128,
-                        GraceWaiverMode::ReducedRate => prorate_interest(
+                        GraceWaiverMode::ReducedRate => prorate(
                             line.utilized_amount as u128,
                             cfg.reduced_rate_bps,
                             in_window_secs,
@@ -287,7 +309,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                     };
 
                     // Calculate waived amount for grace waiver event
-                    let full_rate_interest = prorate_interest(
+                    let full_rate_interest = prorate(
                         line.utilized_amount as u128,
                         effective_rate_bps,
                         in_window_secs,
@@ -296,7 +318,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 
                     let actual_interest = match cfg.waiver_mode {
                         GraceWaiverMode::FullWaiver => 0,
-                        GraceWaiverMode::ReducedRate => prorate_interest(
+                        GraceWaiverMode::ReducedRate => prorate(
                             line.utilized_amount as u128,
                             cfg.reduced_rate_bps,
                             in_window_secs,
@@ -314,7 +336,7 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                         );
                     }
 
-                    let post_window = prorate_interest(
+                    let post_window = prorate(
                         line.utilized_amount as u128,
                         effective_rate_bps,
                         post_window_secs,
@@ -325,19 +347,19 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
                 }
             }
-            _ => prorate_interest(
+            _ => prorate(
                 line.utilized_amount as u128,
                 effective_rate_bps,
-                ((now - accrual_start)),
+                now - accrual_start,
                 Rounding::Floor,
             ),
         }
     } else {
         // Active, Defaulted, Restricted, or Closed status: apply effective rate (may include penalty)
-        prorate_interest(
+        prorate(
             line.utilized_amount as u128,
             effective_rate_bps,
-            ((now - accrual_start)),
+            now - accrual_start,
             Rounding::Floor,
         )
     };

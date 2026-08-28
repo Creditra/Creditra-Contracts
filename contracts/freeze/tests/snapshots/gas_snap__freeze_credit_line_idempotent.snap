@@ -1,0 +1,9 @@
+---
+source: contracts/freeze/tests/gas_snap.rs
+expression: sample
+---
+FreezeGasSample {
+    entrypoint: "freeze_credit_line_idempotent",
+    cpu_instructions: 119611,
+    memory_bytes: 16849,
+}

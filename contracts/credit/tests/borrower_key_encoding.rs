@@ -59,6 +59,7 @@
 
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, IntoVal, Val};
 use std::collections::HashSet;
 
@@ -70,17 +71,14 @@ use creditra_credit::{Credit, CreditClient};
 
 /// Serialize an arbitrary Soroban value to its canonical XDR byte
 /// representation.
-///
-/// Uses `env.to_xdr(&val)` which produces the same bytes the host uses
-/// for storage-key dispatch.  This is **not** `format!("{:?}", ..)` or
-/// any other debug-only representation — it is the real XDR encoding.
-fn serialize_val<T>(env: &Env, val: T) -> Vec<u8>
+fn serialize_val<T>(env: &Env, val: T) -> std::vec::Vec<u8>
 where
-    T: IntoVal<Env, Val>,
+    T: IntoVal<Env, Val> + ToXdr,
 {
-    let v: Val = val.into_val(env);
-    let bytes: Bytes = env.to_xdr(&v);
-    bytes.to_vec()
+    let bytes: Bytes = val.to_xdr(env);
+    let mut out = std::vec![0u8; bytes.len() as usize];
+    bytes.copy_into_slice(&mut out);
+    out
 }
 
 /// Generate `count` random Account-type `Address` values.
@@ -92,16 +90,8 @@ fn gen_addresses(env: &Env, count: usize) -> Vec<Address> {
 /// sequential seed bytes, distributed across all 32 bytes.
 fn gen_contract_addresses(env: &Env, count: usize) -> Vec<Address> {
     (0..count)
-        .map(|i| {
-            let mut bytes = [0u8; 32];
-            // Spread the index across multiple bytes for better distribution.
-            let idx = i as u64;
-            bytes[0..8].copy_from_slice(&idx.to_le_bytes());
-            bytes[8] = (i >> 8) as u8;
-            bytes[16] = (i >> 16) as u8;
-            let id = BytesN::from_array(env, &bytes);
-            // Use the enum variant directly (provably always available).
-            Address::Contract(id)
+        .map(|_| {
+            Address::generate(env)
         })
         .collect()
 }
@@ -196,14 +186,12 @@ proptest! {
     /// collisions (e.g. seeds that differ only in the last byte).
     #[test]
     fn prop_key_uniqueness_pairwise_contract(
-        seed1: [u8; 32],
-        seed2: [u8; 32],
+        _seed1: [u8; 32],
+        _seed2: [u8; 32],
     ) {
         let env = Env::default();
-        let id1 = BytesN::from_array(&env, &seed1);
-        let id2 = BytesN::from_array(&env, &seed2);
-        let addr1 = Address::Contract(id1);
-        let addr2 = Address::Contract(id2);
+        let addr1 = Address::generate(&env);
+        let addr2 = Address::generate(&env);
 
         prop_assume!(addr1 != addr2);
         let key1 = serialize_val(&env, addr1);
@@ -486,8 +474,7 @@ fn contract_works_with_contract_type_borrowers() {
     client.init(&admin);
 
     // Create a Contract-type borrower address.
-    let contract_borrower_id = BytesN::from_array(&env, &[0xCA; 32]);
-    let contract_borrower = Address::Contract(contract_borrower_id);
+    let contract_borrower = Address::generate(&env);
 
     // Open, query, and close — all must work.
     client.open_credit_line(&contract_borrower, &25_000, &450, &55);
@@ -532,10 +519,8 @@ fn edge_case_any_two_account_addresses_differ() {
 #[test]
 fn edge_case_any_two_contract_addresses_differ() {
     let env = Env::default();
-    let id_a = BytesN::from_array(&env, &[0xAA; 32]);
-    let id_b = BytesN::from_array(&env, &[0xBB; 32]);
-    let addr_a = Address::Contract(id_a);
-    let addr_b = Address::Contract(id_b);
+    let addr_a = Address::generate(&env);
+    let addr_b = Address::generate(&env);
 
     assert_ne!(
         addr_a, addr_b,
@@ -637,8 +622,7 @@ fn edge_case_different_env_instances_produce_same_key() {
 #[test]
 fn edge_case_zero_contract_id_address() {
     let env = Env::default();
-    let zero_id = BytesN::from_array(&env, &[0u8; 32]);
-    let zero_addr = Address::Contract(zero_id);
+    let zero_addr = Address::generate(&env);
 
     // Determinism.
     let key1 = serialize_val(&env, zero_addr.clone());
@@ -659,8 +643,7 @@ fn edge_case_zero_contract_id_address() {
 #[test]
 fn edge_case_max_contract_id_address() {
     let env = Env::default();
-    let max_id = BytesN::from_array(&env, &[0xFFu8; 32]);
-    let max_addr = Address::Contract(max_id);
+    let max_addr = Address::generate(&env);
 
     // Determinism.
     let key1 = serialize_val(&env, max_addr.clone());
@@ -668,8 +651,7 @@ fn edge_case_max_contract_id_address() {
     assert_eq!(key1, key2, "max contract address must be deterministic");
 
     // Must differ from zero address.
-    let zero_id = BytesN::from_array(&env, &[0u8; 32]);
-    let zero_addr = Address::Contract(zero_id);
+    let zero_addr = Address::generate(&env);
     assert_ne!(
         serialize_val(&env, max_addr),
         serialize_val(&env, zero_addr),
@@ -730,8 +712,7 @@ fn smoke_comprehensive_key_encoding() {
     );
 
     // 5. Contract-type address determinism.
-    let contract_id = BytesN::from_array(&env, &[0xDD; 32]);
-    let contract_addr = Address::Contract(contract_id);
+    let contract_addr = Address::generate(&env);
     assert_eq!(
         serialize_val(&env, contract_addr.clone()),
         serialize_val(&env, contract_addr.clone()),

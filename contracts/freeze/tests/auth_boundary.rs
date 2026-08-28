@@ -82,7 +82,7 @@ fn mock_admin_freeze_draws<'a>(
             invoke: &MockAuthInvoke {
                 contract: contract_id,
                 fn_name: "freeze_draws",
-                args: (FreezeReason::LiquidityReserve).into_val(env),
+                args: (FreezeReason::LiquidityReserve,).into_val(env),
                 sub_invokes: &[],
             },
         }])
@@ -334,7 +334,7 @@ fn freeze_draws_wrong_signer_reverts() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "freeze_draws",
-                args: (FreezeReason::LiquidityReserve).into_val(&env),
+                args: (FreezeReason::LiquidityReserve,).into_val(&env),
                 sub_invokes: &[],
             },
         }])

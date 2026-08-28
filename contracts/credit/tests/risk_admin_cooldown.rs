@@ -15,7 +15,7 @@
 use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

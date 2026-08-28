@@ -150,6 +150,14 @@ fn test_from_u32_safe_known_codes() {
         ContractError::BorrowerExposureCapExceeded
     );
     assert_eq!(
+        ContractError::from_u32_safe(44),
+        ContractError::TreasuryTimelockActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(45),
+        ContractError::TreasuryProposalExists
+    );
+    assert_eq!(
         ContractError::from_u32_safe(46),
         ContractError::CreditLineFrozen
     );
@@ -179,7 +187,7 @@ fn test_from_u32_safe_known_codes() {
     );
     assert_eq!(
         ContractError::from_u32_safe(53),
-        ContractError::InvalidAttestation
+        ContractError::AdminQueryCooldownActive
     );
     assert_eq!(
         ContractError::from_u32_safe(54),
@@ -188,6 +196,10 @@ fn test_from_u32_safe_known_codes() {
     assert_eq!(
         ContractError::from_u32_safe(55),
         ContractError::OracleNotFound
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(56),
+        ContractError::InvalidAttestation
     );
     assert_eq!(
         ContractError::from_u32_safe(57),
@@ -211,15 +223,11 @@ fn test_from_u32_safe_known_codes() {
 fn test_from_u32_safe_unknown_codes_fallback() {
     assert_eq!(ContractError::from_u32_safe(0), ContractError::UnknownError);
     assert_eq!(
-        ContractError::from_u32_safe(44),
+        ContractError::from_u32_safe(61),
         ContractError::UnknownError
     );
     assert_eq!(
-        ContractError::from_u32_safe(45),
-        ContractError::UnknownError
-    );
-    assert_eq!(
-        ContractError::from_u32_safe(56),
+        ContractError::from_u32_safe(62),
         ContractError::UnknownError
     );
     assert_eq!(
@@ -277,6 +285,8 @@ fn variant_count_is_known() {
         ContractError::BorrowerFrozen,
         ContractError::BountyNotSet,
         ContractError::NoPendingTreasuryWithdrawal,
+        ContractError::TreasuryTimelockActive,
+        ContractError::TreasuryProposalExists,
         ContractError::BorrowerExposureCapExceeded,
         ContractError::CreditLineFrozen,
         ContractError::DrawReversalWindowExpired,
@@ -285,6 +295,7 @@ fn variant_count_is_known() {
         ContractError::OracleQuorumNotMet,
         ContractError::AlreadySettled,
         ContractError::InvalidRiskWeight,
+        ContractError::AdminQueryCooldownActive,
         ContractError::InvalidAttestation,
         ContractError::RiskAdminCooldownActive,
         ContractError::OracleNotFound,
@@ -293,5 +304,5 @@ fn variant_count_is_known() {
         ContractError::LiquidationGraceActive,
         ContractError::UnknownError,
     ];
-    assert_eq!(variants.len(), 57, "Variant count must remain stable");
+    assert_eq!(variants.len(), 60, "Variant count must remain stable");
 }

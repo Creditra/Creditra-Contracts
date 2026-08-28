@@ -26,7 +26,7 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
-    let reserve = Address::generate(&env);
+    let _reserve = Address::generate(&env);
     let treasury = Address::generate(&env);
 
     let contract_id = env.register(Credit, ());
@@ -37,7 +37,7 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
     let token_address = token_id.address();
 
     client.set_liquidity_token(&token_address);
-    client.set_liquidity_source(&reserve);
+    client.set_liquidity_source(&contract_id);
     client.set_treasury(&admin, &treasury);
     client.set_protocol_fee_bps(&1_000); // 10 % fee so repayments build a balance
 
@@ -51,7 +51,7 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let repay = 11_000_i128;
     asset.mint(&borrower, &repay);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &u32::MAX);
+    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &(env.ledger().sequence() + 1000));
     client.repay_credit(&borrower, &repay);
 
     // Sanity: contract holds a treasury balance now.

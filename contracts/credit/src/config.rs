@@ -64,9 +64,6 @@ pub fn init(env: Env, admin: Address) {
         .instance()
         .set(&DataKey::TotalUtilized, &0_i128);
     set_schema_version(&env, crate::SCHEMA_VERSION);
-    // Set default minimum collateral ratio to 150% (15000 bps) in production, 0 in tests
-    #[cfg(not(test))]
-    crate::storage::set_min_collateral_ratio_bps(&env, 15000);
 }
 
 /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.

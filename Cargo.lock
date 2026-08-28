@@ -405,6 +405,7 @@ version = "0.1.0"
 dependencies = [
  "creditra-credit",
  "insta",
+ "proptest",
  "soroban-sdk",
 ]
 

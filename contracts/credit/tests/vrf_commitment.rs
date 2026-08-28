@@ -12,11 +12,12 @@ use creditra_credit::types::ContractError;
 use soroban_sdk::testutils::{Address as _, BytesN as _};
 use soroban_sdk::{Address, BytesN, Env};
 
-fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
-    creditra_credit::ContractClient::new(env, &env.register(creditra_credit::Credit, ()))
+fn create_test_contract(env: &Env) -> creditra_credit::CreditClient {
+    creditra_credit::CreditClient::new(env, &env.register(creditra_credit::Credit, ()))
 }
 
 fn setup_contract<'a>(env: &'a Env, admin: &Address) -> creditra_credit::CreditClient<'a> {
+    env.mock_all_auths();
     let contract = create_test_contract(env);
     contract.init(&admin);
     contract
@@ -40,10 +41,11 @@ fn test_commit_vrf_output() {
     assert!(commitment.is_some());
     let commitment = commitment.unwrap();
     assert_eq!(commitment.commitment_hash, commitment_hash);
-    assert!(commitment.committed_at > 0);
+    assert_eq!(commitment.committed_at, env.ledger().timestamp());
 }
 
 #[test]
+#[should_panic]
 fn test_commit_vrf_output_twice_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -56,10 +58,7 @@ fn test_commit_vrf_output_twice_fails() {
     contract.commit_vrf_output(&borrower, &commitment_hash);
 
     // Second commit should fail
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        contract.commit_vrf_output(&borrower, &commitment_hash);
-    }));
-    assert!(result.is_err());
+    contract.commit_vrf_output(&borrower, &commitment_hash);
 }
 
 #[test]
@@ -114,6 +113,7 @@ fn test_update_risk_parameters_with_valid_vrf_commitment() {
 }
 
 #[test]
+#[should_panic]
 fn test_update_risk_parameters_with_invalid_vrf_commitment_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -136,10 +136,7 @@ fn test_update_risk_parameters_with_invalid_vrf_commitment_fails() {
     contract.commit_vrf_output(&borrower, &commitment_hash);
 
     // Try to update with a different score (not matching the commitment)
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        contract.update_risk_parameters(&borrower, &1000_i128, &500_u32, &80_u32);
-    }));
-    assert!(result.is_err());
+    contract.update_risk_parameters(&borrower, &1000_i128, &500_u32, &80_u32);
 }
 
 #[test]
@@ -238,8 +235,13 @@ fn test_multiple_borrowers_independent_commitments() {
     contract.open_credit_line(&borrower2, &1000_i128, &500_u32, &50_u32);
 
     // Commit different VRF outputs for each borrower
-    let hash1: BytesN<32> = BytesN::from_array(&env, &[75u8; 32]); // derives to 75
-    let hash2: BytesN<32> = BytesN::from_array(&env, &[25u8; 32]); // derives to 25
+    let mut hash_bytes1 = [0u8; 32];
+    hash_bytes1[0] = 75;
+    let hash1: BytesN<32> = BytesN::from_array(&env, &hash_bytes1); // derives to 75
+
+    let mut hash_bytes2 = [0u8; 32];
+    hash_bytes2[0] = 25;
+    let hash2: BytesN<32> = BytesN::from_array(&env, &hash_bytes2); // derives to 25
 
     contract.commit_vrf_output(&borrower1, &hash1);
     contract.commit_vrf_output(&borrower2, &hash2);
@@ -248,7 +250,7 @@ fn test_multiple_borrowers_independent_commitments() {
     contract.update_risk_parameters(&borrower1, &1000_i128, &500_u32, &75_u32);
     contract.update_risk_parameters(&borrower2, &1000_i128, &500_u32, &25_u32);
 
-    // Verify both scores were updated correctly
+    // Verify both were updated correctly
     let line1 = contract.get_credit_line(&borrower1).unwrap();
     let line2 = contract.get_credit_line(&borrower2).unwrap();
     assert_eq!(line1.risk_score, 75);
@@ -256,23 +258,23 @@ fn test_multiple_borrowers_independent_commitments() {
 }
 
 #[test]
+#[should_panic]
 fn test_commit_requires_admin() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let non_admin = Address::generate(&env);
     let borrower = Address::generate(&env);
-    let contract = setup_contract(&env, &admin);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let contract = creditra_credit::CreditClient::new(&env, &contract_id);
+    contract.init(&admin);
 
     let commitment_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
 
-    // Try to commit as non-admin
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        contract.commit_vrf_output(&borrower, &commitment_hash);
-    }));
-    assert!(result.is_err());
+    // Try to commit as non-admin (no mock_all_auths)
+    contract.commit_vrf_output(&borrower, &commitment_hash);
 }
 
 #[test]
+#[should_panic]
 fn test_clear_requires_admin() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -284,14 +286,13 @@ fn test_clear_requires_admin() {
     // Commit as admin
     contract.commit_vrf_output(&borrower, &commitment_hash);
 
-    // Try to clear as non-admin
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        contract.clear_vrf_commitment(&borrower);
-    }));
-    assert!(result.is_err());
+    // Try to clear without auth
+    env.mock_auths(&[]);
+    contract.clear_vrf_commitment(&borrower);
 }
 
 #[test]
+#[should_panic]
 fn test_commit_when_paused_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -304,10 +305,7 @@ fn test_commit_when_paused_fails() {
     let commitment_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
 
     // Try to commit while paused
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        contract.commit_vrf_output(&borrower, &commitment_hash);
-    }));
-    assert!(result.is_err());
+    contract.commit_vrf_output(&borrower, &commitment_hash);
 }
 
 #[test]

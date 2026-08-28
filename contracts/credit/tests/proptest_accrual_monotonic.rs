@@ -5,12 +5,13 @@
 //! as ledger time advances for active, suspended, and delinquent lines.
 
 use proptest::prelude::*;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
 
 use creditra_credit::{types::GraceWaiverMode, Credit, CreditClient};
 
 fn deploy_credit_contract(env: &Env) -> (CreditClient<'_>, Address) {
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     let admin = Address::generate(env);
     let borrower = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -20,7 +21,8 @@ fn deploy_credit_contract(env: &Env) -> (CreditClient<'_>, Address) {
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token = token_id.address();
     client.set_liquidity_token(&token);
-    token::StellarAssetClient::new(env, &token).mint(&contract_id, &1_000_000_000_i128);
+    client.set_liquidity_source(&client.address);
+    token::StellarAssetClient::new(env, &token).mint(&client.address, &1_000_000_000_i128);
 
     (client, borrower)
 }

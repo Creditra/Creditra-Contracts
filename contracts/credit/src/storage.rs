@@ -197,6 +197,8 @@ pub enum DataKey {
     MaxTotalExposure,
     /// Protocol fee in basis points applied to interest portion of repayments.
     ProtocolFeeBps,
+    /// Protocol fee bounds (min, max) in basis points.
+    ProtocolFeeBounds,
     /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
     /// When unset, defaults to 10_000 (100 % treasury).
     TreasuryFeeShareBps,
@@ -262,6 +264,10 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Admin query-critical action cooldown duration in seconds.
+    AdminQueryCooldownSeconds,
+    /// Ledger timestamp of the most recent admin query-critical action.
+    AdminQueryLastActionTs,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -301,7 +307,7 @@ pub fn bump_instance_ttl(env: &Env) {
         .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
-fn bump_persistent_ttl<K>(env: &Env, key: &K)
+pub fn bump_persistent_ttl<K>(env: &Env, key: &K)
 where
     K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
 {
@@ -313,11 +319,17 @@ where
 
 pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
     bump_instance_ttl(env);
-    env.storage().persistent().extend_ttl(
-        borrower,
-        CREDIT_LINE_TTL_THRESHOLD,
-        CREDIT_LINE_TTL_EXTEND_TO,
-    );
+    if env.storage().persistent().has(borrower) {
+        env.storage().persistent().extend_ttl(
+            borrower,
+            CREDIT_LINE_TTL_THRESHOLD,
+            CREDIT_LINE_TTL_EXTEND_TO,
+        );
+    }
+    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    if env.storage().persistent().has(&id_key) {
+        bump_persistent_ttl(env, &id_key);
+    }
 }
 
 /// Refresh the persistent TTL for an active credit-line freeze record.
@@ -451,12 +463,16 @@ pub fn ensure_credit_line_id(env: &Env, borrower: &Address) -> u32 {
     }
 
     let next_id = get_credit_line_count(env);
+    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    let borrower_key = DataKey::CreditLineBorrowerById(next_id);
     env.storage()
         .persistent()
-        .set(&DataKey::CreditLineIdByBorrower(borrower.clone()), &next_id);
+        .set(&id_key, &next_id);
+    bump_persistent_ttl(env, &id_key);
     env.storage()
         .persistent()
-        .set(&DataKey::CreditLineBorrowerById(next_id), borrower);
+        .set(&borrower_key, borrower);
+    bump_persistent_ttl(env, &borrower_key);
     env.storage()
         .instance()
         .set(&DataKey::CreditLineCount, &next_id.saturating_add(1));
@@ -629,6 +645,21 @@ pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
 /// Persist protocol fee basis points.
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
+}
+
+/// Return configured protocol fee bounds, defaulting to (0, 1000).
+pub fn get_protocol_fee_bounds(env: &Env) -> (u32, u32) {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProtocolFeeBounds)
+        .unwrap_or((0, 1_000))
+}
+
+/// Persist protocol fee bounds.
+pub fn set_protocol_fee_bounds(env: &Env, min_bps: u32, max_bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::ProtocolFeeBounds, &(min_bps, max_bps));
 }
 
 /// Return configured treasury address, if set.
@@ -994,9 +1025,15 @@ pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> 
 
 /// Set the per-borrower exposure cap (admin only, enforced by caller).
 pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
-    env.storage()
-        .instance()
-        .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+    if cap == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+    }
 }
 
 /// Set the maximum credit limit (admin only, enforced by caller).
@@ -1042,16 +1079,22 @@ pub fn set_close_factor_bps(env: &Env, bps: u32) {
 
 /// Return the installment schedule for a borrower, if configured.
 pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<RepaymentSchedule> {
+    let key = DataKey::RepaymentSchedule(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
     env.storage()
         .persistent()
-        .get(&DataKey::RepaymentSchedule(borrower.clone()))
+        .get(&key)
 }
 
 /// Persist the installment schedule for a borrower.
 pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &RepaymentSchedule) {
+    let key = DataKey::RepaymentSchedule(borrower.clone());
     env.storage()
         .persistent()
-        .set(&DataKey::RepaymentSchedule(borrower.clone()), schedule);
+        .set(&key, schedule);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the last draw timestamp for a borrower, if any.
@@ -1593,3 +1636,24 @@ pub fn enforce_freeze_cooldown(env: &Env) {
         }
     }
 }
+
+pub fn get_admin_query_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::AdminQueryCooldownSeconds)
+}
+
+pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage().instance().remove(&DataKey::AdminQueryCooldownSeconds);
+    } else {
+        env.storage().instance().set(&DataKey::AdminQueryCooldownSeconds, &seconds);
+    }
+}
+
+pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::AdminQueryLastActionTs)
+}
+
+pub fn set_admin_query_last_action_ts(env: &Env, ts: u64) {
+    env.storage().instance().set(&DataKey::AdminQueryLastActionTs, &ts);
+}
+

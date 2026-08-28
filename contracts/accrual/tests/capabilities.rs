@@ -19,7 +19,6 @@
 //! - [`creditra_credit::views::accrual_capabilities`] — the implementation.
 //! - [`creditra_credit::types::AccrualCapabilities`] — the return type.
 
-use creditra_credit::views::accrual_capabilities;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -55,9 +54,10 @@ fn setup(token_mint: i128) -> (Env, Address, Address, Address) {
 #[test]
 fn capabilities_no_credit_line_returns_false_can_accrue() {
     let (env, contract_id, _admin, _token) = setup(0);
+    let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.can_accrue,
@@ -77,7 +77,7 @@ fn capabilities_active_line_zero_utilization_returns_false_can_accrue() {
 
     client.open_credit_line(&borrower, &50_000_i128, &500_u32, &50_u32);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.can_accrue,
@@ -97,7 +97,7 @@ fn capabilities_active_line_with_utilization_returns_true_can_accrue() {
     env.ledger().set_timestamp(1);
     client.draw_credit(&borrower, &10_000_i128);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         caps.can_accrue,
@@ -120,7 +120,7 @@ fn capabilities_suspended_line_returns_false_can_accrue() {
     client.draw_credit(&borrower, &10_000_i128);
     client.suspend_credit_line(&borrower);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.can_accrue,
@@ -140,7 +140,7 @@ fn capabilities_defaulted_line_returns_false_can_accrue() {
     client.draw_credit(&borrower, &10_000_i128);
     client.default_credit_line(&borrower);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.can_accrue,
@@ -166,7 +166,7 @@ fn capabilities_protocol_paused_returns_false_batch_open_and_can_accrue() {
     // Pause the protocol.
     client.pause_protocol(&admin);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(!caps.batch_open, "batch_open must be false when paused");
     assert!(!caps.can_accrue, "can_accrue must be false when paused");
@@ -175,10 +175,11 @@ fn capabilities_protocol_paused_returns_false_batch_open_and_can_accrue() {
 /// Protocol not paused → `batch_open = true`.
 #[test]
 fn capabilities_not_paused_returns_true_batch_open() {
-    let (env, _contract_id, _admin, _token) = setup(0);
+    let (env, contract_id, _admin, _token) = setup(0);
+    let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(caps.batch_open, "batch_open must be true when not paused");
 }
@@ -199,7 +200,7 @@ fn capabilities_no_surcharge_configured_returns_false_penalty_rate_active() {
     env.ledger().set_timestamp(1);
     client.draw_credit(&borrower, &10_000_i128);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     // No penalty surcharge configured → always false.
     assert!(!caps.penalty_rate_active);
@@ -220,7 +221,7 @@ fn capabilities_active_line_returns_false_grace_waiver_active() {
     env.ledger().set_timestamp(1);
     client.draw_credit(&borrower, &10_000_i128);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.grace_waiver_active,
@@ -240,7 +241,7 @@ fn capabilities_suspended_no_grace_config_returns_false_grace_waiver_active() {
     client.draw_credit(&borrower, &10_000_i128);
     client.suspend_credit_line(&borrower);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(
         !caps.grace_waiver_active,
@@ -256,10 +257,11 @@ fn capabilities_suspended_no_grace_config_returns_false_grace_waiver_active() {
 /// `can_accrue = false`, `batch_open = true`, all others false.
 #[test]
 fn capabilities_default_state_no_borrower() {
-    let (env, _contract_id, _admin, _token) = setup(0);
+    let (env, contract_id, _admin, _token) = setup(0);
+    let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(!caps.can_accrue);
     assert!(caps.batch_open);
@@ -278,8 +280,8 @@ fn capabilities_deterministic_same_result_twice() {
     env.ledger().set_timestamp(1);
     client.draw_credit(&borrower, &10_000_i128);
 
-    let caps1 = accrual_capabilities(env.clone(), borrower.clone());
-    let caps2 = accrual_capabilities(env.clone(), borrower.clone());
+    let caps1 = client.accrual_capabilities(&borrower);
+    let caps2 = client.accrual_capabilities(&borrower);
 
     assert_eq!(caps1, caps2, "capabilities() must be deterministic");
 }
@@ -294,7 +296,7 @@ fn capabilities_closed_line_returns_false_can_accrue() {
     client.open_credit_line(&borrower, &50_000_i128, &500_u32, &50_u32);
     client.close_credit_line(&borrower, &admin);
 
-    let caps = accrual_capabilities(env.clone(), borrower);
+    let caps = client.accrual_capabilities(&borrower);
 
     assert!(!caps.can_accrue, "can_accrue must be false for Closed line");
 }

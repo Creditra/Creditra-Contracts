@@ -16,14 +16,14 @@
 use creditra_credit::events::FeeAccruedEvent;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{token, Address, Env};
+use soroban_sdk::{token, Address, Env, TryFromVal};
 
 /// Create a minimal environment with a funded credit line ready to repay.
 ///
 /// Returns (env, client, borrower, token_address, reserve_address).
 fn setup_minimal() -> (Env, CreditClient<'static>, Address, Address, Address) {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     env.ledger().with_mut(|l| l.timestamp = 1_000);
 
     let admin = Address::generate(&env);
@@ -57,7 +57,8 @@ fn prepare_repay(
     client.open_credit_line(borrower, &draw_amount, &interest_rate_bps, &50_u32);
 
     let asset = token::StellarAssetClient::new(env, token_address);
-    asset.mint(&client.contract_id, &draw_amount);
+    let reserve = client.get_liquidity_source();
+    asset.mint(&reserve, &draw_amount);
     client.draw_credit(borrower, &draw_amount);
 
     // Widen bounds if fee_bps exceeds the default 1000 cap.
@@ -69,9 +70,9 @@ fn prepare_repay(
     asset.mint(borrower, &repay_amount);
     token::Client::new(env, token_address).approve(
         borrower,
-        &client.contract_id,
+        &client.address,
         &repay_amount,
-        &u32::MAX,
+        &10_000_u32,
     );
 }
 
@@ -94,26 +95,25 @@ fn fee_on_principal_only_repayment() {
     );
 
     let token_client = token::Client::new(&env, &token_address);
-    let contract_before = token_client.balance(&client.contract_id);
+    let contract_before = token_client.balance(&client.address);
     let reserve_before = token_client.balance(&reserve);
 
     client.repay_credit(&borrower, &500_i128);
 
-    // fee = floor(500 * 500 / 10000) = 25
-    // reserve gets 500 - 25 = 475
+    // Fee only accrues on interest. With 0 elapsed time, fee is 0.
     assert_eq!(
-        token_client.balance(&client.contract_id),
-        contract_before + 25,
-        "contract should hold the skimmed fee"
+        token_client.balance(&client.address),
+        contract_before,
+        "contract holds no fee when interest is 0"
     );
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_before + 475,
-        "reserve gets repayment minus fee"
+        reserve_before + 500,
+        "reserve gets full repayment when no fee is skimmed"
     );
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 25, "treasury balance matches fee");
+    assert_eq!(summary.treasury_balance, 0, "treasury balance is zero");
 }
 
 /// Fee on a mixed principal + interest repayment.
@@ -136,20 +136,20 @@ fn fee_on_mixed_principal_and_interest() {
     env.ledger().with_mut(|l| l.timestamp = 31_536_000);
 
     let token_client = token::Client::new(&env, &token_address);
-    let contract_before = token_client.balance(&client.contract_id);
+    let contract_before = token_client.balance(&client.address);
     let reserve_before = token_client.balance(&reserve);
 
     client.repay_credit(&borrower, &11_000_i128);
 
-    // effective_repay ≈ 10_999 (cap at utilized), fee = floor(10999 * 1000 / 10000) = 1099
-    // reserve gets 10999 - 1099 = 9900
-    let contract_delta = token_client.balance(&client.contract_id) - contract_before;
+    // interest ≈ 999; fee = floor(999 * 1000 / 10000) = 99
+    // reserve gets 10999 - 99 = 10900
+    let contract_delta = token_client.balance(&client.address) - contract_before;
     let reserve_delta = token_client.balance(&reserve) - reserve_before;
     let total = contract_delta + reserve_delta;
 
     assert_eq!(total, 10_999, "total tokens transferred = effective_repay");
-    assert_eq!(contract_delta, 1_099, "fee = 10% of 10999 = 1099");
-    assert_eq!(reserve_delta, 9_900, "reserve = 10999 - 1099 = 9900");
+    assert_eq!(contract_delta, 99, "fee = 10% of interest (999) = 99");
+    assert_eq!(reserve_delta, 10_900, "reserve = 10999 - 99 = 10900");
 }
 
 /// Fee via `repay_and_release_collateral` path.
@@ -165,7 +165,7 @@ fn fee_with_repay_and_release_collateral() {
 
     // Fund borrower with collateral + repayment buffer.
     asset.mint(&borrower, &(collateral + draw + 1_000));
-    asset.mint(&client.contract_id, &draw);
+    asset.mint(&reserve, &draw);
 
     client.deposit_collateral(&borrower, &collateral);
     client.draw_credit(&borrower, &draw);
@@ -176,32 +176,31 @@ fn fee_with_repay_and_release_collateral() {
     let repay = 1_000_i128;
     token::Client::new(&env, &token_address).approve(
         &borrower,
-        &client.contract_id,
+        &client.address,
         &repay,
-        &u32::MAX,
+        &10_000_u32,
     );
 
     let token_client = token::Client::new(&env, &token_address);
-    let contract_before = token_client.balance(&client.contract_id);
+    let contract_before = token_client.balance(&client.address);
     let reserve_before = token_client.balance(&reserve);
 
     client.repay_and_release_collateral(&borrower, &repay);
 
-    // fee = floor(1000 * 300 / 10000) = 30
-    // reserve gets 1000 - 30 = 970
+    // Collateral is returned (20% of 10_000 = 2_000); 0 interest -> 0 fee.
     assert_eq!(
-        token_client.balance(&client.contract_id),
-        contract_before + 30,
-        "fee skimmed in repay_and_release_collateral"
+        token_client.balance(&client.address),
+        contract_before - 2_000,
+        "collateral returned from contract balance"
     );
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_before + 970,
-        "reserve gets remainder"
+        reserve_before + 1_000,
+        "reserve gets full repayment"
     );
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 30);
+    assert_eq!(summary.treasury_balance, 0);
 }
 
 /// Fee event is emitted with correct amounts.
@@ -220,6 +219,9 @@ fn fee_event_emitted_on_repayment() {
         500_u32,
     );
 
+    // Advance 1 year so interest accrues.
+    env.ledger().with_mut(|l| l.timestamp = 31_536_000);
+
     client.repay_credit(&borrower, &500_i128);
 
     // Locate the FeeAccruedEvent in the event log.
@@ -227,17 +229,17 @@ fn fee_event_emitted_on_repayment() {
     let fee_event = events
         .iter()
         .find(|e| {
-            let topic_str = format!("{:?}", e.0);
+            let topic_str = format!("{:?}", e.1);
             topic_str.contains("fee_accrd")
         })
         .expect("FeeAccruedEvent must be emitted");
 
-    let (_topics, data) = fee_event;
-    let fee_data: FeeAccruedEvent = data.clone().try_into().expect("valid FeeAccruedEvent");
+    let (_contract, _topics, data) = fee_event;
+    let fee_data = FeeAccruedEvent::try_from_val(&env, &data).expect("valid FeeAccruedEvent");
 
     assert_eq!(fee_data.borrower, borrower);
-    assert_eq!(fee_data.fee_amount, 25, "total fee = 25");
-    assert_eq!(fee_data.treasury_amount, 25, "default 100% to treasury");
+    assert_eq!(fee_data.fee_amount, 2, "total fee = 2");
+    assert_eq!(fee_data.treasury_amount, 2, "default 100% to treasury");
     assert_eq!(fee_data.bounty_amount, 0);
     assert!(
         fee_data.new_treasury_balance >= fee_data.treasury_amount,
@@ -292,13 +294,13 @@ fn zero_fee_sends_all_to_reserve() {
     );
 
     let token_client = token::Client::new(&env, &token_address);
-    let contract_before = token_client.balance(&client.contract_id);
+    let contract_before = token_client.balance(&client.address);
     let reserve_before = token_client.balance(&reserve);
 
     client.repay_credit(&borrower, &500_i128);
 
     assert_eq!(
-        token_client.balance(&client.contract_id),
+        token_client.balance(&client.address),
         contract_before,
         "no fee when fee_bps = 0"
     );

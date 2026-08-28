@@ -6,7 +6,7 @@ use soroban_sdk::{token, Address, Env};
 
 fn setup() -> (Env, Address, Address, Address, Address, Address) {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
 
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
@@ -40,7 +40,8 @@ fn prepare_repay<'a>(
     client.open_credit_line(borrower, &draw_amount, &interest_rate_bps, &50_u32);
 
     let asset = token::StellarAssetClient::new(env, token_address);
-    asset.mint(contract_id, &draw_amount);
+    let reserve = client.get_liquidity_source();
+    asset.mint(&reserve, &draw_amount);
     client.draw_credit(borrower, &draw_amount);
 
     // Widen bounds to accommodate the requested fee_bps
@@ -53,7 +54,7 @@ fn prepare_repay<'a>(
         .with_mut(|ledger| ledger.timestamp = 31_536_000);
 
     asset.mint(borrower, &repay_amount);
-    token::Client::new(env, token_address).approve(borrower, contract_id, &repay_amount, &u32::MAX);
+    token::Client::new(env, token_address).approve(borrower, contract_id, &repay_amount, &10_000_u32);
 
     client
 }
@@ -85,7 +86,7 @@ fn protocol_fee_zero_fee_keeps_treasury_balance_at_zero() {
     assert_eq!(token_client.balance(&contract_id), contract_balance_before);
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_balance_before + 1_100
+        reserve_balance_before + 1_099
     );
     assert_eq!(token_client.balance(&treasury), treasury_balance_before);
 }
@@ -110,12 +111,12 @@ fn protocol_fee_on_total_repayment_accrues_expected_fee_amount() {
 
     client.repay_credit(&borrower, &1_100);
 
-    // fee = 10% of 1100 = 110; reserve = 1100 - 110 = 990
+    // interest = 99; fee = 10% of 99 = 9; reserve = 1099 - 9 = 1090
     assert_eq!(
         token_client.balance(&contract_id),
-        contract_balance_before + 110
+        contract_balance_before + 9
     );
-    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 990);
+    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 1_090);
 }
 
 #[test]

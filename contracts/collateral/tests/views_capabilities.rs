@@ -8,7 +8,7 @@ use creditra_collateral::views::{
     CAPABILITY_RISK_WEIGHTING, CAPABILITY_WITHDRAW,
 };
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 fn setup() -> (Env, CreditClient<'static>, Address) {
     let env = Env::default();
@@ -47,15 +47,13 @@ fn test_direct_collateral_views_capabilities() {
 fn test_contract_client_collateral_capabilities() {
     let (_env, client, _admin) = setup();
 
-    let contract_caps = client.capabilities();
     let collateral_caps = client.collateral_capabilities();
 
-    assert_eq!(contract_caps, ALL_COLLATERAL_CAPABILITIES);
     assert_eq!(collateral_caps, ALL_COLLATERAL_CAPABILITIES);
 
     // Ensure all 7 feature flags are set
     let expected_mask: u64 =
         (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
 
-    assert_eq!(contract_caps, expected_mask);
+    assert_eq!(collateral_caps, expected_mask);
 }

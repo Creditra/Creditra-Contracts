@@ -223,62 +223,80 @@ fn get_borrower_frozen_until_bumps_persistent_ttl_when_below_threshold() {
 /// extended to `INSTANCE_BUMP_AMOUNT` after each one.
 #[test]
 fn every_freeze_read_entrypoint_bumps_ttl() {
-    let (env, contract_id, admin, borrower, client) = setup();
-
-    // Seed freeze state.
-    let now = env.ledger().timestamp();
-    client.freeze_draws(&FreezeReason::LiquidityReserve);
-    client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
-    client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
-
     // ① is_draws_frozen
-    drain_instance_ttl(&env, &contract_id);
-    assert!(client.is_draws_frozen());
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "is_draws_frozen must bump TTL"
-    );
+    {
+        let (env, contract_id, _admin, _borrower, client) = setup();
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+        drain_instance_ttl(&env, &contract_id);
+        assert!(client.is_draws_frozen());
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "is_draws_frozen must bump TTL"
+        );
+    }
 
     // ② get_draws_freeze_reason
-    drain_instance_ttl(&env, &contract_id);
-    let reason = client.get_draws_freeze_reason();
-    assert_eq!(reason, Some(FreezeReason::LiquidityReserve));
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "get_draws_freeze_reason must bump TTL"
-    );
+    {
+        let (env, contract_id, _admin, _borrower, client) = setup();
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+        drain_instance_ttl(&env, &contract_id);
+        let reason = client.get_draws_freeze_reason();
+        assert_eq!(reason, Some(FreezeReason::LiquidityReserve));
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "get_draws_freeze_reason must bump TTL"
+        );
+    }
 
     // ③ is_credit_line_frozen
-    drain_instance_ttl(&env, &contract_id);
-    assert!(client.is_credit_line_frozen(&borrower));
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "is_credit_line_frozen must bump TTL"
-    );
+    {
+        let (env, contract_id, _admin, borrower, client) = setup();
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        drain_instance_ttl(&env, &contract_id);
+        assert!(client.is_credit_line_frozen(&borrower));
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "is_credit_line_frozen must bump TTL"
+        );
+    }
 
     // ④ get_credit_line_freeze_reason
-    drain_instance_ttl(&env, &contract_id);
-    let line_reason = client.get_credit_line_freeze_reason(&borrower);
-    assert_eq!(line_reason, Some(FreezeReason::Compliance));
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "get_credit_line_freeze_reason must bump TTL"
-    );
+    {
+        let (env, contract_id, _admin, borrower, client) = setup();
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        drain_instance_ttl(&env, &contract_id);
+        let line_reason = client.get_credit_line_freeze_reason(&borrower);
+        assert_eq!(line_reason, Some(FreezeReason::Compliance));
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "get_credit_line_freeze_reason must bump TTL"
+        );
+    }
 
     // ⑤ is_borrower_frozen
-    drain_instance_ttl(&env, &contract_id);
-    assert!(client.is_borrower_frozen(&borrower));
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "is_borrower_frozen must bump TTL"
-    );
+    {
+        let (env, contract_id, admin, borrower, client) = setup();
+        let now = env.ledger().timestamp();
+        client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
+        drain_instance_ttl(&env, &contract_id);
+        assert!(client.is_borrower_frozen(&borrower));
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "is_borrower_frozen must bump TTL"
+        );
+    }
 
     // ⑥ get_borrower_frozen_until
-    drain_instance_ttl(&env, &contract_id);
-    let expiry = client.get_borrower_frozen_until(&borrower);
-    assert_eq!(expiry, Some(now + 3600));
-    assert!(
-        instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
-        "get_borrower_frozen_until must bump TTL"
-    );
+    {
+        let (env, contract_id, admin, borrower, client) = setup();
+        let now = env.ledger().timestamp();
+        client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
+        drain_instance_ttl(&env, &contract_id);
+        let expiry = client.get_borrower_frozen_until(&borrower);
+        assert_eq!(expiry, Some(now + 3600));
+        assert!(
+            instance_ttl(&env, &contract_id) >= INSTANCE_BUMP_AMOUNT,
+            "get_borrower_frozen_until must bump TTL"
+        );
+    }
 }

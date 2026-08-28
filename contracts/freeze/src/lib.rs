@@ -24,6 +24,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
 };
 
+pub mod events;
 pub mod views;
 
 /// Storage keys for freeze contract storage.

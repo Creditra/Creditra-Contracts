@@ -2,7 +2,7 @@
 
 pub mod curves;
 mod errors;
-mod events;
+pub mod events;
 mod storage;
 mod types;
 

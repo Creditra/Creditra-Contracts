@@ -238,7 +238,8 @@ proptest! {
         prop_assert_eq!(
             hf,
             u32::MAX,
-            "no line → get_health_factor must return u32::MAX, got {hf}",
+            "no line → get_health_factor must return u32::MAX, got {}",
+            hf,
         );
 
         // Confirm is_delinquent returns false for unknown borrowers.
@@ -295,7 +296,8 @@ proptest! {
         prop_assert_eq!(
             hf,
             u32::MAX,
-            "zero utilization → get_health_factor must return u32::MAX, got {hf}",
+            "zero utilization → get_health_factor must return u32::MAX, got {}",
+            hf,
         );
 
         // delinquency_applicable → is_delinquent gate.
@@ -392,7 +394,8 @@ proptest! {
         prop_assert_eq!(
             hf,
             u32::MAX,
-            "zero utilization → get_health_factor must be u32::MAX, got {hf}",
+            "zero utilization → get_health_factor must be u32::MAX, got {}",
+            hf,
         );
     }
 }

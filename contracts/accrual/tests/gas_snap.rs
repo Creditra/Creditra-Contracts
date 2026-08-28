@@ -197,6 +197,7 @@ fn gas_accrue_batch_deterministic() {
     let (cpu1, mem1) = measure(&env, || {
         client.accrue_batch(&borrowers);
     });
+    env.ledger().with_mut(|l| l.timestamp += 86_400 * 15);
     let (cpu2, mem2) = measure(&env, || {
         client.accrue_batch(&borrowers);
     });

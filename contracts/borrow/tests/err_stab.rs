@@ -365,7 +365,7 @@ mod integration {
         let client = CreditClient::new(&env, &contract_id);
         let borrower = Address::generate(&env);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
-        client.freeze_draws();
+        client.freeze_draws(&creditra_credit::types::FreezeReason::OperationalMaintenance);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.draw_credit(&borrower, &100_i128);

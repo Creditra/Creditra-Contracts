@@ -126,6 +126,8 @@ pub enum ContractError {
     BorrowerFrozen = 40,
     BountyNotSet = 41,
     NoPendingTreasuryWithdrawal = 42,
+    TreasuryTimelockActive = 44,
+    TreasuryProposalExists = 45,
     CreditLineFrozen = 46,
     DrawReversalWindowExpired = 47,
     OriginalDrawNotFound = 48,
@@ -145,7 +147,8 @@ pub enum ContractError {
     InsufficientRepaymentAllowance = 26,
     InsufficientRepaymentBalance = 27,
     BorrowerExposureCapExceeded = 43,
-    InvalidAttestation = 53,
+    AdminQueryCooldownActive = 53,
+    InvalidAttestation = 56,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -164,6 +167,9 @@ pub enum ContractErrorCategory {
 }
 
 impl ContractError {
+    #[allow(non_upper_case_globals)]
+    pub const AdminCooldownActive: Self = Self::RiskAdminCooldownActive;
+
     /// Return the stable category for this error variant.
     pub fn category(&self) -> ContractErrorCategory {
         use ContractErrorCategory::*;
@@ -206,7 +212,8 @@ impl ContractError {
             | Self::ScoreTooHigh
             | Self::Paused
             | Self::DrawCooldownActive
-            | Self::RiskAdminCooldownActive => Risk,
+            | Self::RiskAdminCooldownActive
+            | Self::AdminQueryCooldownActive => Risk,
 
             Self::CollateralRatioBelowMinimum
             | Self::InsufficientCollateralBalance
@@ -229,6 +236,8 @@ impl ContractError {
             Self::CreditLineNotFound
             | Self::AdminAcceptTooEarly
             | Self::NoPendingTreasuryWithdrawal
+            | Self::TreasuryTimelockActive
+            | Self::TreasuryProposalExists
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound
             | Self::InvalidAttestation
@@ -276,6 +285,8 @@ impl ContractError {
             40 => Self::BorrowerFrozen,
             41 => Self::BountyNotSet,
             42 => Self::NoPendingTreasuryWithdrawal,
+            44 => Self::TreasuryTimelockActive,
+            45 => Self::TreasuryProposalExists,
             46 => Self::CreditLineFrozen,
             47 => Self::DrawReversalWindowExpired,
             48 => Self::OriginalDrawNotFound,
@@ -295,7 +306,8 @@ impl ContractError {
             26 => Self::InsufficientRepaymentAllowance,
             27 => Self::InsufficientRepaymentBalance,
             43 => Self::BorrowerExposureCapExceeded,
-            53 => Self::InvalidAttestation,
+            53 => Self::AdminQueryCooldownActive,
+            56 => Self::InvalidAttestation,
             _ => Self::UnknownError,
         }
     }
@@ -307,6 +319,22 @@ impl ContractError {
 pub struct RiskAdminCooldownConfig {
     /// New cooldown duration in seconds. `0` means disabled.
     pub cooldown_seconds: u64,
+}
+
+/// Comprehensive snapshot of a borrower's collateral position and health factor.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralState {
+    /// Address of the borrower.
+    pub borrower: Address,
+    /// Total collateral balance deposited.
+    pub balance: i128,
+    /// Minimum required collateral ratio in basis points (e.g. 15000 = 150%).
+    pub min_ratio_bps: u32,
+    /// Health factor in basis points (`balance * 10_000 / utilized`, or `u32::MAX` if no debt).
+    pub health_factor_bps: u32,
+    /// Configured collateral token address, if set.
+    pub collateral_token: Option<Address>,
 }
 
 /// Stored credit line data for a borrower.
@@ -840,3 +868,5 @@ impl From<ContractError> for soroban_sdk::Error {
         soroban_sdk::Error::from_contract_error(err as u32)
     }
 }
+
+pub use crate::penalties::{AprFeeConfig, FlatFeeConfig, LateFeeConfig};

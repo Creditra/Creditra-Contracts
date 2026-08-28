@@ -6,12 +6,12 @@
 //! advances while the contract continues to accept the last known good price
 //! as long as the stored price remains within the configured freshness window.
 
-use creditra_credit::types::{CreditStatus, OracleConfig};
+use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol};
 
-fn setup(env: &Env) -> (CreditClient, Address, Address) {
+fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());

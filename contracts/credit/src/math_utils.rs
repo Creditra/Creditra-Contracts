@@ -260,40 +260,39 @@ pub fn apply_bps(amount: u128, rate_bps: u32, rounding: Rounding) -> u128 {
 /// // Zero time → zero interest
 /// assert_eq!(prorate_interest(10_000, 300, 0, Rounding::Floor), 0);
 /// ```
+pub fn prorate_interest_checked(
+    principal: u128,
+    rate_bps: u32,
+    time_delta: u64,
+    rounding: Rounding,
+) -> Option<u128> {
+    if principal == 0 || rate_bps == 0 || time_delta == 0 {
+        return Some(0);
+    }
+
+    let step1 = principal.checked_mul(rate_bps as u128)?;
+    let step2 = step1.checked_mul(time_delta as u128)?;
+    let quotient = step2 / BPS_YEAR_DENOM;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if !step2.is_multiple_of(BPS_YEAR_DENOM) {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
+            }
+        }
+    }
+}
+
 pub fn prorate_interest(
     principal: u128,
     rate_bps: u32,
     time_delta: u64,
     rounding: Rounding,
 ) -> u128 {
-    if principal == 0 || rate_bps == 0 || time_delta == 0 {
-        return 0;
-    }
-
-    // Step 1: principal × rate_bps  (fits in u128 for principal ≤ ~3.4 × 10^34)
-    let step1 = principal
-        .checked_mul(rate_bps as u128)
-        .expect("math_utils: prorate overflow (step1)");
-
-    // Step 2: step1 × time_delta
-    let step2 = step1
-        .checked_mul(time_delta as u128)
-        .expect("math_utils: prorate overflow (step2)");
-
-    // Step 3: divide by (BPS_DENOMINATOR × SECONDS_PER_YEAR) with rounding
-    let quotient = step2 / BPS_YEAR_DENOM;
-    match rounding {
-        Rounding::Floor => quotient,
-        Rounding::Ceil => {
-            if !step2.is_multiple_of(BPS_YEAR_DENOM) {
-                quotient
-                    .checked_add(1)
-                    .expect("math_utils: prorate ceil overflow")
-            } else {
-                quotient
-            }
-        }
-    }
+    prorate_interest_checked(principal, rate_bps, time_delta, rounding)
+        .expect("math_utils: prorate overflow")
 }
 
 // ─── Oracle deviation helper ──────────────────────────────────────────────────

@@ -277,6 +277,8 @@ pub struct GraceWaiverAppliedEvent {
     pub mode: crate::types::GraceWaiverMode,
 }
 
+pub type GraceWaiverReceiptEvent = GraceWaiverAppliedEvent;
+
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
 }
@@ -616,6 +618,20 @@ pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) 
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "upgraded")),
         event,
+    );
+}
+
+pub fn publish_protocol_fee_bps_set_event(env: &Env, bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_set")),
+        bps,
+    );
+}
+
+pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_bnd")),
+        (min_bps, max_bps),
     );
 }
 

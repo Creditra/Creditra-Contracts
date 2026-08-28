@@ -50,8 +50,9 @@ fn setup_with_token(env: &Env) -> (CreditClient<'_>, Address, Address, Address) 
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&contract_id);
 
-    // Mint reserves to the contract
+    // Mint reserves to the contract and borrower
     token::StellarAssetClient::new(env, &token_address).mint(&contract_id, &1_000_000_i128);
+    token::StellarAssetClient::new(env, &token_address).mint(&borrower, &1_000_000_i128);
 
     client.open_credit_line(&borrower, &10_000_i128, &500_u32, &50_u32);
 
@@ -127,9 +128,6 @@ fn repay_and_release_collateral_auth_snapshot() {
     let (client, _contract_id, _admin, borrower) = setup_with_token(&env);
 
     // Deposit collateral first
-    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-    let collateral_address = token_id.address();
-    token::StellarAssetClient::new(&env, &collateral_address).mint(&borrower, &5_000_i128);
     client.deposit_collateral(&borrower, &5_000_i128);
 
     // Draw credit
@@ -250,10 +248,10 @@ fn get_borrow_state_requires_no_auth() {
     let env = Env::default();
     let (client, _contract_id, _admin, borrower) = setup_with_token(&env);
 
-    let _ = client.get_borrow_state(&borrower);
+    let _ = client.get_credit_line(&borrower);
 
     assert!(
         env.auths().is_empty(),
-        "get_borrow_state must not require any authorization"
+        "get_credit_line must not require any authorization"
     );
 }

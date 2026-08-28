@@ -206,7 +206,7 @@ fn accrual_v7_category_mappings_are_pinned() {
 fn accrual_v7_subset_has_no_duplicate_discriminants() {
     use std::collections::HashSet;
 
-    let codes: Vec<u32> = vec![
+    let codes: std::vec::Vec<u32> = vec![
         ContractError::Overflow as u32,
         ContractError::InvalidAmount as u32,
         ContractError::TimestampRegression as u32,
@@ -254,7 +254,7 @@ fn accrual_v7_subset_has_no_duplicate_discriminants() {
     );
 }
 
-/// Known count: 38 variants in the v7 accrual surface (pinned above).
+/// Known count: 37 variants in the v7 accrual surface (pinned above).
 ///
 /// If this assertion fails, a new accrual-relevant variant was added to or
 /// removed from the `ContractError` enum — update the count AND add/remove
@@ -263,7 +263,7 @@ fn accrual_v7_subset_has_no_duplicate_discriminants() {
 /// [`accrual_v7_category_mappings_are_pinned`].
 #[test]
 fn accrual_v7_subset_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 38;
+    const EXPECTED_VARIANT_COUNT: usize = 37;
 
     let codes = [
         ContractError::Overflow as u32,

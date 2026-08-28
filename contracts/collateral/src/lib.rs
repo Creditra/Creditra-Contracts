@@ -140,4 +140,15 @@ impl Collateral {
 
         Ok(())
     }
+
+    /// Gets the deposited collateral balance for a given user.
+    pub fn get_balance(env: Env, user: Address) -> i128 {
+        let key = DataKey::Balance(user);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Alias for get_balance.
+    pub fn balance(env: Env, user: Address) -> i128 {
+        Self::get_balance(env, user)
+    }
 }

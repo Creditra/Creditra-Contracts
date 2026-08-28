@@ -1,0 +1,54 @@
+---
+source: contracts/freeze/tests/gas_snap.rs
+expression: samples
+---
+{
+    "freeze_borrower_until": (
+        106847,
+        18177,
+    ),
+    "freeze_credit_line": (
+        137288,
+        21132,
+    ),
+    "freeze_draws": (
+        89229,
+        13363,
+    ),
+    "get_borrower_frozen_until": (
+        34558,
+        6509,
+    ),
+    "get_credit_line_freeze_reason": (
+        34571,
+        6513,
+    ),
+    "get_draws_freeze_reason": (
+        61895,
+        10001,
+    ),
+    "is_borrower_frozen": (
+        34556,
+        6509,
+    ),
+    "is_credit_line_frozen": (
+        34569,
+        6513,
+    ),
+    "is_draws_frozen": (
+        61893,
+        10001,
+    ),
+    "unfreeze_borrower": (
+        75462,
+        12699,
+    ),
+    "unfreeze_credit_line": (
+        90552,
+        13392,
+    ),
+    "unfreeze_draws": (
+        115533,
+        18118,
+    ),
+}
