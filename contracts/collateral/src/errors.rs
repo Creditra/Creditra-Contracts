@@ -79,7 +79,6 @@ pub enum CollateralError {
     // Each mirror variant carries the same discriminant *and* the same
     // semantic meaning as its canonical counterpart, so SDK consumers
     // can map an emitted integer against docs/ERROR_CODES.md directly.
-
     /// Amount is zero, negative, or otherwise not a valid token amount.
     ///
     /// Mirror of canonical `ContractError::InvalidAmount` (`= 5`).
@@ -124,7 +123,6 @@ pub enum CollateralError {
     // start at 100 to leave a 50-slot buffer above the credit contract's
     // 1..=49 range. New variants MUST be appended at the end of this
     // block (after 104) and paired with an assertion in tests/catalog.rs.
-
     /// The supplied collateral token address is not in the
     /// admin-managed allowlist used by the multi-collateral
     /// deposit/withdraw path.
@@ -194,7 +192,10 @@ mod tests {
         assert_eq!(CollateralError::CollateralRiskWeightOutOfRange as u32, 101);
         assert_eq!(CollateralError::CollateralTokenMismatch as u32, 102);
         assert_eq!(CollateralError::CollateralPositionLocked as u32, 103);
-        assert_eq!(CollateralError::CollateralBalanceForTokenNotFound as u32, 104);
+        assert_eq!(
+            CollateralError::CollateralBalanceForTokenNotFound as u32,
+            104
+        );
     }
 
     /// Verify no two `CollateralError` variants share a discriminant. This

@@ -19,8 +19,8 @@
 //! - [`creditra_credit::views::accrual_capabilities`] — the implementation.
 //! - [`creditra_credit::types::AccrualCapabilities`] — the return type.
 
-use creditra_credit::{Credit, CreditClient};
 use creditra_credit::views::accrual_capabilities;
+use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, Env,
@@ -59,7 +59,10 @@ fn capabilities_no_credit_line_returns_false_can_accrue() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(!caps.can_accrue, "can_accrue must be false when no line exists");
+    assert!(
+        !caps.can_accrue,
+        "can_accrue must be false when no line exists"
+    );
     assert!(caps.batch_open, "batch_open must be true when not paused");
     assert!(!caps.penalty_rate_active);
     assert!(!caps.grace_waiver_active);
@@ -76,7 +79,10 @@ fn capabilities_active_line_zero_utilization_returns_false_can_accrue() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(!caps.can_accrue, "can_accrue must be false with zero utilization");
+    assert!(
+        !caps.can_accrue,
+        "can_accrue must be false with zero utilization"
+    );
     assert!(caps.batch_open);
 }
 
@@ -93,7 +99,10 @@ fn capabilities_active_line_with_utilization_returns_true_can_accrue() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(caps.can_accrue, "can_accrue must be true for Active line with utilization");
+    assert!(
+        caps.can_accrue,
+        "can_accrue must be true for Active line with utilization"
+    );
     assert!(caps.batch_open);
     assert!(!caps.penalty_rate_active);
     assert!(!caps.grace_waiver_active);
@@ -113,7 +122,10 @@ fn capabilities_suspended_line_returns_false_can_accrue() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(!caps.can_accrue, "can_accrue must be false for Suspended line");
+    assert!(
+        !caps.can_accrue,
+        "can_accrue must be false for Suspended line"
+    );
 }
 
 /// Defaulted line → `can_accrue = false`.
@@ -130,7 +142,10 @@ fn capabilities_defaulted_line_returns_false_can_accrue() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(!caps.can_accrue, "can_accrue must be false for Defaulted line");
+    assert!(
+        !caps.can_accrue,
+        "can_accrue must be false for Defaulted line"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -207,7 +222,10 @@ fn capabilities_active_line_returns_false_grace_waiver_active() {
 
     let caps = accrual_capabilities(env.clone(), borrower);
 
-    assert!(!caps.grace_waiver_active, "grace_waiver_active must be false for Active line");
+    assert!(
+        !caps.grace_waiver_active,
+        "grace_waiver_active must be false for Active line"
+    );
 }
 
 /// Suspended line with no grace config → `grace_waiver_active = false`.

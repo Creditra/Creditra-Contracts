@@ -245,10 +245,22 @@ fn settle_clears_reentrancy_guard_on_success() {
     let client = CreditClient::new(&env, &contract_id);
 
     // First settlement — should set and clear reentrancy guard
-    client.settle_default_liquidation(&borrower, &200_i128, &Symbol::new(&env, "auc_re1"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &200_i128,
+        &Symbol::new(&env, "auc_re1"),
+        &10_000_u32,
+        &None,
+    );
 
     // Second settlement with different id — proves guard was cleared
-    client.settle_default_liquidation(&borrower, &100_i128, &Symbol::new(&env, "auc_re2"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &100_i128,
+        &Symbol::new(&env, "auc_re2"),
+        &10_000_u32,
+        &None,
+    );
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 200); // 500 - 200 - 100

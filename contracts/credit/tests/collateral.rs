@@ -162,4 +162,3 @@ fn test_withdraw_exact_collateral_balance_succeeds() {
     client.withdraw_collateral(&borrower, &1000);
     assert_eq!(client.get_collateral(&borrower), 0);
 }
-

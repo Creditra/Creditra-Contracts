@@ -1,4 +1,3 @@
-
 #![cfg(test)]
 
 use creditra_credit::types::{ContractError, ContractErrorCategory};
@@ -7,62 +6,193 @@ use creditra_credit::types::{ContractError, ContractErrorCategory};
 fn test_from_u32_safe_known_codes() {
     assert_eq!(ContractError::from_u32_safe(1), ContractError::Unauthorized);
     assert_eq!(ContractError::from_u32_safe(2), ContractError::NotAdmin);
-    assert_eq!(ContractError::from_u32_safe(3), ContractError::CreditLineNotFound);
-    assert_eq!(ContractError::from_u32_safe(4), ContractError::CreditLineClosed);
-    assert_eq!(ContractError::from_u32_safe(5), ContractError::InvalidAmount);
+    assert_eq!(
+        ContractError::from_u32_safe(3),
+        ContractError::CreditLineNotFound
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(4),
+        ContractError::CreditLineClosed
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(5),
+        ContractError::InvalidAmount
+    );
     assert_eq!(ContractError::from_u32_safe(6), ContractError::OverLimit);
-    assert_eq!(ContractError::from_u32_safe(7), ContractError::NegativeLimit);
+    assert_eq!(
+        ContractError::from_u32_safe(7),
+        ContractError::NegativeLimit
+    );
     assert_eq!(ContractError::from_u32_safe(8), ContractError::RateTooHigh);
     assert_eq!(ContractError::from_u32_safe(9), ContractError::ScoreTooHigh);
-    assert_eq!(ContractError::from_u32_safe(10), ContractError::UtilizationNotZero);
+    assert_eq!(
+        ContractError::from_u32_safe(10),
+        ContractError::UtilizationNotZero
+    );
     assert_eq!(ContractError::from_u32_safe(11), ContractError::Reentrancy);
     assert_eq!(ContractError::from_u32_safe(12), ContractError::Overflow);
-    assert_eq!(ContractError::from_u32_safe(14), ContractError::AlreadyInitialized);
-    assert_eq!(ContractError::from_u32_safe(15), ContractError::AdminAcceptTooEarly);
-    assert_eq!(ContractError::from_u32_safe(17), ContractError::DrawExceedsMaxAmount);
+    assert_eq!(
+        ContractError::from_u32_safe(14),
+        ContractError::AlreadyInitialized
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(15),
+        ContractError::AdminAcceptTooEarly
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(17),
+        ContractError::DrawExceedsMaxAmount
+    );
     assert_eq!(ContractError::from_u32_safe(18), ContractError::Paused);
     assert_eq!(ContractError::from_u32_safe(19), ContractError::DrawsFrozen);
-    assert_eq!(ContractError::from_u32_safe(20), ContractError::CreditLineSuspended);
-    assert_eq!(ContractError::from_u32_safe(21), ContractError::CreditLineDefaulted);
-    assert_eq!(ContractError::from_u32_safe(22), ContractError::MissingLiquidityToken);
-    assert_eq!(ContractError::from_u32_safe(23), ContractError::MissingLiquiditySource);
-    assert_eq!(ContractError::from_u32_safe(24), ContractError::InsufficientLiquidityReserve);
-    assert_eq!(ContractError::from_u32_safe(28), ContractError::RepayExceedsMaxAmount);
-    assert_eq!(ContractError::from_u32_safe(29), ContractError::DrawCooldownActive);
-    assert_eq!(ContractError::from_u32_safe(30), ContractError::TreasuryNotSet);
-    assert_eq!(ContractError::from_u32_safe(31), ContractError::ExposureCapExceeded);
-    assert_eq!(ContractError::from_u32_safe(32), ContractError::AdminNotInitialized);
-    assert_eq!(ContractError::from_u32_safe(33), ContractError::TimestampRegression);
-    assert_eq!(ContractError::from_u32_safe(34), ContractError::LimitOutOfBounds);
-    assert_eq!(ContractError::from_u32_safe(35), ContractError::CollateralRatioBelowMinimum);
-    assert_eq!(ContractError::from_u32_safe(36), ContractError::OraclePriceInvalid);
-    assert_eq!(ContractError::from_u32_safe(37), ContractError::OraclePriceStale);
-    assert_eq!(ContractError::from_u32_safe(38), ContractError::OraclePriceDeviation);
-    assert_eq!(ContractError::from_u32_safe(39), ContractError::InsufficientCollateralBalance);
-    assert_eq!(ContractError::from_u32_safe(40), ContractError::BorrowerFrozen);
-    assert_eq!(ContractError::from_u32_safe(41), ContractError::BountyNotSet);
-    assert_eq!(ContractError::from_u32_safe(42), ContractError::NoPendingTreasuryWithdrawal);
-    assert_eq!(ContractError::from_u32_safe(46), ContractError::CreditLineFrozen);
-    assert_eq!(ContractError::from_u32_safe(47), ContractError::DrawReversalWindowExpired);
-    assert_eq!(ContractError::from_u32_safe(48), ContractError::OriginalDrawNotFound);
-    assert_eq!(ContractError::from_u32_safe(49), ContractError::AttestationBatchNotFound);
-    assert_eq!(ContractError::from_u32_safe(50), ContractError::OracleQuorumNotMet);
-    assert_eq!(ContractError::from_u32_safe(51), ContractError::AlreadySettled);
-    assert_eq!(ContractError::from_u32_safe(52), ContractError::InvalidRiskWeight);
-    assert_eq!(ContractError::from_u32_safe(54), ContractError::RiskAdminCooldownActive);
-    assert_eq!(ContractError::from_u32_safe(55), ContractError::OracleNotFound);
-    assert_eq!(ContractError::from_u32_safe(57), ContractError::FreezeCooldownActive);
-    assert_eq!(ContractError::from_u32_safe(58), ContractError::AdminCollateralCooldownActive);
-    assert_eq!(ContractError::from_u32_safe(59), ContractError::LiquidationGraceActive);
-
+    assert_eq!(
+        ContractError::from_u32_safe(20),
+        ContractError::CreditLineSuspended
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(21),
+        ContractError::CreditLineDefaulted
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(22),
+        ContractError::MissingLiquidityToken
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(23),
+        ContractError::MissingLiquiditySource
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(24),
+        ContractError::InsufficientLiquidityReserve
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(28),
+        ContractError::RepayExceedsMaxAmount
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(29),
+        ContractError::DrawCooldownActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(30),
+        ContractError::TreasuryNotSet
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(31),
+        ContractError::ExposureCapExceeded
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(32),
+        ContractError::AdminNotInitialized
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(33),
+        ContractError::TimestampRegression
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(34),
+        ContractError::LimitOutOfBounds
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(35),
+        ContractError::CollateralRatioBelowMinimum
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(36),
+        ContractError::OraclePriceInvalid
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(37),
+        ContractError::OraclePriceStale
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(38),
+        ContractError::OraclePriceDeviation
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(39),
+        ContractError::InsufficientCollateralBalance
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(40),
+        ContractError::BorrowerFrozen
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(41),
+        ContractError::BountyNotSet
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(42),
+        ContractError::NoPendingTreasuryWithdrawal
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(46),
+        ContractError::CreditLineFrozen
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(47),
+        ContractError::DrawReversalWindowExpired
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(48),
+        ContractError::OriginalDrawNotFound
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(49),
+        ContractError::AttestationBatchNotFound
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(50),
+        ContractError::OracleQuorumNotMet
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(51),
+        ContractError::AlreadySettled
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(52),
+        ContractError::InvalidRiskWeight
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(54),
+        ContractError::RiskAdminCooldownActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(55),
+        ContractError::OracleNotFound
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(57),
+        ContractError::FreezeCooldownActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(58),
+        ContractError::AdminCollateralCooldownActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(59),
+        ContractError::LiquidationGraceActive
+    );
 }
 
 #[test]
 fn test_from_u32_safe_unknown_codes_fallback() {
-    assert_eq!(ContractError::from_u32_safe(13), ContractError::UnknownError);
-    assert_eq!(ContractError::from_u32_safe(16), ContractError::UnknownError);
-    assert_eq!(ContractError::from_u32_safe(999), ContractError::UnknownError);
-    assert_eq!(ContractError::from_u32_safe(u32::MAX), ContractError::UnknownError);
+    assert_eq!(
+        ContractError::from_u32_safe(13),
+        ContractError::UnknownError
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(16),
+        ContractError::UnknownError
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(999),
+        ContractError::UnknownError
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(u32::MAX),
+        ContractError::UnknownError
+    );
 }
 
 #[test]

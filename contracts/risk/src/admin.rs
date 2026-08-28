@@ -150,10 +150,7 @@ fn rad_last_key() -> soroban_sdk::Symbol {
 /// is below [`INSTANCE_BUMP_THRESHOLD`].
 pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
     bump_instance_ttl(env);
-    env.storage()
-        .instance()
-        .get(&rad_cool_key())
-        .unwrap_or(0)
+    env.storage().instance().get(&rad_cool_key()).unwrap_or(0)
 }
 
 /// Set the risk admin cooldown duration in seconds.
@@ -173,9 +170,7 @@ pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
 /// is below [`INSTANCE_BUMP_THRESHOLD`].
 pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
     bump_instance_ttl(env);
-    env.storage()
-        .instance()
-        .set(&rad_cool_key(), &seconds);
+    env.storage().instance().set(&rad_cool_key(), &seconds);
 }
 
 /// Get the timestamp of the last risk admin action.
@@ -194,10 +189,7 @@ pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
 /// is below [`INSTANCE_BUMP_THRESHOLD`].
 pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
     bump_instance_ttl(env);
-    env.storage()
-        .instance()
-        .get(&rad_last_key())
-        .unwrap_or(0)
+    env.storage().instance().get(&rad_last_key()).unwrap_or(0)
 }
 
 /// Set the timestamp of the last risk admin action.
@@ -218,9 +210,7 @@ pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
 /// is below [`INSTANCE_BUMP_THRESHOLD`].
 pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
     bump_instance_ttl(env);
-    env.storage()
-        .instance()
-        .set(&rad_last_key(), &ts);
+    env.storage().instance().set(&rad_last_key(), &ts);
 }
 
 // ── Cooldown guard ────────────────────────────────────────────────────────────

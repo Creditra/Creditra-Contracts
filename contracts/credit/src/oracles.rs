@@ -487,41 +487,37 @@ mod test {
 use crate::math_utils::compute_deviation_bps;
 use crate::types::OracleQuorumConfig;
 
-        /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
-        ///
-        /// Limits gas consumption and keeps the stack buffer within WASM limits.
-        /// Adjust after gas profiling if the protocol sources more feeds.
-        pub const MAX_ORACLE_FEEDS: u32 = 20;
+/// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
+///
+/// Limits gas consumption and keeps the stack buffer within WASM limits.
+/// Adjust after gas profiling if the protocol sources more feeds.
+pub const MAX_ORACLE_FEEDS: u32 = 20;
 
-        /// Resolve a single canonical price from N submitted oracle prices using
-        /// the quorum-of-K sliding-window algorithm.
-        ///
-        /// # Parameters
-        /// - `env`: Soroban host environment (used to panic with typed errors).
-        /// - `prices`: N submitted prices in any order, one per oracle feed.
-        /// - `cfg`: Quorum configuration supplying K, max deviation, and max age.
-        ///
-        /// # Returns
-        /// The lower-median price of the first K-wide consecutive window (in sorted
-        /// ascending order) whose highest-to-lowest spread is within
-        /// `cfg.max_deviation_bps`.
-        ///
-        /// # Errors
-        ///
-        /// Panics with [`ContractError::OraclePriceInvalid`] when:
-        /// - The price list is empty.
-        /// - The price list exceeds [`MAX_ORACLE_FEEDS`].
-        /// - Any individual price is ≤ 0.
-        ///
-        /// Panics with [`ContractError::OracleQuorumNotMet`] when:
-        /// - `min_quorum_k < 2` (a single feed is not a meaningful quorum).
-        /// - `min_quorum_k > n` (cannot form a window larger than the input).
-        /// - No K-wide window in the sorted array satisfies the deviation bound.
-        pub fn resolve_quorum_price(
-    env: &Env,
-    prices: &Vec<i128>,
-    cfg: &OracleQuorumConfig,
-) -> i128 {
+/// Resolve a single canonical price from N submitted oracle prices using
+/// the quorum-of-K sliding-window algorithm.
+///
+/// # Parameters
+/// - `env`: Soroban host environment (used to panic with typed errors).
+/// - `prices`: N submitted prices in any order, one per oracle feed.
+/// - `cfg`: Quorum configuration supplying K, max deviation, and max age.
+///
+/// # Returns
+/// The lower-median price of the first K-wide consecutive window (in sorted
+/// ascending order) whose highest-to-lowest spread is within
+/// `cfg.max_deviation_bps`.
+///
+/// # Errors
+///
+/// Panics with [`ContractError::OraclePriceInvalid`] when:
+/// - The price list is empty.
+/// - The price list exceeds [`MAX_ORACLE_FEEDS`].
+/// - Any individual price is ≤ 0.
+///
+/// Panics with [`ContractError::OracleQuorumNotMet`] when:
+/// - `min_quorum_k < 2` (a single feed is not a meaningful quorum).
+/// - `min_quorum_k > n` (cannot form a window larger than the input).
+/// - No K-wide window in the sorted array satisfies the deviation bound.
+pub fn resolve_quorum_price(env: &Env, prices: &Vec<i128>, cfg: &OracleQuorumConfig) -> i128 {
     let n = prices.len();
 
     if n == 0 || n > MAX_ORACLE_FEEDS {
@@ -536,9 +532,9 @@ use crate::types::OracleQuorumConfig;
     // Copy prices into a fixed stack buffer and validate positivity.
     let mut buf = [0i128; MAX_ORACLE_FEEDS as usize];
     for i in 0..n {
-        let p = prices.get(i).unwrap_or_else(|| {
-            env.panic_with_error(ContractError::OraclePriceInvalid)
-        });
+        let p = prices
+            .get(i)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::OraclePriceInvalid));
         if p <= 0 {
             env.panic_with_error(ContractError::OraclePriceInvalid);
         }

@@ -90,18 +90,16 @@
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
-    publish_borrow_lifecycle_event, publish_credit_line_event,
-    publish_debt_forgiven_event, publish_default_liquidation_requested_event,
-    publish_default_liquidation_settled_event, publish_late_fee_charged_event,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent, DebtForgivenEvent,
-    DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+    publish_borrow_lifecycle_event, publish_credit_line_event, publish_debt_forgiven_event,
+    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event,
+    publish_late_fee_charged_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
+    DebtForgivenEvent, DefaultLiquidationSettledEvent, LateFeeChargedEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    add_treasury_balance as storage_add_treasury_balance,
-    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl, clear_repayment_schedule,
-    get_credit_line, get_late_fee_flat as storage_get_late_fee_flat,
-    get_repayment_schedule, persist_credit_line,
+    add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
+    bump_credit_line_ttl, clear_repayment_schedule, get_credit_line,
+    get_late_fee_flat as storage_get_late_fee_flat, get_repayment_schedule, persist_credit_line,
     set_late_fee_flat as storage_set_late_fee_flat,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
@@ -125,8 +123,6 @@ fn liquidation_settlement_key(
         settlement_id.clone(),
     )
 }
-
-
 
 /// Open a new credit line for a borrower (admin only).
 ///
@@ -250,11 +246,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
 /// # Panics
 /// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
 /// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
-pub fn set_per_borrower_liquidation_grace(
-    env: &Env,
-    borrower: Address,
-    grace_period_seconds: u64,
-) {
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: Address, grace_period_seconds: u64) {
     assert_not_paused(env);
     require_admin_auth(env);
 
@@ -275,8 +267,6 @@ pub fn set_per_borrower_liquidation_grace(
 pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> Option<u64> {
     crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
 }
-
-
 
 /// Set the flat late fee per missed installment (admin only).
 ///
@@ -606,7 +596,8 @@ pub fn default_credit_line(env: Env, borrower: Address) {
         return;
     }
 
-    if let Some(grace_seconds) = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower) {
+    if let Some(grace_seconds) = crate::storage::get_per_borrower_liquidation_grace(&env, &borrower)
+    {
         if grace_seconds > 0 {
             let now = env.ledger().timestamp();
             let base_ts = if credit_line.suspension_ts > 0 {
@@ -818,7 +809,6 @@ pub fn settle_default_liquidation(
 /// This is an accounting-only write-off path intended for explicit admin debt
 /// relief or off-chain settlements that have already been handled elsewhere.
 /// The forgiven amount is capped to the current `utilized_amount`.
-
 
 // ── reinstate_credit_line ─────────────────────────────────────────────────────
 
@@ -1393,10 +1383,7 @@ mod installment {
         let after = client.get_credit_line(&borrower).unwrap();
         assert_eq!(after.status, CreditStatus::Defaulted); // Still defaulted, not fully liquidated
         assert!(after.utilized_amount < before.utilized_amount);
-        assert_eq!(
-            after.utilized_amount,
-            before.utilized_amount - recovered
-        );
+        assert_eq!(after.utilized_amount, before.utilized_amount - recovered);
     }
 
     /// Partial liquidation with close_factor_bps = 10_000 fully closes the line.
@@ -1568,12 +1555,7 @@ mod installment {
         let settlement_id = Symbol::new(&env, "settle_replay");
 
         // First settlement succeeds
-        client.settle_default_liquidation(
-            &borrower,
-            &50_000,
-            &settlement_id,
-            &5_000,
-        );
+        client.settle_default_liquidation(&borrower, &50_000, &settlement_id, &5_000, &None);
 
         // Second settlement with same (borrower, settlement_id) should fail
         client.settle_default_liquidation(
@@ -1581,6 +1563,7 @@ mod installment {
             &25_000,
             &settlement_id, // Same ID
             &5_000,
+            &None,
         );
     }
 
@@ -1611,6 +1594,7 @@ mod installment {
             &recovery_1,
             &settlement_id_1,
             &3_333, // ~33%
+            &None,
         );
 
         let after_round_1 = client.get_credit_line(&borrower).unwrap();
@@ -1625,6 +1609,7 @@ mod installment {
             &recovery_2,
             &settlement_id_2,
             &5_000, // 50%
+            &None,
         );
 
         let after_round_2 = client.get_credit_line(&borrower).unwrap();
@@ -1642,6 +1627,7 @@ mod installment {
             &recovery_3,
             &settlement_id_3,
             &10_000, // 100%
+            &None,
         );
 
         let after_round_3 = client.get_credit_line(&borrower).unwrap();
@@ -1672,6 +1658,7 @@ mod installment {
             &0, // Invalid: zero recovered amount
             &settlement_id,
             &5_000,
+            &None,
         );
     }
 
@@ -1693,11 +1680,6 @@ mod installment {
         // No default call - line is still Active
 
         let settlement_id = Symbol::new(&env, "settle_active");
-        client.settle_default_liquidation(
-            &borrower,
-            &50_000,
-            &settlement_id,
-            &5_000,
-        );
+        client.settle_default_liquidation(&borrower, &50_000, &settlement_id, &5_000, &None);
     }
 }

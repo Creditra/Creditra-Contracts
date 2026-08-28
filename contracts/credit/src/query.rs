@@ -279,11 +279,7 @@ pub fn enumerate_credit_lines(
 
     // If we haven't exhausted the enumeration space, provide a cursor for the
     // next page. Otherwise signal completion with `None`.
-    let next_cursor = if next_id < count {
-        Some(next_id)
-    } else {
-        None
-    };
+    let next_cursor = if next_id < count { Some(next_id) } else { None };
 
     (out, next_cursor)
 }

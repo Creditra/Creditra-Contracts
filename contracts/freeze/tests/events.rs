@@ -135,7 +135,10 @@ fn publish_draws_frozen_all_freeze_reasons() {
         publish_draws_frozen(&env, true, reason);
         let ev = first_event(&env);
         let payload: DrawsFrozenEvent = ev.data.try_into_val(&env).unwrap();
-        assert_eq!(payload.reason, reason, "reason must round-trip for {reason:?}");
+        assert_eq!(
+            payload.reason, reason,
+            "reason must round-trip for {reason:?}"
+        );
     }
 }
 
@@ -217,7 +220,12 @@ fn publish_credit_line_frozen_distinct_borrowers() {
     let borrower_b = Address::generate(&env);
 
     publish_credit_line_frozen(&env, &borrower_a, true, FreezeReason::Compliance);
-    publish_credit_line_frozen(&env, &borrower_b, true, FreezeReason::OperationalMaintenance);
+    publish_credit_line_frozen(
+        &env,
+        &borrower_b,
+        true,
+        FreezeReason::OperationalMaintenance,
+    );
 
     let all = env.events().all();
     assert_eq!(all.len(), 2);
@@ -369,8 +377,7 @@ fn all_publishers_use_freeze_namespace() {
     assert_eq!(all.len(), 4, "must emit exactly four events");
 
     for (i, ev) in all.iter().enumerate() {
-        let first_topic =
-            Symbol::try_from_val(&env, &ev.topics.get(0).unwrap()).unwrap();
+        let first_topic = Symbol::try_from_val(&env, &ev.topics.get(0).unwrap()).unwrap();
         assert_eq!(
             first_topic,
             Symbol::new(&env, "freeze"),

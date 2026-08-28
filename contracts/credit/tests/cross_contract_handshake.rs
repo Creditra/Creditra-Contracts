@@ -146,7 +146,13 @@ fn happy_path_settlement_with_auction_configured() {
 
     // Setup auction in Closed state with highest_bid = recovered_amount
     let settlement_id = Symbol::new(&env, "auc_happy");
-    setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id, recovered_amount);
+    setup_closed_auction(
+        &env,
+        &auction_id,
+        &credit_id,
+        &settlement_id,
+        recovered_amount,
+    );
 
     // Settle: should call auction, validate return, allocate debt
     credit.settle_default_liquidation(
@@ -187,7 +193,13 @@ fn happy_path_partial_settlement() {
     credit.set_auction_contract(&auction_id);
 
     let settlement_id = Symbol::new(&env, "auc_partial");
-    setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id, partial_recovery);
+    setup_closed_auction(
+        &env,
+        &auction_id,
+        &credit_id,
+        &settlement_id,
+        partial_recovery,
+    );
 
     credit.settle_default_liquidation(
         &borrower,
@@ -253,16 +265,13 @@ fn error_propagation_auction_not_closed() {
 
     // Try to settle: should panic because auction is not Closed
     let result = catch_unwind(AssertUnwindSafe(|| {
-        credit.settle_default_liquidation(
-            &borrower,
-            &500_i128,
-            &settlement_id,
-            &10_000_u32,
-            &None,
-        );
+        credit.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
     }));
 
-    assert!(result.is_err(), "settlement should fail when auction not closed");
+    assert!(
+        result.is_err(),
+        "settlement should fail when auction not closed"
+    );
 
     // Verify line is still defaulted (no partial settlement)
     let line = credit.get_credit_line(&borrower).unwrap();
@@ -296,7 +305,7 @@ fn error_propagation_amount_mismatch() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         credit.settle_default_liquidation(
             &borrower,
-            &500_i128,  // Mismatch!
+            &500_i128, // Mismatch!
             &settlement_id,
             &10_000_u32,
             &None,
@@ -421,13 +430,7 @@ fn reentrancy_guard_protects_settlement() {
     let settlement_id_1 = Symbol::new(&env, "auc_re1");
     setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id_1, 300_i128);
 
-    credit.settle_default_liquidation(
-        &borrower,
-        &300_i128,
-        &settlement_id_1,
-        &10_000_u32,
-        &None,
-    );
+    credit.settle_default_liquidation(&borrower, &300_i128, &settlement_id_1, &10_000_u32, &None);
 
     let line_after_first = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line_after_first.utilized_amount, 700); // 1000 - 300
@@ -436,13 +439,7 @@ fn reentrancy_guard_protects_settlement() {
     let settlement_id_2 = Symbol::new(&env, "auc_re2");
     setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id_2, 200_i128);
 
-    credit.settle_default_liquidation(
-        &borrower,
-        &200_i128,
-        &settlement_id_2,
-        &10_000_u32,
-        &None,
-    );
+    credit.settle_default_liquidation(&borrower, &200_i128, &settlement_id_2, &10_000_u32, &None);
 
     let line_after_second = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line_after_second.utilized_amount, 500); // 700 - 200
@@ -477,13 +474,7 @@ fn replay_protection_prevents_double_settlement() {
     // First settlement
     setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id, 300_i128);
 
-    credit.settle_default_liquidation(
-        &borrower,
-        &300_i128,
-        &settlement_id,
-        &10_000_u32,
-        &None,
-    );
+    credit.settle_default_liquidation(&borrower, &300_i128, &settlement_id, &10_000_u32, &None);
 
     let line_after_first = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line_after_first.utilized_amount, 700);
@@ -493,14 +484,17 @@ fn replay_protection_prevents_double_settlement() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         credit.settle_default_liquidation(
             &borrower,
-            &100_i128,  // Different amount
-            &settlement_id,  // Same settlement_id
+            &100_i128,      // Different amount
+            &settlement_id, // Same settlement_id
             &10_000_u32,
             &None,
         );
     }));
 
-    assert!(result.is_err(), "replay with same settlement_id should fail");
+    assert!(
+        result.is_err(),
+        "replay with same settlement_id should fail"
+    );
 
     // Verify no additional settlement occurred
     let line_after_replay = credit.get_credit_line(&borrower).unwrap();
@@ -545,13 +539,7 @@ fn replay_protection_auction_side() {
     // Setup and settle once
     setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id, 300_i128);
 
-    client.settle_default_liquidation(
-        &borrower,
-        &300_i128,
-        &settlement_id,
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &300_i128, &settlement_id, &10_000_u32, &None);
 
     // Try to settle same auction again: should fail
     let result = catch_unwind(AssertUnwindSafe(|| {
@@ -616,7 +604,7 @@ fn return_value_zero_bid_settlement() {
     // Settle with 0 recovery
     credit.settle_default_liquidation(
         &borrower,
-        &0_i128,  // Matches auction's 0 return
+        &0_i128, // Matches auction's 0 return
         &settlement_id,
         &10_000_u32,
         &None,
@@ -690,13 +678,7 @@ fn edge_case_full_settlement_closes_line() {
     let settlement_id = Symbol::new(&env, "auc_full_close");
     setup_closed_auction(&env, &auction_id, &credit_id, &settlement_id, draw_amount);
 
-    credit.settle_default_liquidation(
-        &borrower,
-        &draw_amount,
-        &settlement_id,
-        &10_000_u32,
-        &None,
-    );
+    credit.settle_default_liquidation(&borrower, &draw_amount, &settlement_id, &10_000_u32, &None);
 
     let line = credit.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Closed);

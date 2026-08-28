@@ -18,7 +18,7 @@
 extern crate std;
 
 use proptest::prelude::*;
-use soroban_sdk::{testutils::Address as _, vec, Env, Address, Symbol, Vec};
+use soroban_sdk::{testutils::Address as _, vec, Address, Env, Symbol, Vec};
 
 use creditra_credit::contract::CreditraCreditClient;
 
@@ -53,10 +53,7 @@ impl CollateralHarness {
         let collateral_client = CreditraCollateralClient::new(&env, &contract_id);
 
         // Initialize
-        collateral_client.init(
-            &admin,
-            &credit_contract_id,
-        );
+        collateral_client.init(&admin, &credit_contract_id);
 
         // Add a supported asset
         collateral_client.add_supported_asset(&supported_asset);
@@ -80,7 +77,8 @@ impl CollateralHarness {
     }
 
     fn withdraw(&self, asset: &Address, amount: i128) {
-        self.collateral_client().withdraw(&self.user, asset, &amount);
+        self.collateral_client()
+            .withdraw(&self.user, asset, &amount);
     }
 
     fn get_balance(&self, asset: &Address) -> i128 {

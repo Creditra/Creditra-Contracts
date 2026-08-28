@@ -242,10 +242,7 @@ fn gas_set_utilization_cap() {
     });
 
     assert!(cpu > 0, "set_utilization_cap must consume CPU");
-    assert!(
-        cpu < 5_000_000,
-        "set_utilization_cap CPU regression: {cpu}"
-    );
+    assert!(cpu < 5_000_000, "set_utilization_cap CPU regression: {cpu}");
     assert!(
         mem < 500_000,
         "set_utilization_cap memory regression: {mem}"
@@ -301,10 +298,7 @@ fn gas_borrow_read_only_queries() {
         let _ = f.client.get_utilization_cap(&f.borrower);
     });
     assert!(cpu > 0, "get_utilization_cap must consume CPU");
-    assert!(
-        cpu < 2_000_000,
-        "get_utilization_cap CPU regression: {cpu}"
-    );
+    assert!(cpu < 2_000_000, "get_utilization_cap CPU regression: {cpu}");
     assert!(
         mem < 200_000,
         "get_utilization_cap memory regression: {mem}"

@@ -242,14 +242,8 @@ fn prorate_interest_all_zeros() {
 /// Zero principal with non-zero rate and time → zero interest.
 #[test]
 fn prorate_interest_zero_principal_nonzero_rate_time() {
-    assert_eq!(
-        prorate_interest(0, 9_999, 31_557_600, Rounding::Floor),
-        0
-    );
-    assert_eq!(
-        prorate_interest(0, 9_999, 31_557_600, Rounding::Ceil),
-        0
-    );
+    assert_eq!(prorate_interest(0, 9_999, 31_557_600, Rounding::Floor), 0);
+    assert_eq!(prorate_interest(0, 9_999, 31_557_600, Rounding::Ceil), 0);
 }
 
 /// Non-zero principal, non-zero rate, zero time → zero interest.

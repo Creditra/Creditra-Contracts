@@ -179,7 +179,6 @@ fn compute_interest(utilized: i128, rate_bps: i128, seconds: i128) -> Result<i12
 /// assert!(updated_line.utilized_amount >= original_utilized);
 /// ```
 pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
-
     let now = env.ledger().timestamp();
 
     // Do nothing if ledger time has not advanced.
@@ -420,7 +419,6 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
 /// accrue_batch(&env, borrowers);
 /// ```
 pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
-
     for borrower in borrowers.iter() {
         if let Some(stored_line) = get_credit_line(env, &borrower) {
             if stored_line.status == CreditStatus::Active && stored_line.utilized_amount > 0 {

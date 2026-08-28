@@ -42,8 +42,7 @@ fn freeze_capabilities_direct_call_returns_all_capabilities() {
     let caps = freeze_capabilities(&env);
 
     assert_eq!(
-        caps,
-        ALL_FREEZE_CAPABILITIES,
+        caps, ALL_FREEZE_CAPABILITIES,
         "freeze_capabilities() must equal ALL_FREEZE_CAPABILITIES"
     );
 }
@@ -188,10 +187,7 @@ fn freeze_capabilities_deterministic_same_result_twice() {
     let caps1 = freeze_capabilities(&env);
     let caps2 = freeze_capabilities(&env);
 
-    assert_eq!(
-        caps1, caps2,
-        "freeze_capabilities() must be deterministic"
-    );
+    assert_eq!(caps1, caps2, "freeze_capabilities() must be deterministic");
 }
 
 /// The returned value equals the exported [`ALL_FREEZE_CAPABILITIES`] constant.
@@ -201,8 +197,7 @@ fn freeze_capabilities_equals_all_freeze_capabilities_constant() {
     let caps = freeze_capabilities(&env);
 
     assert_eq!(
-        caps,
-        ALL_FREEZE_CAPABILITIES,
+        caps, ALL_FREEZE_CAPABILITIES,
         "freeze_capabilities() must equal the ALL_FREEZE_CAPABILITIES constant"
     );
 }
@@ -223,7 +218,11 @@ fn each_capability_constant_is_a_single_bit() {
     ];
 
     for (idx, &cap) in constants.iter().enumerate() {
-        assert_ne!(cap, 0, "Capability constant at index {} must not be zero", idx);
+        assert_ne!(
+            cap, 0,
+            "Capability constant at index {} must not be zero",
+            idx
+        );
         assert_eq!(
             cap & (cap - 1),
             0,

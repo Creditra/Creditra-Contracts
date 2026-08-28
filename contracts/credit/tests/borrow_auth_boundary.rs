@@ -125,13 +125,13 @@ fn repay_credit_auth_snapshot() {
 fn repay_and_release_collateral_auth_snapshot() {
     let env = Env::default();
     let (client, _contract_id, _admin, borrower) = setup_with_token(&env);
-    
+
     // Deposit collateral first
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let collateral_address = token_id.address();
     token::StellarAssetClient::new(&env, &collateral_address).mint(&borrower, &5_000_i128);
     client.deposit_collateral(&borrower, &5_000_i128);
-    
+
     // Draw credit
     client.draw_credit(&borrower, &1_000_i128);
 

@@ -352,10 +352,10 @@ fn gas_get_repayment_schedule_existing() {
     // Configure a repayment schedule: 12 monthly installments.
     f.client.set_repayment_schedule(
         &f.borrower_idle,
-        &START_TS,            // start timestamp
+        &START_TS,                 // start timestamp
         &(START_TS + 86_400 * 30), // first due
-        &12_u32,              // installments
-        &(CREDIT_LIMIT / 12), // amount per installment
+        &12_u32,                   // installments
+        &(CREDIT_LIMIT / 12),      // amount per installment
     );
 
     let (cpu, mem) = measure(&env, || {
@@ -574,10 +574,7 @@ fn gas_get_credit_lines_paginated_limit_1() {
 
     let (cpu, mem) = measure(&env, || {
         let page = f.client.get_credit_lines_paginated(&None, &1_u32);
-        assert!(
-            page.items.len() <= 1,
-            "limit=1 must return at most 1 item"
-        );
+        assert!(page.items.len() <= 1, "limit=1 must return at most 1 item");
     });
 
     assert!(cpu > 0);
@@ -890,7 +887,10 @@ fn gas_query_capabilities_deterministic() {
     });
 
     assert_eq!(cpu1, cpu2, "query_capabilities CPU must be deterministic");
-    assert_eq!(mem1, mem2, "query_capabilities memory must be deterministic");
+    assert_eq!(
+        mem1, mem2,
+        "query_capabilities memory must be deterministic"
+    );
 
     eprintln!("query_capabilities(deterministic): cpu={cpu1} mem={mem1}");
 }
@@ -1011,45 +1011,52 @@ fn gas_query_all_entrypoints_summary() {
             let (cpu, mem) = measure(&env, || $body);
             assert!(
                 cpu < $limit_cpu,
-                "{}: CPU regression — got {cpu}, limit {}", $name, $limit_cpu
+                "{}: CPU regression — got {cpu}, limit {}",
+                $name,
+                $limit_cpu
             );
             assert!(
                 mem < $limit_mem,
-                "{}: memory regression — got {mem}, limit {}", $name, $limit_mem
+                "{}: memory regression — got {mem}, limit {}",
+                $name,
+                $limit_mem
             );
             table.push(($name, cpu, mem));
         }};
     }
 
-    snap!("get_credit_line",         2_000_000, 200_000, {
+    snap!("get_credit_line", 2_000_000, 200_000, {
         let _ = f.client.get_credit_line(&f.borrower_idle);
     });
     snap!("get_credit_line_summary", 2_000_000, 200_000, {
         let _ = f.client.get_credit_line_summary(&f.borrower_idle);
     });
-    snap!("get_protocol_summary",    2_000_000, 200_000, {
+    snap!("get_protocol_summary", 2_000_000, 200_000, {
         let _ = f.client.get_protocol_summary();
     });
-    snap!("get_repayment_schedule",  2_000_000, 200_000, {
+    snap!("get_repayment_schedule", 2_000_000, 200_000, {
         let _ = f.client.get_repayment_schedule(&f.borrower_active);
     });
-    snap!("get_health_factor",       3_000_000, 300_000, {
+    snap!("get_health_factor", 3_000_000, 300_000, {
         let _ = f.client.get_health_factor(&f.borrower_active);
     });
-    snap!("is_delinquent",           3_000_000, 300_000, {
+    snap!("is_delinquent", 3_000_000, 300_000, {
         let _ = f.client.is_delinquent(&f.borrower_active);
     });
     snap!("get_credit_lines_paginated", 5_000_000, 500_000, {
         let _ = f.client.get_credit_lines_paginated(&None, &100_u32);
     });
-    snap!("borrow_capabilities",     3_000_000, 300_000, {
+    snap!("borrow_capabilities", 3_000_000, 300_000, {
         let _ = f.client.borrow_capabilities(&f.borrower_idle);
     });
-    snap!("query_capabilities",      4_000_000, 400_000, {
+    snap!("query_capabilities", 4_000_000, 400_000, {
         let _ = f.client.query_capabilities(&f.borrower_active);
     });
 
-    eprintln!("\n{:<35} {:>15} {:>15}", "entrypoint", "cpu_instructions", "memory_bytes");
+    eprintln!(
+        "\n{:<35} {:>15} {:>15}",
+        "entrypoint", "cpu_instructions", "memory_bytes"
+    );
     eprintln!("{}", "-".repeat(67));
     for (name, cpu, mem) in &table {
         eprintln!("{:<35} {:>15} {:>15}", name, cpu, mem);

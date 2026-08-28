@@ -542,4 +542,3 @@ fn set_protocol_paused_non_admin_mock_auth() {
         }])
         .set_protocol_paused(&true);
 }
-

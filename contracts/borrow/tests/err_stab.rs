@@ -138,18 +138,36 @@ fn borrow_v7_category_mappings_are_pinned() {
 
     assert_eq!(ContractError::MissingLiquidityToken.category(), Liquidity);
     assert_eq!(ContractError::MissingLiquiditySource.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientLiquidityReserve.category(), Liquidity);
-    assert_eq!(ContractError::LiquidityTokenCallFailed.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentAllowance.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentBalance.category(), Liquidity);
+    assert_eq!(
+        ContractError::InsufficientLiquidityReserve.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::LiquidityTokenCallFailed.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentAllowance.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentBalance.category(),
+        Liquidity
+    );
     assert_eq!(ContractError::ExposureCapExceeded.category(), Liquidity);
 
     assert_eq!(ContractError::Paused.category(), Risk);
     assert_eq!(ContractError::DrawCooldownActive.category(), Risk);
     assert_eq!(ContractError::AdminCooldownActive.category(), Risk);
 
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), Collateral);
-    assert_eq!(ContractError::InsufficientCollateralBalance.category(), Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        Collateral
+    );
+    assert_eq!(
+        ContractError::InsufficientCollateralBalance.category(),
+        Collateral
+    );
 
     assert_eq!(ContractError::BorrowerBlocked.category(), Block);
     assert_eq!(ContractError::DrawsFrozen.category(), Block);

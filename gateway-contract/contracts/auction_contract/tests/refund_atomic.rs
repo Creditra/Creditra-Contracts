@@ -28,7 +28,8 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent, DutchAuctionDecay,
+    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent,
+    DutchAuctionDecay,
 };
 use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::token::StellarAssetClient;
@@ -71,7 +72,7 @@ fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
         &0_u32,
         &None,
         &None,
-        &Some(gateway_auction::DutchAuctionDecay::None),
+        &gateway_auction::DutchAuctionDecay::None,
         &None,
     );
 }

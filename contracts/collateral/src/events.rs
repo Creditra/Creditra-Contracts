@@ -144,12 +144,7 @@ pub fn publish_collateral_withdrawn(env: &Env, user: &Address, amount: i128, new
 /// * `user` - Account address of the user.
 /// * `old_balance` - Balance prior to the update.
 /// * `new_balance` - Balance following the update.
-pub fn publish_collateral_updated(
-    env: &Env,
-    user: &Address,
-    old_balance: i128,
-    new_balance: i128,
-) {
+pub fn publish_collateral_updated(env: &Env, user: &Address, old_balance: i128, new_balance: i128) {
     env.events().publish(
         (symbol_short!("collat"), symbol_short!("updated")),
         CollateralUpdatedEvent {

@@ -148,9 +148,7 @@ impl FreezeContract {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .set(&DataKey::GlobalFreeze, &false);
+        env.storage().instance().set(&DataKey::GlobalFreeze, &false);
     }
 
     /// Freeze a target address.
@@ -627,7 +625,6 @@ impl FreezeContract {
     }
 
     fn verify_freezer(env: &Env, acting: &Address) {
-
         let is_freezer = env
             .storage()
             .persistent()
@@ -876,7 +873,7 @@ mod test {
         let admin = Address::generate(&env);
         let contract_id = env.register(FreezeContract, ());
         let client = FreezeContractClient::new(&env, &contract_id);
-        
+
         // env.mock_all_auths() was not called, so calls will fail auth check
         client.init(&admin);
     }

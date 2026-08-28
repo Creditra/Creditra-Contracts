@@ -13,10 +13,7 @@ use soroban_sdk::testutils::{Address as _, BytesN as _};
 use soroban_sdk::{Address, BytesN, Env};
 
 fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
-    creditra_credit::ContractClient::new(
-        env,
-        &env.register(creditra_credit::Credit, ()),
-    )
+    creditra_credit::ContractClient::new(env, &env.register(creditra_credit::Credit, ()))
 }
 
 fn setup_contract<'a>(env: &'a Env, admin: &Address) -> creditra_credit::CreditClient<'a> {

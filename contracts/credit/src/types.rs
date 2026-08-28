@@ -304,9 +304,7 @@ impl ContractError {
     pub fn category(&self) -> ContractErrorCategory {
         use ContractErrorCategory::*;
         match self {
-            Self::Unauthorized
-            | Self::NotAdmin
-            | Self::AdminNotInitialized => Auth,
+            Self::Unauthorized | Self::NotAdmin | Self::AdminNotInitialized => Auth,
 
             Self::CreditLineClosed
             | Self::AlreadyInitialized
@@ -368,7 +366,6 @@ impl ContractError {
     }
 }
 
-
 /// Configuration emitted when the risk admin cooldown is set or changed.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -376,7 +373,6 @@ pub struct RiskAdminCooldownConfig {
     /// New cooldown duration in seconds. `0` means disabled.
     pub cooldown_seconds: u64,
 }
-
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -776,6 +772,41 @@ pub struct CollateralCapabilities {
     pub can_withdraw: bool,
     /// Whether partial collateral release is currently permitted.
     pub can_partial_release: bool,
+}
+
+/// Read-only capabilities bitmap for the accrual (v7) subsystem.
+///
+/// Returned by [`crate::views::accrual_capabilities`] / the `capabilities()`
+/// entrypoint on the accrual contract. All fields are pure boolean flags
+/// derived from protocol and per-borrower state; no state is mutated.
+///
+/// # Bit semantics
+///
+/// | Field                    | `true` when …                                                          |
+/// |--------------------------|------------------------------------------------------------------------|
+/// | `can_accrue`             | `accrue_batch` will process the borrower (line exists, Active, utilization > 0, protocol not paused) |
+/// | `batch_open`             | protocol accepts new `accrue_batch` submissions (not paused, batch size < `ACCRUE_BATCH_MAX`) |
+/// | `penalty_rate_active`    | a penalty surcharge is configured and the borrower is currently delinquent |
+/// | `grace_waiver_active`    | a grace-period config exists and the borrower is within the grace window |
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccrualCapabilities {
+    /// `true` when `accrue_batch` will capitalize interest for this borrower:
+    /// the credit line exists, is `Active`, has `utilized_amount > 0`, and the
+    /// protocol is not paused.
+    pub can_accrue: bool,
+    /// `true` when the protocol is accepting new `accrue_batch` submissions
+    /// (i.e. the circuit breaker is not engaged).
+    pub batch_open: bool,
+    /// `true` when a positive `penalty_surcharge_bps` is configured and the
+    /// borrower is currently past their due date (delinquent). This means
+    /// the next accrual will apply the elevated penalty rate.
+    pub penalty_rate_active: bool,
+    /// `true` when a `GracePeriodConfig` is set and the current ledger
+    /// timestamp is within the borrower's grace window (i.e.
+    /// `now <= suspension_ts + grace_period_seconds`). Only meaningful when
+    /// the line is `Suspended`.
+    pub grace_waiver_active: bool,
 }
 
 /// Proof-of-reserve view for the protocol treasury.

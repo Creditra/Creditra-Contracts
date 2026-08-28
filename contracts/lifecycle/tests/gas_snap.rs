@@ -55,7 +55,7 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     let token_id = env.register_stellar_asset_contract_v2(admin.clone());
     client.set_liquidity_token(&token_id.address());
     client.set_liquidity_source(&admin);

@@ -112,10 +112,20 @@ fn setup() -> TestCtx {
         let borrower = Address::generate(&env);
         asset.mint(&borrower, &INITIAL_TOKEN_BALANCE);
         let approve_expiration = env.ledger().sequence() + 100_000;
-        token_client.approve(&borrower, &contract_id, &INITIAL_TOKEN_BALANCE, &approve_expiration);
+        token_client.approve(
+            &borrower,
+            &contract_id,
+            &INITIAL_TOKEN_BALANCE,
+            &approve_expiration,
+        );
 
         client.deposit_collateral(&borrower, &COLLATERAL_AMOUNTS[i]);
-        client.open_credit_line(&borrower, &CREDIT_LIMITS[i], &INTEREST_RATE_BPS, &RISK_SCORE);
+        client.open_credit_line(
+            &borrower,
+            &CREDIT_LIMITS[i],
+            &INTEREST_RATE_BPS,
+            &RISK_SCORE,
+        );
 
         borrowers.push(borrower);
     }
@@ -132,11 +142,7 @@ fn setup() -> TestCtx {
 
 fn raw_steps_strategy() -> impl Strategy<Value = Vec<RawStep>> {
     proptest_vec(
-        (
-            0usize..BORROWER_COUNT,
-            any::<bool>(),
-            1_i128..=10_000_i128,
-        ),
+        (0usize..BORROWER_COUNT, any::<bool>(), 1_i128..=10_000_i128),
         1..=MAX_STEPS,
     )
     .prop_map(|steps| {
@@ -206,12 +212,10 @@ fn enforce_per_borrower_invariants(ctx: &TestCtx, modeled: &[i128]) -> TestCaseR
 
 fn assert_total_utilized_invariant(ctx: &TestCtx, modeled: &[i128]) -> TestCaseResult {
     let client = ctx.client();
-    let computed_total: i128 = modeled
-        .iter()
-        .try_fold(0_i128, |acc, &v| {
-            acc.checked_add(v)
-                .ok_or_else(|| TestCaseError::fail("I4: computed total overflow"))
-        })?;
+    let computed_total: i128 = modeled.iter().try_fold(0_i128, |acc, &v| {
+        acc.checked_add(v)
+            .ok_or_else(|| TestCaseError::fail("I4: computed total overflow"))
+    })?;
     let stored_total = client.get_total_utilized();
 
     prop_assert_eq!(
@@ -261,13 +265,16 @@ fn materialize_draw(
     }
 
     let amount = step.requested_amount.min(remaining).max(1);
-    Ok((Action::Draw { borrower_index: i, amount }, amount))
+    Ok((
+        Action::Draw {
+            borrower_index: i,
+            amount,
+        },
+        amount,
+    ))
 }
 
-fn materialize_repay(
-    modeled: &[i128],
-    step: &RawStep,
-) -> Result<(Action, i128), TestCaseError> {
+fn materialize_repay(modeled: &[i128], step: &RawStep) -> Result<(Action, i128), TestCaseError> {
     let i = step.borrower_index;
     let utilized = modeled[i];
 
@@ -276,7 +283,13 @@ fn materialize_repay(
     }
 
     let amount = step.requested_amount.min(utilized).max(1);
-    Ok((Action::Repay { borrower_index: i, amount }, amount))
+    Ok((
+        Action::Repay {
+            borrower_index: i,
+            amount,
+        },
+        amount,
+    ))
 }
 
 fn materialize_action(
@@ -364,9 +377,8 @@ fn apply_valid_step(ctx: &TestCtx, modeled: &mut [i128], step: &RawStep) -> Test
     // I7: other borrowers' state is unchanged
     for (j, borrower_j) in ctx.borrowers.iter().enumerate() {
         if j != borrower_index {
-            let line_j: CreditLineData = client
-                .get_credit_line(borrower_j)
-                .expect("line must exist");
+            let line_j: CreditLineData =
+                client.get_credit_line(borrower_j).expect("line must exist");
             prop_assert_eq!(
                 line_j.utilized_amount,
                 modeled[j],
@@ -452,7 +464,12 @@ fn setup_single_borrower(env: &Env) -> (CreditClient<'_>, Address) {
     let borrower = Address::generate(env);
     StellarAssetClient::new(env, &token).mint(&borrower, &INITIAL_TOKEN_BALANCE);
     let approve_expiration = env.ledger().sequence() + 100_000;
-    TokenClient::new(env, &token).approve(&borrower, &contract_id, &INITIAL_TOKEN_BALANCE, &approve_expiration);
+    TokenClient::new(env, &token).approve(
+        &borrower,
+        &contract_id,
+        &INITIAL_TOKEN_BALANCE,
+        &approve_expiration,
+    );
 
     client.deposit_collateral(&borrower, &100_000);
     client.open_credit_line(&borrower, &10_000, &INTEREST_RATE_BPS, &RISK_SCORE);
@@ -650,9 +667,7 @@ fn overpayment_caps_at_zero_utilization() {
 
     client.draw_credit(&borrower, &5_000);
 
-    let line_before: CreditLineData = client
-        .get_credit_line(&borrower)
-        .expect("line must exist");
+    let line_before: CreditLineData = client.get_credit_line(&borrower).expect("line must exist");
     assert_eq!(line_before.utilized_amount, 5_000);
 
     // Repay way more than owed
@@ -681,9 +696,7 @@ fn full_repay_zeros_utilization_and_total() {
 
     client.draw_credit(&borrower, &3_000);
 
-    let line_before: CreditLineData = client
-        .get_credit_line(&borrower)
-        .expect("line must exist");
+    let line_before: CreditLineData = client.get_credit_line(&borrower).expect("line must exist");
     assert_eq!(line_before.utilized_amount, 3_000);
     assert_eq!(client.get_total_utilized(), 3_000);
 

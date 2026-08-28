@@ -742,7 +742,6 @@ impl Auction {
         token_client.transfer(&env.current_contract_address(), &winner, &recovered_amount);
         clear_reentrancy_guard(&env);
     }
-
 }
 
 #[cfg(test)]

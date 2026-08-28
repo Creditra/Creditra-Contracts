@@ -60,7 +60,9 @@ pub fn publish_risk_admin_action_recorded(env: &Env, timestamp: u64) {
 pub fn publish_risk_initialized(env: &Env, admin: &Address) {
     env.events().publish(
         (symbol_short!("risk"), symbol_short!("init")),
-        RiskInitializedEvent { admin: admin.clone() },
+        RiskInitializedEvent {
+            admin: admin.clone(),
+        },
     );
 }
 
@@ -71,8 +73,6 @@ pub fn publish_risk_paused(env: &Env, paused: bool) {
     } else {
         symbol_short!("unpaused")
     };
-    env.events().publish(
-        (symbol_short!("risk"), topic),
-        RiskPausedEvent { paused },
-    );
+    env.events()
+        .publish((symbol_short!("risk"), topic), RiskPausedEvent { paused });
 }

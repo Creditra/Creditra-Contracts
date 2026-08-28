@@ -110,12 +110,7 @@ fn setup() -> Ctx {
     credit.draw_credit(&borrower, &DRAW_AMOUNT);
 
     // Configure a 6-period repayment schedule (first due at T0 + PERIOD).
-    credit.set_repayment_schedule(
-        &borrower,
-        &AMOUNT_PER_PERIOD,
-        &PERIOD,
-        &(T0 + PERIOD),
-    );
+    credit.set_repayment_schedule(&borrower, &AMOUNT_PER_PERIOD, &PERIOD, &(T0 + PERIOD));
 
     Ctx {
         env,

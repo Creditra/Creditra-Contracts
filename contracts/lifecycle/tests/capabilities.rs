@@ -47,9 +47,15 @@ fn active_line_zero_utilization_capabilities() {
     assert!(caps.can_suspend);
     assert!(caps.can_self_suspend);
     assert!(caps.can_close_admin);
-    assert!(caps.can_close_borrower, "zero utilization allows borrower self-close");
+    assert!(
+        caps.can_close_borrower,
+        "zero utilization allows borrower self-close"
+    );
     assert!(caps.can_default);
-    assert!(!caps.can_reinstate, "Active line is never reinstate-eligible");
+    assert!(
+        !caps.can_reinstate,
+        "Active line is never reinstate-eligible"
+    );
 }
 
 #[test]
@@ -68,7 +74,10 @@ fn active_line_with_utilization_blocks_borrower_close_only() {
     client.draw_credit(&borrower, &500_i128);
 
     let caps = client.lifecycle_capabilities(&borrower);
-    assert!(caps.can_close_admin, "admin force-close ignores utilization");
+    assert!(
+        caps.can_close_admin,
+        "admin force-close ignores utilization"
+    );
     assert!(
         !caps.can_close_borrower,
         "borrower self-close requires zero utilization"
@@ -87,7 +96,10 @@ fn suspended_line_capabilities() {
     assert!(!caps.can_self_suspend, "already suspended");
     assert!(caps.can_close_admin);
     assert!(caps.can_close_borrower, "zero utilization");
-    assert!(caps.can_default, "Suspended -> Defaulted is a valid transition");
+    assert!(
+        caps.can_default,
+        "Suspended -> Defaulted is a valid transition"
+    );
     assert!(!caps.can_reinstate);
 }
 
@@ -101,10 +113,16 @@ fn defaulted_line_capabilities() {
     let caps = client.lifecycle_capabilities(&borrower);
     assert!(!caps.can_suspend);
     assert!(!caps.can_self_suspend);
-    assert!(caps.can_close_admin, "admin can force-close a defaulted line");
+    assert!(
+        caps.can_close_admin,
+        "admin can force-close a defaulted line"
+    );
     assert!(caps.can_close_borrower, "zero utilization");
     assert!(!caps.can_default, "already Defaulted");
-    assert!(caps.can_reinstate, "only Defaulted lines are reinstate-eligible");
+    assert!(
+        caps.can_reinstate,
+        "only Defaulted lines are reinstate-eligible"
+    );
 }
 
 #[test]

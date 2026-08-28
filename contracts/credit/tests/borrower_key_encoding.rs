@@ -301,7 +301,11 @@ fn key_collision_scan_mixed_types() {
         );
     }
 
-    assert_eq!(seen.len(), 500, "must have 500 unique keys across both address types");
+    assert_eq!(
+        seen.len(),
+        500,
+        "must have 500 unique keys across both address types"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -310,10 +314,7 @@ fn key_collision_scan_mixed_types() {
 
 /// Helper: deploy a credit contract, init it, and open `n` random credit
 /// lines.  Returns the client and the list of borrower addresses.
-fn deploy_and_open_lines(
-    env: &Env,
-    n: usize,
-) -> (CreditClient<'_>, Vec<Address>) {
+fn deploy_and_open_lines(env: &Env, n: usize) -> (CreditClient<'_>, Vec<Address>) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -363,10 +364,7 @@ fn contract_storage_isolation_100_borrowers() {
             line.risk_score, expected_score,
             "borrower {i}: score mismatch"
         );
-        assert_eq!(
-            line.borrower, *borrower,
-            "borrower {i}: address mismatch"
-        );
+        assert_eq!(line.borrower, *borrower, "borrower {i}: address mismatch");
         assert_eq!(
             line.status,
             creditra_credit::types::CreditStatus::Active,
@@ -539,7 +537,10 @@ fn edge_case_any_two_contract_addresses_differ() {
     let addr_a = Address::Contract(id_a);
     let addr_b = Address::Contract(id_b);
 
-    assert_ne!(addr_a, addr_b, "contract addresses with distinct IDs must differ");
+    assert_ne!(
+        addr_a, addr_b,
+        "contract addresses with distinct IDs must differ"
+    );
     assert_ne!(
         serialize_val(&env, addr_a),
         serialize_val(&env, addr_b),
@@ -610,10 +611,7 @@ fn edge_case_block_unblock_cycle_does_not_corrupt_credit_line() {
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.credit_limit, 15_000);
     assert_eq!(line.interest_rate_bps, 400);
-    assert_eq!(
-        line.status,
-        creditra_credit::types::CreditStatus::Active
-    );
+    assert_eq!(line.status, creditra_credit::types::CreditStatus::Active);
 }
 
 /// **Edge case:** Using two separate Env instances for serialization
@@ -650,7 +648,10 @@ fn edge_case_zero_contract_id_address() {
     // Must differ from a generated address.
     let gen_addr = Address::generate(&env);
     let gen_key = serialize_val(&env, gen_addr);
-    assert_ne!(key1, gen_key, "zero address must not collide with generated address");
+    assert_ne!(
+        key1, gen_key,
+        "zero address must not collide with generated address"
+    );
 }
 
 /// **Edge case:** An Address with all-max (0xFF) contract ID must serialize

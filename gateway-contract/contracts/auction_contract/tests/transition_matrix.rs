@@ -181,7 +181,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &None,
                 &None,
-                &Some(gateway_auction::DutchAuctionDecay::None),
+                &gateway_auction::DutchAuctionDecay::None,
                 &None,
             );
         }
@@ -195,7 +195,7 @@ fn init_auction(client: &AuctionClient<'_>, auction_id: &Symbol, mode: AuctionMo
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &Some(DutchAuctionDecay::None),
+                &DutchAuctionDecay::None,
                 &None,
             );
             client.env.ledger().with_mut(|li| li.timestamp = 1_000);

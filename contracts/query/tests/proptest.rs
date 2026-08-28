@@ -813,7 +813,11 @@ fn health_factor_no_credit_line_returns_max() {
     let borrower = Address::generate(&env);
 
     let hf = client.get_health_factor(&borrower);
-    assert_eq!(hf, u32::MAX, "no credit line → health factor must be u32::MAX");
+    assert_eq!(
+        hf,
+        u32::MAX,
+        "no credit line → health factor must be u32::MAX"
+    );
 }
 
 /// `get_protocol_summary` on a fresh contract returns all-zero aggregates.
@@ -901,7 +905,10 @@ fn get_credit_line_none_for_unknown_borrower() {
     let borrower = Address::generate(&env);
 
     let result = client.get_credit_line(&borrower);
-    assert!(result.is_none(), "unknown borrower → get_credit_line must return None");
+    assert!(
+        result.is_none(),
+        "unknown borrower → get_credit_line must return None"
+    );
 }
 
 /// `is_delinquent` returns `false` for a borrower with zero utilization even
@@ -935,7 +942,12 @@ fn protocol_summary_count_tracks_opened_lines() {
 
     for i in 0..n {
         let borrower = Address::generate(&env);
-        client.open_credit_line(&borrower, &(1_000_i128 * (i as i128 + 1)), &500_u32, &30_u32);
+        client.open_credit_line(
+            &borrower,
+            &(1_000_i128 * (i as i128 + 1)),
+            &500_u32,
+            &30_u32,
+        );
         let summary = client.get_protocol_summary();
         assert_eq!(
             summary.count,

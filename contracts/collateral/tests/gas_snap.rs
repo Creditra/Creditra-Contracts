@@ -42,13 +42,13 @@
 #![cfg(test)]
 
 extern crate std;
+use crate::{CollateralContract, CollateralContractClient};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
     testutils::{budget::Budget, Address as _, Ledger, MockAuth},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
 };
-use crate::{CollateralContract, CollateralContractClient};
 
 const COLLATERAL_AMOUNT: i128 = 1_000;
 
@@ -99,7 +99,7 @@ fn setup(env: &Env) -> Fixture<'_> {
 fn test_collateral_gas_snapshot() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register_contract(None, CollateralContract);
     let client = CollateralContractClient::new(&env, &contract_id);
 
@@ -107,30 +107,30 @@ fn test_collateral_gas_snapshot() {
     let amount = 1000_i128;
 
     env.budget().reset_unlimited();
-    
+
     let cpu_before_deposit = env.budget().cpu_instruction_cost();
     let mem_before_deposit = env.budget().memory_bytes_cost();
 
     client.deposit(&user, &amount);
-    
+
     let cpu_after_deposit = env.budget().cpu_instruction_cost();
     let mem_after_deposit = env.budget().memory_bytes_cost();
     let cpu_before_withdraw = env.budget().cpu_instruction_cost();
     let mem_before_withdraw = env.budget().memory_bytes_cost();
 
     client.withdraw(&user, &amount);
-    
+
     let cpu_after_withdraw = env.budget().cpu_instruction_cost();
     let mem_after_withdraw = env.budget().memory_bytes_cost();
 
     std::println!("=== Collateral Contract Gas Snapshot Baseline ===");
     std::println!(
-        "Deposit  -> CPU: {}, MEM: {}", 
+        "Deposit  -> CPU: {}, MEM: {}",
         cpu_after_deposit.saturating_sub(cpu_before_deposit),
         mem_after_deposit.saturating_sub(mem_before_deposit)
     );
     std::println!(
-        "Withdraw -> CPU: {}, MEM: {}", 
+        "Withdraw -> CPU: {}, MEM: {}",
         cpu_after_withdraw.saturating_sub(cpu_before_withdraw),
         mem_after_withdraw.saturating_sub(mem_before_withdraw)
     );
@@ -151,14 +151,8 @@ fn gas_deposit_collateral() {
     });
 
     assert!(cpu > 0, "deposit_collateral must consume CPU");
-    assert!(
-        cpu < 5_000_000,
-        "deposit_collateral CPU regression: {cpu}"
-    );
-    assert!(
-        mem < 500_000,
-        "deposit_collateral memory regression: {mem}"
-    );
+    assert!(cpu < 5_000_000, "deposit_collateral CPU regression: {cpu}");
+    assert!(mem < 500_000, "deposit_collateral memory regression: {mem}");
 
     eprintln!("deposit_collateral: cpu={cpu} mem={mem}");
 }
@@ -168,8 +162,7 @@ fn gas_deposit_collateral() {
 fn gas_withdraw_collateral() {
     let env = Env::default();
     let f = setup(&env);
-    f.client
-        .deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
+    f.client.deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
 
     let (cpu, mem) = measure(&env, || {
         f.client
@@ -177,10 +170,7 @@ fn gas_withdraw_collateral() {
     });
 
     assert!(cpu > 0, "withdraw_collateral must consume CPU");
-    assert!(
-        cpu < 5_000_000,
-        "withdraw_collateral CPU regression: {cpu}"
-    );
+    assert!(cpu < 5_000_000, "withdraw_collateral CPU regression: {cpu}");
     assert!(
         mem < 500_000,
         "withdraw_collateral memory regression: {mem}"
@@ -194,8 +184,7 @@ fn gas_withdraw_collateral() {
 fn gas_partial_release_collateral() {
     let env = Env::default();
     let f = setup(&env);
-    f.client
-        .deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
+    f.client.deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
 
     let (cpu, mem) = measure(&env, || {
         f.client.partial_release_collateral(&f.borrower, &1);
@@ -221,21 +210,13 @@ fn gas_repay_and_release_collateral() {
     let env = Env::default();
     let f = setup(&env);
     StellarAssetClient::new(&env, &f.token).mint(&f.contract_id, &1_000);
-    f.client
-        .open_credit_line(&f.borrower, &1_000, &300, &50);
-    f.client
-        .deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
+    f.client.open_credit_line(&f.borrower, &1_000, &300, &50);
+    f.client.deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
     f.client.draw_credit(&f.borrower, &100);
-    TokenClient::new(&env, &f.token).approve(
-        &f.borrower,
-        &f.contract_id,
-        &100,
-        &1_000,
-    );
+    TokenClient::new(&env, &f.token).approve(&f.borrower, &f.contract_id, &100, &1_000);
 
     let (cpu, mem) = measure(&env, || {
-        f.client
-            .repay_and_release_collateral(&f.borrower, &1);
+        f.client.repay_and_release_collateral(&f.borrower, &1);
     });
 
     assert!(cpu > 0, "repay_and_release_collateral must consume CPU");
@@ -416,8 +397,7 @@ fn gas_set_admin_collateral_cooldown_seconds() {
 fn gas_read_only_queries() {
     let env = Env::default();
     let f = setup(&env);
-    f.client
-        .deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
+    f.client.deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
 
     let mut tokens = Vec::new(&env);
     tokens.push_back(f.token.clone());
@@ -526,10 +506,7 @@ fn gas_deposit_collateral_deterministic() {
         f.client.deposit_collateral(&f.borrower, &500);
     });
 
-    assert_eq!(
-        cpu1, cpu2,
-        "deposit_collateral CPU must be deterministic"
-    );
+    assert_eq!(cpu1, cpu2, "deposit_collateral CPU must be deterministic");
     assert_eq!(
         mem1, mem2,
         "deposit_collateral memory must be deterministic"
@@ -544,8 +521,7 @@ fn gas_deposit_collateral_deterministic() {
 fn gas_write_more_expensive_than_read() {
     let env = Env::default();
     let f = setup(&env);
-    f.client
-        .deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
+    f.client.deposit_collateral(&f.borrower, &COLLATERAL_AMOUNT);
 
     let (read_cpu, _) = measure(&env, || {
         let _ = f.client.get_collateral(&f.borrower);

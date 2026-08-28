@@ -31,10 +31,7 @@ fn test_deposit_emits_collateral_deposited_event() {
     assert_eq!(events.len(), 1);
 
     let event = events.get(0).unwrap();
-    assert_eq!(
-        event.0,
-        client.address
-    );
+    assert_eq!(event.0, client.address);
     assert_eq!(
         event.1,
         (symbol_short!("collat"), symbol_short!("deposit")).into_val(&env)

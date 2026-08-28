@@ -49,41 +49,47 @@ pub fn capabilities(env: Env, borrower: Address) -> LifecycleCapabilities {
     let credit_line = get_credit_line(&env, &borrower);
     let paused = is_paused(&env);
 
-    let (can_suspend, can_self_suspend, can_close_admin, can_close_borrower, can_default, can_reinstate) =
-        match credit_line {
-            None => (false, false, false, false, false, false),
-            Some(_) if paused => (false, false, false, false, false, false),
-            Some(line) => {
-                let status = line.status;
+    let (
+        can_suspend,
+        can_self_suspend,
+        can_close_admin,
+        can_close_borrower,
+        can_default,
+        can_reinstate,
+    ) = match credit_line {
+        None => (false, false, false, false, false, false),
+        Some(_) if paused => (false, false, false, false, false, false),
+        Some(line) => {
+            let status = line.status;
 
-                // suspend_credit_line / self_suspend_credit_line: Active only.
-                let can_suspend = status == CreditStatus::Active;
-                let can_self_suspend = can_suspend;
+            // suspend_credit_line / self_suspend_credit_line: Active only.
+            let can_suspend = status == CreditStatus::Active;
+            let can_self_suspend = can_suspend;
 
-                // close_credit_line (admin): any non-Closed status.
-                let can_close_admin = status != CreditStatus::Closed;
-                // close_credit_line (borrower): admin precondition + zero utilization.
-                let can_close_borrower = can_close_admin && line.utilized_amount == 0;
+            // close_credit_line (admin): any non-Closed status.
+            let can_close_admin = status != CreditStatus::Closed;
+            // close_credit_line (borrower): admin precondition + zero utilization.
+            let can_close_borrower = can_close_admin && line.utilized_amount == 0;
 
-                // default_credit_line: Active, Restricted, or Suspended.
-                let can_default = matches!(
-                    status,
-                    CreditStatus::Active | CreditStatus::Restricted | CreditStatus::Suspended
-                );
+            // default_credit_line: Active, Restricted, or Suspended.
+            let can_default = matches!(
+                status,
+                CreditStatus::Active | CreditStatus::Restricted | CreditStatus::Suspended
+            );
 
-                // reinstate_credit_line: Defaulted only.
-                let can_reinstate = status == CreditStatus::Defaulted;
+            // reinstate_credit_line: Defaulted only.
+            let can_reinstate = status == CreditStatus::Defaulted;
 
-                (
-                    can_suspend,
-                    can_self_suspend,
-                    can_close_admin,
-                    can_close_borrower,
-                    can_default,
-                    can_reinstate,
-                )
-            }
-        };
+            (
+                can_suspend,
+                can_self_suspend,
+                can_close_admin,
+                can_close_borrower,
+                can_default,
+                can_reinstate,
+            )
+        }
+    };
 
     LifecycleCapabilities {
         can_suspend,

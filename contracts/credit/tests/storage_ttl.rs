@@ -345,9 +345,10 @@ fn reverse_draw_bumps_credit_line_ttl_on_accrual_read() {
     // find an original draw to reverse.
     let original_ts = env.ledger().timestamp();
     env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&DataKey::DrawAudit(borrower.clone(), original_ts), &200_i128);
+        env.storage().persistent().set(
+            &DataKey::DrawAudit(borrower.clone(), original_ts),
+            &200_i128,
+        );
     });
 
     drain_credit_line_ttl(&env, &contract_id, &borrower);

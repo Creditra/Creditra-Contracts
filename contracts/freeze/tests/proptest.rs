@@ -8,9 +8,12 @@
 
 extern crate std;
 
-use proptest::prelude::*;
-use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, IntoVal};
 use creditra_credit::{Credit, CreditClient, FreezeReason};
+use proptest::prelude::*;
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, Env, IntoVal,
+};
 
 const START_TS: u64 = 10_000;
 
@@ -58,7 +61,7 @@ proptest! {
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
-        
+
         // initialize
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);

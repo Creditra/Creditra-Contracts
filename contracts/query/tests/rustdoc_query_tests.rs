@@ -87,7 +87,10 @@ fn capabilities_no_credit_line_all_flags_false() {
 
     let caps = client.query_capabilities(&borrower);
 
-    assert!(!caps.has_credit_line, "no line → has_credit_line must be false");
+    assert!(
+        !caps.has_credit_line,
+        "no line → has_credit_line must be false"
+    );
     assert!(
         !caps.has_repayment_schedule,
         "no line → has_repayment_schedule must be false"
@@ -118,7 +121,10 @@ fn capabilities_active_line_zero_utilization() {
 
     let caps = client.query_capabilities(&borrower);
 
-    assert!(caps.has_credit_line, "open line → has_credit_line must be true");
+    assert!(
+        caps.has_credit_line,
+        "open line → has_credit_line must be true"
+    );
     assert!(
         !caps.health_factor_applicable,
         "zero utilization → health_factor_applicable must be false"
@@ -232,7 +238,11 @@ fn publish_credit_line_queried_emits_correct_topic_found_true() {
     let t0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let t1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
     assert_eq!(t0, symbol_short!("query"), "first topic must be 'query'");
-    assert_eq!(t1, symbol_short!("cl_read"), "second topic must be 'cl_read'");
+    assert_eq!(
+        t1,
+        symbol_short!("cl_read"),
+        "second topic must be 'cl_read'"
+    );
 
     let payload: CreditLineQueriedEvent = data.try_into_val(&env).unwrap();
     assert_eq!(payload.borrower, borrower);
@@ -286,7 +296,11 @@ fn publish_health_factor_queried_emits_correct_topic_and_value() {
 
     let (_, topics, data) = env.events().all().get(0).unwrap();
     let t1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(t1, symbol_short!("hf_read"), "second topic must be 'hf_read'");
+    assert_eq!(
+        t1,
+        symbol_short!("hf_read"),
+        "second topic must be 'hf_read'"
+    );
 
     let payload: HealthFactorQueriedEvent = data.try_into_val(&env).unwrap();
     assert_eq!(payload.borrower, borrower);
@@ -364,7 +378,11 @@ fn publish_delinquency_checked_true_emits_correct_topic() {
 
     let (_, topics, data) = env.events().all().get(0).unwrap();
     let t1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(t1, symbol_short!("dlq_chk"), "second topic must be 'dlq_chk'");
+    assert_eq!(
+        t1,
+        symbol_short!("dlq_chk"),
+        "second topic must be 'dlq_chk'"
+    );
 
     let payload: DelinquencyCheckedEvent = data.try_into_val(&env).unwrap();
     assert_eq!(payload.borrower, borrower);
@@ -391,7 +409,10 @@ fn publish_delinquency_checked_false_encodes_correctly() {
 
     let (_, _, data) = env.events().all().get(0).unwrap();
     let payload: DelinquencyCheckedEvent = data.try_into_val(&env).unwrap();
-    assert!(!payload.is_delinquent, "is_delinquent=false must round-trip");
+    assert!(
+        !payload.is_delinquent,
+        "is_delinquent=false must round-trip"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -419,7 +440,11 @@ fn publish_protocol_summary_queried_emits_correct_topic_and_payload() {
     let t0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
     let t1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
     assert_eq!(t0, symbol_short!("query"));
-    assert_eq!(t1, symbol_short!("proto_rd"), "second topic must be 'proto_rd'");
+    assert_eq!(
+        t1,
+        symbol_short!("proto_rd"),
+        "second topic must be 'proto_rd'"
+    );
 
     let payload: ProtocolSummaryQueriedEvent = data.try_into_val(&env).unwrap();
     assert_eq!(payload.total_utilized, 500_000_i128);

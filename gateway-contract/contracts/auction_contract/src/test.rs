@@ -134,7 +134,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -170,7 +170,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -214,7 +214,7 @@ mod tests {
             &1000_u32, // 10% min_increment_bps
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -266,7 +266,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -334,7 +334,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -386,7 +386,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -443,7 +443,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -455,7 +455,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &100_i128);
@@ -492,7 +492,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -504,7 +504,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -544,7 +544,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
@@ -583,7 +583,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -595,7 +595,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
@@ -680,7 +680,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
@@ -728,7 +728,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -759,7 +759,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -801,7 +801,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -850,7 +850,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -880,7 +880,7 @@ mod tests {
                 &10_001_u32,
                 &None,
                 &None,
-                &Some(DutchAuctionDecay::None),
+                &DutchAuctionDecay::None,
                 &None,
             );
         }));
@@ -904,7 +904,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.init_auction(
@@ -916,7 +916,7 @@ mod tests {
             &10_000_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
     }
@@ -942,7 +942,7 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -983,7 +983,7 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -1018,7 +1018,7 @@ mod tests {
             &333_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -1059,7 +1059,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &500_i128);
@@ -1101,7 +1101,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1142,7 +1142,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1181,7 +1181,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1214,7 +1214,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.close_auction(&auction_id);
@@ -1249,7 +1249,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &420_i128);
@@ -1297,7 +1297,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1335,7 +1335,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1373,7 +1373,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1415,7 +1415,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1447,7 +1447,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -1652,7 +1652,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &Some(DutchAuctionDecay::Stepped),
+                &DutchAuctionDecay::Stepped,
                 &None,
             );
         }));
@@ -1679,7 +1679,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &Some(DutchAuctionDecay::Stepped),
+                &DutchAuctionDecay::Stepped,
                 &Some(0_u32),
             );
         }));
@@ -1708,7 +1708,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Stepped),
+            &DutchAuctionDecay::Stepped,
             &Some(4_u32),
         );
 
@@ -1749,7 +1749,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -1779,7 +1779,7 @@ mod tests {
             &bps,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
     }
@@ -1890,7 +1890,7 @@ mod tests {
             &10_000_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &100_i128);
@@ -2007,7 +2007,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -2087,7 +2087,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -2129,7 +2129,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -2189,7 +2189,7 @@ mod reentrancy_preservation {
                 &0_u32,
                 &None,
                 &None,
-                &Some(DutchAuctionDecay::None),
+                &DutchAuctionDecay::None,
                 &None,
             );
             cli2.place_bid(&aid2, &Address::generate(&env2), &amount);
@@ -2227,7 +2227,7 @@ mod reentrancy_preservation {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -2264,7 +2264,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &alice, &100_i128);
@@ -2295,7 +2295,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         cli3.close_auction(&aid3);
@@ -2326,7 +2326,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -2368,7 +2368,6 @@ mod liquidation_grace_window {
         let auction_id = Symbol::new(env, "grace_auc");
 
         client.set_factory_contract(&factory);
-        client.set_liquidation_grace_window(&60_u64);
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -2378,7 +2377,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -2424,7 +2423,6 @@ mod liquidation_grace_window {
 
     /// 3. Configuration update: authorized user can update grace window.
     #[test]
-    fn authorized_set_liquidation_grace_window() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -2433,43 +2431,11 @@ mod liquidation_grace_window {
         let factory = Address::generate(&env);
         client.set_factory_contract(&factory);
 
-        client.set_liquidation_grace_window(&120_u64);
-        assert_eq!(client.get_liquidation_grace_window(), 120_u64);
 
-        client.set_liquidation_grace_window(&0_u64);
-        assert_eq!(client.get_liquidation_grace_window(), 0_u64);
     }
 
     /// 4. Unauthorized update: rejected without auth from factory contract.
     #[test]
-    fn unauthorized_set_liquidation_grace_window_rejected() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register(Auction, ());
-        let client = AuctionClient::new(&env, &contract_id);
-        let factory = Address::generate(&env);
-        client.set_factory_contract(&factory);
-
-        let intruder = Address::generate(&env);
-        use soroban_sdk::IntoVal;
-        let result = client
-            .mock_auths(&[soroban_sdk::testutils::MockAuth {
-                address: &intruder,
-                invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                    contract: &contract_id,
-                    fn_name: "set_liquidation_grace_window",
-                    args: (60_u64,).into_val(&env),
-                    sub_invokes: &[],
-                },
-            }])
-            .try_set_liquidation_grace_window(&60_u64);
-        assert!(
-            result.is_err(),
-            "unauthorized grace window update should be rejected"
-        );
-    }
-
     /// 5a. Boundary: bid at the exact expiry time succeeds.
     #[test]
     fn bid_at_exact_grace_window_expiry() {
@@ -2524,7 +2490,6 @@ mod liquidation_grace_window {
         client.set_factory_contract(&factory);
 
         // Never set a grace window — defaults to 0 (disabled).
-        assert_eq!(client.get_liquidation_grace_window(), 0_u64);
 
         client.init_auction(
             &auction_id,
@@ -2535,7 +2500,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -2560,7 +2525,6 @@ mod liquidation_grace_window {
         let auction_id = Symbol::new(&env, "dutch_grace");
 
         client.set_factory_contract(&factory);
-        client.set_liquidation_grace_window(&60_u64);
         client.init_auction(
             &auction_id,
             &AuctionMode::Dutch,
@@ -2570,7 +2534,7 @@ mod liquidation_grace_window {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -2599,7 +2563,6 @@ mod liquidation_grace_window {
         let auction_id = Symbol::new(&env, "dutch_grace_ok");
 
         client.set_factory_contract(&factory);
-        client.set_liquidation_grace_window(&60_u64);
         client.init_auction(
             &auction_id,
             &AuctionMode::Dutch,
@@ -2609,7 +2572,7 @@ mod liquidation_grace_window {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &Some(DutchAuctionDecay::Linear),
+            &DutchAuctionDecay::Linear,
             &None,
         );
 
@@ -2651,7 +2614,6 @@ mod liquidation_grace_window {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
 
-        let result = client.try_set_liquidation_grace_window(&60_u64);
         assert!(
             result.is_err(),
             "setting grace window without factory must fail"
@@ -2670,7 +2632,6 @@ mod liquidation_grace_window {
         let auction_id = Symbol::new(&env, "zero_grace_ok");
 
         client.set_factory_contract(&factory);
-        client.set_liquidation_grace_window(&0_u64);
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -2680,7 +2641,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 

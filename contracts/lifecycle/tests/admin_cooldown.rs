@@ -32,7 +32,10 @@ fn set_timestamp(env: &Env, timestamp: u64) {
 }
 
 fn assert_admin_lifecycle_cooldown_active(result: std::thread::Result<()>, context: &str) {
-    assert!(result.is_err(), "{context}: expected panic for active cooldown");
+    assert!(
+        result.is_err(),
+        "{context}: expected panic for active cooldown"
+    );
     let err = result.unwrap_err();
     let err_str = if let Some(s) = err.downcast_ref::<String>() {
         s.clone()
@@ -73,7 +76,10 @@ fn admin_lifecycle_cooldown_rejects_before_boundary_and_allows_at_boundary() {
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
     client.set_admin_lifecycle_cooldown_seconds(&COOLDOWN_SECONDS);
-    assert_eq!(client.get_admin_lifecycle_cooldown_seconds(), Some(COOLDOWN_SECONDS));
+    assert_eq!(
+        client.get_admin_lifecycle_cooldown_seconds(),
+        Some(COOLDOWN_SECONDS)
+    );
 
     // First action starts the cooldown clock
     client.set_credit_limit_bounds(&100_i128, &1_000_000_i128);
@@ -89,7 +95,7 @@ fn admin_lifecycle_cooldown_rejects_before_boundary_and_allows_at_boundary() {
     }));
     assert_admin_lifecycle_cooldown_active(
         result,
-        "second action before cooldown boundary must revert"
+        "second action before cooldown boundary must revert",
     );
 
     // Second action at boundary succeeds
@@ -147,5 +153,8 @@ fn different_lifecycle_critical_actions_share_single_cooldown_clock() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.set_late_fee_flat(&100_i128);
     }));
-    assert_admin_lifecycle_cooldown_active(result, "different action must share same cooldown anchor");
+    assert_admin_lifecycle_cooldown_active(
+        result,
+        "different action must share same cooldown anchor",
+    );
 }

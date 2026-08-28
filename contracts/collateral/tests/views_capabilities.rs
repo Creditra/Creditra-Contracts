@@ -33,7 +33,10 @@ fn test_direct_collateral_views_capabilities() {
     // Verify individual capability bits
     assert_eq!(caps & CAPABILITY_DEPOSIT, CAPABILITY_DEPOSIT);
     assert_eq!(caps & CAPABILITY_WITHDRAW, CAPABILITY_WITHDRAW);
-    assert_eq!(caps & CAPABILITY_PARTIAL_RELEASE, CAPABILITY_PARTIAL_RELEASE);
+    assert_eq!(
+        caps & CAPABILITY_PARTIAL_RELEASE,
+        CAPABILITY_PARTIAL_RELEASE
+    );
     assert_eq!(caps & CAPABILITY_MULTI_TOKEN, CAPABILITY_MULTI_TOKEN);
     assert_eq!(caps & CAPABILITY_RISK_WEIGHTING, CAPABILITY_RISK_WEIGHTING);
     assert_eq!(caps & CAPABILITY_ADMIN_COOLDOWN, CAPABILITY_ADMIN_COOLDOWN);
@@ -51,13 +54,8 @@ fn test_contract_client_collateral_capabilities() {
     assert_eq!(collateral_caps, ALL_COLLATERAL_CAPABILITIES);
 
     // Ensure all 7 feature flags are set
-    let expected_mask: u64 = (1 << 0)
-        | (1 << 1)
-        | (1 << 2)
-        | (1 << 3)
-        | (1 << 4)
-        | (1 << 5)
-        | (1 << 6);
+    let expected_mask: u64 =
+        (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
 
     assert_eq!(contract_caps, expected_mask);
 }

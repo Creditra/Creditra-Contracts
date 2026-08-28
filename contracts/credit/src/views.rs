@@ -9,8 +9,8 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, BorrowStateSnapshot, CollateralCapabilities, CreditLineSnapshot,
-    CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    AccrualCapabilities, BorrowCapabilities, BorrowStateSnapshot, CollateralCapabilities,
+    CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -279,5 +279,68 @@ pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
         credit_line,
         collateral_balance,
         capabilities,
+    }
+}
+/// operations are currently available for a given borrower, without
+/// executing any state-mutating logic.
+///
+/// # Parameters
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+/// An [`AccrualCapabilities`] struct with four bool fields:
+/// - `can_accrue` — `accrue_batch` will process this borrower
+/// - `batch_open` — protocol accepts new `accrue_batch` submissions
+/// - `penalty_rate_active` — borrower is delinquent and a surcharge is configured
+/// - `grace_waiver_active` — borrower is within their suspension grace window
+///
+/// # Security
+/// Pure read-only query. No authentication required. No state mutations occur.
+pub fn accrual_capabilities(env: Env, borrower: Address) -> AccrualCapabilities {
+    let paused = is_paused(&env);
+
+    // batch_open: protocol not paused (batch size check is per-call; not evaluated here)
+    let batch_open = !paused;
+
+    let credit_line = get_credit_line(&env, &borrower);
+
+    // can_accrue: line exists, Active, has utilization, protocol not paused
+    let can_accrue = credit_line
+        .as_ref()
+        .map(|line| !paused && line.status == crate::types::CreditStatus::Active && line.utilized_amount > 0)
+        .unwrap_or(false);
+
+    // penalty_rate_active: surcharge configured AND borrower is delinquent
+    let penalty_surcharge_bps = crate::storage::get_penalty_surcharge_bps(&env);
+    let penalty_rate_active = if penalty_surcharge_bps > 0 {
+        crate::query::is_delinquent(env.clone(), borrower.clone())
+    } else {
+        false
+    };
+
+    // grace_waiver_active: line is Suspended, a grace config exists, and now <= grace_end
+    let grace_waiver_active = credit_line
+        .as_ref()
+        .map(|line| {
+            if line.status != crate::types::CreditStatus::Suspended {
+                return false;
+            }
+            let grace_cfg = crate::storage::get_grace_period_config(&env);
+            match grace_cfg {
+                Some(cfg) if cfg.grace_period_seconds > 0 => {
+                    let now = env.ledger().timestamp();
+                    let grace_end = line.suspension_ts.saturating_add(cfg.grace_period_seconds);
+                    now <= grace_end
+                }
+                _ => false,
+            }
+        })
+        .unwrap_or(false);
+
+    AccrualCapabilities {
+        can_accrue,
+        batch_open,
+        penalty_rate_active,
+        grace_waiver_active,
     }
 }

@@ -267,7 +267,11 @@ fn closed_is_terminal_no_state_change_succeeds() {
     // Idempotent double-close must succeed without changing state.
     client.close_credit_line(&borrower, &admin);
     let still_closed = client.get_credit_line(&borrower).expect("line must exist");
-    assert_eq!(still_closed.status, CreditStatus::Closed, "must stay Closed");
+    assert_eq!(
+        still_closed.status,
+        CreditStatus::Closed,
+        "must stay Closed"
+    );
 
     // All other mutations must fail on a Closed line.
     let suspend_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -293,13 +297,23 @@ fn closed_is_terminal_no_state_change_succeeds() {
 
     // Status must not have changed.
     let final_line = client.get_credit_line(&borrower).expect("line must exist");
-    assert_eq!(final_line.status, CreditStatus::Closed, "status must remain Closed");
+    assert_eq!(
+        final_line.status,
+        CreditStatus::Closed,
+        "status must remain Closed"
+    );
 
     // Advance time and re-check — accrual on a Closed line must not produce debt.
     env.ledger().with_mut(|l| l.timestamp += 31_536_000);
     let time_line = client.get_credit_line(&borrower).expect("line must exist");
-    assert_eq!(time_line.utilized_amount, 0, "Closed line must have zero utilized");
-    assert_eq!(time_line.accrued_interest, 0, "Closed line must have zero interest");
+    assert_eq!(
+        time_line.utilized_amount, 0,
+        "Closed line must have zero utilized"
+    );
+    assert_eq!(
+        time_line.accrued_interest, 0,
+        "Closed line must have zero interest"
+    );
 }
 // ── deterministic invariant: illegal edges always fail ───────────────────────
 
@@ -310,7 +324,10 @@ fn suspend_from_non_active_always_fails() {
     {
         let (_env, client, _admin, borrower) = setup();
         client.suspend_credit_line(&borrower);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Suspended);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.suspend_credit_line(&borrower);
         }));
@@ -342,7 +359,10 @@ fn reinstate_from_non_defaulted_always_fails() {
     // From Active
     {
         let (_env, client, _admin, borrower) = setup();
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Active);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.reinstate_credit_line(&borrower, &CreditStatus::Active);
         }));
@@ -362,7 +382,11 @@ fn reinstate_from_non_defaulted_always_fails() {
 /// Reinstate to Closed, Defaulted, or Suspended must always fail even from Defaulted.
 #[test]
 fn reinstate_to_invalid_targets_always_fails() {
-    for bad_target in [CreditStatus::Closed, CreditStatus::Defaulted, CreditStatus::Suspended] {
+    for bad_target in [
+        CreditStatus::Closed,
+        CreditStatus::Defaulted,
+        CreditStatus::Suspended,
+    ] {
         let (_env, client, _admin, borrower) = setup();
         client.default_credit_line(&borrower);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -385,7 +409,10 @@ fn borrower_close_requires_zero_utilization() {
     client.draw_credit(&borrower, &1_000_i128);
 
     let line = client.get_credit_line(&borrower).unwrap();
-    assert!(line.utilized_amount > 0, "precondition: need non-zero utilized");
+    assert!(
+        line.utilized_amount > 0,
+        "precondition: need non-zero utilized"
+    );
 
     // Borrower close must fail.
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -395,7 +422,11 @@ fn borrower_close_requires_zero_utilization() {
 
     // Status must be unchanged.
     let still_active = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(still_active.status, CreditStatus::Active, "status must not change on failed close");
+    assert_eq!(
+        still_active.status,
+        CreditStatus::Active,
+        "status must not change on failed close"
+    );
 
     // Admin force-close must succeed unconditionally.
     client.close_credit_line(&borrower, &admin);
@@ -410,7 +441,10 @@ fn borrower_close_requires_zero_utilization() {
 #[test]
 fn duplicate_open_on_active_line_fails() {
     let (_env, client, _admin, borrower) = setup();
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Active);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Active
+    );
 
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &RISK_SCORE);
@@ -418,7 +452,10 @@ fn duplicate_open_on_active_line_fails() {
     assert!(r.is_err(), "re-open of Active line must fail");
 
     // Status must remain Active.
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Active);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Active
+    );
 }
 
 // ── deterministic invariant: debt is never negative after transitions ─────────
@@ -455,8 +492,14 @@ fn debt_fields_non_negative_across_full_lifecycle() {
     assert!(after_reinstate.accrued_interest >= 0);
     assert!(after_reinstate.accrued_interest <= after_reinstate.utilized_amount);
     // Reinstate must not alter debt amounts.
-    assert_eq!(after_reinstate.utilized_amount, after_default.utilized_amount);
-    assert_eq!(after_reinstate.accrued_interest, after_default.accrued_interest);
+    assert_eq!(
+        after_reinstate.utilized_amount,
+        after_default.utilized_amount
+    );
+    assert_eq!(
+        after_reinstate.accrued_interest,
+        after_default.accrued_interest
+    );
 
     // Full repay.
     let debt = after_reinstate.utilized_amount;
@@ -546,8 +589,14 @@ fn self_suspend_produces_same_status_as_admin_suspend() {
         self_interest = line.accrued_interest;
     }
 
-    assert_eq!(admin_util, self_util, "utilized_amount must match between admin and self suspend");
-    assert_eq!(admin_interest, self_interest, "accrued_interest must match between admin and self suspend");
+    assert_eq!(
+        admin_util, self_util,
+        "utilized_amount must match between admin and self suspend"
+    );
+    assert_eq!(
+        admin_interest, self_interest,
+        "accrued_interest must match between admin and self suspend"
+    );
 }
 // ── deterministic invariant: proptest edge-case sequences ────────────────────
 
@@ -558,7 +607,10 @@ fn repay_on_closed_line_fails() {
     client.draw_credit(&borrower, &10_000_i128);
     // Admin force-closes with outstanding balance.
     client.close_credit_line(&borrower, &admin);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
 
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.repay_credit(&borrower, &1_i128);
@@ -582,9 +634,19 @@ fn default_already_defaulted_is_idempotent() {
     // Second default must not panic.
     client.default_credit_line(&borrower);
     let second = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(second.status, CreditStatus::Defaulted, "must remain Defaulted");
-    assert_eq!(second.utilized_amount, first.utilized_amount, "utilized must be unchanged");
-    assert_eq!(second.accrued_interest, first.accrued_interest, "interest must be unchanged");
+    assert_eq!(
+        second.status,
+        CreditStatus::Defaulted,
+        "must remain Defaulted"
+    );
+    assert_eq!(
+        second.utilized_amount, first.utilized_amount,
+        "utilized must be unchanged"
+    );
+    assert_eq!(
+        second.accrued_interest, first.accrued_interest,
+        "interest must be unchanged"
+    );
 }
 
 /// draw is blocked when status is Suspended (error #20) or Defaulted (#21).
@@ -599,7 +661,10 @@ fn draw_blocked_on_suspended_and_defaulted() {
         }));
         assert!(r.is_err(), "draw on Suspended must fail");
         // Status must not change.
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Suspended);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Suspended
+        );
     }
     // Defaulted
     {
@@ -609,7 +674,10 @@ fn draw_blocked_on_suspended_and_defaulted() {
             client.draw_credit(&borrower, &1_i128);
         }));
         assert!(r.is_err(), "draw on Defaulted must fail");
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Defaulted);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
     }
 }
 
@@ -644,12 +712,25 @@ fn reopen_after_closed_resets_state_correctly() {
     let (_env, client, admin, borrower) = setup();
     client.draw_credit(&borrower, &5_000_i128);
     client.close_credit_line(&borrower, &admin);
-    assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Closed);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
 
     // Admin can reopen a Closed line.
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &RISK_SCORE);
     let reopened = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(reopened.status, CreditStatus::Active, "reopened line must be Active");
-    assert_eq!(reopened.utilized_amount, 0, "reopened line must have zero utilized");
-    assert_eq!(reopened.accrued_interest, 0, "reopened line must have zero accrued interest");
+    assert_eq!(
+        reopened.status,
+        CreditStatus::Active,
+        "reopened line must be Active"
+    );
+    assert_eq!(
+        reopened.utilized_amount, 0,
+        "reopened line must have zero utilized"
+    );
+    assert_eq!(
+        reopened.accrued_interest, 0,
+        "reopened line must have zero accrued interest"
+    );
 }

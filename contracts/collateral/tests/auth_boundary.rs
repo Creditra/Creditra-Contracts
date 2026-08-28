@@ -74,7 +74,10 @@ fn assert_unauthorized<F: Fn() + std::panic::UnwindSafe>(f: F, context: &str) {
     };
 
     if let Some(code) = extract_error_code(&err_str) {
-        assert_eq!(code, 1, "{context}: expected Unauthorized (#1), got #{code}. Error: {err_str}");
+        assert_eq!(
+            code, 1,
+            "{context}: expected Unauthorized (#1), got #{code}. Error: {err_str}"
+        );
     } else {
         panic!("{context}: could not extract error code from {err_str}");
     }
@@ -92,7 +95,10 @@ fn assert_error_code<F: Fn() + std::panic::UnwindSafe>(f: F, expected_code: u32,
     };
 
     if let Some(code) = extract_error_code(&err_str) {
-        assert_eq!(code, expected_code, "{context}: expected error #{expected_code}, got #{code}. Error: {err_str}");
+        assert_eq!(
+            code, expected_code,
+            "{context}: expected error #{expected_code}, got #{code}. Error: {err_str}"
+        );
     } else {
         panic!("{context}: could not extract error code from {err_str}");
     }

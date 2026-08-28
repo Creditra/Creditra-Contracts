@@ -128,8 +128,7 @@ pub fn capabilities(env: Env, borrower: Address) -> QueryCapabilities {
             let health_factor_applicable = has_utilization;
             // Mirrors `query::is_delinquent` short-circuits: needs an open
             // line with utilization and a configured repayment schedule.
-            let delinquency_applicable =
-                open && has_utilization && has_repayment_schedule;
+            let delinquency_applicable = open && has_utilization && has_repayment_schedule;
             (health_factor_applicable, delinquency_applicable)
         }
     };

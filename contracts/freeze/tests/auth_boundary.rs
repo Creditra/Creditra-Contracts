@@ -144,7 +144,10 @@ fn freeze_draws_authorized_records_admin_auth() {
 
     let auths = env.auths();
     assert_eq!(auths.len(), 1, "freeze_draws must record exactly one auth");
-    assert_eq!(auths[0].0, admin, "freeze_draws must be authorized by admin");
+    assert_eq!(
+        auths[0].0, admin,
+        "freeze_draws must be authorized by admin"
+    );
     assert!(client.is_draws_frozen());
 }
 
@@ -157,8 +160,15 @@ fn unfreeze_draws_authorized_records_admin_auth() {
     client.unfreeze_draws();
 
     let auths = env.auths();
-    assert_eq!(auths.len(), 1, "unfreeze_draws must record exactly one auth");
-    assert_eq!(auths[0].0, admin, "unfreeze_draws must be authorized by admin");
+    assert_eq!(
+        auths.len(),
+        1,
+        "unfreeze_draws must record exactly one auth"
+    );
+    assert_eq!(
+        auths[0].0, admin,
+        "unfreeze_draws must be authorized by admin"
+    );
     assert!(!client.is_draws_frozen());
 }
 
@@ -323,12 +333,13 @@ fn freeze_draws_wrong_signer_reverts() {
             address: &attacker,
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
-                fn_name: "freeze_draws",                args: (FreezeReason::LiquidityReserve).into_val(&env),
+                fn_name: "freeze_draws",
+                args: (FreezeReason::LiquidityReserve).into_val(&env),
                 sub_invokes: &[],
             },
         }])
         .freeze_draws(&FreezeReason::LiquidityReserve);
-    }
+}
 
 #[test]
 #[should_panic]

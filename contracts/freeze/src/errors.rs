@@ -74,7 +74,6 @@ pub enum FreezeError {
     // Each mirror variant carries the same discriminant *and* the same
     // semantic meaning as its canonical counterpart, so SDK consumers
     // can map an emitted integer against docs/ERROR_CODES.md directly.
-
     /// The requested borrower does not have an open credit line.
     ///
     /// Mirror of canonical `ContractError::CreditLineNotFound` (`= 3`).
@@ -99,7 +98,6 @@ pub enum FreezeError {
     ///
     /// Mirror of canonical `ContractError::CreditLineFrozen` (`= 46`).
     CreditLineFrozen = 46,
-
     // ── Freeze-specific tier (codes 100+) ───────────────────────────────
     //
     // These discriminants are exclusive to the freeze domain and

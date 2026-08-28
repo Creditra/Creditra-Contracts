@@ -27,7 +27,7 @@ fn init_open_auction(client: &AuctionClient<'_>, auction_id: &Symbol, end_time: 
         &0_u32,
         &None,
         &None,
-        &Some(gateway_auction::DutchAuctionDecay::None),
+        &gateway_auction::DutchAuctionDecay::None,
         &None,
     );
     factory

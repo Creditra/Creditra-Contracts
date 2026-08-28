@@ -76,7 +76,7 @@ fn test_credit_lines_pagination_first_page() {
     // Open 5 credit lines
     for i in 0..5 {
         let borrower = Address::generate(&env);
-        client.open_credit_line(&borrower, &(1000 + i as i128), &500, &10 + i);
+        client.open_credit_line(&borrower, &(1000 + i as i128), &500, &(10 + i));
     }
 
     let por = client.get_proof_of_reserve();
@@ -133,7 +133,7 @@ fn test_credit_lines_paginated_empty() {
 
     // Empty result with no credit lines
     let page = client.get_credit_lines_paginated(&&None, &10);
-    assert_eq!(page.credit_lines.len(), 0);
+    assert_eq!(page.lines.len(), 0);
     assert!(page.next_cursor.is_none());
 }
 
@@ -164,13 +164,13 @@ fn test_credit_lines_paginated_single_page() {
 
     // Request all 3 in one page
     let page = client.get_credit_lines_paginated(&None, &10);
-    assert_eq!(page.credit_lines.len(), 3);
+    assert_eq!(page.lines.len(), 3);
     assert!(page.next_cursor.is_none());
 
     // Verify credit line data
-    assert_eq!(page.credit_lines.get(0).unwrap().credit_limit, 1000);
-    assert_eq!(page.credit_lines.get(1).unwrap().credit_limit, 2000);
-    assert_eq!(page.credit_lines.get(2).unwrap().credit_limit, 3000);
+    assert_eq!(page.lines.get(0).unwrap().credit_limit, 1000);
+    assert_eq!(page.lines.get(1).unwrap().credit_limit, 2000);
+    assert_eq!(page.lines.get(2).unwrap().credit_limit, 3000);
 }
 
 #[test]
@@ -187,27 +187,52 @@ fn collateral_caps_require_configured_token_and_balance() {
     let borrower = Address::generate(&env);
 
     let caps = client.capabilities(&borrower);
-    assert!(!caps.can_deposit, "missing collateral token -> cannot deposit");
-    assert!(!caps.can_withdraw, "missing collateral token -> cannot withdraw");
-    assert!(!caps.can_partial_release, "missing collateral token -> cannot release");
+    assert!(
+        !caps.can_deposit,
+        "missing collateral token -> cannot deposit"
+    );
+    assert!(
+        !caps.can_withdraw,
+        "missing collateral token -> cannot withdraw"
+    );
+    assert!(
+        !caps.can_partial_release,
+        "missing collateral token -> cannot release"
+    );
 
     let token = Address::generate(&env);
     client.set_liquidity_token(&token);
 
     let caps = client.capabilities(&borrower);
-    assert!(caps.can_deposit, "configured collateral token -> can deposit");
-    assert!(!caps.can_withdraw, "no collateral balance -> cannot withdraw");
-    assert!(!caps.can_partial_release, "no collateral balance -> cannot release");
+    assert!(
+        caps.can_deposit,
+        "configured collateral token -> can deposit"
+    );
+    assert!(
+        !caps.can_withdraw,
+        "no collateral balance -> cannot withdraw"
+    );
+    assert!(
+        !caps.can_partial_release,
+        "no collateral balance -> cannot release"
+    );
 
     env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&crate::storage::DataKey::CollateralBalance(borrower.clone()), &42_i128);
+        env.storage().persistent().set(
+            &crate::storage::DataKey::CollateralBalance(borrower.clone()),
+            &42_i128,
+        );
     });
 
     let caps = client.capabilities(&borrower);
-    assert!(caps.can_withdraw, "positive collateral balance -> can withdraw");
-    assert!(caps.can_partial_release, "positive collateral balance -> can release");
+    assert!(
+        caps.can_withdraw,
+        "positive collateral balance -> can withdraw"
+    );
+    assert!(
+        caps.can_partial_release,
+        "positive collateral balance -> can release"
+    );
 }
 
 #[test]
@@ -229,7 +254,12 @@ fn test_credit_lines_paginated_multiple_pages() {
     // Create 5 credit lines
     let borrowers: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
     for (i, borrower) in borrowers.iter().enumerate() {
-        client.open_credit_line(borrower, &(1000 * (i as i128 + 1)), &500, &(10 * (i as u32 + 1)));
+        client.open_credit_line(
+            borrower,
+            &(1000 * (i as i128 + 1)),
+            &500,
+            &(10 * (i as u32 + 1)),
+        );
     }
 
     // Get first page with limit 2

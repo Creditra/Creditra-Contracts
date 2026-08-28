@@ -49,7 +49,10 @@ fn query_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::BorrowerBlocked.category(), Block);
     assert_eq!(ContractError::CreditLineFrozen.category(), Block);
     assert_eq!(ContractError::ExposureCapExceeded.category(), Liquidity);
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        Collateral
+    );
     assert_eq!(ContractError::Reentrancy.category(), Reentrancy);
     assert_eq!(ContractError::OraclePriceInvalid.category(), Oracle);
 }

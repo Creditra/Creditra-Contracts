@@ -1,5 +1,5 @@
-use creditra_credit as credit;
 use credit::cross_chain::{BridgeAttestation, CrossChainHook};
+use creditra_credit as credit;
 
 fn sample_att() -> BridgeAttestation {
     BridgeAttestation {

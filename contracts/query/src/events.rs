@@ -221,10 +221,8 @@ pub struct ProtocolSummaryQueriedEvent {
 /// - [`CreditLineQueriedEvent`] — the payload type.
 /// - [`publish_health_factor_queried`] — companion helper for health-factor reads.
 pub fn publish_credit_line_queried(env: &Env, event: CreditLineQueriedEvent) {
-    env.events().publish(
-        (symbol_short!("query"), symbol_short!("cl_read")),
-        event,
-    );
+    env.events()
+        .publish((symbol_short!("query"), symbol_short!("cl_read")), event);
 }
 
 /// Publish a [`HealthFactorQueriedEvent`] to the Soroban event ledger.
@@ -281,10 +279,8 @@ pub fn publish_credit_line_queried(env: &Env, event: CreditLineQueriedEvent) {
 /// - [`HealthFactorQueriedEvent`] — the payload type and `health_bps` interpretation.
 /// - [`publish_delinquency_checked`] — companion helper for delinquency reads.
 pub fn publish_health_factor_queried(env: &Env, event: HealthFactorQueriedEvent) {
-    env.events().publish(
-        (symbol_short!("query"), symbol_short!("hf_read")),
-        event,
-    );
+    env.events()
+        .publish((symbol_short!("query"), symbol_short!("hf_read")), event);
 }
 
 /// Publish a [`DelinquencyCheckedEvent`] to the Soroban event ledger.
@@ -342,10 +338,8 @@ pub fn publish_health_factor_queried(env: &Env, event: HealthFactorQueriedEvent)
 /// - [`DelinquencyCheckedEvent`] — the payload type and `is_delinquent` semantics.
 /// - [`publish_credit_line_queried`] — companion helper for credit-line reads.
 pub fn publish_delinquency_checked(env: &Env, event: DelinquencyCheckedEvent) {
-    env.events().publish(
-        (symbol_short!("query"), symbol_short!("dlq_chk")),
-        event,
-    );
+    env.events()
+        .publish((symbol_short!("query"), symbol_short!("dlq_chk")), event);
 }
 
 /// Publish a [`ProtocolSummaryQueriedEvent`] to the Soroban event ledger.
@@ -406,8 +400,6 @@ pub fn publish_delinquency_checked(env: &Env, event: DelinquencyCheckedEvent) {
 /// - [`ProtocolSummaryQueriedEvent`] — the payload type and field semantics.
 /// - [`publish_credit_line_queried`] — companion helper for per-borrower reads.
 pub fn publish_protocol_summary_queried(env: &Env, event: ProtocolSummaryQueriedEvent) {
-    env.events().publish(
-        (symbol_short!("query"), symbol_short!("proto_rd")),
-        event,
-    );
+    env.events()
+        .publish((symbol_short!("query"), symbol_short!("proto_rd")), event);
 }

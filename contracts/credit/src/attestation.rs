@@ -357,7 +357,9 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &3);
 
-        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
+        let batch = client
+            .get_attestation_batch(&borrower)
+            .expect("batch should exist");
         assert_eq!(batch.merkle_root, root);
         assert_eq!(batch.count, 3);
     }
@@ -373,7 +375,9 @@ mod tests {
         client.commit_attestation_batch(&borrower, &root1, &1);
         client.commit_attestation_batch(&borrower, &root2, &2);
 
-        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
+        let batch = client
+            .get_attestation_batch(&borrower)
+            .expect("batch should exist");
         assert_eq!(batch.merkle_root, root2);
         assert_eq!(batch.count, 2);
     }
@@ -408,7 +412,7 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &l, &1);
 
-        assert!(client.verify_attestation_proof(&borrower, &l, &vec![&env]));
+        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l.clone(), vec![&env]));
     }
 
     #[test]
@@ -422,8 +426,8 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(client.verify_attestation_proof(&borrower, &l0, &vec![&env, l1.clone()]));
-        assert!(client.verify_attestation_proof(&borrower, &l1, &vec![&env, l0]));
+        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l0.clone(), vec![&env, l1.clone()]));
+        assert!(verify_attestation_proof(env.clone(), borrower.clone(), l1.clone(), vec![&env, l0]));
     }
 
     #[test]
@@ -438,7 +442,7 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(!client.verify_attestation_proof(&borrower, &wrong_leaf, &vec![&env, l1]));
+        assert!(!verify_attestation_proof(env.clone(), borrower.clone(), wrong_leaf.clone(), vec![&env, l1]));
     }
 
     #[test]

@@ -52,7 +52,7 @@ fn setup_auction() -> (Env, Address, Symbol, Address, Address, i128) {
         &0_u32,
         &None,
         &None,
-        &Some(DutchAuctionDecay::None),
+        &DutchAuctionDecay::None,
         &None,
     );
     client.place_bid(&auction_id, &bidder, &420_i128);

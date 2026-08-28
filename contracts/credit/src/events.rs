@@ -311,14 +311,24 @@ pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPar
     );
 }
 
-pub fn publish_oracle_quorum_config_set_event(env: &Env, min_quorum_k: u32, max_deviation_bps: u32, max_age_seconds: u64) {
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "oracle_quorum")),
         (min_quorum_k, max_deviation_bps, max_age_seconds),
     );
 }
 
-pub fn publish_oracle_quorum_price_set_event(env: &Env, price: i128, min_quorum_k: u32, timestamp: u64) {
+pub fn publish_oracle_quorum_price_set_event(
+    env: &Env,
+    price: i128,
+    min_quorum_k: u32,
+    timestamp: u64,
+) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "oracle_price")),
         (price, min_quorum_k, timestamp),
@@ -379,10 +389,19 @@ pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types:
     );
 }
 
-pub fn publish_credit_line_freeze_event(env: &Env, borrower: &Address, reason: crate::types::FreezeReason, frozen: bool) {
+pub fn publish_credit_line_freeze_event(
+    env: &Env,
+    borrower: &Address,
+    reason: crate::types::FreezeReason,
+    frozen: bool,
+) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "cl_freeze")),
-        CreditLineFreezeEvent { borrower: borrower.clone(), reason, frozen },
+        CreditLineFreezeEvent {
+            borrower: borrower.clone(),
+            reason,
+            frozen,
+        },
     );
 }
 
@@ -404,10 +423,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -420,7 +436,8 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
@@ -653,8 +670,6 @@ pub fn publish_grace_waiver_applied_event(
         },
     );
 }
-
-
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]
