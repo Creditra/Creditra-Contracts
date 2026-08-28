@@ -289,10 +289,8 @@ impl ContractError {
             | Self::AdminAcceptTooEarly
             | Self::NoPendingTreasuryWithdrawal
             | Self::OriginalDrawNotFound
-            | Self::AttestationBatchNotFound => Misc,
+            |            Self::AttestationBatchNotFound => Misc,
         }
-    }
-}
     }
 }
 

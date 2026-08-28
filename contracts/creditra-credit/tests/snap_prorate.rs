@@ -640,7 +640,7 @@ mod fuzz {
 
     /// Elapsed seconds, 0 to 100 years.
     fn elapsed_secs() -> impl Strategy<Value = u64> {
-        0u64..=(SECONDS_PER_YEAR as u64 * 100)
+        0u64..=(SECONDS_PER_YEAR * 100)
     }
 
     proptest! {
@@ -764,7 +764,7 @@ mod fuzz {
         fn interest_bounded_by_principal_within_one_year(
             p in safe_principal(),
             r in rate_bps(),
-            t in 0u64..=(SECONDS_PER_YEAR as u64),
+            t in 0u64..=SECONDS_PER_YEAR,
         ) {
             if let Ok(interest) = accrued_interest(Uint128::new(p), r, t) {
                 prop_assert!(
@@ -781,8 +781,8 @@ mod fuzz {
         fn split_period_accrues_le_combined(
             p in safe_principal(),
             r in rate_bps(),
-            t1 in 0u64..=(SECONDS_PER_YEAR as u64),
-            t2 in 0u64..=(SECONDS_PER_YEAR as u64),
+            t1 in 0u64..=SECONDS_PER_YEAR,
+            t2 in 0u64..=SECONDS_PER_YEAR,
         ) {
             let principal = Uint128::new(p);
             let combined = t1.saturating_add(t2);

@@ -55,7 +55,7 @@ pub fn add_oracle(deps: DepsMut, oracle: Addr, weight: u32) -> Result<(), Contra
 /// Admin only.
 pub fn remove_oracle(deps: DepsMut, oracle: Addr) -> Result<(), ContractError> {
     let mut oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
-    if let Some(idx) = oracle_list.iter().position(|x| x == &oracle) {
+    if let Some(idx) = oracle_list.iter().position(|x| *x == oracle) {
         oracle_list.remove(idx);
         ORACLE_LIST.save(deps.storage, &oracle_list)?;
         ORACLE_WEIGHT.remove(deps.storage, oracle.clone());
@@ -90,9 +90,9 @@ pub fn report_value(
     Ok(())
 }
 
-/// Check if an oracle price record is stale relative to the current block timestamp and quorum configuration.
-// ... (rest of the file)
-
+/// Check if an oracle price record is stale relative to the current block
+/// timestamp and quorum configuration.
+///
 /// # Parameters
 /// - `record`: The stored [`OraclePriceRecord`].
 /// - `cfg`: The active [`OracleQuorumConfig`].
