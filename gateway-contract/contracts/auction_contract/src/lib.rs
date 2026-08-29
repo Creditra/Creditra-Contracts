@@ -8,7 +8,9 @@ mod types;
 
 pub use curves::{calculate_price, CurveError, DecayCurve};
 pub use errors::AuctionError;
-pub use events::BidRefundedEvent;
+pub use events::{
+    AuctionClosedEvent, BidRefundedEvent, DefaultLiquidationSettlementEvent,
+};
 pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
