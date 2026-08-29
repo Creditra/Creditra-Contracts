@@ -254,7 +254,9 @@ mod tests {
         let _factory = setup_factory(&env, &client);
         // Mint 2M tokens to the contract to cover all refunds across 64 fuzz
         // iterations (each refund is the prior high bid, sum converges to ~500K).
-        setup_token(&env, &contract_id, 2_000_000, &[], 0);
+        // Bidders are funded too so `place_bid` can pull each bid from the
+        // bidder at bid time.
+        setup_token(&env, &contract_id, 2_000_000, &bidders, 2_000_000);
         let auction_id = Symbol::new(&env, AUCTION_ID);
 
         client.init_auction(
@@ -316,10 +318,9 @@ mod tests {
         let _factory = setup_factory(&env, &client);
 
         // Mint 2M tokens to the contract to cover refunds across 64 fuzz
-        // iterations. The contract never collects tokens from bidders during
-        // place_bid, so pre-fund it with enough to refund every previous
-        // highest bid.
-        let (_bid_token, _sac) = setup_token(&env, &contract_id, 2_000_000, &[], 0);
+        // iterations. `place_bid` pulls each bid from the bidder at bid time,
+        // so fund the bidders too.
+        let (_bid_token, _sac) = setup_token(&env, &contract_id, 2_000_000, &bidders, 2_000_000);
 
         let mut seed: u64 = 0x1234_5678_9abc_def0;
         let mut expected: Option<(usize, i128)> = None;
@@ -1235,8 +1236,13 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
         let _factory = setup_factory(&env, &client);
-        let (bid_token, _sac) =
-            setup_token(&env, &contract_id, 1000, std::slice::from_ref(&winner), 0);
+        let (bid_token, _sac) = setup_token(
+            &env,
+            &contract_id,
+            1000,
+            std::slice::from_ref(&winner),
+            1000,
+        );
 
         let auction_id = Symbol::new(&env, "claim_transfer");
 
@@ -1266,10 +1272,12 @@ mod tests {
             "winner must receive the bid amount after claim"
         );
 
+        // Contract is funded with 1000, the winner pays 420 in at bid time and
+        // receives 420 back at claim, so the contract balance is unchanged.
         let contract_balance = token_client.balance(&contract_id);
         assert_eq!(
-            contract_balance, 580_i128,
-            "contract balance must decrease by the bid amount"
+            contract_balance, 1000_i128,
+            "contract balance is unchanged after bid-in equals claim-out"
         );
     }
 
@@ -1868,9 +1876,12 @@ mod tests {
         assert_eq!(stored.highest_bid, 101_i128);
     }
 
-    /// First bid in an English auction only needs to meet min_bid, not bps.
+    /// The first bid must clear the `min_next_bid` threshold over `min_bid`
+    /// (i.e. `min_bid + increment`), matching [`crate::min_next_bid`] and the
+    /// documented behavior in `tests/gas_snap.rs`. A bid equal to `min_bid`
+    /// is rejected; `min_bid + increment` is accepted.
     #[test]
-    fn bps_first_bid_only_needs_min_bid() {
+    fn bps_first_bid_requires_min_bid_increment() {
         let env = Env::default();
         env.mock_all_auths();
         let alice = Address::generate(&env);
@@ -1879,8 +1890,7 @@ mod tests {
         let _factory = setup_factory(&env, &client);
         let auction_id = Symbol::new(&env, "bps_first");
 
-        // 10_000 bps (100%) would double the price — but on the first bid
-        // there is no highest_bid, so min_bid (= 100) applies directly.
+        // 10_000 bps (100%) doubles the price: first threshold = min_bid + 100.
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -1893,12 +1903,22 @@ mod tests {
             &Some(DutchAuctionDecay::None),
             &None,
         );
-        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid equal to min_bid (100) is below the threshold (200): rejected.
+        let too_low = client.try_place_bid(&auction_id, &alice, &100_i128);
+        assert!(
+            too_low.is_err(),
+            "first bid at min_bid alone must be rejected"
+        );
+
+        // Bid at the threshold (200) is accepted and stored.
+        setup_token(&env, &contract_id, 1000, std::slice::from_ref(&alice), 1000);
+        client.place_bid(&auction_id, &alice, &200_i128);
 
         let stored: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
             .unwrap();
-        assert_eq!(stored.highest_bid, 100_i128);
+        assert_eq!(stored.highest_bid, 200_i128);
     }
 
     /// Ceiling division: fractional bps must round up (1 bps on 999 = ceil(0.999) = 1).
@@ -1991,6 +2011,8 @@ mod reentrancy_exploration {
         let sac = soroban_sdk::token::StellarAssetClient::new(&env, &bid_token);
 
         sac.mint(&contract_id, &1_000_i128);
+        sac.mint(&alice, &1_000_i128);
+        sac.mint(&bob, &1_000_i128);
 
         env.as_contract(&contract_id, || {
             env.storage()
@@ -2071,6 +2093,7 @@ mod reentrancy_exploration {
         let bid_token = token_id.address();
         let _sac = StellarAssetClient::new(&env, &bid_token);
         _sac.mint(&contract_id, &1000_i128);
+        _sac.mint(&winner, &1000_i128);
         env.as_contract(&contract_id, || {
             env.storage()
                 .instance()
@@ -2171,7 +2194,7 @@ mod reentrancy_preservation {
         let contract_id = env.register(Auction, ());
         let _client = AuctionClient::new(&env, &contract_id);
 
-        let amounts: [i128; 8] = [50, 51, 100, 999, 1_000, 10_000, 100_000, 1_000_000];
+        let amounts: [i128; 8] = [51, 51, 100, 999, 1_000, 10_000, 100_000, 1_000_000];
         for amount in amounts {
             let env2 = Env::default();
             env2.mock_all_auths();

@@ -362,6 +362,146 @@ pub fn compute_deviation_bps(new_price: i128, last_price: i128) -> Option<u32> {
     Some(deviation.min(u32::MAX as u128) as u32)
 }
 
+// ─── Deterministic, value-conserving apportionment ───────────────────────────────
+
+/// Deterministically apportion `total` across `weights` so that the returned
+/// parts **always sum exactly to `total`** — no dust is created or destroyed.
+///
+/// This is the canonical "largest-remainder" (Hamilton) method:
+///
+/// 1. Each bucket `i` receives `floor(total * w_i / W)` where `W` is the sum of
+///    all weights.
+/// 2. The leftover `total - Σ floor(...)` (strictly less than the number of
+///    buckets, so at most one unit can be owed to any single bucket) is handed
+///    out one unit at a time to the buckets with the largest *fractional*
+///    remainder (`total * w_i mod W`).
+/// 3. Ties on the fractional remainder are broken **deterministically** by
+///    ascending index, so identical inputs always yield identical output.
+///
+/// # Why this matters for interest
+///
+/// Independent `floor` rounding of each recipient's share loses up to one base
+/// unit *per recipient* to truncation and — worse — makes the allocation depend
+/// on the *order* weights are supplied or the *number* of recipients. That is
+/// exactly the class of bug this issue closes: dust that leaks out of the system
+/// or is misallocated between treasury / bounty / lender. With this helper the
+/// total is conserved to the last base unit and the split is reproducible.
+///
+/// # Parameters
+///
+/// - `total` — amount (e.g. an interest or fee amount) to split, in the
+///   contract's native token unit.
+/// - `weights` — non-negative integer weights; need **not** sum to any fixed
+///   value. A weight of `0` simply receives no share beyond a deterministic
+///   leftover tie-break.
+///
+/// # Panics
+///
+/// Panics if `weights` is empty. This is intentional: there is no recipient to
+/// conserve value *into*, so the caller's configuration is invalid.
+///
+/// # Examples
+///
+/// ```rust
+/// use creditra_credit::math_utils::split_conserving;
+///
+/// // 100 split 50/50 → exact.
+/// assert_eq!(split_conserving(100, &[5_000, 5_000]), vec![50, 50]);
+///
+/// // 10 split 1/3 vs 2/3 → floors 3 & 6 leave 1; the larger fractional
+/// // remainder (treasury) wins the leftover unit deterministically.
+/// let parts = split_conserving(10, &[3_333, 6_667]);
+/// assert_eq!(parts, vec![3, 7]);
+/// assert_eq!(parts.iter().copied().sum::<u128>(), 10);
+/// ```
+pub fn split_conserving(total: u128, weights: &[u32]) -> Vec<u128> {
+    let n = weights.len();
+    assert!(n > 0, "split_conserving: at least one weight required");
+
+    if total == 0 {
+        return vec![0u128; n];
+    }
+
+    let total_weight: u128 = weights.iter().map(|w| *w as u128).sum();
+    if total_weight == 0 {
+        // No positive weight — there is no proportional signal, so collapse the
+        // entire amount onto the first bucket. Value is still conserved exactly.
+        let mut parts = vec![0u128; n];
+        parts[0] = total;
+        return parts;
+    }
+
+    let mut floors = Vec::with_capacity(n);
+    let mut remainders = Vec::with_capacity(n);
+    let mut allocated: u128 = 0;
+    // Overflow-safe apportionment. Because each individual weight `w_i` is at
+    // most the total weight `W`, `(total / W) * w_i <= total`, so the quotient
+    // term can never overflow a `u128`. The remainder term `(total % W) * w_i`
+    // is bounded by `W * w_i` which is also comfortably inside `u128`. This
+    // keeps the split sound even for maximum-magnitude token amounts.
+    let q = total / total_weight;
+    let r = total % total_weight;
+    for &w in weights {
+        let wi = w as u128;
+        let part = q * wi + (r * wi) / total_weight;
+        floors.push(part);
+        remainders.push((r * wi) % total_weight);
+        allocated += part;
+    }
+
+    // Leftover is at most n-1 (< n) base units; hand them out largest-remainder
+    // first, ties broken by ascending index. This never assigns more than one
+    // unit to any single bucket, so the loop is bounded and safe.
+    let mut leftover = total - allocated;
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| remainders[b].cmp(&remainders[a]).then(a.cmp(b)));
+    let mut cursor = 0;
+    while leftover > 0 {
+        floors[order[cursor % n]] += 1;
+        leftover -= 1;
+        cursor += 1;
+    }
+
+    floors
+}
+
+/// Compute pro-rated interest on `principal` over `time_delta` seconds at
+/// `rate_bps` and split the resulting amount across `weights` using
+/// [`split_conserving`].
+///
+/// The interest is floored exactly once (via [`prorate_interest`] with
+/// [`Rounding::Floor`]) and the single integer result is then apportioned
+/// without further truncation, so the recipients' shares sum exactly to the
+/// realized interest — no double-floor dust leak between sub-allocations.
+///
+/// # Returns
+///
+/// One share per weight; the vector sums exactly to the realized interest.
+///
+/// # Examples
+///
+/// ```rust
+/// use creditra_credit::math_utils::{prorate_interest_conserving, Rounding, SECONDS_PER_YEAR};
+///
+/// // 10_000 tokens @ 300 bps for one year → 300 interest, split 1/1.
+/// let shares = prorate_interest_conserving(
+///     10_000,
+///     300,
+///     SECONDS_PER_YEAR as u64,
+///     &[5_000, 5_000],
+/// );
+/// assert_eq!(shares, vec![150, 150]);
+/// ```
+pub fn prorate_interest_conserving(
+    principal: u128,
+    rate_bps: u32,
+    time_delta: u64,
+    weights: &[u32],
+) -> Vec<u128> {
+    let interest = prorate_interest(principal, rate_bps, time_delta, Rounding::Floor);
+    split_conserving(interest, weights)
+}
+
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -793,5 +933,117 @@ mod tests {
     #[test]
     fn deviation_negative_last_price_returns_none() {
         assert_eq!(compute_deviation_bps(100, -1), None);
+    }
+
+    // ── split_conserving (deterministic, value-conserving apportionment) ────────
+
+    #[test]
+    fn split_conserving_sums_to_total_exact() {
+        // Invariant: Σ parts == total for a wide sweep of inputs.
+        for total in [0u128, 1, 2, 3, 7, 10, 99, 100, 1_000, 10_000, u128::MAX / 2] {
+            let parts = split_conserving(total, &[3_333, 6_667]);
+            assert_eq!(
+                parts.iter().copied().sum::<u128>(),
+                total,
+                "split_conserving must conserve value for total={total}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_conserving_even_ratio_is_exact() {
+        assert_eq!(split_conserving(100, &[5_000, 5_000]), vec![50, 50]);
+        assert_eq!(split_conserving(101, &[5_000, 5_000]), vec![50, 51]);
+    }
+
+    #[test]
+    fn split_conserving_gives_leftover_to_largest_remainder() {
+        // 10 split 1/3 vs 2/3: floors 3 & 6, leftover 1 → larger fractional
+        // remainder (the 2/3 side) receives the extra unit deterministically.
+        assert_eq!(split_conserving(10, &[3_333, 6_667]), vec![3, 7]);
+    }
+
+    #[test]
+    fn split_conserving_reversed_weights_mirrors_output() {
+        // Symmetry: swapping weights swaps the parts.
+        let a = split_conserving(10, &[3_333, 6_667]);
+        let b = split_conserving(10, &[6_667, 3_333]);
+        assert_eq!(a, vec![b[1], b[0]]);
+    }
+
+    #[test]
+    fn split_conserving_deterministic_across_calls() {
+        // Same input → same output, every time.
+        let first = split_conserving(1_234_567, &[1_111, 2_222, 3_333, 4_444]);
+        let second = split_conserving(1_234_567, &[1_111, 2_222, 3_333, 4_444]);
+        assert_eq!(first, second);
+        // And it still conserves value.
+        assert_eq!(first.iter().copied().sum::<u128>(), 1_234_567);
+    }
+
+    #[test]
+    fn split_conserving_single_weight_takes_all() {
+        assert_eq!(split_conserving(42, &[10_000]), vec![42]);
+        assert_eq!(split_conserving(0, &[10_000]), vec![0]);
+    }
+
+    #[test]
+    fn split_conserving_all_zero_weights_collapses_to_first() {
+        // No proportional signal → entire amount lands on bucket 0; still conserved.
+        let parts = split_conserving(77, &[0, 0, 0]);
+        assert_eq!(parts, vec![77, 0, 0]);
+    }
+
+    #[test]
+    fn split_conserving_one_zero_weight_gets_nothing() {
+        // A zero weight only ever receives a leftover unit via a deterministic
+        // tie; with a positive weight present it receives nothing here.
+        let parts = split_conserving(100, &[10_000, 0]);
+        assert_eq!(parts, vec![100, 0]);
+    }
+
+    #[test]
+    fn split_conserving_boundary_single_unit() {
+        // Dust input must not be lost: 1 unit split 50/50 → 0/1 (leftover to
+        // the larger-remainder / lower-index side deterministically).
+        let parts = split_conserving(1, &[5_000, 5_000]);
+        assert_eq!(parts.iter().copied().sum::<u128>(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn split_conserving_empty_weights_panics() {
+        let _ = split_conserving(10, &[]);
+    }
+
+    // ── prorate_interest_conserving ─────────────────────────────────────────────
+
+    #[test]
+    fn prorate_interest_conserving_sums_to_realized_interest() {
+        let shares = prorate_interest_conserving(10_000, 300, SECONDS_PER_YEAR as u64, &[5_000, 5_000]);
+        let realized = prorate_interest(10_000, 300, SECONDS_PER_YEAR as u64, Rounding::Floor);
+        assert_eq!(shares.iter().copied().sum::<u128>(), realized);
+        assert_eq!(shares, vec![realized / 2, realized - realized / 2]);
+    }
+
+    #[test]
+    fn prorate_interest_conserving_zero_inputs() {
+        assert_eq!(
+            prorate_interest_conserving(0, 300, SECONDS_PER_YEAR as u64, &[3_333, 6_667]),
+            vec![0, 0]
+        );
+        assert_eq!(
+            prorate_interest_conserving(10_000, 0, SECONDS_PER_YEAR as u64, &[3_333, 6_667]),
+            vec![0, 0]
+        );
+    }
+
+    #[test]
+    fn prorate_interest_conserving_three_way_sums_exactly() {
+        let shares =
+            prorate_interest_conserving(1_000_000, 1_000, SECONDS_PER_YEAR as u64, &[1_000, 2_000, 7_000]);
+        let sum: u128 = shares.iter().copied().sum();
+        let realized = prorate_interest(1_000_000, 1_000, SECONDS_PER_YEAR as u64, Rounding::Floor);
+        assert_eq!(sum, realized);
     }
 }

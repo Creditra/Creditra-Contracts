@@ -1097,6 +1097,27 @@ pub fn set_repayment_schedule(
 /// Interest-only repayments and partial principal installments do not move the
 /// due date. Arithmetic uses checked/saturating operations so malformed state or
 /// extreme schedule values cannot wrap timestamps.
+/// Deterministically allocate a repayment across the debt components.
+///
+/// `utilized_amount` is treated as the total debt bucket and `accrued_interest`
+/// is the interest slice of that bucket. The allocator normalizes the current
+/// debt split before computing the repayment so `interest_repaid` and
+/// `principal_repaid` always derive from the same valid state, even when the
+/// line has drifted across a boundary or contains stale component values.
+pub fn allocate_repayment(
+    total_debt: i128,
+    accrued_interest: i128,
+    requested_amount: i128,
+) -> (i128, i128, i128) {
+    let total_debt = total_debt.max(0);
+    let normalized_interest = accrued_interest.min(total_debt).max(0);
+    let effective_repay = requested_amount.min(total_debt).max(0);
+    let interest_repaid = effective_repay.min(normalized_interest).max(0);
+    let principal_repaid = effective_repay.saturating_sub(interest_repaid);
+
+    (effective_repay, interest_repaid, principal_repaid)
+}
+
 pub fn advance_repayment_schedule_after_repay(
     env: &Env,
     borrower: &Address,
