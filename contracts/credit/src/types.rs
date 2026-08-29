@@ -166,7 +166,13 @@ pub enum CreditStatus {
 /// | 60   | `StaleStateTransition`         | Lifecycle     | Transition rejected: the credit line is already in the requested target state |
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
-#[soroban_sdk::contracterror]
+/// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
+// `export = false`: `ContractError` has grown past the 50-case limit the
+// Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
+// exported type spec. Errors still surface to clients with their pinned numeric
+// discriminants (see `tests/error_discriminants.rs`); only the spec entry is
+// skipped. Mirrors the same decision already applied to `DataKey`.
+#[soroban_sdk::contracterror(export = false)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
@@ -251,6 +257,16 @@ pub enum ContractError {
     /// The settlement is safe to retry with a corrected `recovered_amount` or
     /// after the auction contract issue is resolved.
     AuctionCallFailed = 62,
+    /// A fee-configuration change was rejected because at least one liquidation
+    /// auction is currently active (Issue #1169).
+    ///
+    /// Fee parameters — protocol fee, treasury/bounty fee-share split, penalty
+    /// surcharge, and flat / structured late fees — are frozen while any
+    /// defaulted credit line has an in-flight liquidation auction, so that the
+    /// economics of an ongoing auction and its eventual settlement are
+    /// deterministic. The block lifts when the last active auction exits the
+    /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
+    AuctionActive = 63,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -306,7 +322,8 @@ impl ContractError {
             | Self::CreditLineDefaulted
             | Self::AlreadySettled
             | Self::LiquidationGraceActive
-            | Self::StaleStateTransition => Lifecycle,
+            | Self::StaleStateTransition
+            | Self::AuctionActive => Lifecycle,
 
             Self::InvalidAmount
             | Self::NegativeLimit

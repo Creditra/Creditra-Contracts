@@ -389,6 +389,9 @@ pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
 pub fn set_late_fee_flat(env: Env, fee: i128) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    // Issue #1169: fee parameters are frozen while a liquidation auction is
+    // active so in-flight auction economics stay deterministic.
+    crate::storage::assert_no_active_auctions(&env);
     if fee < 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }
@@ -437,9 +440,20 @@ pub fn open_credit_line(
             env.panic_with_error(ContractError::AlreadyInitialized);
         }
 
-        // Prevent borrower-controlled status bypasses on existing lines.
-        require_admin_auth(&env);
+        // Issue #1169: re-opening a `Defaulted` line replaces the defaulted
+        // record with a fresh `Active` line, which abandons the liquidation
+        // auction. `persist_credit_line` is called with `previous_status =
+        // None` below, so the active-auction counter is maintained here
+        // explicitly.
+        if existing.status == CreditStatus::Defaulted {
+            crate::storage::decrement_pending_auction_count(&env);
+        }
     }
+    // Re-opening any existing non-Active line is admin-gated: auth is enforced
+    // by the `lib.rs` wrapper (`require_admin_auth`), not re-checked here — a
+    // second `require_auth` for the already-authorized admin address within one
+    // invocation is rejected by the Soroban auth frame as
+    // `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
 
     let previous_utilized = existing_line
         .map(|existing| existing.utilized_amount)
@@ -768,6 +782,12 @@ pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
 
     let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Closed;
+    // Issue #1169: admin force-closing a defaulted line abandons its
+    // liquidation auction, so the active-auction counter is decremented
+    // atomically with the status write.
+    if previous_status == CreditStatus::Defaulted {
+        crate::storage::decrement_pending_auction_count(&env);
+    }
     persist_credit_line(
         &env,
         &borrower,
@@ -890,6 +910,11 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 
     let previous_status = credit_line.status;
     credit_line.status = CreditStatus::Defaulted;
+    // Issue #1169: entering `Defaulted` marks this line's liquidation auction
+    // as active. The increment happens atomically with the status write in the
+    // same host transaction, so fee-config guards never observe a half-updated
+    // state.
+    crate::storage::increment_pending_auction_count(&env);
     persist_credit_line(
         &env,
         &borrower,
@@ -1021,7 +1046,10 @@ pub fn settle_default_liquidation(
     oracle_price: Option<i128>,
 ) {
     // Step 1: Authorization
-    require_admin_auth(&env);
+    // Admin auth is enforced by the `lib.rs` wrapper (see `suspend_credit_line`
+    // for why this is not re-checked here): a second `require_auth` for the
+    // already-authorized admin address within one invocation is rejected by the
+    // Soroban auth frame as `Error(Auth, ExistingValue)`.
 
     // Step 2: Numeric validation (cheap checks before any storage reads)
     if recovered_amount <= 0 {
@@ -1087,6 +1115,13 @@ pub fn settle_default_liquidation(
     let previous_status = credit_line.status;
     if credit_line.utilized_amount == 0 {
         credit_line.status = CreditStatus::Closed;
+    }
+
+    // Issue #1169: a full settlement transitions the line out of `Defaulted`,
+    // ending its active auction. A partial settlement leaves the line in
+    // `Defaulted`, so the auction stays active and the counter is untouched.
+    if previous_status == CreditStatus::Defaulted && credit_line.status == CreditStatus::Closed {
+        crate::storage::decrement_pending_auction_count(&env);
     }
 
     persist_credit_line(
@@ -1202,6 +1237,12 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
     let previous_status = credit_line.status;
     credit_line.status = target_status;
     credit_line.suspension_ts = 0;
+    // Issue #1169: reinstating a defaulted line abandons its liquidation
+    // auction, so the active-auction counter is decremented atomically with
+    // the status write.
+    if previous_status == CreditStatus::Defaulted {
+        crate::storage::decrement_pending_auction_count(&env);
+    }
     persist_credit_line(
         &env,
         &borrower,

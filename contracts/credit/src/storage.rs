@@ -134,6 +134,15 @@ pub enum DataKey {
     CreditLineCount,
     /// Count of currently Active credit lines.
     ActiveLineCount,
+    /// Count of credit lines whose liquidation auction is currently active
+    /// (i.e. lines in [`CreditStatus::Defaulted`] with an in-flight auction).
+    ///
+    /// Incremented when a line enters `Defaulted` and decremented when a line
+    /// exits the `Defaulted` pipeline (full settlement, reinstate, admin
+    /// force-close, or reopen). While non-zero, fee-configuration entrypoints
+    /// revert with [`ContractError::AuctionActive`] so auction economics stay
+    /// deterministic (Issue #1169).
+    PendingAuctionCount,
     /// Borrower → stable numeric id used for deterministic enumeration.
     CreditLineIdByBorrower(Address),
     /// Stable numeric id → borrower address.
@@ -406,6 +415,62 @@ pub fn decrement_active_line_count(env: &Env) {
     env.storage()
         .instance()
         .set(&DataKey::ActiveLineCount, &count.saturating_sub(1));
+}
+
+// ── Active liquidation auction tracking (Issue #1169) ────────────────────────
+//
+// A liquidation auction is considered **active** from the moment a credit line
+// enters `CreditStatus::Defaulted` until that line exits the `Defaulted`
+// pipeline through one of the four terminal paths:
+//
+//   1. `settle_default_liquidation` with full recovery   (Defaulted → Closed)
+//   2. `reinstate_credit_line`                           (Defaulted → Active/Restricted)
+//   3. `close_credit_line` admin force-close              (Defaulted → Closed)
+//   4. `open_credit_line` admin reopen                    (Defaulted → Active)
+//
+// A **partial** settlement leaves the line in `Defaulted`, so the auction stays
+// active and the counter is not touched.
+//
+// The counter is maintained atomically with the credit-line status transition
+// inside the same host transaction, so the guard below sees a consistent,
+// deterministic value under any interleaving of concurrent calls.
+
+/// Return the number of credit lines with an active liquidation auction.
+pub fn get_pending_auction_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingAuctionCount)
+        .unwrap_or(0)
+}
+
+/// Mark one more liquidation auction as active (line entered `Defaulted`).
+pub fn increment_pending_auction_count(env: &Env) {
+    let count = get_pending_auction_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAuctionCount, &count.saturating_add(1));
+}
+
+/// Mark one liquidation auction as no longer active (line exited `Defaulted`).
+pub fn decrement_pending_auction_count(env: &Env) {
+    let count = get_pending_auction_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAuctionCount, &count.saturating_sub(1));
+}
+
+/// Revert with [`crate::types::ContractError::AuctionActive`] if any
+/// liquidation auction is currently active.
+///
+/// This is the deterministic state check injected into fee-configuration
+/// entrypoints (Issue #1169): while an auction is in flight, changing the
+/// protocol fee, fee-share split, penalty surcharge, or late-fee schedule
+/// could silently change the economics of the in-flight auction or its
+/// eventual settlement, so such changes are rejected atomically.
+pub fn assert_no_active_auctions(env: &Env) {
+    if get_pending_auction_count(env) > 0 {
+        env.panic_with_error(crate::types::ContractError::AuctionActive);
+    }
 }
 
 /// Return the configured global exposure cap, if set.

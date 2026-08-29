@@ -16,7 +16,9 @@ crate-type = ["cdylib", "rlib"]
 instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
 
 [dependencies]
-soroban-sdk = { workspace = true }
+# `alloc` provides the WASM global allocator required because math_utils uses
+# `alloc::vec` (heap allocation) in the no_std contract build.
+soroban-sdk = { workspace = true, features = ["alloc"] }
 serde = { version = "1.0", optional = true, default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", optional = true, default-features = false }
 
