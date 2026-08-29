@@ -122,7 +122,6 @@ mod lifecycle_views;
 
 mod limits;
 pub mod math_utils;
-mod oracles;
 mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
@@ -133,57 +132,6 @@ pub use crate::types::FreezeReason;
 mod scoring;
 mod storage;
 pub mod types;
-mod views;
-
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
-
-use crate::auth::{require_admin, require_admin_auth};
-use crate::attestation::AttestationBatch;
-use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
-    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event,
-    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
-    publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
-    publish_paused_event, publish_protocol_fee_bounds_set_event,
-    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
-    CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
-};
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
-use crate::penalties::LateFeeConfig;
-use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
-    clear_pending_treasury_withdrawal, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
-    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
-    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
-    set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
-    set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
-};
-use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
-use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig,
-    GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
-};
-
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
-use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
-use auth::require_admin_auth;
-
 
 #[cfg(test)]
 mod boundary_tests;
@@ -203,17 +151,18 @@ use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrower_blocked_event, publish_borrower_frozen_event,
-    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
-    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
-    publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
+    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
+    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
+    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
     publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
     publish_oracle_quorum_price_set_event, publish_paused_event,
     publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
     publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
+    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
@@ -229,7 +178,8 @@ use crate::storage::{
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
     set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
+    MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
@@ -399,22 +349,6 @@ impl Credit {
     pub fn set_liquidity_source(env: Env, reserve_address: Address) {
         config::set_liquidity_source(env, reserve_address)
     }
-
-    /// Sets the minimum collateral ratio in basis points (admin only).
-    /// Set the minimum collateral ratio required for borrowing (admin only).
-    ///
-    /// # Arguments
-    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
-    ///
-    /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
-    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
-    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
-        require_admin_auth(&env);
-        assert_not_paused(&env);
-        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
-    }
-
 
     /// Open a new credit line for a borrower (admin only).
     pub fn open_credit_line(
@@ -1777,6 +1711,33 @@ impl Credit {
         lifecycle::self_suspend_credit_line(env, borrower)
     }
 
+    /// Unsuspend a credit line (admin only).
+    ///
+    /// Transitions `Suspended` or `SelfSuspended` → `Active`. This is the
+    /// admin recovery path for both suspension origins; it clears
+    /// `suspension_ts` and emits `("credit","unsuspend")`.
+    ///
+    /// # Authorization
+    /// Admin only. Borrowers cannot unsuspend an admin `Suspended` line via
+    /// `self_unsuspend_credit_line` — that path only handles `SelfSuspended`.
+    pub fn unsuspend_credit_line(env: Env, borrower: Address) {
+        require_admin_auth(&env);
+        enforce_accrual_admin_cooldown(&env, &borrower);
+        lifecycle::unsuspend_credit_line(env, borrower)
+    }
+
+    /// Borrower-initiated unsuspend for self-suspended lines only.
+    ///
+    /// Transitions `SelfSuspended → Active`. Lets a borrower revert their own
+    /// voluntary suspension without admin. An admin `Suspended` line **cannot**
+    /// be cleared via this path — least privilege.
+    ///
+    /// # Authorization
+    /// Requires `borrower.require_auth()`.
+    pub fn self_unsuspend_credit_line(env: Env, borrower: Address) {
+        lifecycle::self_unsuspend_credit_line(env, borrower)
+    }
+
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         closer.require_auth();
         if closer == require_admin(&env) {
@@ -1950,6 +1911,7 @@ impl Credit {
             recovered_amount,
             settlement_id,
             close_factor_bps,
+            oracle_price,
         );
         clear_reentrancy_guard(&env);
     }

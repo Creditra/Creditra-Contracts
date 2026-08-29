@@ -65,6 +65,9 @@
 
 #![allow(dead_code)]
 
+extern crate alloc;
+use alloc::vec::Vec;
+
 /// Scaling factor used for fixed-point intermediate arithmetic (10^18).
 pub const SCALE: u128 = 1_000_000_000_000_000_000_u128;
 
@@ -132,6 +135,32 @@ pub fn mul_div(a: u128, numerator: u128, denominator: u128, rounding: Rounding) 
                 quotient.checked_add(1).expect("math_utils: ceil overflow")
             } else {
                 quotient
+            }
+        }
+    }
+}
+
+/// Checked variant of `mul_div` that returns `None` on overflow or division by
+/// zero instead of panicking. Used by callers that need to surface
+/// `ContractError::Overflow` as a typed error rather than an unhandled panic.
+pub fn safe_mul_div(
+    a: u128,
+    numerator: u128,
+    denominator: u128,
+    rounding: Rounding,
+) -> Option<u128> {
+    if denominator == 0 {
+        return None;
+    }
+    let product = a.checked_mul(numerator)?;
+    let quotient = product / denominator;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if product % denominator != 0 {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
             }
         }
     }
@@ -419,14 +448,14 @@ pub fn split_conserving(total: u128, weights: &[u32]) -> Vec<u128> {
     assert!(n > 0, "split_conserving: at least one weight required");
 
     if total == 0 {
-        return vec![0u128; n];
+        return alloc::vec![0u128; n];
     }
 
     let total_weight: u128 = weights.iter().map(|w| *w as u128).sum();
     if total_weight == 0 {
         // No positive weight — there is no proportional signal, so collapse the
         // entire amount onto the first bucket. Value is still conserved exactly.
-        let mut parts = vec![0u128; n];
+        let mut parts = alloc::vec![0u128; n];
         parts[0] = total;
         return parts;
     }
@@ -454,7 +483,7 @@ pub fn split_conserving(total: u128, weights: &[u32]) -> Vec<u128> {
     // unit to any single bucket, so the loop is bounded and safe.
     let mut leftover = total - allocated;
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| remainders[b].cmp(&remainders[a]).then(a.cmp(b)));
+    order.sort_by(|&a, &b| remainders[b].cmp(&remainders[a]).then(a.cmp(&b)));
     let mut cursor = 0;
     while leftover > 0 {
         floors[order[cursor % n]] += 1;

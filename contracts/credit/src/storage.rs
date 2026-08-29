@@ -59,8 +59,8 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
+    OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
@@ -264,8 +264,6 @@ pub enum DataKey {
     BorrowerExposureCap(Address),
     /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
-    /// Per-borrower, per-token collateral balance (multi-collateral path).
-    CollateralBalanceV2(Address, Address),
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
 }
@@ -1576,4 +1574,67 @@ pub fn enforce_freeze_cooldown(env: &Env) {
             env.panic_with_error(ContractError::FreezeCooldownActive);
         }
     }
+}
+
+// ── Grace period config (instance) ───────────────────────────────────────────
+
+pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
+    env.storage().instance().get(&grace_period_key(env))
+}
+
+// ── Per-borrower liquidation grace (persistent) ───────────────────────────────
+
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+        .unwrap_or(0)
+}
+
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, secs: u64) {
+    let key = DataKey::LiquidationGracePeriod(borrower.clone());
+    if secs == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &secs);
+        bump_persistent_ttl(env, &key);
+    }
+}
+
+// ── Oracle quorum config (instance) ─────────────────────────────────────────
+
+pub fn get_oracle_quorum_config(env: &Env) -> Option<OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+pub fn set_oracle_quorum_config(env: &Env, cfg: &OracleQuorumConfig) {
+    env.storage().instance().set(&DataKey::OracleQuorumConfig, cfg);
+}
+
+// ── Treasury withdrawal proposal (instance) ───────────────────────────────────
+
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<TreasuryWithdrawalProposal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &TreasuryWithdrawalProposal) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
+}
+
+// ── Max borrower exposure (persistent) ────────────────────────────────────────
+
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }

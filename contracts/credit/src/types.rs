@@ -66,7 +66,11 @@ use soroban_sdk::{contracttype, Address};
 /// - `Active` is the only state that permits new draws.
 /// - `Restricted` allows draws but the numeric limit check will fail until
 ///   the borrower repays under the reduced ceiling.
-/// - `Suspended` and `Defaulted` both block draws and allow repayments.
+/// - `Suspended` (admin) and `SelfSuspended` (borrower) both block draws and
+///   allow repayments; they are distinct for auditability and authorization —
+///   see the module docs for `lifecycle::suspend_credit_line` vs
+///   `lifecycle::self_suspend_credit_line`.
+/// - `Defaulted` blocks draws and allows repayments for cure.
 /// - `Closed` is terminal — no draws, no repayments.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,6 +86,11 @@ pub enum CreditStatus {
     /// Credit limit was decreased below utilized amount; excess must be repaid.
     /// Draws are not flat-blocked but will fail the numeric limit check until cured.
     Restricted = 4,
+    /// Credit line is voluntarily frozen by the borrower. Draws blocked,
+    /// repayments allowed. Distinct from `Suspended` (admin-initiated) for
+    /// least-privilege: the borrower can self-unsuspend, while an admin
+    /// suspension requires admin unsuspend.
+    SelfSuspended = 5,
 }
 
 /// Errors that can be returned by the Credit contract.
@@ -746,16 +755,53 @@ pub struct ProofOfReserve {
     pub bounty_balance: i128,
 }
 
+/// Paginated view of credit lines for off-chain reporting.
+///
+/// Returned by `get_credit_lines_paginated` to enable efficient navigation
+/// through large sets of credit lines using cursor-based pagination.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Vector of credit line data for this page.
+    pub lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor for the next page, or `None` if this is the last page.
+    pub next_cursor: Option<u32>,
+    /// Whether more results are available beyond this page.
+    pub has_more: bool,
+}
+
+/// Oracle quorum configuration for multi-oracle price feeds.
+///
+/// Used by `set_oracle_quorum_config` to configure the quorum threshold,
+/// deviation bound, and staleness window for the quorum-of-K price
+/// resolution algorithm.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleQuorumConfig {
+    /// Minimum number of oracle prices that must agree within `max_deviation_bps`.
+    pub min_quorum_k: u32,
+    /// Maximum allowed deviation between the lowest and highest price in a
+    /// qualifying window, in basis points.
+    pub max_deviation_bps: u32,
+    /// Maximum age of a quorum price in seconds before it is considered stale.
+    pub max_age_seconds: u64,
+}
+
 /// Full state snapshot for a borrower's credit line.
 ///
 /// Returned by `get_borrow_state` to provide a comprehensive view of the
 /// borrower's current state in a single read-only call. This includes
 /// credit line data, collateral balance, and borrow capabilities.
+///
+/// # Field encoding
+/// `credit_line` is a `Vec` with 0 or 1 element rather than `Option<T>`
+/// because the Soroban SDK's `#[contracttype]` XDR codegen does not support
+/// `Option<CustomStruct>` for `#[contracttype]`-derived UDTs.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowStateSnapshot {
-    /// The full credit line data if it exists, or `None`.
-    pub credit_line: Option<CreditLineData>,
+    /// The full credit line data if it exists, or an empty vec.
+    pub credit_line: soroban_sdk::Vec<CreditLineData>,
     /// The borrower's collateral balance.
     pub collateral_balance: i128,
     /// The borrower's current borrow capabilities.

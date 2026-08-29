@@ -65,10 +65,14 @@ pub fn capabilities(env: Env, borrower: Address) -> LifecycleCapabilities {
                 // close_credit_line (borrower): admin precondition + zero utilization.
                 let can_close_borrower = can_close_admin && line.utilized_amount == 0;
 
-                // default_credit_line: Active, Restricted, or Suspended.
+                // default_credit_line: Active, Restricted, Suspended, or SelfSuspended.
+                // Both suspension origins are default-eligible; distinction is audit-only.
                 let can_default = matches!(
                     status,
-                    CreditStatus::Active | CreditStatus::Restricted | CreditStatus::Suspended
+                    CreditStatus::Active
+                        | CreditStatus::Restricted
+                        | CreditStatus::Suspended
+                        | CreditStatus::SelfSuspended
                 );
 
                 // reinstate_credit_line: Defaulted only.
