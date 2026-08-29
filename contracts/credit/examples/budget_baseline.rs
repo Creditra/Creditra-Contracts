@@ -281,6 +281,92 @@ fn main() {
         );
     }
 
+    // ── place_bid ─────────────────────────────────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_bid");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        let sample = BudgetSample::measure(&env, || {
+            auction.place_bid(&auction_id, &bidder1, &100_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::PLACE_BID,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
+    // ── bid_refunded ──────────────────────────────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, bidder2) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_refund");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        auction.place_bid(&auction_id, &bidder1, &100_i128);
+        let sample = BudgetSample::measure(&env, || {
+            auction.place_bid(&auction_id, &bidder2, &200_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::BID_REFUNDED,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
+    // ── settle_default_liquidation (auction) ──────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_settle");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        auction.place_bid(&auction_id, &bidder1, &100_i128);
+        auction.close_auction(&auction_id);
+        
+        let borrower = Address::generate(&env);
+        let sample = BudgetSample::measure(&env, || {
+            auction.settle_default_liquidation(&auction_id, &admin, &borrower);
+        });
+        push(
+            &mut results,
+            entrypoint::SETTLE_DEFAULT_LIQUIDATION,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
     assert_eq!(results.len(), entrypoint::ALL.len());
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
