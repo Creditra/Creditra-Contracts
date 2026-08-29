@@ -9,7 +9,8 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    BorrowCapabilities, BorrowStateSnapshot, CreditLineSnapshot, CreditLinesPage, ProofOfReserve,
+    ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -247,12 +248,17 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
 /// and does not mutate any state. TTL may be bumped if the borrower's
 /// persistent entry is near expiry, but this does not change logical state.
 pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
-    let credit_line = get_credit_line(&env, &borrower);
+    let credit_line_opt = get_credit_line(&env, &borrower);
     let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
     let capabilities = borrow_capabilities(env.clone(), borrower.clone());
 
+    let mut credit_line_vec = soroban_sdk::Vec::new(&env);
+    if let Some(line) = credit_line_opt {
+        credit_line_vec.push_back(line);
+    }
+
     BorrowStateSnapshot {
-        credit_line,
+        credit_line: credit_line_vec,
         collateral_balance,
         capabilities,
     }

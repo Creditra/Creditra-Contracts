@@ -10,9 +10,9 @@
 //! disabled (same semantics as borrower draw cooldown).
 
 use crate::auth::require_admin_auth;
-use crate::storage::self, assert_not_paused};
+use crate::storage::{self, assert_not_paused};
 use crate::types::ContractError;
-use soroban_sdk::Address, Env, Vec;
+use soroban_sdk::{Address, Env, Vec};
 
 /// Enforce the configured cool-off since the last critical collateral admin action.
 fn enforce_admin_collateral_cooldown(env: &Env) {
