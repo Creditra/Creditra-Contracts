@@ -560,12 +560,31 @@ impl Auction {
 
     /// Closes an open auction, transitioning its status from `Open` to `Closed`.
     ///
-    /// The caller must be the registered factory contract.  After closing, the
-    /// auction is eligible for `settle_default_liquidation` (factory-only) or
-    /// `claim_auction` (winner-only).
+    /// After closing, the auction is eligible for `settle_default_liquidation`
+    /// (factory-only) or `claim_auction` (winner-only).
     ///
     /// # Authorization
-    /// Requires [`Address::require_auth`] from the registered factory contract.
+    ///
+    /// Closing is gated on the auction's own `end_time` ledger boundary —
+    /// the same boundary `place_bid` already uses (`now >= end_time`) to stop
+    /// accepting bids:
+    ///
+    /// - **Before** `end_time` (`now < end_time`): only the registered
+    ///   factory contract may close, via [`Address::require_auth`]. This
+    ///   preserves the existing early-close capability the default-liquidation
+    ///   flow relies on (e.g. closing an auction ahead of schedule once a
+    ///   borrower defaults).
+    /// - **At or after** `end_time` (`now >= end_time`): closing is
+    ///   permissionless. No value moves in `close_auction` — it only flips
+    ///   `Open` → `Closed` — so opening this up is safe, and it removes a
+    ///   liveness hazard: without it, an auction whose factory never calls
+    ///   `close_auction` after the deadline would leave a legitimate winning
+    ///   bidder's already-transferred funds permanently unclaimable, since
+    ///   `claim_auction` requires `Closed` status.
+    ///
+    /// This makes the `Open` → `Closed` transition a deterministic function
+    /// of ledger time once the boundary is crossed, rather than depending
+    /// solely on a privileged caller acting.
     ///
     /// # Parameters
     /// - `env`: The execution environment.
@@ -579,7 +598,6 @@ impl Auction {
     pub fn close_auction(env: Env, auction_id: Symbol) {
         let factory = get_factory_contract(&env)
             .unwrap_or_else(|| env.panic_with_error(AuctionError::NoFactoryContract));
-        factory.require_auth();
 
         let mut state: AuctionState = env
             .storage()
@@ -592,6 +610,15 @@ impl Auction {
             AuctionStatus::Claimed => env.panic_with_error(AuctionError::AlreadyClaimed),
             AuctionStatus::Closed => env.panic_with_error(AuctionError::AuctionNotOpen),
             AuctionStatus::Open => {}
+        }
+
+        // Deterministic ledger-boundary check: mirrors the `now >= end_time`
+        // cutoff `place_bid` already enforces. Only once that same boundary
+        // is crossed does closing stop requiring factory authorization.
+        let now = env.ledger().timestamp();
+        let past_deadline = now >= state.config.end_time;
+        if !past_deadline {
+            factory.require_auth();
         }
 
         state.status = AuctionStatus::Closed;

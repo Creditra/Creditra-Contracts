@@ -21,6 +21,13 @@
 //! revert with the documented `AuctionError` discriminant and leave stored status
 //! unchanged.
 //!
+//! `close_auction`'s `Open → Closed` transition is additionally gated on the
+//! `end_time` ledger boundary: before it, only the factory may close
+//! (`Address::require_auth`); at or after it, closing is permissionless. All
+//! cases below run under `env.mock_all_auths()`, so both sides of that
+//! boundary succeed identically here — the boundary itself is covered by the
+//! dedicated `close_auction_*` tests in `src/test.rs`.
+//!
 //! # Running
 //!
 //! ```bash
