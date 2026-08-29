@@ -367,6 +367,38 @@ pub fn get_total_utilized(env: &Env) -> i128 {
         .unwrap_or(0)
 }
 
+/// Assert that the persisted `TotalUtilized` accumulator matches the live sum of
+/// every credit line's `utilized_amount`.
+///
+/// This is a fail-closed invariant check: any drift in the aggregate is treated
+/// as protocol corruption and aborts the transaction with a deterministic error
+/// message so operators can diagnose storage drift without exposing sensitive
+/// state.
+pub fn assert_total_utilized_conserved(env: &Env) {
+    let stored_total = get_total_utilized(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        let Some(line) = env.storage().persistent().get::<Address, CreditLineData>(&borrower)
+        else {
+            continue;
+        };
+        recomputed_total = recomputed_total
+            .checked_add(line.utilized_amount)
+            .unwrap_or_else(|| panic!("utilization conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "utilization conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
+}
+
 /// Return the global collateral accumulator.
 pub fn get_total_collateral(env: &Env) -> i128 {
     bump_instance_ttl(env);
@@ -374,6 +406,30 @@ pub fn get_total_collateral(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::TotalCollateral)
         .unwrap_or(0)
+}
+
+/// Assert that the persisted `TotalCollateral` accumulator matches the live sum of
+/// the tracked collateral balances for the known borrower set.
+pub fn assert_total_collateral_conserved(env: &Env) {
+    let stored_total = get_total_collateral(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        let balance = get_collateral_balance(env, &borrower);
+        recomputed_total = recomputed_total
+            .checked_add(balance)
+            .unwrap_or_else(|| panic!("collateral conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "collateral conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
 }
 
 /// Return the number of indexed credit lines.
@@ -482,6 +538,7 @@ pub fn adjust_total_utilized(env: &Env, previous_utilized: i128, new_utilized: i
     env.storage()
         .instance()
         .set(&DataKey::TotalUtilized, &updated_total);
+    assert_total_utilized_conserved(env);
 }
 
 /// Adjust the global collateral accumulator by the change in one borrower balance.
@@ -499,6 +556,7 @@ pub fn adjust_total_collateral(env: &Env, previous_balance: i128, new_balance: i
     env.storage()
         .instance()
         .set(&DataKey::TotalCollateral, &updated_total);
+    assert_total_collateral_conserved(env);
 }
 
 /// Persist a credit line and atomically apply its contribution delta to the

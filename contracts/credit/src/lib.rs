@@ -279,6 +279,10 @@ pub struct Credit;
 
 #[contractimpl]
 impl Credit {
+    pub fn init(env: Env, admin: Address) {
+        config::init(env, admin)
+    }
+
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
     }
@@ -2651,7 +2655,7 @@ mod test_rate_change_limits {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger as _;
-    use soroban_sdk::token;
+    use soroban_sdk::token::{self, StellarAssetClient};
 
     fn setup<'a>(
         env: &'a Env,
@@ -2701,6 +2705,69 @@ mod test_rate_change_limits {
                 "active credit lines must stay within their limit"
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "utilization conservation")]
+    fn test_total_utilized_invariant_rejects_state_drift() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&contract_id);
+
+        let sac = StellarAssetClient::new(&env, &token);
+        sac.mint(&contract_id, &100_000_i128);
+        sac.mint(&borrower, &100_000_i128);
+
+        client.open_credit_line(&borrower, &10_000_i128, &300_u32, &70_u32);
+        client.deposit_collateral(&borrower, &5_000_i128);
+        client.draw_credit(&borrower, &1_000_i128);
+
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .set(&crate::storage::DataKey::TotalUtilized, &9_999_i128);
+            crate::storage::assert_total_utilized_conserved(&env);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "collateral conservation")]
+    fn test_total_collateral_invariant_rejects_state_drift() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&contract_id);
+
+        let sac = StellarAssetClient::new(&env, &token);
+        sac.mint(&contract_id, &100_000_i128);
+        sac.mint(&borrower, &100_000_i128);
+
+        client.open_credit_line(&borrower, &10_000_i128, &300_u32, &70_u32);
+        client.deposit_collateral(&borrower, &5_000_i128);
+
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .set(&crate::storage::DataKey::TotalCollateral, &4_999_i128);
+            crate::storage::assert_total_collateral_conserved(&env);
+        });
     }
 
     #[test]

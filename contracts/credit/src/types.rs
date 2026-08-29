@@ -166,7 +166,13 @@ pub enum CreditStatus {
 /// | 60   | `StaleStateTransition`         | Lifecycle     | Transition rejected: the credit line is already in the requested target state |
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
-#[soroban_sdk::contracterror]
+// `export = false`: this enum is intentionally huge and is used as the
+// protocol's internal Rust error vocabulary for stable discriminants, but it
+// is not meant to be exported through the generated Soroban contract spec.
+// The SDK enforces a strict case cap on exported error UDTs, and this enum has
+// already outgrown that limit. Keeping the ABI of the public contract stable
+// for clients is still preserved by the fixed numeric discriminants.
+#[soroban_sdk::contracterror(export = false)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
