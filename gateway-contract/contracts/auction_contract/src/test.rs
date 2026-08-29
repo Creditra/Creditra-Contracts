@@ -2692,4 +2692,167 @@ mod liquidation_grace_window {
             "zero grace window must allow immediate bid at start_time"
         );
     }
+
+    // -----------------------------------------------------------------
+    // close_auction ledger-boundary determinism (Issue #1135)
+    //
+    // These tests deliberately avoid `env.mock_all_auths()`: that call
+    // makes every `require_auth()` in the environment trivially succeed
+    // for the rest of the test, which would make it impossible to prove
+    // that `close_auction` skips the factory-auth check once the ledger
+    // has crossed `end_time`. Instead, only the setup call that needs
+    // authorization (`set_factory_contract`) is scoped with
+    // `client.mock_auths(...)`; `close_auction` itself is invoked with
+    // zero authorizations in scope, so it only succeeds if the
+    // permissionless (post-deadline) path is actually taken.
+    // -----------------------------------------------------------------
+
+    fn setup_boundary_auction(
+        env: &Env,
+        start_time: u64,
+        end_time: u64,
+    ) -> (AuctionClient<'_>, Address, Address, Symbol) {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(env, &contract_id);
+        let factory = Address::generate(env);
+        let auction_id = Symbol::new(env, "boundary_auc");
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &factory,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "set_factory_contract",
+                    args: (factory.clone(),).into_val(env),
+                    sub_invokes: &[],
+                },
+            }])
+            .set_factory_contract(&factory);
+
+        // init_auction requires no authorization.
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &start_time,
+            &end_time,
+            &1_i128,
+            &0_u32,
+            &None,
+            &None,
+            &Some(DutchAuctionDecay::None),
+            &None,
+        );
+
+        (client, factory, contract_id, auction_id)
+    }
+
+    #[test]
+    fn close_auction_before_deadline_requires_factory_auth() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(999); // one tick before end_time
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_err(),
+            "unauthorized close before end_time must be rejected"
+        );
+    }
+
+    #[test]
+    fn close_auction_factory_can_force_close_before_deadline() {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
+
+        let env = Env::default();
+        let (client, factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(500); // well before end_time
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &factory,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "close_auction",
+                    args: (auction_id.clone(),).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "factory must still be able to force-close before end_time"
+        );
+    }
+
+    #[test]
+    fn close_auction_at_exact_deadline_is_permissionless() {
+        let env = Env::default();
+        let (client, _factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000); // exact boundary
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "close at the exact end_time boundary must not require factory auth"
+        );
+
+        let stored_state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_state.status, AuctionStatus::Closed);
+    }
+
+    #[test]
+    fn close_auction_after_deadline_is_permissionless() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1001); // one tick after end_time
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "close after end_time must not require factory auth"
+        );
+    }
+
+    #[test]
+    fn close_auction_permissionless_path_is_duplicate_safe() {
+        let env = Env::default();
+        let (client, _factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000);
+        client.close_auction(&auction_id);
+
+        // A second, still-unauthorized close attempt must not silently
+        // succeed again or move state; it must hit the terminal-state
+        // check before authorization is even considered.
+        let retry = client.try_close_auction(&auction_id);
+        assert!(
+            retry.is_err(),
+            "closing an already-closed auction must fail deterministically on retry"
+        );
+
+        let stored_state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_state.status, AuctionStatus::Closed);
+    }
+
+    #[test]
+    fn close_auction_invalid_auction_id_is_rejected_regardless_of_time() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, _auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000);
+        let missing_id = Symbol::new(&env, "does_not_exist");
+        let result = client.try_close_auction(&missing_id);
+        assert!(
+            result.is_err(),
+            "closing a nonexistent auction id must fail deterministically"
+        );
+    }
 }
