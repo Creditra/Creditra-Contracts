@@ -40,6 +40,10 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized,
 
+    /// A caller supplied a credit-line identifier belonging to a different tenant.
+    #[error("CrossTenantIdentifier")]
+    CrossTenantIdentifier,
+
     /// Collateral is insufficient for the requested operation.
     ///
     /// Semantic error raised when posted or available collateral cannot
@@ -142,7 +146,9 @@ impl ContractError {
             ContractError::CreditLineNotFound(_) | ContractError::DrawNotFound(_, _) => {
                 ContractErrorCategory::NotFound
             }
-            ContractError::Unauthorized => ContractErrorCategory::Auth,
+            ContractError::Unauthorized | ContractError::CrossTenantIdentifier => {
+                ContractErrorCategory::Auth
+            }
             ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
             ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
             ContractError::CollateralTokenNotAllowed => ContractErrorCategory::Collateral,
