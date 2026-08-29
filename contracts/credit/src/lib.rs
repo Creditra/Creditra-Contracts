@@ -114,6 +114,7 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod oracle_validation;
 mod oracles;
 
 #[path = "../../lifecycle/src/views.rs"]
