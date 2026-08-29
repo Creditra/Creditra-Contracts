@@ -202,6 +202,11 @@ pub struct Auction;
 pub enum AuctionKey {
     Closed(Symbol),
     LiquidationSettled(Symbol),
+    /// Replay barrier for a successful bid acceptance. The identity is the
+    /// auction id plus the bidder address and exact bid amount. Reusing the same
+    /// identity is treated as a no-op so a retried transaction cannot re-apply
+    /// the same state transition or refund path.
+    BidAccepted(Symbol, Address, i128),
 }
 
 #[contractimpl]
@@ -300,6 +305,16 @@ impl Auction {
     pub fn place_bid(env: Env, auction_id: Symbol, bidder: Address, amount: i128) {
         bump_instance_ttl(&env);
         bidder.require_auth();
+
+        let bid_identity = AuctionKey::BidAccepted(auction_id.clone(), bidder.clone(), amount);
+        if env.storage().persistent().has(&bid_identity) {
+            env.storage().persistent().extend_ttl(
+                &bid_identity,
+                crate::storage::PERSISTENT_LIFETIME_THRESHOLD,
+                crate::storage::PERSISTENT_BUMP_AMOUNT,
+            );
+            return;
+        }
 
         if amount <= 0 {
             env.panic_with_error(AuctionError::BidTooLow);
@@ -433,6 +448,13 @@ impl Auction {
 
         env.storage().persistent().set(&auction_id, &state);
         bump_auction_state_ttl(&env, &auction_id);
+
+        env.storage().persistent().set(&bid_identity, &true);
+        env.storage().persistent().extend_ttl(
+            &bid_identity,
+            crate::storage::PERSISTENT_LIFETIME_THRESHOLD,
+            crate::storage::PERSISTENT_BUMP_AMOUNT,
+        );
     }
 
     /// Closes an open auction, transitioning its status from `Open` to `Closed`.
