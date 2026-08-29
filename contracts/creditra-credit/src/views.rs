@@ -246,18 +246,7 @@ pub fn query_borrower_health_factor(
     for id in 0..count {
         if let Some(cl) = CREDIT_LINES.may_load(deps.storage, id)? {
             if cl.active && cl.borrower == borrower_addr {
-                // Compute utilized amount (sum of all draws that are not repaid)
-                let draw_count = DRAW_COUNT.may_load(deps.storage, id)?.unwrap_or(0);
-                let mut utilized_amount = Uint128::zero();
-
-                for did in 0..draw_count {
-                    let draw = DRAWS.load(deps.storage, (id, did))?;
-                    if !draw.repaid {
-                        utilized_amount = utilized_amount
-                            .checked_add(draw.amount)
-                            .map_err(StdError::from)?;
-                    }
-                }
+                let utilized_amount = crate::state::outstanding_utilization(deps.storage, id)?;
 
                 // Aggregate credit-line collateral + multi-collateral (risk-weighted).
                 let multi_total = collateral::weighted_collateral_total(deps, &cl.borrower)?;
@@ -339,15 +328,9 @@ pub fn query_credit_line_snapshot(
         .unwrap_or(0);
 
     let mut draws: Vec<DrawSnapshotEntry> = Vec::with_capacity(draw_count as usize);
-    let mut total_utilized = Uint128::zero();
 
     for did in 0..draw_count {
         if let Some(draw) = DRAWS.may_load(deps.storage, (credit_line_id, did))? {
-            if !draw.repaid {
-                total_utilized = total_utilized
-                    .checked_add(draw.amount)
-                    .map_err(StdError::from)?;
-            }
             draws.push(DrawSnapshotEntry {
                 draw_id: did,
                 amount: draw.amount,
@@ -358,6 +341,8 @@ pub fn query_credit_line_snapshot(
             });
         }
     }
+
+    let total_utilized = crate::state::outstanding_utilization(deps.storage, credit_line_id)?;
 
     // ── Multi-collateral breakdown ────────────────────────────────────────────
     let raw_multi = collateral::query_borrower_collateral(deps, &cl.borrower);
@@ -512,7 +497,7 @@ mod tests {
             collateral_denom: "ucollateral".to_string(),
             collateral_amount: "1000".to_string(),
             credit_denom: "ucredit".to_string(),
-            credit_amount: "500".to_string(),
+            credit_amount: "10000".to_string(),
         };
         crate::contract::execute(deps.as_mut(), env, info, msg).unwrap();
     }
@@ -808,7 +793,7 @@ mod tests {
             assert_eq!(por.total_credit_lines, 1);
             assert_eq!(por.active_credit_lines, 1);
             assert_eq!(por.total_collateral, Uint128::from(1000u128));
-            assert_eq!(por.total_credit_limit, Uint128::from(500u128));
+            assert_eq!(por.total_credit_limit, Uint128::from(10000u128));
             assert_eq!(por.total_drawn, Uint128::from(200u128));
             assert_eq!(por.total_repaid, Uint128::from(100u128));
             assert_eq!(por.net_outstanding, Uint128::from(200u128));
@@ -826,7 +811,7 @@ mod tests {
                 .iter()
                 .find(|r| r.denom == "ucredit")
                 .unwrap();
-            assert_eq!(ucredit_res.credit_limit, Uint128::from(500u128));
+            assert_eq!(ucredit_res.credit_limit, Uint128::from(10000u128));
             assert_eq!(ucredit_res.drawn_amount, Uint128::from(200u128));
             assert_eq!(ucredit_res.repaid_amount, Uint128::from(100u128));
             assert_eq!(ucredit_res.net_outstanding, Uint128::from(200u128));
@@ -847,7 +832,7 @@ mod tests {
             let por_cred = query_por(&deps, Some("ucredit".to_string()));
             assert_eq!(por_cred.reserves_by_denom.len(), 1);
             assert_eq!(por_cred.reserves_by_denom[0].denom, "ucredit");
-            assert_eq!(por_cred.total_credit_limit, Uint128::from(500u128));
+            assert_eq!(por_cred.total_credit_limit, Uint128::from(10000u128));
             assert_eq!(por_cred.total_drawn, Uint128::from(150u128));
         }
 
@@ -1032,11 +1017,19 @@ mod tests {
             assert_eq!(resp.credit_lines[1].credit_line_id, 1);
             assert_eq!(resp.credit_lines[1].health_factor_bps, u32::MAX);
 
-            // Now make a draw on credit line 1
-            create_draw(&mut deps, 1, "10");
+            let drawer = borrower(&deps);
+            let err = crate::contract::execute_create_draw(
+                deps.as_mut(),
+                mock_env(),
+                message_info(&drawer, &[]),
+                1,
+                "10".to_string(),
+                "ucredit".to_string(),
+            )
+            .unwrap_err();
+            assert_eq!(err, crate::error::ContractError::OverLimit);
             let resp2 = query_health(&deps, &borrower_str);
-            // cl 1: collateral 1000, credit 0, utilized 10 -> health = 0
-            assert_eq!(resp2.credit_lines[1].health_factor_bps, 0);
+            assert_eq!(resp2.credit_lines[1].health_factor_bps, u32::MAX);
         }
     }
 }

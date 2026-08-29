@@ -339,15 +339,16 @@ pub fn execute_create_credit_line(
 /// |---|---|
 /// | [`ContractError::CreditLineNotFound`] | `credit_line_id` has no stored [`CreditLine`] |
 /// | [`ContractError::Unauthorized`] | `info.sender != credit_line.borrower` |
+/// | [`ContractError::InvalidAmount`] | `amount` parses to zero |
+/// | [`ContractError::Overflow`] | summing outstanding draws or adding `amount` overflows `Uint128` |
+/// | [`ContractError::OverLimit`] | `outstanding + amount` would exceed `credit_line.credit_amount` |
 /// | `StdError::ParseErr` / `ContractError::Std(_)` | `amount` is not a valid `Uint128` |
 /// | Storage I/O errors | propagated from `cw-storage-plus` |
 ///
 /// # @notice
-/// v7 does **not** enforce a credit-limit ceiling on the sum of draws —
-/// this is intentional for the error-stability testing crate (see
-/// `tests/err_stab.rs`).  The production `credit` contract adds the
-/// full 25-step preflight chain including limit, collateral-ratio, and
-/// exposure caps.
+/// Utilization is the sum of unrepaid draw amounts on the line. A draw that
+/// would push that sum strictly above `credit_amount` is rejected before any
+/// `DRAWS` / audit write. Drawing exactly up to `credit_amount` is allowed.
 ///
 /// # @dev
 /// The draw audit trail is initialized with a single `DrawCreated`
@@ -377,6 +378,18 @@ pub fn execute_create_draw(
     let draw_amount: cosmwasm_std::Uint128 = amount
         .parse()
         .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
+
+    if draw_amount.is_zero() {
+        return Err(ContractError::InvalidAmount);
+    }
+
+    let outstanding = crate::state::outstanding_utilization(deps.storage, credit_line_id)?;
+    let projected = outstanding
+        .checked_add(draw_amount)
+        .map_err(|_| ContractError::Overflow)?;
+    if projected > credit_line.credit_amount {
+        return Err(ContractError::OverLimit);
+    }
 
     let draw = Draw {
         id: draw_count,

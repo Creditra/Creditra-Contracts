@@ -139,7 +139,7 @@ proptest! {
         // Create credit lines for each borrower. The contract assigns sequential ids
         // starting at 0; we track the mapping implicitly by creation order.
         for label in &borrower_labels {
-            create_credit_line(&mut deps, label, "1000", "500");
+            create_credit_line(&mut deps, label, "1000", "1000000");
         }
 
         // Model: per-credit-line list of draws (amount, repaid)
