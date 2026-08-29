@@ -2,10 +2,1478 @@
   "contract_name": "creditra-credit",
   "contract_version": "0.1.0",
   "idl_version": "1.0.0",
-  "instantiate": null,
-  "execute": null,
-  "query": null,
+  "instantiate": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "InstantiateMsg",
+    "type": "object",
+    "required": [
+      "owner"
+    ],
+    "properties": {
+      "owner": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": false
+  },
+  "execute": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "ExecuteMsg",
+    "oneOf": [
+      {
+        "type": "object",
+        "required": [
+          "create_credit_line"
+        ],
+        "properties": {
+          "create_credit_line": {
+            "type": "object",
+            "required": [
+              "borrower",
+              "collateral_amount",
+              "collateral_denom",
+              "credit_amount",
+              "credit_denom"
+            ],
+            "properties": {
+              "borrower": {
+                "type": "string"
+              },
+              "collateral_amount": {
+                "type": "string"
+              },
+              "collateral_denom": {
+                "type": "string"
+              },
+              "credit_amount": {
+                "type": "string"
+              },
+              "credit_denom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "create_draw"
+        ],
+        "properties": {
+          "create_draw": {
+            "type": "object",
+            "required": [
+              "amount",
+              "credit_line_id",
+              "denom"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "credit_line_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "denom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "repay_draw"
+        ],
+        "properties": {
+          "repay_draw": {
+            "type": "object",
+            "required": [
+              "credit_line_id",
+              "draw_id"
+            ],
+            "properties": {
+              "credit_line_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "draw_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "add_audit_memo"
+        ],
+        "properties": {
+          "add_audit_memo": {
+            "type": "object",
+            "required": [
+              "credit_line_id",
+              "draw_id",
+              "memo"
+            ],
+            "properties": {
+              "credit_line_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "draw_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "memo": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "update_protocol_version"
+        ],
+        "properties": {
+          "update_protocol_version": {
+            "type": "object",
+            "required": [
+              "major",
+              "minor"
+            ],
+            "properties": {
+              "major": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              },
+              "minor": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Configure the multi-oracle quorum parameters (admin only).",
+        "type": "object",
+        "required": [
+          "set_oracle_quorum_config"
+        ],
+        "properties": {
+          "set_oracle_quorum_config": {
+            "type": "object",
+            "required": [
+              "max_age_seconds",
+              "max_deviation_bps",
+              "min_quorum_k"
+            ],
+            "properties": {
+              "max_age_seconds": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "max_deviation_bps": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              },
+              "min_quorum_k": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Add an authorized oracle and its weight (admin only).",
+        "type": "object",
+        "required": [
+          "add_oracle"
+        ],
+        "properties": {
+          "add_oracle": {
+            "type": "object",
+            "required": [
+              "oracle",
+              "weight"
+            ],
+            "properties": {
+              "oracle": {
+                "type": "string"
+              },
+              "weight": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Remove an authorized oracle (admin only).",
+        "type": "object",
+        "required": [
+          "remove_oracle"
+        ],
+        "properties": {
+          "remove_oracle": {
+            "type": "object",
+            "required": [
+              "oracle"
+            ],
+            "properties": {
+              "oracle": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Submit an oracle report value.",
+        "type": "object",
+        "required": [
+          "report_value"
+        ],
+        "properties": {
+          "report_value": {
+            "type": "object",
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "integer",
+                "format": "int128"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Submit N oracle prices and resolve a quorum canonical price (admin only).",
+        "type": "object",
+        "required": [
+          "submit_oracle_prices"
+        ],
+        "properties": {
+          "submit_oracle_prices": {
+            "type": "object",
+            "required": [
+              "prices"
+            ],
+            "properties": {
+              "prices": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int128"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Set or update the structured late-fee configuration (admin only).\n\nPass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed installment, or `Some(LateFeeConfig::AprBased(…))` for an additive basis-point surcharge.  Pass `None` to remove the config.",
+        "type": "object",
+        "required": [
+          "set_late_fee_config"
+        ],
+        "properties": {
+          "set_late_fee_config": {
+            "type": "object",
+            "properties": {
+              "config": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/LateFeeConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Deposit a collateral token on behalf of a borrower (admin only).",
+        "type": "object",
+        "required": [
+          "deposit_collateral"
+        ],
+        "properties": {
+          "deposit_collateral": {
+            "type": "object",
+            "required": [
+              "amount",
+              "borrower",
+              "denom"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "borrower": {
+                "type": "string"
+              },
+              "denom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Withdraw a collateral token for a borrower (admin only).",
+        "type": "object",
+        "required": [
+          "withdraw_collateral"
+        ],
+        "properties": {
+          "withdraw_collateral": {
+            "type": "object",
+            "required": [
+              "amount",
+              "borrower",
+              "denom"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "borrower": {
+                "type": "string"
+              },
+              "denom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Add a denomination to the collateral allowlist (admin only).\n\nRejected with `TooManyCollateralTokens` when the allowlist is already at [`crate::state::MAX_COLLATERAL_TOKENS`] entries.",
+        "type": "object",
+        "required": [
+          "add_collateral_token"
+        ],
+        "properties": {
+          "add_collateral_token": {
+            "type": "object",
+            "required": [
+              "denom",
+              "risk_weight_bps"
+            ],
+            "properties": {
+              "denom": {
+                "type": "string"
+              },
+              "risk_weight_bps": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Remove a denomination from the collateral allowlist (admin only).",
+        "type": "object",
+        "required": [
+          "remove_collateral_token"
+        ],
+        "properties": {
+          "remove_collateral_token": {
+            "type": "object",
+            "required": [
+              "denom"
+            ],
+            "properties": {
+              "denom": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Update the risk weight for an allowed collateral token (admin only).",
+        "type": "object",
+        "required": [
+          "set_collateral_risk_weight"
+        ],
+        "properties": {
+          "set_collateral_risk_weight": {
+            "type": "object",
+            "required": [
+              "denom",
+              "risk_weight_bps"
+            ],
+            "properties": {
+              "denom": {
+                "type": "string"
+              },
+              "risk_weight_bps": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    ],
+    "definitions": {
+      "AprFeeConfig": {
+        "description": "Payload for the [`LateFeeConfig::AprBased`] variant.\n\nWraps the APR surcharge in basis points.",
+        "type": "object",
+        "required": [
+          "surcharge_bps"
+        ],
+        "properties": {
+          "surcharge_bps": {
+            "description": "Extra basis points added to the base interest rate while delinquent.\n\nMust be in `0..=10_000`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "FlatFeeConfig": {
+        "description": "Payload for the [`LateFeeConfig::Flat`] variant.\n\nWraps the flat surcharge amount so the enum can serialise as a tagged union in JSON and Binary.",
+        "type": "object",
+        "required": [
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "description": "Token units charged once per overdue installment.\n\nMust be `>= 0`. Zero disables the fee (no-op).",
+            "allOf": [
+              {
+                "$ref": "#/definitions/Uint128"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LateFeeConfig": {
+        "description": "Configuration for the late-fee penalty applied to overdue installments.\n\n# Variants\n\n| Variant    | Behaviour | |------------|-----------| | `Flat`     | A fixed `amount` in token units is applied once per missed installment. | | `AprBased` | An additive basis-point surcharge on the periodic interest rate while the line is delinquent. |\n\n# Storage\n\nStored in instance storage under `LATE_FEE_CONFIG`.  Admin-configurable via `SetLateFeeConfig` / `GetLateFeeConfig` on the contract.\n\n# Examples\n\n```ignore // Flat: charge 50 tokens per missed installment let cfg = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });\n\n// APR-based: add 200 bps to the interest rate when delinquent let cfg = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }); ```",
+        "oneOf": [
+          {
+            "description": "Fixed flat amount charged once per overdue installment.\n\nUse [`FlatFeeConfig`] to supply the `amount`.  Zero disables the fee.",
+            "type": "object",
+            "required": [
+              "flat"
+            ],
+            "properties": {
+              "flat": {
+                "$ref": "#/definitions/FlatFeeConfig"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "description": "Additive APR surcharge applied to delinquent lines during accrual.\n\n`surcharge_bps` must be in `0..=10_000`.",
+            "type": "object",
+            "required": [
+              "apr_based"
+            ],
+            "properties": {
+              "apr_based": {
+                "$ref": "#/definitions/AprFeeConfig"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Uint128": {
+        "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+        "type": "string"
+      }
+    }
+  },
+  "query": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "QueryMsg",
+    "oneOf": [
+      {
+        "type": "object",
+        "required": [
+          "draw_audit_trail"
+        ],
+        "properties": {
+          "draw_audit_trail": {
+            "type": "object",
+            "required": [
+              "credit_line_id"
+            ],
+            "properties": {
+              "credit_line_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              },
+              "draw_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "proof_of_reserve"
+        ],
+        "properties": {
+          "proof_of_reserve": {
+            "type": "object",
+            "properties": {
+              "denom": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "borrower_health_factor"
+        ],
+        "properties": {
+          "borrower_health_factor": {
+            "type": "object",
+            "required": [
+              "borrower"
+            ],
+            "properties": {
+              "borrower": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "get_oracle_quorum_config"
+        ],
+        "properties": {
+          "get_oracle_quorum_config": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "get_oracle_price"
+        ],
+        "properties": {
+          "get_oracle_price": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "get_late_fee_config"
+        ],
+        "properties": {
+          "get_late_fee_config": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "get_collateral_balance"
+        ],
+        "properties": {
+          "get_collateral_balance": {
+            "type": "object",
+            "required": [
+              "borrower"
+            ],
+            "properties": {
+              "borrower": {
+                "type": "string"
+              },
+              "denom": {
+                "description": "When `None`, returns all tokens; when `Some`, filters to that denom.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "get_collateral_allowlist"
+        ],
+        "properties": {
+          "get_collateral_allowlist": {
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "description": "Full read-only snapshot of a single credit line by its stable numeric id.\n\nAggregates the core credit-line record, all active draw balances, collateral holdings (single-token + multi-token), health factor, and active status in a single round-trip, avoiding the multiple separate queries a caller would otherwise need.\n\nReturns `None` when no credit line exists for `credit_line_id`.",
+        "type": "object",
+        "required": [
+          "credit_line_snapshot"
+        ],
+        "properties": {
+          "credit_line_snapshot": {
+            "type": "object",
+            "required": [
+              "credit_line_id"
+            ],
+            "properties": {
+              "credit_line_id": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    ]
+  },
   "migrate": null,
   "sudo": null,
-  "responses": null
+  "responses": {
+    "borrower_health_factor": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "BorrowerHealthFactorResponse",
+      "type": "object",
+      "required": [
+        "borrower",
+        "credit_lines"
+      ],
+      "properties": {
+        "borrower": {
+          "type": "string"
+        },
+        "credit_lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CreditLineHealthResponse"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "CreditLineHealthResponse": {
+          "type": "object",
+          "required": [
+            "collateral_amount",
+            "collateral_denom",
+            "credit_amount",
+            "credit_denom",
+            "credit_line_id",
+            "health_factor_bps",
+            "utilized_amount"
+          ],
+          "properties": {
+            "collateral_amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "collateral_denom": {
+              "type": "string"
+            },
+            "credit_amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "credit_denom": {
+              "type": "string"
+            },
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "health_factor_bps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "utilized_amount": {
+              "$ref": "#/definitions/Uint128"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Uint128": {
+          "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "credit_line_snapshot": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Nullable_CreditLineSnapshotResponse",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CreditLineSnapshotResponse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "definitions": {
+        "Addr": {
+          "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+          "type": "string"
+        },
+        "CollateralEntryResponse": {
+          "description": "A single entry in a borrower's multi-collateral portfolio.",
+          "type": "object",
+          "required": [
+            "amount",
+            "denom",
+            "risk_weight_bps"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Raw deposited balance (before risk weighting).",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "denom": {
+              "description": "Token denomination.",
+              "type": "string"
+            },
+            "risk_weight_bps": {
+              "description": "Risk weight in basis points applied to this token.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "CreditLineSnapshotResponse": {
+          "description": "Full read-only snapshot of a credit line and its associated state.\n\nReturned by [`QueryMsg::CreditLineSnapshot`]. Aggregates the core credit-line record, all draws, collateral balances, and the derived health factor in a single response so callers avoid multiple round-trip queries.\n\n# Health factor semantics\n\n- `health_factor_bps == u32::MAX` when `total_utilized == 0` (no outstanding debt). - A value below `10_000` indicates the position is under-collateralized. - A value of `10_000` means collateral exactly covers the utilized amount. - A value above `10_000` means the position is over-collateralized.",
+          "type": "object",
+          "required": [
+            "active",
+            "borrower",
+            "collateral_amount",
+            "collateral_denom",
+            "credit_amount",
+            "credit_denom",
+            "credit_line_id",
+            "draws",
+            "health_factor_bps",
+            "multi_collateral",
+            "total_utilized",
+            "weighted_collateral_total"
+          ],
+          "properties": {
+            "active": {
+              "description": "Whether the credit line is currently active.",
+              "type": "boolean"
+            },
+            "borrower": {
+              "description": "Borrower address.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                }
+              ]
+            },
+            "collateral_amount": {
+              "description": "Primary collateral balance held against this credit line.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "collateral_denom": {
+              "description": "Primary collateral token denomination.",
+              "type": "string"
+            },
+            "credit_amount": {
+              "description": "Maximum principal that may be outstanding across all draws.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "credit_denom": {
+              "description": "Credit (borrowable) token denomination.",
+              "type": "string"
+            },
+            "credit_line_id": {
+              "description": "Stable numeric id of the credit line.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "draws": {
+              "description": "All draws associated with this credit line (active and repaid).",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DrawSnapshotEntry"
+              }
+            },
+            "health_factor_bps": {
+              "description": "Collateral-aware health factor in basis points. `u32::MAX` when `total_utilized == 0`.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "multi_collateral": {
+              "description": "Multi-token collateral breakdown (may be empty when no multi-token collateral has been deposited).",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CollateralEntryResponse"
+              }
+            },
+            "total_utilized": {
+              "description": "Sum of all un-repaid draw amounts (outstanding principal).",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "weighted_collateral_total": {
+              "description": "Risk-weighted total across all collateral tokens.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "DrawSnapshotEntry": {
+          "description": "A single draw entry included in the credit-line snapshot.",
+          "type": "object",
+          "required": [
+            "amount",
+            "denom",
+            "draw_id",
+            "drawn_at",
+            "drawn_by",
+            "repaid"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Principal drawn.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "denom": {
+              "description": "Token denomination of this draw.",
+              "type": "string"
+            },
+            "draw_id": {
+              "description": "Per-line numeric draw id.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "drawn_at": {
+              "description": "Block time when the draw was created.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Timestamp"
+                }
+              ]
+            },
+            "drawn_by": {
+              "description": "Address that initiated the draw.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                }
+              ]
+            },
+            "repaid": {
+              "description": "`true` when the draw has been fully repaid.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Timestamp": {
+          "description": "A point in time in nanosecond precision.\n\nThis type can represent times from 1970-01-01T00:00:00Z to 2554-07-21T23:34:33Z.\n\n## Examples\n\n``` # use cosmwasm_std::Timestamp; let ts = Timestamp::from_nanos(1_000_000_202); assert_eq!(ts.nanos(), 1_000_000_202); assert_eq!(ts.seconds(), 1); assert_eq!(ts.subsec_nanos(), 202);\n\nlet ts = ts.plus_seconds(2); assert_eq!(ts.nanos(), 3_000_000_202); assert_eq!(ts.seconds(), 3); assert_eq!(ts.subsec_nanos(), 202); ```",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint64"
+            }
+          ]
+        },
+        "Uint128": {
+          "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+          "type": "string"
+        },
+        "Uint64": {
+          "description": "A thin wrapper around u64 that is using strings for JSON encoding/decoding, such that the full u64 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u64` to get the value out:\n\n``` # use cosmwasm_std::Uint64; let a = Uint64::from(42u64); assert_eq!(a.u64(), 42);\n\nlet b = Uint64::from(70u32); assert_eq!(b.u64(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "draw_audit_trail": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "DrawAuditTrailResponse",
+      "type": "object",
+      "required": [
+        "credit_line_id",
+        "draw_amount",
+        "draw_denom",
+        "draw_id",
+        "drawn_at",
+        "drawn_by",
+        "events",
+        "repaid"
+      ],
+      "properties": {
+        "credit_line_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "draw_amount": {
+          "type": "string"
+        },
+        "draw_denom": {
+          "type": "string"
+        },
+        "draw_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "drawn_at": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "drawn_by": {
+          "$ref": "#/definitions/Addr"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DrawAuditEvent"
+          }
+        },
+        "repaid": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "Addr": {
+          "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+          "type": "string"
+        },
+        "DrawAction": {
+          "description": "The type of action recorded in a draw audit entry.",
+          "type": "string",
+          "enum": [
+            "draw_created",
+            "repaid",
+            "liquidated",
+            "memo_added"
+          ]
+        },
+        "DrawAuditEvent": {
+          "description": "A human-readable audit event returned by queries.",
+          "type": "object",
+          "required": [
+            "action",
+            "block_height",
+            "by",
+            "memo",
+            "seq",
+            "timestamp"
+          ],
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/DrawAction"
+            },
+            "block_height": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "by": {
+              "$ref": "#/definitions/Addr"
+            },
+            "memo": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "timestamp": {
+              "$ref": "#/definitions/Timestamp"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Timestamp": {
+          "description": "A point in time in nanosecond precision.\n\nThis type can represent times from 1970-01-01T00:00:00Z to 2554-07-21T23:34:33Z.\n\n## Examples\n\n``` # use cosmwasm_std::Timestamp; let ts = Timestamp::from_nanos(1_000_000_202); assert_eq!(ts.nanos(), 1_000_000_202); assert_eq!(ts.seconds(), 1); assert_eq!(ts.subsec_nanos(), 202);\n\nlet ts = ts.plus_seconds(2); assert_eq!(ts.nanos(), 3_000_000_202); assert_eq!(ts.seconds(), 3); assert_eq!(ts.subsec_nanos(), 202); ```",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint64"
+            }
+          ]
+        },
+        "Uint64": {
+          "description": "A thin wrapper around u64 that is using strings for JSON encoding/decoding, such that the full u64 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u64` to get the value out:\n\n``` # use cosmwasm_std::Uint64; let a = Uint64::from(42u64); assert_eq!(a.u64(), 42);\n\nlet b = Uint64::from(70u32); assert_eq!(b.u64(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "get_collateral_allowlist": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "CollateralAllowlistResponse",
+      "description": "Response for the collateral allowlist query.",
+      "type": "object",
+      "required": [
+        "denoms"
+      ],
+      "properties": {
+        "denoms": {
+          "description": "Allowed token denominations.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "get_collateral_balance": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "CollateralBalanceResponse",
+      "description": "Response for the multi-collateral balance query.",
+      "type": "object",
+      "required": [
+        "borrower",
+        "entries",
+        "weighted_total"
+      ],
+      "properties": {
+        "borrower": {
+          "description": "Borrower address.",
+          "type": "string"
+        },
+        "entries": {
+          "description": "Per-token collateral breakdown.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CollateralEntryResponse"
+          }
+        },
+        "weighted_total": {
+          "description": "Risk-weighted total across all tokens.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "CollateralEntryResponse": {
+          "description": "A single entry in a borrower's multi-collateral portfolio.",
+          "type": "object",
+          "required": [
+            "amount",
+            "denom",
+            "risk_weight_bps"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Raw deposited balance (before risk weighting).",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "denom": {
+              "description": "Token denomination.",
+              "type": "string"
+            },
+            "risk_weight_bps": {
+              "description": "Risk weight in basis points applied to this token.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "Uint128": {
+          "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "get_late_fee_config": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LateFeeConfigResponse",
+      "description": "Response for the late-fee configuration query.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "The currently configured late-fee config, or `None` if unset.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LateFeeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "AprFeeConfig": {
+          "description": "Payload for the [`LateFeeConfig::AprBased`] variant.\n\nWraps the APR surcharge in basis points.",
+          "type": "object",
+          "required": [
+            "surcharge_bps"
+          ],
+          "properties": {
+            "surcharge_bps": {
+              "description": "Extra basis points added to the base interest rate while delinquent.\n\nMust be in `0..=10_000`.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "FlatFeeConfig": {
+          "description": "Payload for the [`LateFeeConfig::Flat`] variant.\n\nWraps the flat surcharge amount so the enum can serialise as a tagged union in JSON and Binary.",
+          "type": "object",
+          "required": [
+            "amount"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Token units charged once per overdue installment.\n\nMust be `>= 0`. Zero disables the fee (no-op).",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "LateFeeConfig": {
+          "description": "Configuration for the late-fee penalty applied to overdue installments.\n\n# Variants\n\n| Variant    | Behaviour | |------------|-----------| | `Flat`     | A fixed `amount` in token units is applied once per missed installment. | | `AprBased` | An additive basis-point surcharge on the periodic interest rate while the line is delinquent. |\n\n# Storage\n\nStored in instance storage under `LATE_FEE_CONFIG`.  Admin-configurable via `SetLateFeeConfig` / `GetLateFeeConfig` on the contract.\n\n# Examples\n\n```ignore // Flat: charge 50 tokens per missed installment let cfg = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });\n\n// APR-based: add 200 bps to the interest rate when delinquent let cfg = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }); ```",
+          "oneOf": [
+            {
+              "description": "Fixed flat amount charged once per overdue installment.\n\nUse [`FlatFeeConfig`] to supply the `amount`.  Zero disables the fee.",
+              "type": "object",
+              "required": [
+                "flat"
+              ],
+              "properties": {
+                "flat": {
+                  "$ref": "#/definitions/FlatFeeConfig"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "description": "Additive APR surcharge applied to delinquent lines during accrual.\n\n`surcharge_bps` must be in `0..=10_000`.",
+              "type": "object",
+              "required": [
+                "apr_based"
+              ],
+              "properties": {
+                "apr_based": {
+                  "$ref": "#/definitions/AprFeeConfig"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "Uint128": {
+          "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+          "type": "string"
+        }
+      }
+    },
+    "get_oracle_price": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "OraclePriceResponse",
+      "description": "Response for oracle price query.",
+      "type": "object",
+      "properties": {
+        "price": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int128"
+        },
+        "timestamp": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "get_oracle_quorum_config": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "OracleQuorumConfigResponse",
+      "description": "Response for oracle quorum configuration query.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OracleQuorumConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "OracleQuorumConfig": {
+          "description": "Multi-oracle quorum configuration for redundancy median resolution.",
+          "type": "object",
+          "required": [
+            "max_age_seconds",
+            "max_deviation_bps",
+            "min_quorum_k"
+          ],
+          "properties": {
+            "max_age_seconds": {
+              "description": "Maximum age of the stored quorum price in seconds before it is considered stale for settlement purposes.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "max_deviation_bps": {
+              "description": "Maximum allowed price deviation between the highest and lowest prices in the qualifying quorum window, in basis points (e.g. 500 = 5%).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "min_quorum_k": {
+              "description": "Minimum number of submitted prices that must agree within `max_deviation_bps` to form a valid quorum.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "proof_of_reserve": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ProofOfReserveResponse",
+      "type": "object",
+      "required": [
+        "active_credit_lines",
+        "net_outstanding",
+        "reserves_by_denom",
+        "total_collateral",
+        "total_credit_limit",
+        "total_credit_lines",
+        "total_drawn",
+        "total_repaid"
+      ],
+      "properties": {
+        "active_credit_lines": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "net_outstanding": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "reserves_by_denom": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DenomReserve"
+          }
+        },
+        "total_collateral": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "total_credit_limit": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "total_credit_lines": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "total_drawn": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "total_repaid": {
+          "$ref": "#/definitions/Uint128"
+        }
+      },
+      "additionalProperties": false,
+      "definitions": {
+        "DenomReserve": {
+          "type": "object",
+          "required": [
+            "collateral_amount",
+            "credit_limit",
+            "denom",
+            "drawn_amount",
+            "net_outstanding",
+            "repaid_amount"
+          ],
+          "properties": {
+            "collateral_amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "credit_limit": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "denom": {
+              "type": "string"
+            },
+            "drawn_amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "net_outstanding": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "repaid_amount": {
+              "$ref": "#/definitions/Uint128"
+            }
+          },
+          "additionalProperties": false
+        },
+        "Uint128": {
+          "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+          "type": "string"
+        }
+      }
+    }
+  }
 }
