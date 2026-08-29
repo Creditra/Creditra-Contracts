@@ -317,10 +317,15 @@ impl Auction {
     /// Sets the factory contract address.
     ///
     /// # Authorization
-    /// Requires `require_auth` from the factory itself.
+    /// Requires the proposed factory's auth during initial registration and
+    /// the currently registered factory's auth when replacing it.
     pub fn set_factory_contract(env: Env, factory: Address) {
         bump_instance_ttl(&env);
-        factory.require_auth();
+        if let Some(current_factory) = get_factory_contract(&env) {
+            current_factory.require_auth();
+        } else {
+            factory.require_auth();
+        }
         storage::set_factory_contract(&env, &factory);
     }
 
