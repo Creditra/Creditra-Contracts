@@ -690,14 +690,15 @@ impl Credit {
             env.panic_with_error(ContractError::CreditLineClosed);
         }
 
-        let effective_repay = if amount > credit_line.utilized_amount {
-            credit_line.utilized_amount
-        } else {
-            amount
-        };
+        // Normalize the interest slice against the current total debt before
+        // allocating repayment. This keeps the allocation order deterministic
+        // across the debt components even if stale or boundary values have
+        // drifted the underlying state.
+        let total_debt = credit_line.utilized_amount.max(0);
+        credit_line.accrued_interest = credit_line.accrued_interest.min(total_debt).max(0);
 
-        let interest_repaid = effective_repay.min(credit_line.accrued_interest);
-        let _principal_repaid = effective_repay - interest_repaid;
+        let (effective_repay, interest_repaid, _principal_repaid) =
+            lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
 
         if effective_repay > 0 {
             let maybe_token: Option<Address> =
