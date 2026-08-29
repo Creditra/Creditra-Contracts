@@ -65,7 +65,6 @@ use soroban_sdk::contracterror;
 /// - **Freeze-specific tier** (`100+`) — namespaced to leave a clear gap
 ///   from the credit contract's `1..49` range, defending against accidental
 ///   collisions if either contract appends to its enum in the future.
-#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum FreezeError {
@@ -99,11 +98,48 @@ pub enum FreezeError {
     /// Mirror of canonical `ContractError::CreditLineFrozen` (`= 46`).
     CreditLineFrozen = 46,
     // ── Freeze-specific tier (codes 100+) ───────────────────────────────
+    UnknownError = 100,
     //
     // These discriminants are exclusive to the freeze domain and
     // start at 100 to leave a 50-slot buffer above the credit contract's
     // range. New variants MUST be appended at the end of this
     // block.
+}
+
+impl FreezeError {
+    pub fn from_u32_safe(code: u32) -> Self {
+        match code {
+            3 => Self::CreditLineNotFound,
+            16 => Self::BorrowerBlocked,
+            19 => Self::DrawsFrozen,
+            40 => Self::BorrowerFrozen,
+            46 => Self::CreditLineFrozen,
+            100 => Self::UnknownError,
+            _ => Self::UnknownError,
+        }
+    }
+}
+
+impl From<soroban_sdk::Error> for FreezeError {
+    fn from(err: soroban_sdk::Error) -> Self {
+        if err.is_type(soroban_sdk::xdr::ScErrorType::Contract) {
+            Self::from_u32_safe(err.get_code())
+        } else {
+            Self::UnknownError
+        }
+    }
+}
+
+impl<'a> From<&'a FreezeError> for soroban_sdk::Error {
+    fn from(err: &'a FreezeError) -> Self {
+        soroban_sdk::Error::from_contract_error(*err as u32)
+    }
+}
+
+impl From<FreezeError> for soroban_sdk::Error {
+    fn from(err: FreezeError) -> Self {
+        soroban_sdk::Error::from_contract_error(err as u32)
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +172,7 @@ mod tests {
             FreezeError::DrawsFrozen as u32,
             FreezeError::BorrowerFrozen as u32,
             FreezeError::CreditLineFrozen as u32,
+            FreezeError::UnknownError as u32,
         ];
 
         for i in 0..codes.len() {
@@ -153,7 +190,7 @@ mod tests {
     /// a new variant at the end of the enum.
     #[test]
     fn variant_count_is_known() {
-        const EXPECTED_VARIANT_COUNT: usize = 5;
+        const EXPECTED_VARIANT_COUNT: usize = 6;
 
         let codes = [
             FreezeError::CreditLineNotFound as u32,
@@ -161,6 +198,7 @@ mod tests {
             FreezeError::DrawsFrozen as u32,
             FreezeError::BorrowerFrozen as u32,
             FreezeError::CreditLineFrozen as u32,
+            FreezeError::UnknownError as u32,
         ];
 
         assert_eq!(
@@ -171,6 +209,24 @@ mod tests {
     }
 
     /// Verify `Eq` / `PartialEq` round-trip both directions.
+    #[test]
+    #[test]
+    fn test_golden_vector_encodings() {
+        assert_eq!(
+            FreezeError::from_u32_safe(3),
+            FreezeError::CreditLineNotFound
+        );
+        assert_eq!(FreezeError::from_u32_safe(16), FreezeError::BorrowerBlocked);
+        assert_eq!(FreezeError::from_u32_safe(19), FreezeError::DrawsFrozen);
+        assert_eq!(FreezeError::from_u32_safe(40), FreezeError::BorrowerFrozen);
+        assert_eq!(
+            FreezeError::from_u32_safe(46),
+            FreezeError::CreditLineFrozen
+        );
+        assert_eq!(FreezeError::from_u32_safe(100), FreezeError::UnknownError);
+        assert_eq!(FreezeError::from_u32_safe(999), FreezeError::UnknownError);
+    }
+
     #[test]
     fn equality_round_trips() {
         let a = FreezeError::DrawsFrozen;

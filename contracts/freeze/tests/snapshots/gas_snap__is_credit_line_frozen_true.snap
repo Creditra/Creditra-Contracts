@@ -4,6 +4,6 @@ expression: sample
 ---
 FreezeGasSample {
     entrypoint: "is_credit_line_frozen_true",
-    cpu_instructions: 43713,
-    memory_bytes: 7226,
+    cpu_instructions: 48878,
+    memory_bytes: 7730,
 }

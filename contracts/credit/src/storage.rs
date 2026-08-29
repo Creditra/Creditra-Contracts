@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // SPDX-License-Identifier: MIT
 
 //! Storage abstraction for the Credit contract.

@@ -4,6 +4,6 @@ expression: sample
 ---
 FreezeGasSample {
     entrypoint: "get_credit_line_freeze_reason_some",
-    cpu_instructions: 51947,
-    memory_bytes: 8042,
+    cpu_instructions: 57112,
+    memory_bytes: 8546,
 }

@@ -4,6 +4,6 @@ expression: sample
 ---
 FreezeGasSample {
     entrypoint: "freeze_borrower_until_24h",
-    cpu_instructions: 90178,
-    memory_bytes: 14137,
+    cpu_instructions: 98932,
+    memory_bytes: 14826,
 }

@@ -152,3 +152,23 @@ mod integration {
         );
     }
 }
+
+#[test]
+fn test_golden_vector_encodings() {
+    use creditra_risk::ContractError;
+    assert_eq!(ContractError::from_u32_safe(1), ContractError::Unauthorized);
+    assert_eq!(ContractError::from_u32_safe(2), ContractError::NotAdmin);
+    assert_eq!(ContractError::from_u32_safe(3), ContractError::Paused);
+    assert_eq!(
+        ContractError::from_u32_safe(54),
+        ContractError::RiskAdminCooldownActive
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(200),
+        ContractError::UnknownError
+    );
+    assert_eq!(
+        ContractError::from_u32_safe(999),
+        ContractError::UnknownError
+    );
+}

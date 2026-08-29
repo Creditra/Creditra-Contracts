@@ -4,12 +4,12 @@ expression: samples
 ---
 {
     "freeze_borrower_until": (
-        106847,
-        18177,
+        116159,
+        18866,
     ),
     "freeze_credit_line": (
-        137288,
-        21132,
+        172694,
+        25715,
     ),
     "freeze_draws": (
         89229,
@@ -40,8 +40,8 @@ expression: samples
         10001,
     ),
     "unfreeze_borrower": (
-        75462,
-        12699,
+        79340,
+        12888,
     ),
     "unfreeze_credit_line": (
         90552,

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 #![cfg_attr(not(test), no_std)]
 
 pub mod curves;

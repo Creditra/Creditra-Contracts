@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // SPDX-License-Identifier: MIT
 
 //! Credit line lifecycle management: suspend, close, default, reinstate, and liquidation settlement.
