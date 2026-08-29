@@ -155,6 +155,8 @@ pub enum CreditStatus {
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
 /// | 54   | `RiskAdminCooldownActive`      | Risk          | Risk admin cooldown has not yet elapsed since the last mutation |
 /// | 60   | `StaleStateTransition`         | Lifecycle     | Transition rejected: the credit line is already in the requested target state |
+/// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
+/// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -171,8 +173,11 @@ pub enum ContractError {
     UtilizationNotZero = 10,
     Reentrancy = 11,
     Overflow = 12,
+    // discriminant 13 reserved (LimitDecreaseRequiresRepayment, removed)
     AlreadyInitialized = 14,
     AdminAcceptTooEarly = 15,
+    /// Borrower address does not match the credit line's registered borrower.
+    BorrowerBlocked = 16,
     DrawExceedsMaxAmount = 17,
     Paused = 18,
     DrawsFrozen = 19,
@@ -181,6 +186,12 @@ pub enum ContractError {
     MissingLiquidityToken = 22,
     MissingLiquiditySource = 23,
     InsufficientLiquidityReserve = 24,
+    /// Liquidity token transfer call failed (observable error path).
+    LiquidityTokenCallFailed = 25,
+    /// Borrower repayment allowance is insufficient to cover the repayment amount.
+    InsufficientRepaymentAllowance = 26,
+    /// Borrower balance is insufficient to cover the repayment amount.
+    InsufficientRepaymentBalance = 27,
     RepayExceedsMaxAmount = 28,
     DrawCooldownActive = 29,
     TreasuryNotSet = 30,
@@ -196,6 +207,12 @@ pub enum ContractError {
     BorrowerFrozen = 40,
     BountyNotSet = 41,
     NoPendingTreasuryWithdrawal = 42,
+    /// Treasury withdrawal timelock has not yet elapsed since proposal.
+    TreasuryTimelockActive = 43,
+    /// A treasury withdrawal proposal already exists; cancel or execute it first.
+    TreasuryProposalExists = 44,
+    /// The supplied `close_factor_bps` exceeds the protocol-configured maximum.
+    CloseFactorAboveMax = 45,
     CreditLineFrozen = 46,
     DrawReversalWindowExpired = 47,
     OriginalDrawNotFound = 48,
@@ -206,31 +223,64 @@ pub enum ContractError {
     InvalidAttestation = 53,
     RiskAdminCooldownActive = 54,
     OracleNotFound = 55,
+    // discriminant 56 reserved
     FreezeCooldownActive = 57,
     AdminCollateralCooldownActive = 58,
     LiquidationGraceActive = 59,
-    /// Transition rejected: the credit line is already in the requested target
-    /// state (stale/duplicate), or the current state makes the operation a
-    /// no-op that would silently corrupt caller expectations. The caller must
-    /// re-fetch the credit line state before retrying.
+    /// Transition rejected because the credit line is already in the requested
+    /// target state (stale/duplicate).
     StaleStateTransition = 60,
+    /// Auction contract's protocol version does not match the credit contract.
+    ///
+    /// The version handshake check failed before any state mutation occurred.
+    /// The reentrancy guard has been cleared; the settlement is safe to retry
+    /// once the auction or credit contract is upgraded to a compatible version.
+    IncompatibleVersion = 61,
+    /// The cross-contract auction CPI call failed or returned an unexpected value.
+    ///
+    /// No credit-line state was mutated. The reentrancy guard has been cleared.
+    /// The settlement is safe to retry with a corrected `recovered_amount` or
+    /// after the auction contract issue is resolved.
+    AuctionCallFailed = 62,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
 ///
-/// Each category groups semantically related errors that share a common
-/// SDK-side recovery action. See [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md)
-/// for the full categorized reference.
-///
 /// # Stability guarantee
-/// These discriminants are **permanent**. Never reorder or renumber existing
-/// variants — doing so would break deployed SDK clients that match on
-/// category codes. New variants must be appended at the end.
+/// Discriminants are permanent. New variants must be appended; existing values
+/// must never be reordered or renumbered.
 ///
-/// # Usage
-/// Use [`ContractError::category`] to map any error to its category at
-/// runtime. This allows SDK clients to group errors by category without
-/// matching on individual error codes.
+/// | Code | Category    | Description |
+/// |------|-------------|-------------|
+/// | 1    | `Auth`      | Authorization and authentication errors |
+/// | 2    | `Lifecycle` | Credit-line state-machine transition errors |
+/// | 3    | `Numeric`   | Arithmetic and bounds errors |
+/// | 4    | `Limit`     | Per-transaction, exposure, or protocol-cap errors |
+/// | 5    | `Liquidity` | Token transfer, reserve, and treasury errors |
+/// | 6    | `Risk`      | Rate, score, and cooldown errors |
+/// | 7    | `Oracle`    | Price-feed validity and quorum errors |
+/// | 8    | `Collateral`| Collateral ratio and balance errors |
+/// | 9    | `Block`     | Freeze, block, and borrower-control errors |
+/// | 10   | `Reentrancy`| Reentrancy detection errors |
+/// | 11   | `Misc`      | Miscellaneous errors not belonging elsewhere |
+/// | 12   | `Handshake` | Cross-contract version and CPI call errors |
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    Auth = 1,
+    Lifecycle = 2,
+    Numeric = 3,
+    Limit = 4,
+    Liquidity = 5,
+    Risk = 6,
+    Oracle = 7,
+    Collateral = 8,
+    Block = 9,
+    Reentrancy = 10,
+    Misc = 11,
+    /// Cross-contract version negotiation and CPI call errors.
+    Handshake = 12,
+}
 
 impl ContractError {
     /// Return the stable category for this error variant.
@@ -260,11 +310,15 @@ impl ContractError {
             | Self::UtilizationNotZero
             | Self::DrawExceedsMaxAmount
             | Self::RepayExceedsMaxAmount
-            | Self::DrawReversalWindowExpired => Limit,
+            | Self::DrawReversalWindowExpired
+            | Self::CloseFactorAboveMax => Limit,
 
             Self::MissingLiquidityToken
             | Self::MissingLiquiditySource
             | Self::InsufficientLiquidityReserve
+            | Self::LiquidityTokenCallFailed
+            | Self::InsufficientRepaymentAllowance
+            | Self::InsufficientRepaymentBalance
             | Self::TreasuryNotSet
             | Self::ExposureCapExceeded
             | Self::BountyNotSet => Liquidity,
@@ -287,6 +341,7 @@ impl ContractError {
 
             Self::DrawsFrozen
             | Self::BorrowerFrozen
+            | Self::BorrowerBlocked
             | Self::CreditLineFrozen
             | Self::FreezeCooldownActive => Block,
 
@@ -295,8 +350,15 @@ impl ContractError {
             Self::CreditLineNotFound
             | Self::AdminAcceptTooEarly
             | Self::NoPendingTreasuryWithdrawal
+            | Self::TreasuryTimelockActive
+            | Self::TreasuryProposalExists
             | Self::OriginalDrawNotFound
-            |            Self::AttestationBatchNotFound => Misc,
+            | Self::AttestationBatchNotFound
+            | Self::InvalidAttestation => Misc,
+
+            // Cross-contract handshake errors — guard is always cleared before
+            // these are emitted so the settlement path is safe to retry.
+            Self::IncompatibleVersion | Self::AuctionCallFailed => Handshake,
         }
     }
 }

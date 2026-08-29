@@ -108,27 +108,6 @@ use crate::storage::{
     CREDIT_LINE_TTL_THRESHOLD,
 };
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
-
-/// Generate a unique key for tracking liquidation settlements.
-///
-/// # Storage
-/// - **Type**: Persistent storage (independent TTL per settlement)
-/// - **Key**: `(Symbol("liq_seen"), borrower, settlement_id)`
-/// - **Purpose**: Prevents replay of the same liquidation settlement
-fn liquidation_settlement_key(
-    borrower: &Address,
-    settlement_id: &Symbol,
-) -> (Symbol, Address, Symbol) {
-    (
-        symbol_short!("liq_seen"),
-        borrower.clone(),
-        settlement_id.clone(),
-    )
-}
-
-
-
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 /// Guard helper: assert that a state transition is valid given the current status.

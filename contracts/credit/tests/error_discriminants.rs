@@ -71,6 +71,8 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
     // Appended in Issue #1146 — reject stale credit-line state transitions.
     assert_eq!(ContractError::StaleStateTransition as u32, 60);
+    assert_eq!(ContractError::IncompatibleVersion as u32, 61);
+    assert_eq!(ContractError::AuctionCallFailed as u32, 62);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -133,6 +135,8 @@ fn no_duplicate_discriminants() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
+        ContractError::IncompatibleVersion as u32,
+        ContractError::AuctionCallFailed as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -146,7 +150,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 60;
+    const EXPECTED_VARIANT_COUNT: usize = 62;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -203,7 +207,9 @@ fn variant_count_is_known() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
-        ContractError::StaleStateTransition as u32,
+    ContractError::IncompatibleVersion as u32,
+    ContractError::AuctionCallFailed as u32,
+    ContractError::StaleStateTransition as u32,
     ];
 
     assert_eq!(
@@ -231,6 +237,7 @@ fn category_discriminants_are_stable() {
     assert_eq!(ContractErrorCategory::Block as u32, 9);
     assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
     assert_eq!(ContractErrorCategory::Misc as u32, 11);
+    assert_eq!(ContractErrorCategory::Handshake as u32, 12);
 }
 
 /// Verify no two `ContractErrorCategory` variants share a discriminant.
@@ -250,6 +257,7 @@ fn no_duplicate_category_discriminants() {
         ContractErrorCategory::Block as u32,
         ContractErrorCategory::Reentrancy as u32,
         ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -263,7 +271,7 @@ fn no_duplicate_category_discriminants() {
 /// Verify the total variant count for `ContractErrorCategory`.
 #[test]
 fn category_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 11;
+    const EXPECTED_VARIANT_COUNT: usize = 12;
 
     let codes = [
         ContractErrorCategory::Auth as u32,
@@ -277,6 +285,7 @@ fn category_variant_count_is_known() {
         ContractErrorCategory::Block as u32,
         ContractErrorCategory::Reentrancy as u32,
         ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     assert_eq!(
@@ -544,6 +553,15 @@ fn category_mappings_are_stable() {
     assert_eq!(
         ContractError::FreezeCooldownActive.category(),
         ContractErrorCategory::Block
+    );
+    // Handshake (12) — cross-contract version and CPI call errors
+    assert_eq!(
+        ContractError::IncompatibleVersion.category(),
+        ContractErrorCategory::Handshake
+    );
+    assert_eq!(
+        ContractError::AuctionCallFailed.category(),
+        ContractErrorCategory::Handshake
     );
     // Lifecycle — stale state transition guard (Issue #1146)
     assert_eq!(
