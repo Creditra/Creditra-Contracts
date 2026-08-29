@@ -87,21 +87,6 @@ pub enum ContractError {
     #[error("Overflow")]
     Overflow,
 
-    #[error("CollateralTokenNotAllowed")]
-    CollateralTokenNotAllowed,
-
-    #[error("TreasuryAddressNotSet")]
-    TreasuryAddressNotSet,
-
-    #[error("BountyAddressNotSet")]
-    BountyAddressNotSet,
-
-    #[error("LateFeeConfigInvalid")]
-    LateFeeConfigInvalid,
-
-    #[error("ProtocolFeeBpsExceeded")]
-    ProtocolFeeBpsExceeded,
-
     /// A configured interest rate exceeds the applicable ceiling.
     #[error("RateCeilingExceeded")]
     RateCeilingExceeded,
@@ -117,6 +102,10 @@ pub enum ContractError {
     /// Requested bounty withdrawal exceeds the accumulated bounty balance.
     #[error("InsufficientBountyBalance")]
     InsufficientBountyBalance,
+
+    /// A draw would exceed the borrower's max-utilization cap.
+    #[error("MaxUtilizationExceeded")]
+    MaxUtilizationExceeded,
 }
 
 impl ContractError {
@@ -145,7 +134,7 @@ impl ContractError {
             ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
-            ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
+            ContractError::MaxUtilizationExceeded => ContractErrorCategory::Validation,
         }
     }
 }

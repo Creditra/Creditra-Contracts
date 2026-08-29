@@ -1,0 +1,9 @@
+---
+source: contracts/freeze/tests/gas_snap.rs
+expression: sample
+---
+FreezeGasSample {
+    entrypoint: "unfreeze_draws",
+    cpu_instructions: 115533,
+    memory_bytes: 18118,
+}

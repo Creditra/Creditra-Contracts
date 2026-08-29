@@ -6,12 +6,12 @@
 //! advances while the contract continues to accept the last known good price
 //! as long as the stored price remains within the configured freshness window.
 
-use creditra_credit::types::{CreditStatus, OracleConfig};
+use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol};
 
-fn setup(env: &Env) -> (CreditClient, Address, Address) {
+fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -61,7 +61,13 @@ fn oracle_outage_recovers_across_many_ledgers() {
     env.ledger().with_mut(|l| l.timestamp = 1_000);
 
     let first = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &10_000_u32, &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &first,
+        &500_i128,
+        &sid(&env, "s0"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
     assert_eq!(
         client.get_credit_line(&first).unwrap().status,
         CreditStatus::Closed
@@ -96,11 +102,23 @@ fn oracle_outage_rejects_price_after_stale_window() {
 
     env.ledger().with_mut(|l| l.timestamp = 1_000);
     let first = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &10_000_u32, &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &first,
+        &500_i128,
+        &sid(&env, "s0"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 
     // Advance beyond the configured oracle freshness window without a price update.
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 10_001);
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
 }

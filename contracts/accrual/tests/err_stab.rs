@@ -46,7 +46,7 @@
 //! - `contracts/credit/tests/accrual_overflow_audit.rs` — overflow-determinism tests.
 
 use creditra_credit::types::{ContractError, ContractErrorCategory};
-use creditra_credit::{Credit, CreditClient};
+use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, Env, Vec,
@@ -207,7 +207,7 @@ fn accrual_v7_category_mappings_are_pinned() {
 fn accrual_v7_subset_has_no_duplicate_discriminants() {
     use std::collections::HashSet;
 
-    let codes: Vec<u32> = vec![
+    let codes: std::vec::Vec<u32> = std::vec![
         ContractError::Overflow as u32,
         ContractError::InvalidAmount as u32,
         ContractError::TimestampRegression as u32,
@@ -671,7 +671,7 @@ mod integration {
         let borrower = Address::generate(&env);
 
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        client.freeze_credit_line(&admin, &borrower);
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.draw_credit(&borrower, &100_i128);

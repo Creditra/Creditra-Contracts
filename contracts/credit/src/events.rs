@@ -184,6 +184,59 @@ pub struct DrawsFrozenEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineFreezeEvent {
+    pub borrower: Address,
+    pub reason: crate::types::FreezeReason,
+    pub frozen: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeAccruedEvent {
+    pub borrower: Address,
+    pub fee_amount: i128,
+    pub treasury_amount: i128,
+    pub bounty_amount: i128,
+    pub new_treasury_balance: i128,
+    pub new_bounty_balance: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowerFrozenEvent {
+    pub borrower: Address,
+    pub frozen_until: u64,
+    pub ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateEnteredEvent {
+    pub borrower: Address,
+    pub base_rate_bps: u32,
+    pub penalty_surcharge_bps: u32,
+    pub effective_rate_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PenaltyRateExitedEvent {
+    pub borrower: Address,
+    pub previous_rate_bps: u32,
+    pub new_rate_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralPartialReleasedEvent {
+    pub borrower: Address,
+    pub amount_released: i128,
+    pub new_balance: i128,
+    pub health_factor_bps: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BorrowerBlockedEvent {
     pub borrower: Address,
     pub blocked: bool,
@@ -224,6 +277,8 @@ pub struct GraceWaiverAppliedEvent {
     pub mode: crate::types::GraceWaiverMode,
 }
 
+pub type GraceWaiverReceiptEvent = GraceWaiverAppliedEvent;
+
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
 }
@@ -249,6 +304,37 @@ pub fn publish_draw_reversed_event(env: &Env, event: DrawReversedEvent) {
 pub fn publish_drawn_event_v2(env: &Env, event: DrawnEventV2) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("drawn_v2")), event);
+}
+
+pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "col_part_rel")),
+        event,
+    );
+}
+
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "oracle_quorum")),
+        (min_quorum_k, max_deviation_bps, max_age_seconds),
+    );
+}
+
+pub fn publish_oracle_quorum_price_set_event(
+    env: &Env,
+    price: i128,
+    min_quorum_k: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "oracle_price")),
+        (price, min_quorum_k, timestamp),
+    );
 }
 
 pub fn publish_fee_accrued_event(env: &Env, event: FeeAccruedEvent) {
@@ -305,6 +391,22 @@ pub fn publish_draws_frozen_event(env: &Env, frozen: bool, reason: crate::types:
     );
 }
 
+pub fn publish_credit_line_freeze_event(
+    env: &Env,
+    borrower: &Address,
+    reason: crate::types::FreezeReason,
+    frozen: bool,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "cl_freeze")),
+        CreditLineFreezeEvent {
+            borrower: borrower.clone(),
+            reason,
+            frozen,
+        },
+    );
+}
+
 pub fn publish_rate_formula_config_event(env: &Env, enabled: bool) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "rate_form")),
@@ -323,10 +425,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -339,7 +438,8 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
@@ -372,8 +472,6 @@ pub fn publish_borrower_frozen_event(env: &Env, borrower: &Address, frozen_until
         },
     );
 }
-
-/// Publish a penalty rate entered event when a line becomes delinquent.
 
 /// Publish a penalty rate entered event when a line becomes delinquent.
 pub fn publish_penalty_rate_entered_event(
@@ -521,6 +619,18 @@ pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) 
     );
 }
 
+pub fn publish_protocol_fee_bps_set_event(env: &Env, bps: u32) {
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "fee_set")), bps);
+}
+
+pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "fee_bnd")),
+        (min_bps, max_bps),
+    );
+}
+
 pub fn publish_close_factor_bps_set_event(env: &Env, close_factor_bps: u32) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "clsfctr")),
@@ -572,8 +682,6 @@ pub fn publish_grace_waiver_applied_event(
         },
     );
 }
-
-
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]

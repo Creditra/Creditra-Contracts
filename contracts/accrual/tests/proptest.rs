@@ -69,9 +69,11 @@ fn setup_env() -> (Env, CreditClient<'static>, std::vec::Vec<Address>) {
     sac.mint(&contract_id, &LIQUIDITY_AMOUNT);
 
     let mut borrowers = std::vec::Vec::with_capacity(BORROWER_COUNT);
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
     for i in 0..BORROWER_COUNT {
         let borrower = Address::generate(&env);
         sac.mint(&borrower, &50_000_000_i128);
+        token_client.approve(&borrower, &contract_id, &50_000_000_i128, &1_000_000_u32);
         let credit_limit = 50_000_i128 + (i as i128 * 20_000_i128);
         let rate_bps = 1_000_u32 + (i as u32 * 500_u32);
         let score = 30_u32 + (i as u32 * 10_u32);
@@ -84,14 +86,14 @@ fn setup_env() -> (Env, CreditClient<'static>, std::vec::Vec<Address>) {
 
 /// Assert `0 <= accrued_interest <= utilized_amount` for every active line.
 fn assert_accrued_le_utilized(client: &CreditClient<'_>, label: &str) {
-    let mut cursor = None;
+    let mut cursor = 0_u32;
     loop {
-        let page = client.enumerate_credit_lines(&cursor, &8);
-        if page.is_empty() {
+        let (lines, next_cursor) = client.enumerate_credit_lines(&cursor, &8, &false);
+        if lines.is_empty() {
             break;
         }
-        for item in page.iter() {
-            let (_, line) = item;
+        for i in 0..lines.len() {
+            let line = lines.get(i).unwrap();
             assert!(
                 line.accrued_interest >= 0,
                 "{label}: accrued_interest is negative ({}) for borrower {:?}",
@@ -106,12 +108,16 @@ fn assert_accrued_le_utilized(client: &CreditClient<'_>, label: &str) {
                 line.borrower,
             );
         }
+        match next_cursor {
+            Some(c) => cursor = c,
+            None => break,
+        }
     }
 }
 
 /// Assert `total_utilized` >= 0 (sanity check).
 fn assert_total_utilized_non_negative(client: &CreditClient<'_>, label: &str) {
-    let total = client.total_utilized();
+    let total = client.get_total_utilized();
     assert!(total >= 0, "{label}: total_utilized is negative: {total}");
 }
 
@@ -331,8 +337,8 @@ fn max_rate_one_year_bound() {
     let (env, client, borrowers) = setup_env();
     let borrower = &borrowers[0];
 
-    // Reopen with max rate (100% APR).
-    client.open_credit_line(borrower, &1_000_000_i128, &10_000_u32, &50_u32);
+    // Set max rate (100% APR) and higher limit.
+    client.update_risk_parameters(borrower, &1_000_000_i128, &10_000_u32, &50_u32);
     client.draw_credit(borrower, &100_000_i128);
 
     env.ledger().with_mut(|l| l.timestamp += 31_536_000);

@@ -1,0 +1,38 @@
+---
+source: contracts/credit/tests/gas_snap_freeze.rs
+expression: samples
+---
+{
+    "freeze_credit_line": (
+        172694,
+        25715,
+    ),
+    "freeze_draws": (
+        89229,
+        13363,
+    ),
+    "get_credit_line_freeze_reason": (
+        34373,
+        6309,
+    ),
+    "get_draws_freeze_reason": (
+        61753,
+        9797,
+    ),
+    "is_credit_line_frozen": (
+        34371,
+        6309,
+    ),
+    "is_draws_frozen": (
+        61751,
+        9797,
+    ),
+    "unfreeze_credit_line": (
+        90552,
+        13392,
+    ),
+    "unfreeze_draws": (
+        115533,
+        18118,
+    ),
+}

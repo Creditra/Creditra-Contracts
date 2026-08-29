@@ -75,6 +75,12 @@ fn setup(env: &Env) -> Fixture<'_> {
     StellarAssetClient::new(env, &token).mint(&contract_id, &(CREDIT_LIMIT * 10));
     // Fund the borrower so repay_credit can pull tokens in.
     StellarAssetClient::new(env, &token).mint(&borrower, &(CREDIT_LIMIT * 2));
+    soroban_sdk::token::Client::new(env, &token).approve(
+        &borrower,
+        &contract_id,
+        &(CREDIT_LIMIT * 10),
+        &100_000_u32,
+    );
 
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &300_u32, &50_u32);
 

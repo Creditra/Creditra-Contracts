@@ -141,4 +141,3 @@ pub fn publish_interest_accrued(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("accrual"), symbol_short!("accrue")), event);
 }
-

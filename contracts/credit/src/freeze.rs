@@ -30,7 +30,8 @@
 use crate::auth::require_admin_auth;
 use crate::events::{publish_credit_line_freeze_event, publish_draws_frozen_event};
 use crate::storage::{
-    enforce_freeze_cooldown, get_credit_line, record_freeze_timestamp_if_cooldown, DataKey,
+    bump_instance_ttl, enforce_freeze_cooldown, get_credit_line,
+    record_freeze_timestamp_if_cooldown, DataKey,
 };
 use crate::types::{ContractError, DrawsFreezeState, FreezeReason};
 use soroban_sdk::{Address, Env};
@@ -120,7 +121,7 @@ pub fn unfreeze_draws(env: Env) {
 /// - `true` if draws are frozen
 /// - `false` if draws are not frozen or the key has never been set
 pub fn is_draws_frozen(env: &Env) -> bool {
-    get_draws_freeze_state(env).map_or(false, |state| state.frozen)
+    get_draws_freeze_state(env).is_some_and(|state| state.frozen)
 }
 
 /// Returns the active global freeze reason, if draws are currently frozen.
@@ -198,6 +199,7 @@ pub fn get_credit_line_freeze_reason(env: &Env, borrower: &Address) -> Option<Fr
 }
 
 fn get_draws_freeze_state(env: &Env) -> Option<DrawsFreezeState> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get::<DataKey, DrawsFreezeState>(&DataKey::DrawsFrozen)
@@ -206,8 +208,11 @@ fn get_draws_freeze_state(env: &Env) -> Option<DrawsFreezeState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
+    use crate::storage::{
+        INSTANCE_BUMP_AMOUNT, INSTANCE_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD,
+    };
     use crate::{Credit, CreditClient};
+    use soroban_sdk::testutils::storage::Instance as _;
     use soroban_sdk::testutils::storage::Persistent as _;
     use soroban_sdk::testutils::{Address as _, Ledger};
 
@@ -224,6 +229,21 @@ mod tests {
 
     fn ttl_for_key(env: &Env, contract_id: &Address, key: &DataKey) -> u32 {
         env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
+    }
+
+    fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
+        env.as_contract(contract_id, || env.storage().instance().get_ttl())
+    }
+
+    fn drain_instance_ttl(env: &Env, contract_id: &Address) {
+        let current = instance_ttl(env, contract_id);
+        let target = INSTANCE_BUMP_THRESHOLD.saturating_sub(1);
+        let delta = current.saturating_sub(target);
+        if delta > 0 {
+            env.ledger().with_mut(|li| {
+                li.sequence_number = li.sequence_number.saturating_add(delta);
+            });
+        }
     }
 
     fn advance_to_ttl_threshold(env: &Env, ttl: u32) {
@@ -247,5 +267,83 @@ mod tests {
         advance_to_ttl_threshold(&env, initial_ttl);
         assert!(client.is_credit_line_frozen(&borrower));
         assert!(ttl_for_key(&env, &contract_id, &key) >= LEDGER_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn is_draws_frozen_bumps_instance_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+        drain_instance_ttl(&env, &contract_id);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before < INSTANCE_BUMP_THRESHOLD);
+
+        assert!(client.is_draws_frozen());
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= INSTANCE_BUMP_AMOUNT,
+            "is_draws_frozen must extend instance TTL; before={before} after={after}"
+        );
+    }
+
+    #[test]
+    fn get_draws_freeze_reason_bumps_instance_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::Compliance);
+        drain_instance_ttl(&env, &contract_id);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before < INSTANCE_BUMP_THRESHOLD);
+
+        let reason = client.get_draws_freeze_reason();
+        assert_eq!(reason, Some(FreezeReason::Compliance));
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= INSTANCE_BUMP_AMOUNT,
+            "get_draws_freeze_reason must extend instance TTL; before={before} after={after}"
+        );
+    }
+
+    #[test]
+    fn get_credit_line_freeze_reason_bumps_persistent_ttl_when_below_threshold() {
+        let env = Env::default();
+        let (contract_id, client, borrower) = setup(&env);
+        let key = DataKey::CreditLineFreeze(borrower.clone());
+
+        client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        let initial_ttl = ttl_for_key(&env, &contract_id, &key);
+        assert!(initial_ttl >= LEDGER_BUMP_AMOUNT);
+
+        advance_to_ttl_threshold(&env, initial_ttl);
+
+        let reason = client.get_credit_line_freeze_reason(&borrower);
+        assert_eq!(reason, Some(FreezeReason::Compliance));
+
+        assert!(ttl_for_key(&env, &contract_id, &key) >= LEDGER_BUMP_AMOUNT);
+    }
+
+    #[test]
+    fn draw_freeze_reads_do_not_write_ttl_when_healthy() {
+        let env = Env::default();
+        let (contract_id, client, _borrower) = setup(&env);
+
+        client.freeze_draws(&FreezeReason::LiquidityReserve);
+
+        let before = instance_ttl(&env, &contract_id);
+        assert!(before >= INSTANCE_BUMP_THRESHOLD);
+
+        assert!(client.is_draws_frozen());
+
+        let after = instance_ttl(&env, &contract_id);
+        assert!(
+            after >= before.saturating_sub(1),
+            "TTL must not decrease when bump is a no-op; before={before} after={after}"
+        );
     }
 }

@@ -373,6 +373,7 @@ name = "creditra-borrow"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -403,6 +404,8 @@ name = "creditra-freeze"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
+ "insta",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -420,6 +423,7 @@ name = "creditra-query"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
+ "proptest",
  "soroban-sdk",
 ]
 

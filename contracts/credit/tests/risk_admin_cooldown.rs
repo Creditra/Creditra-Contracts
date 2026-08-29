@@ -15,7 +15,7 @@
 use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,8 +111,7 @@ fn cooldown_blocks_immediate_successive_update() {
 
     // Second update at t=1001 (< 1 hour since last) should fail.
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
     assert!(result.is_err(), "should fail during cooldown");
     let err = result.err().unwrap();
     assert_eq!(
@@ -136,8 +135,7 @@ fn cooldown_elapses_correctly() {
 
     // Still within cooldown at t=3000 (< 1000 + 3600 = 4600).
     env.ledger().with_mut(|li| li.timestamp = 3000);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
     assert!(result.is_err(), "should still be in cooldown at t=3000");
 
     // Cooldown elapsed at t=4600 (1000 + 3600).
@@ -163,12 +161,8 @@ fn cooldown_is_per_action_not_per_borrower() {
 
     // Update borrower2 at t=1001 should also be blocked (cooldown is global).
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
-    assert!(
-        result.is_err(),
-        "cooldown is global, not per-borrower"
-    );
+    let result = client.try_update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
+    assert!(result.is_err(), "cooldown is global, not per-borrower");
 }
 
 // ── event emission ───────────────────────────────────────────────────────────
@@ -231,12 +225,8 @@ fn cooldown_blocks_even_after_unpause() {
     client.set_protocol_paused(&false);
 
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
-    assert!(
-        result.is_err(),
-        "cooldown should survive pause/unpause"
-    );
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    assert!(result.is_err(), "cooldown should survive pause/unpause");
 }
 
 // ── first action always succeeds ─────────────────────────────────────────────

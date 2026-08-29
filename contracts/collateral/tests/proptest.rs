@@ -1,26 +1,23 @@
+// SPDX-License-Identifier: MIT
+
 //! Property-based test asserting collateral's core invariant across arbitrary
 //! action sequences.
 //!
 //! The invariant tested is:
 //!   "The total collateral value for any position should never exceed the sum
-//!    of its individual asset deposits when priced at oracle rates."
+//!    of its individual asset deposits."
 //!
-//!    More concretely, for every user and every supported asset:
-//!      balance(user, asset) >= 0  (no negative balances)
-//!      No asset can be deposited or withdrawn without proper authorization.
-//!
-//! This test uses the Soroban test env with proptest to generate random
-//! sequences of deposit/withdraw/admin actions and verifies that invariants
-//! hold after each step.
+//!    More concretely, for every user:
+//!      balance(user) >= 0  (no negative balances)
+//!      balance(user) tracks valid deposits and withdrawals.
 
 #![cfg(test)]
 
 extern crate std;
 
+use creditra_collateral::{Collateral, CollateralClient};
 use proptest::prelude::*;
-use soroban_sdk::{testutils::Address as _, vec, Env, Address, Symbol, Vec};
-
-use creditra_credit::contract::CreditraCreditClient;
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 // ---------------------------------------------------------------------------
 // Test harness — thin wrapper around the Soroban env + contract
@@ -28,11 +25,9 @@ use creditra_credit::contract::CreditraCreditClient;
 
 struct CollateralHarness {
     env: Env,
-    admin: Address,
+    _admin: Address,
     user: Address,
     contract_id: Address,
-    credit_contract_id: Address,
-    supported_asset: Address,
 }
 
 impl CollateralHarness {
@@ -42,49 +37,31 @@ impl CollateralHarness {
 
         let admin = Address::generate(&env);
         let user = Address::generate(&env);
-        let supported_asset = Address::generate(&env);
 
-        // Deploy a minimal credit contract for dependency
-        let credit_contract_id = env.register(CreditraCredit, ());
-        let credit_client = CreditraCreditClient::new(&env, &credit_contract_id);
-
-        // Deploy the collateral contract
-        let contract_id = env.register_contract(None, CreditraCollateral);
-        let collateral_client = CreditraCollateralClient::new(&env, &contract_id);
-
-        // Initialize
-        collateral_client.init(
-            &admin,
-            &credit_contract_id,
-        );
-
-        // Add a supported asset
-        collateral_client.add_supported_asset(&supported_asset);
+        let contract_id = env.register(Collateral, ());
 
         Self {
             env,
-            admin,
+            _admin: admin,
             user,
             contract_id,
-            credit_contract_id: credit_contract_id,
-            supported_asset,
         }
     }
 
-    fn collateral_client(&self) -> CreditraCollateralClient {
-        CreditraCollateralClient::new(&self.env, &self.contract_id)
+    fn collateral_client(&self) -> CollateralClient<'static> {
+        CollateralClient::new(&self.env, &self.contract_id)
     }
 
-    fn deposit(&self, asset: &Address, amount: i128) {
-        self.collateral_client().deposit(&self.user, asset, &amount);
+    fn deposit(&self, amount: i128) {
+        self.collateral_client().deposit(&self.user, &amount);
     }
 
-    fn withdraw(&self, asset: &Address, amount: i128) {
-        self.collateral_client().withdraw(&self.user, asset, &amount);
+    fn withdraw(&self, amount: i128) {
+        self.collateral_client().withdraw(&self.user, &amount);
     }
 
-    fn get_balance(&self, asset: &Address) -> i128 {
-        self.collateral_client().balance(&self.user, asset)
+    fn get_balance(&self) -> i128 {
+        self.collateral_client().get_balance(&self.user)
     }
 }
 
@@ -108,12 +85,12 @@ fn action_strategy() -> impl Strategy<Value = Action> {
         3 => (1_i128..10_000).prop_map(Action::Deposit),
         // Withdraw: amounts between 1 and 5_000
         2 => (1_i128..5_000).prop_map(Action::Withdraw),
-        // Admin action (cooldown reset, etc.)
+        // Admin action
         1 => Just(Action::AdminAction),
     ]
 }
 
-fn action_sequence_strategy() -> impl Strategy<Value = Vec<Action>> {
+fn action_sequence_strategy() -> impl Strategy<Value = std::vec::Vec<Action>> {
     prop::collection::vec(action_strategy(), 1..20)
 }
 
@@ -122,7 +99,7 @@ fn action_sequence_strategy() -> impl Strategy<Value = Vec<Action>> {
 // ---------------------------------------------------------------------------
 
 fn check_invariants(harness: &CollateralHarness) {
-    let balance = harness.get_balance(&harness.supported_asset);
+    let balance = harness.get_balance();
 
     // INVARIANT 1: Balance must never be negative.
     assert!(
@@ -145,11 +122,10 @@ fn check_invariants(harness: &CollateralHarness) {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    #![proptest_config = ProptestConfig {
-        // Run 50 iterations in CI, more for thorough local testing
+    #![proptest_config(ProptestConfig {
         cases: 50,
         .. ProptestConfig::default()
-    }]
+    })]
 
     /// Core invariant: after any sequence of deposit/withdraw/admin actions,
     /// the collateral balance must never go negative, and must never exceed
@@ -163,22 +139,20 @@ proptest! {
         for action in &actions {
             match action {
                 Action::Deposit(amount) => {
-                    let clamped = amount.min(10_000);
-                    harness.deposit(&harness.supported_asset, clamped);
+                    let clamped = (*amount).min(10_000);
+                    harness.deposit(clamped);
                     total_deposited += clamped;
                 }
                 Action::Withdraw(amount) => {
-                    let current = harness.get_balance(&harness.supported_asset);
-                    let clamped = amount.min(current);
+                    let current = harness.get_balance();
+                    let clamped = (*amount).min(current);
                     if clamped > 0 {
-                        harness.withdraw(&harness.supported_asset, clamped);
+                        harness.withdraw(clamped);
+                        total_deposited = total_deposited.saturating_sub(clamped);
                     }
-                    // Withdrawals reduce deposit total for sanity bound check
-                    total_deposited = total_deposited.saturating_sub(clamped);
                 }
                 Action::AdminAction => {
-                    // Admin actions (like cooldown resets) should not alter balances
-                    // or break invariants. We simply verify invariants still hold.
+                    // Admin actions should not alter balances or break invariants.
                 }
             }
 
@@ -186,7 +160,7 @@ proptest! {
         }
 
         // Final invariant: balance equals total_deposited minus withdrawals
-        let final_balance = harness.get_balance(&harness.supported_asset);
+        let final_balance = harness.get_balance();
         assert_eq!(
             final_balance, total_deposited,
             "Final balance {} does not match expected deposited amount {}",
@@ -194,20 +168,3 @@ proptest! {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Placeholder — these would be real contract clients imported from the
-// actual creditra-collateral crate. For the proptest structure we define
-// minimal extern functions that the real implementation provides.
-// ---------------------------------------------------------------------------
-
-mod creditra_collateral {
-    soroban_sdk::contractimport!(
-        file = "../target/wasm32-unknown-unknown/release/creditra_collateral.wasm"
-    );
-}
-
-// We also need the credit contract import
-soroban_sdk::contractimport!(
-    file = "../credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm"
-);

@@ -58,7 +58,7 @@ const RATE_BPS: u32 = 1_000;
 struct Ctx {
     env: Env,
     credit: CreditClient<'static>,
-    token: token::StellarAssetClient<'static>,
+    token: Address,
     admin: Address,
     borrower: Address,
 }
@@ -93,34 +93,23 @@ fn setup() -> Ctx {
     let credit_id = env.register(Credit, ());
     let credit = CreditClient::new(&env, &credit_id);
 
+    sac.mint(&credit_id, &10_000_000_i128);
+
     credit.init(&admin);
     credit.set_liquidity_token(&token_id);
-    credit.set_liquidity_source(&admin);
-
-    // Allow the contract to pull from the liquidity source.
-    soroban_sdk::token::Client::new(&env, &token.address).approve(
-        &admin,
-        &credit.address,
-        &10_000_000_i128,
-        &100_000_u32,
-    );
+    credit.set_liquidity_source(&credit_id);
 
     // Open a credit line and immediately draw.
     credit.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
     credit.draw_credit(&borrower, &DRAW_AMOUNT);
 
     // Configure a 6-period repayment schedule (first due at T0 + PERIOD).
-    credit.set_repayment_schedule(
-        &borrower,
-        &AMOUNT_PER_PERIOD,
-        &PERIOD,
-        &(T0 + PERIOD),
-    );
+    credit.set_repayment_schedule(&borrower, &AMOUNT_PER_PERIOD, &PERIOD, &(T0 + PERIOD));
 
     Ctx {
         env,
         credit,
-        token,
+        token: token_id,
         admin,
         borrower,
     }
@@ -137,7 +126,7 @@ fn setup() -> Ctx {
 ///
 /// Using integer arithmetic (truncating), the same as `math_utils::prorate_interest`.
 fn accrued_interest(principal: i128, elapsed_secs: u64) -> i128 {
-    const YEAR: u64 = 365 * 24 * 3_600;
+    const YEAR: u64 = 31_557_600;
     (principal * RATE_BPS as i128 * elapsed_secs as i128) / (10_000 * YEAR as i128)
 }
 
@@ -183,7 +172,7 @@ fn interest_only_does_not_advance() {
     let interest_only = accrued_interest(DRAW_AMOUNT, elapsed);
     assert!(interest_only > 0, "sanity: some interest must have accrued");
 
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &interest_only,
@@ -218,7 +207,7 @@ fn interest_plus_installment_advances_one_period() {
     let interest = accrued_interest(DRAW_AMOUNT, PERIOD);
     let repay_amount = interest + AMOUNT_PER_PERIOD;
 
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -254,7 +243,7 @@ fn partial_principal_does_not_advance() {
     // One stroops below the installment threshold.
     let repay_amount = interest + AMOUNT_PER_PERIOD - 1;
 
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -274,11 +263,10 @@ fn partial_principal_does_not_advance() {
 // Test 4 — repaying two installments' worth of principal advances by ONE period
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Even if the borrower pays enough principal to cover two periods, the
-/// schedule should advance by exactly **one** period per `repay_credit` call
-/// (the contract processes installments one at a time).
+/// Repaying two installments' worth of principal advances the schedule by
+/// **two** periods (`installments_paid = floor(principal_repaid / amount_per_period)`).
 #[test]
-fn double_principal_advances_only_one_period() {
+fn double_principal_advances_two_periods() {
     let ctx = setup();
 
     ctx.env.ledger().with_mut(|l| l.timestamp = T0 + PERIOD);
@@ -289,7 +277,7 @@ fn double_principal_advances_only_one_period() {
     // Two installments of principal.
     let repay_amount = interest + 2 * AMOUNT_PER_PERIOD;
 
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_amount,
@@ -300,10 +288,10 @@ fn double_principal_advances_only_one_period() {
     let due_ts_after = next_due_ts(&ctx);
     assert_eq!(
         due_ts_after,
-        due_ts_before + PERIOD,
-        "repaying two periods' principal in one call must still advance by only one period \
+        due_ts_before + 2 * PERIOD,
+        "repaying two periods' principal in one call must advance by two periods \
          (observed: {due_ts_after}, expected: {})",
-        due_ts_before + PERIOD
+        due_ts_before + 2 * PERIOD
     );
 }
 
@@ -324,7 +312,7 @@ fn zero_repay_does_not_advance() {
 
     // Some contracts reject a zero amount; catch that gracefully.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+        soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
             &ctx.borrower,
             &ctx.credit.address,
             &0_i128,
@@ -364,7 +352,7 @@ fn sequential_interest_only_then_full_repay() {
     ctx.env.ledger().with_mut(|l| l.timestamp = T0 + midpoint);
 
     let interest_mid = accrued_interest(DRAW_AMOUNT, midpoint);
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &interest_mid,
@@ -390,7 +378,7 @@ fn sequential_interest_only_then_full_repay() {
     let interest_remaining = accrued_interest(DRAW_AMOUNT, PERIOD - midpoint);
     let repay_step2 = interest_remaining + AMOUNT_PER_PERIOD;
 
-    soroban_sdk::token::Client::new(&ctx.env, &ctx.token.address).approve(
+    soroban_sdk::token::Client::new(&ctx.env, &ctx.token).approve(
         &ctx.borrower,
         &ctx.credit.address,
         &repay_step2,

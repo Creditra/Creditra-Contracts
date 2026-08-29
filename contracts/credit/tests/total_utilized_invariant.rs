@@ -140,22 +140,26 @@ fn setup_env() -> (Env, CreditClient<'static>, Address, Vec<Address>) {
 }
 
 fn assert_total_utilized_invariant(client: &CreditClient<'_>) {
-    let mut cursor = None;
+    let mut cursor = 0_u32;
     let mut enumerated = 0_u32;
     let mut recomputed_total = 0_i128;
     let expected_count = client.get_credit_line_count();
 
     loop {
-        let page = client.enumerate_credit_lines(&cursor, &PAGE_SIZE);
-        if page.is_empty() {
+        let (lines, next_cursor) = client.enumerate_credit_lines(&cursor, &PAGE_SIZE, &false);
+        if lines.is_empty() {
             break;
         }
+        enumerated += lines.len();
 
-        for item in page.iter() {
-            let (id, line) = item;
-            enumerated += 1;
+        for i in 0..lines.len() {
+            let line = lines.get(i).unwrap();
             recomputed_total += line.utilized_amount;
-            cursor = Some(id);
+        }
+
+        match next_cursor {
+            Some(c) => cursor = c,
+            None => break,
         }
     }
 

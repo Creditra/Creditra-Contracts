@@ -7,8 +7,8 @@
 //! paths so that active credit lines are not silently archived by the network.
 
 use creditra_credit::storage::{
-    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, LEDGER_BUMP_AMOUNT,
-    LEDGER_BUMP_THRESHOLD,
+    DataKey, DrawAuditKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD,
 };
 use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
@@ -39,12 +39,8 @@ fn ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
     env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
 }
 
-fn instance_ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
-    env: &Env,
-    contract_id: &Address,
-    key: &K,
-) -> u32 {
-    env.as_contract(contract_id, || env.storage().instance().get_ttl(key))
+fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 #[test]
@@ -203,8 +199,7 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
         );
     });
 
-    let grace_key = creditra_credit::storage::grace_period_key(&env);
-    let initial_ttl = instance_ttl_for_key(&env, &contract_id, &grace_key);
+    let initial_ttl = instance_ttl(&env, &contract_id);
     let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
     let delta = initial_ttl.saturating_sub(target_remaining);
     advance_ledgers(&env, delta);
@@ -228,7 +223,7 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
     env.ledger().set_timestamp(100);
     client.update_risk_parameters(&borrower, &1_000_i128, &300_u32, &70_u32);
 
-    let ttl_after = instance_ttl_for_key(&env, &contract_id, &grace_key);
+    let ttl_after = instance_ttl(&env, &contract_id);
     assert!(
         ttl_after >= LEDGER_BUMP_AMOUNT,
         "instance TTL not extended for accrual reads: initial={initial_ttl} after={ttl_after}"
@@ -318,6 +313,11 @@ fn settle_default_liquidation_bumps_credit_line_ttl_on_accrual_read() {
 
     let borrower = Address::generate(&env);
     client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    env.as_contract(&contract_id, || {
+        let mut line = creditra_credit::storage::get_credit_line(&env, &borrower).unwrap();
+        line.utilized_amount = 1000;
+        env.storage().persistent().set(&borrower, &line);
+    });
     client.default_credit_line(&borrower);
 
     drain_credit_line_ttl(&env, &contract_id, &borrower);
@@ -344,10 +344,16 @@ fn reverse_draw_bumps_credit_line_ttl_on_accrual_read() {
     // which is irrelevant to this TTL regression test) so `reverse_draw` can
     // find an original draw to reverse.
     let original_ts = env.ledger().timestamp();
+    let draw_key = DataKey::DrawAudit(DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp: original_ts,
+    });
     env.as_contract(&contract_id, || {
-        env.storage()
-            .persistent()
-            .set(&DataKey::DrawAudit(borrower.clone(), original_ts), &200_i128);
+        env.storage().persistent().set(&draw_key, &200_i128);
+        creditra_credit::storage::bump_persistent_ttl(&env, &draw_key);
+        let mut line = creditra_credit::storage::get_credit_line(&env, &borrower).unwrap();
+        line.utilized_amount = 200;
+        env.storage().persistent().set(&borrower, &line);
     });
 
     drain_credit_line_ttl(&env, &contract_id, &borrower);

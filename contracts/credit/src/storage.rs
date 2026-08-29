@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // SPDX-License-Identifier: MIT
 
 //! Storage abstraction for the Credit contract.
@@ -58,10 +59,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) §3 for the
 //! full per-variant tier table.
 
-use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
-};
+use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 
 /// Storage keys used in instance and persistent storage.
@@ -198,6 +196,8 @@ pub enum DataKey {
     MaxTotalExposure,
     /// Protocol fee in basis points applied to interest portion of repayments.
     ProtocolFeeBps,
+    /// Protocol fee bounds (min, max) in basis points.
+    ProtocolFeeBounds,
     /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
     /// When unset, defaults to 10_000 (100 % treasury).
     TreasuryFeeShareBps,
@@ -232,6 +232,8 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Quorum-of-K oracle price configuration.
+    OracleQuorumConfig,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
     /// Pending treasury withdrawal proposal (at most one at a time).
@@ -254,21 +256,22 @@ pub enum DataKey {
     /// Per-borrower liquidation grace period in seconds.
     /// Specifies a grace window before a credit line can be defaulted or liquidated.
     LiquidationGracePeriod(Address),
+    /// Global grace period configuration.
+    GracePeriodConfig,
     /// Per-borrower absolute exposure cap (i128 amount).
-    BorrowerExposureCap(Address),
     /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
-    /// Per-borrower, per-token collateral balance (multi-collateral path).
-    CollateralBalanceV2(Address, Address),
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Admin query-critical action cooldown duration in seconds.
+    AdminQueryCooldownSeconds,
+    /// Ledger timestamp of the most recent admin query-critical action.
+    AdminQueryLastActionTs,
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
-
-
 
 // ── Persistent storage TTL policy ────────────────────────────────────────────
 //
@@ -303,21 +306,31 @@ pub fn bump_instance_ttl(env: &Env) {
         .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
-fn bump_persistent_ttl<K>(env: &Env, key: &K)
+pub fn bump_persistent_ttl<K>(env: &Env, key: &K)
 where
     K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
 {
     bump_instance_ttl(env);
-    env.storage()
-        .persistent()
-        .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+    if env.storage().persistent().has(key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
+    }
 }
 
 pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
     bump_instance_ttl(env);
-    env.storage()
-        .persistent()
-        .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
+    if env.storage().persistent().has(borrower) {
+        env.storage().persistent().extend_ttl(
+            borrower,
+            CREDIT_LINE_TTL_THRESHOLD,
+            CREDIT_LINE_TTL_EXTEND_TO,
+        );
+    }
+    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    if env.storage().persistent().has(&id_key) {
+        bump_persistent_ttl(env, &id_key);
+    }
 }
 
 /// Refresh the persistent TTL for an active credit-line freeze record.
@@ -451,12 +464,12 @@ pub fn ensure_credit_line_id(env: &Env, borrower: &Address) -> u32 {
     }
 
     let next_id = get_credit_line_count(env);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineIdByBorrower(borrower.clone()), &next_id);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineBorrowerById(next_id), borrower);
+    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    let borrower_key = DataKey::CreditLineBorrowerById(next_id);
+    env.storage().persistent().set(&id_key, &next_id);
+    bump_persistent_ttl(env, &id_key);
+    env.storage().persistent().set(&borrower_key, borrower);
+    bump_persistent_ttl(env, &borrower_key);
     env.storage()
         .instance()
         .set(&DataKey::CreditLineCount, &next_id.saturating_add(1));
@@ -594,9 +607,7 @@ pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
 
 /// Get the ledger timestamp of the last critical collateral admin action, if any.
 pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
-    env.storage()
-        .instance()
-        .get(&DataKey::LastColAdminActionTs)
+    env.storage().instance().get(&DataKey::LastColAdminActionTs)
 }
 
 /// Record the ledger timestamp of the last critical collateral admin action.
@@ -617,9 +628,10 @@ pub fn get_collateral_risk_weight_bps(env: &Env, asset: &Address) -> Option<u32>
 /// Set the risk weight for a specific collateral asset, in basis points.
 /// Caller is responsible for admin auth and for validating `weight_bps <= 10_000`.
 pub fn set_collateral_risk_weight_bps(env: &Env, asset: &Address, weight_bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::CollateralRiskWeightBps(asset.clone()), &weight_bps);
+    env.storage().instance().set(
+        &DataKey::CollateralRiskWeightBps(asset.clone()),
+        &weight_bps,
+    );
 }
 
 /// Return configured protocol fee basis points, if set.
@@ -630,6 +642,21 @@ pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
 /// Persist protocol fee basis points.
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
+}
+
+/// Return configured protocol fee bounds, defaulting to (0, 1000).
+pub fn get_protocol_fee_bounds(env: &Env) -> (u32, u32) {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProtocolFeeBounds)
+        .unwrap_or((0, 1_000))
+}
+
+/// Persist protocol fee bounds.
+pub fn set_protocol_fee_bounds(env: &Env, min_bps: u32, max_bps: u32) {
+    env.storage()
+        .instance()
+        .set(&DataKey::ProtocolFeeBounds, &(min_bps, max_bps));
 }
 
 /// Return configured treasury address, if set.
@@ -663,6 +690,32 @@ pub fn add_treasury_balance(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&DataKey::TreasuryBalance, &updated_balance);
+}
+
+/// Get the pending treasury withdrawal proposal, if any.
+pub fn get_pending_treasury_withdrawal(
+    env: &Env,
+) -> Option<crate::types::TreasuryWithdrawalProposal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+/// Store a pending treasury withdrawal proposal.
+pub fn set_pending_treasury_withdrawal(
+    env: &Env,
+    proposal: &crate::types::TreasuryWithdrawalProposal,
+) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+/// Clear the pending treasury withdrawal proposal after execution or cancellation.
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
 }
 
 /// Clear accumulated treasury balance after withdrawal.
@@ -759,6 +812,32 @@ pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
 }
 
+/// Get the global grace period configuration, if set.
+pub fn get_grace_period_config(env: &Env) -> Option<crate::types::GracePeriodConfig> {
+    env.storage().instance().get(&DataKey::GracePeriodConfig)
+}
+
+/// Set the global grace period configuration.
+pub fn set_grace_period_config(env: &Env, cfg: &crate::types::GracePeriodConfig) {
+    env.storage()
+        .instance()
+        .set(&DataKey::GracePeriodConfig, cfg);
+}
+
+/// Get the per-borrower liquidation grace period in seconds, if set.
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+}
+
+/// Set the per-borrower liquidation grace period in seconds.
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquidationGracePeriod(borrower.clone()), &seconds);
+}
+
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 ///
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,
@@ -808,13 +887,9 @@ pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<
     }
     let key = DataKey::RateFloorBps(borrower.clone());
     if let Some(floor) = floor_bps {
-        env.storage()
-            .persistent()
-            .set(&key, &floor);
+        env.storage().persistent().set(&key, &floor);
     } else {
-        env.storage()
-            .persistent()
-            .remove(&key);
+        env.storage().persistent().remove(&key);
     }
     bump_persistent_ttl(env, &key);
 }
@@ -844,13 +919,9 @@ pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Opt
     }
     let key = DataKey::RateCeilingBps(borrower.clone());
     if let Some(ceiling) = ceiling_bps {
-        env.storage()
-            .persistent()
-            .set(&key, &ceiling);
+        env.storage().persistent().set(&key, &ceiling);
     } else {
-        env.storage()
-            .persistent()
-            .remove(&key);
+        env.storage().persistent().remove(&key);
     }
     bump_persistent_ttl(env, &key);
 }
@@ -875,13 +946,9 @@ pub fn get_borrower_rate_ceiling(env: &Env, borrower: &Address) -> Option<u32> {
 pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
     let key = DataKey::UtilizationCapBps(borrower.clone());
     if let Some(cap) = cap_bps {
-        env.storage()
-            .persistent()
-            .set(&key, &cap);
+        env.storage().persistent().set(&key, &cap);
     } else {
-        env.storage()
-            .persistent()
-            .remove(&key);
+        env.storage().persistent().remove(&key);
     }
     bump_persistent_ttl(env, &key);
 }
@@ -912,15 +979,12 @@ pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     let key = DataKey::BlockedBorrower(borrower.clone());
     if blocked {
-        env.storage()
-            .persistent()
-            .set(&key, &true);
+        env.storage().persistent().set(&key, &true);
+        bump_persistent_ttl(env, &key);
     } else {
-        env.storage()
-            .persistent()
-            .remove(&key);
+        env.storage().persistent().remove(&key);
+        bump_instance_ttl(env);
     }
-    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.
@@ -948,6 +1012,26 @@ pub fn set_min_credit_limit(env: &Env, min: i128) {
 /// Get the configured maximum credit limit, if set.
 pub fn get_max_credit_limit(env: &Env) -> Option<i128> {
     env.storage().instance().get(&DataKey::MaxCreditLimit)
+}
+
+/// Get the per-borrower exposure cap, if set.
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
+}
+
+/// Set the per-borrower exposure cap (admin only, enforced by caller).
+pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
+    if cap == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+    }
 }
 
 /// Set the maximum credit limit (admin only, enforced by caller).
@@ -993,16 +1077,18 @@ pub fn set_close_factor_bps(env: &Env, bps: u32) {
 
 /// Return the installment schedule for a borrower, if configured.
 pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RepaymentSchedule(borrower.clone()))
+    let key = DataKey::RepaymentSchedule(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Persist the installment schedule for a borrower.
 pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &RepaymentSchedule) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::RepaymentSchedule(borrower.clone()), schedule);
+    let key = DataKey::RepaymentSchedule(borrower.clone());
+    env.storage().persistent().set(&key, schedule);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the last draw timestamp for a borrower, if any.
@@ -1137,6 +1223,11 @@ pub fn set_pause_reason(env: &Env, reason: &crate::types::PauseReason) {
     env.storage().instance().set(&DataKey::PauseReason, reason);
 }
 
+/// Clear the structured pause reason from instance storage.
+pub fn clear_pause_reason(env: &Env) {
+    env.storage().instance().remove(&DataKey::PauseReason);
+}
+
 /// Assert the protocol is not paused. Reverts with ContractError::Paused if paused.
 /// This is the circuit breaker guard injected into all mutating entrypoints except repay_credit.
 pub fn assert_not_paused(env: &Env) {
@@ -1182,6 +1273,18 @@ pub fn get_oracle_config(env: &Env) -> Option<crate::types::OracleConfig> {
 /// config satisfies the invariants documented on [`crate::types::OracleConfig`].
 pub fn set_oracle_config(env: &Env, cfg: &crate::types::OracleConfig) {
     env.storage().instance().set(&DataKey::OracleConfig, cfg);
+}
+
+/// Get the quorum-of-K oracle configuration, if set.
+pub fn get_oracle_quorum_config(env: &Env) -> Option<crate::types::OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+/// Set the quorum-of-K oracle configuration.
+pub fn set_oracle_quorum_config(env: &Env, cfg: &crate::types::OracleQuorumConfig) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumConfig, cfg);
 }
 
 /// Get the last accepted oracle price, if any.
@@ -1404,7 +1507,12 @@ pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
-pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
+pub fn set_collateral_balance_for_token(
+    env: &Env,
+    borrower: &Address,
+    token: &Address,
+    balance: i128,
+) {
     let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
     let previous = get_collateral_balance_for_token(env, borrower, token);
     env.storage().persistent().set(&key, &balance);
@@ -1438,36 +1546,26 @@ pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
 /// Returns `0` when the cooldown is disabled (default).
 pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
     let key = symbol_short!("rad_cool");
-    env.storage()
-        .instance()
-        .get(&key)
-        .unwrap_or(0)
+    env.storage().instance().get(&key).unwrap_or(0)
 }
 
 /// Set the risk admin cooldown duration in seconds.
 pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
     let key = symbol_short!("rad_cool");
-    env.storage()
-        .instance()
-        .set(&key, &seconds);
+    env.storage().instance().set(&key, &seconds);
 }
 
 /// Get the timestamp of the last risk admin action.
 /// Returns `0` when no action has been recorded yet.
 pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
     let key = symbol_short!("rad_last");
-    env.storage()
-        .instance()
-        .get(&key)
-        .unwrap_or(0)
+    env.storage().instance().get(&key).unwrap_or(0)
 }
 
 /// Set the timestamp of the last risk admin action.
 pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
     let key = symbol_short!("rad_last");
-    env.storage()
-        .instance()
-        .set(&key, &ts);
+    env.storage().instance().set(&key, &ts);
 }
 
 /// Assert that the risk admin cooldown has elapsed since the last action.
@@ -1511,9 +1609,7 @@ pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
 }
 
 pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
-    env.storage()
-        .instance()
-        .get(&DataKey::LastFreezeTimestamp)
+    env.storage().instance().get(&DataKey::LastFreezeTimestamp)
 }
 
 pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
@@ -1538,4 +1634,34 @@ pub fn enforce_freeze_cooldown(env: &Env) {
             env.panic_with_error(ContractError::FreezeCooldownActive);
         }
     }
+}
+
+pub fn get_admin_query_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryCooldownSeconds)
+}
+
+pub fn set_admin_query_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::AdminQueryCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminQueryCooldownSeconds, &seconds);
+    }
+}
+
+pub fn get_admin_query_last_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminQueryLastActionTs)
+}
+
+pub fn set_admin_query_last_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminQueryLastActionTs, &ts);
 }

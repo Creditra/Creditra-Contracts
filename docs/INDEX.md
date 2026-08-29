@@ -139,6 +139,7 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `storage-layout.md` | ~4 | Storage tier reference |
 | `threat-model.md` | ~4 | Authorization matrix |
 | `default-liquidation-auction-hook.md` | ~3 | Cross-contract handoff |
+| `cross-contract-contract.md` | ~6 | Formal credit↔auction settlement contract with invariants |
 | `default-oracle.md` | ~5 | Staged default-signal oracle |
 | `credit.md` | ~15 | Master credit-contract reference |
 | `upgrade-policy.md` | ~3 | Upgrade procedure |

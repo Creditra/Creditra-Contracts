@@ -148,9 +148,7 @@ mod missing {
 mod fresh {
     use super::*;
 
-    fn fresh_snap(
-        deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-    ) -> CreditLineSnapshotResponse {
+    fn fresh_snap(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> CreditLineSnapshotResponse {
         snapshot(deps, 0).unwrap()
     }
 
@@ -458,10 +456,7 @@ mod health_factor {
         create_draw(&mut deps, 0, "400", "ucredit");
         let hf2 = snapshot(&deps, 0).unwrap().health_factor_bps;
 
-        assert!(
-            hf1 > hf2,
-            "hf should decrease as utilization rises: {hf1} vs {hf2}"
-        );
+        assert!(hf1 > hf2, "hf should decrease as utilization rises: {hf1} vs {hf2}");
     }
 
     #[test]

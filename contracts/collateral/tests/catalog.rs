@@ -37,7 +37,10 @@ fn discriminants_are_stable() {
     assert_eq!(CollateralError::CollateralRiskWeightOutOfRange as u32, 101);
     assert_eq!(CollateralError::CollateralTokenMismatch as u32, 102);
     assert_eq!(CollateralError::CollateralPositionLocked as u32, 103);
-    assert_eq!(CollateralError::CollateralBalanceForTokenNotFound as u32, 104);
+    assert_eq!(
+        CollateralError::CollateralBalanceForTokenNotFound as u32,
+        104
+    );
 }
 
 /// Verify no two variants collide. Iterates the `discriminants_are_stable`

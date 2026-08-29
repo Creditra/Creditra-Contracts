@@ -139,3 +139,10 @@ pub struct Bid {
     pub amount: i128,
     pub timestamp: u64,
 }
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolVersion {
+    pub major: u32,
+    pub minor: u32,
+}

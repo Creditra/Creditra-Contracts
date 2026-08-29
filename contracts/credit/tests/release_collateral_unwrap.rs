@@ -198,9 +198,9 @@ fn quorum_negative_price_reverts() {
     client.submit_oracle_prices(&prices);
 }
 
-/// k = 1 → single feed is not a quorum → OracleQuorumNotMet (#50).
+/// k = 1 → single feed is not a quorum → InvalidAmount (#5) during config.
 #[test]
-#[should_panic(expected = "Error(Contract, #50)")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn quorum_k_less_than_2_reverts() {
     let env = Env::default();
     let client = setup_with_quorum(&env, 1, 500, 3_600);
@@ -209,9 +209,9 @@ fn quorum_k_less_than_2_reverts() {
     client.submit_oracle_prices(&prices);
 }
 
-/// k = 0 → OracleQuorumNotMet (#50).
+/// k = 0 → InvalidAmount (#5) during config.
 #[test]
-#[should_panic(expected = "Error(Contract, #50)")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn quorum_k_zero_reverts() {
     let env = Env::default();
     let client = setup_with_quorum(&env, 0, 500, 3_600);
@@ -256,8 +256,8 @@ fn quorum_max_feeds_accepted() {
     let prices = price_vec(
         &env,
         &[
-            1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000,
-            1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000,
+            1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000,
+            1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000, 1_000,
         ],
     );
     client.submit_oracle_prices(&prices);
@@ -275,9 +275,8 @@ fn quorum_exceeds_max_feeds_reverts() {
     let prices = price_vec(
         &env,
         &[
-            100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-            100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-            100,
+            100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+            100, 100, 100, 100,
         ],
     );
     client.submit_oracle_prices(&prices);

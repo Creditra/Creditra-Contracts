@@ -226,7 +226,7 @@ fn test_event_hf_max_when_no_debt() {
 
     let payload: creditra_credit::events::CollateralPartialReleasedEvent =
         soroban_sdk::TryFromVal::try_from_val(&env, &prel_event.2).unwrap();
-    assert_eq!(payload.health_factor_bps, u32::MAX);
+    assert_eq!(payload.health_factor_bps, u64::from(u32::MAX));
     assert_eq!(payload.amount_released, 500);
     assert_eq!(payload.new_balance, 2_500);
 }

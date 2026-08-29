@@ -1,15 +1,17 @@
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 #![cfg_attr(not(test), no_std)]
 
 pub mod curves;
 mod errors;
-mod events;
+pub mod events;
 mod storage;
 mod types;
 
 pub use curves::{calculate_price, CurveError, DecayCurve};
 pub use errors::AuctionError;
 pub use events::BidRefundedEvent;
-pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay};
+pub use types::{AuctionMode, AuctionState, AuctionStatus, DutchAuctionDecay, ProtocolVersion};
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol};
 
@@ -204,6 +206,7 @@ pub enum AuctionKey {
     LiquidationSettled(Symbol),
 }
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl Auction {
     /// Initializes a new auction.
@@ -223,6 +226,7 @@ impl Auction {
     ///
     /// # Panics
     /// Panics if `start_time >= end_time`, if `min_increment_bps > 10_000`, or if Dutch auction parameters are invalid.
+    #[allow(clippy::too_many_arguments)]
     pub fn init_auction(
         env: Env,
         auction_id: Symbol,
@@ -335,7 +339,7 @@ impl Auction {
                     min_next_bid(&env, state.highest_bid, state.config.min_increment_bps)
                         .max(state.config.min_bid)
                 } else {
-                    min_next_bid(&env, state.config.min_bid, state.config.min_increment_bps)
+                    state.config.min_bid
                 };
                 if amount < threshold {
                     env.panic_with_error(AuctionError::BidTooLow);
@@ -487,6 +491,117 @@ impl Auction {
     ///
     /// Transfers the highest bid amount (if any) to the credit contract.
     ///
+    /// Settle a default liquidation auction atomically and return the recovered amount.
+    ///
+    /// This function is called by the credit contract when a borrower defaults and
+    /// their collateral has been auctioned. The function verifies the auction is closed,
+    /// marks it as settled (replay protection), emits the settlement event, and returns
+    /// the highest bid for validation by the credit contract.
+    ///
+    /// # Authorization
+    ///
+    /// Requires `require_auth` from the factory contract (credit contract).
+    /// Additionally, the `credit_contract` parameter must exactly match the factory
+    /// contract address. This creates a dual-layer identity verification.
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: Soroban environment
+    /// - `auction_id`: Unique identifier for the auction (Symbol)
+    /// - `credit_contract`: Address of the calling credit contract (must match factory)
+    /// - `borrower`: Address of the borrower whose collateral was liquidated
+    ///
+    /// # Preconditions
+    ///
+    /// All of the following must be true:
+    /// 1. Factory contract must be configured via `set_factory_contract()`
+    /// 2. Caller must be authorized by the factory contract via `require_auth(factory)`
+    /// 3. `credit_contract` must exactly equal the factory contract address
+    /// 4. Auction with `auction_id` must exist
+    /// 5. Auction must be in `Closed` state (not `Open` or other states)
+    /// 6. Auction must not have been previously settled (replay protection)
+    ///
+    /// # Effects (on success)
+    ///
+    /// 1. Retrieves the auction state
+    /// 2. Determines the winner:
+    ///    - If `highest_bidder` exists, uses that address
+    ///    - Otherwise, defaults to `borrower` (no bids placed)
+    /// 3. Marks auction as settled: `LiquidationSettled(auction_id)` → `true` (replay protection)
+    /// 4. Publishes `LIQ_SETL` / `auction` event with settlement details:
+    ///    - `auction_id`
+    ///    - `credit_contract` (caller)
+    ///    - `borrower` (defaulted position owner)
+    ///    - `winner` (highest bidder or borrower)
+    ///    - `recovered_amount` (highest_bid from auction)
+    /// 5. Transfers `highest_bid` from auction to credit contract (via token CPI)
+    ///    - Only if token is configured and `highest_bid > 0`
+    ///    - Protected by reentrancy guard during transfer
+    ///
+    /// # Returns
+    ///
+    /// The `highest_bid` amount from the auction state (i128). This value is:
+    /// - Returned to the credit contract and validated against `recovered_amount`
+    /// - The amount transferred to the credit contract (if token configured)
+    /// - May be 0 if no valid bids were placed
+    ///
+    /// # Errors
+    ///
+    /// Panics with:
+    /// - `AuctionError::NoFactoryContract` — Factory contract not configured
+    /// - `AuctionError::Unauthorized` — `require_auth(factory)` fails OR `credit_contract != factory`
+    /// - `AuctionError::NotFound` — Auction with `auction_id` does not exist
+    /// - `AuctionError::NotClosed` — Auction is not in `Closed` state (settlement requires closure)
+    /// - `AuctionError::AlreadySettled` — Auction already settled (replay protection)
+    ///
+    /// # Reentrancy Safety
+    ///
+    /// This function sets a reentrancy guard only during the token transfer (if applicable).
+    /// The guard is cleared immediately after the transfer completes. This prevents
+    /// re-entrance callbacks from the token contract (e.g., token receiver hooks).
+    ///
+    /// The credit contract's `settle_default_liquidation()` sets its own contract-wide
+    /// reentrancy guard before calling this function, providing an additional layer
+    /// of protection.
+    ///
+    /// # Replay Protection
+    ///
+    /// Settlement is protected on both sides:
+    /// - **Auction side** (this function): `auction_id` can only be settled once
+    /// - **Credit side**: `(borrower, settlement_id)` pair can only be settled once
+    ///
+    /// If replayed with the same `auction_id`, this function panics with
+    /// `AuctionError::AlreadySettled` before any state mutation.
+    ///
+    /// # Example Call Flow
+    ///
+    /// ```ignore
+    /// // Orchestrated by off-chain indexer:
+    /// // 1. Collateral auctioned, bids placed, auction closed
+    /// // 2. Credit admin triggers settlement
+    ///
+    /// let credit_client = CreditClient::new(&env, &credit_address);
+    /// credit_client.settle_default_liquidation(
+    ///     &borrower,
+    ///     &500_i128,              // expected recovered_amount
+    ///     &Symbol::new(&env, "auc_1"),  // settlement_id
+    ///     &10_000_u32,            // close_factor_bps
+    ///     &None,                  // oracle_price
+    /// );
+    /// // Internally:
+    /// // - get_version() called on auction
+    /// // - settle_default_liquidation() called on auction
+    /// // - highest_bid returned and validated
+    /// // - debt settled, replay marker set
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - `docs/CROSS_CONTRACT_HANDSHAKE.md` — Protocol specification
+    /// - `Credit::settle_default_liquidation()` — Credit-side caller
+    /// - `AuctionClient` trait — Soroban client interface
+    /// - `set_factory_contract()` — Configure the factory (credit) address
+    ///
     /// # Authorization
     /// Requires `require_auth` from the factory contract.
     ///
@@ -632,6 +747,10 @@ impl Auction {
         clear_reentrancy_guard(&env);
     }
 
+    /// Get the protocol version of the auction contract.
+    pub fn get_version(_env: Env) -> ProtocolVersion {
+        ProtocolVersion { major: 1, minor: 0 }
+    }
 }
 
 #[cfg(test)]

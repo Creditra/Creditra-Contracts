@@ -9,7 +9,6 @@ members = [
     "contracts/lifecycle",
     "contracts/query",
     "contracts/freeze",
-    "contracts/risk",
     "gateway-contract/contracts/auction_contract",
 ]
 
@@ -21,11 +20,11 @@ rust-version = "1.75"
 soroban-sdk = "22"
 
 [profile.release]
-opt-level = "z"          # Optimize for size
-overflow-checks = false  # Disable for smaller binary
+opt-level = "z"         # Optimize for size
+overflow-checks = true  # Arithmetic overflow → panic/revert, never silent wrap
 debug = 0               # No debug info
 strip = "symbols"       # Strip symbols
 debug-assertions = false # No debug assertions
 panic = "abort"         # Smaller than unwinding
 codegen-units = 1       # Better optimization
-lto = true             # Link time optimization
+lto = true              # Link time optimization

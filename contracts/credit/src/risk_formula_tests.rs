@@ -393,7 +393,7 @@ fn clearing_formula_restores_manual_mode() {
 // ── Config validation tests ──────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "Error(Contract, #8)")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn set_config_min_greater_than_max_reverts() {
     let env = Env::default();
     env.mock_all_auths();

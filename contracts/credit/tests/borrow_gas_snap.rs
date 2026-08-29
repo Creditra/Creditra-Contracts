@@ -34,7 +34,7 @@ use soroban_sdk::{
 
 /// Reset the budget, run `f`, and return consumed CPU + memory.
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
@@ -57,6 +57,13 @@ fn setup(token_mint: i128, credit_limit: i128) -> (Env, Address, Address, Addres
     client.set_liquidity_source(&contract_id);
 
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &token_mint);
+    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &token_mint);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &token_mint,
+        &100_000_u32,
+    );
 
     client.open_credit_line(&borrower, &credit_limit, &500_u32, &50_u32);
 
@@ -78,8 +85,14 @@ fn gas_draw_credit_small() {
 
     // Small draw should be relatively cheap.
     assert!(cpu > 0, "draw_credit small must consume some CPU");
-    assert!(cpu < 3_000_000, "draw_credit small CPU unexpectedly high: {cpu}");
-    assert!(mem < 200_000, "draw_credit small memory unexpectedly high: {mem}");
+    assert!(
+        cpu < 3_000_000,
+        "draw_credit small CPU unexpectedly high: {cpu}"
+    );
+    assert!(
+        mem < 200_000,
+        "draw_credit small memory unexpectedly high: {mem}"
+    );
 
     eprintln!("draw_credit(small): cpu={cpu} mem={mem}");
 }
@@ -97,7 +110,10 @@ fn gas_draw_credit_medium() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "draw_credit medium CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "draw_credit medium CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("draw_credit(medium): cpu={cpu} mem={mem}");
 }
@@ -115,7 +131,10 @@ fn gas_draw_credit_large() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "draw_credit large CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "draw_credit large CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("draw_credit(large): cpu={cpu} mem={mem}");
 }
@@ -133,7 +152,10 @@ fn gas_draw_credit_at_limit() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "draw_credit at limit CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "draw_credit at limit CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("draw_credit(at_limit): cpu={cpu} mem={mem}");
 }
@@ -145,7 +167,7 @@ fn gas_draw_credit_at_limit() {
 fn gas_repay_credit_small_no_interest() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     // Draw first to create debt
     client.draw_credit(&borrower, &1_000_i128);
 
@@ -154,7 +176,10 @@ fn gas_repay_credit_small_no_interest() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "repay_credit small no interest CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "repay_credit small no interest CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_credit(small_no_interest): cpu={cpu} mem={mem}");
 }
@@ -166,7 +191,7 @@ fn gas_repay_credit_small_no_interest() {
 fn gas_repay_credit_medium_no_interest() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     client.draw_credit(&borrower, &1_000_i128);
 
     let (cpu, mem) = measure(&env, || {
@@ -174,7 +199,10 @@ fn gas_repay_credit_medium_no_interest() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "repay_credit medium no interest CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "repay_credit medium no interest CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_credit(medium_no_interest): cpu={cpu} mem={mem}");
 }
@@ -186,9 +214,9 @@ fn gas_repay_credit_medium_no_interest() {
 fn gas_repay_credit_with_interest() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     client.draw_credit(&borrower, &1_000_i128);
-    
+
     // Advance 30 days to accrue interest
     env.ledger().with_mut(|l| l.timestamp += 86_400 * 30);
 
@@ -197,7 +225,10 @@ fn gas_repay_credit_with_interest() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 4_000_000, "repay_credit with interest CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 4_000_000,
+        "repay_credit with interest CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_credit(with_interest): cpu={cpu} mem={mem}");
 }
@@ -209,7 +240,7 @@ fn gas_repay_credit_with_interest() {
 fn gas_repay_credit_full() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     client.draw_credit(&borrower, &1_000_i128);
 
     let (cpu, mem) = measure(&env, || {
@@ -217,7 +248,10 @@ fn gas_repay_credit_full() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "repay_credit full CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "repay_credit full CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_credit(full): cpu={cpu} mem={mem}");
 }
@@ -229,7 +263,7 @@ fn gas_repay_credit_full() {
 fn gas_repay_and_release_no_collateral() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     client.draw_credit(&borrower, &1_000_i128);
 
     let (cpu, mem) = measure(&env, || {
@@ -237,7 +271,10 @@ fn gas_repay_and_release_no_collateral() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 3_000_000, "repay_and_release no collateral CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 3_000_000,
+        "repay_and_release no collateral CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_and_release(no_collateral): cpu={cpu} mem={mem}");
 }
@@ -249,13 +286,13 @@ fn gas_repay_and_release_no_collateral() {
 fn gas_repay_and_release_with_collateral() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     // Deposit collateral
     let collateral_token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let collateral_address = collateral_token_id.address();
     token::StellarAssetClient::new(&env, &collateral_address).mint(&borrower, &5_000_i128);
     client.deposit_collateral(&borrower, &5_000_i128);
-    
+
     // Draw credit
     client.draw_credit(&borrower, &1_000_i128);
 
@@ -264,7 +301,10 @@ fn gas_repay_and_release_with_collateral() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 4_000_000, "repay_and_release with collateral CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 4_000_000,
+        "repay_and_release with collateral CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_and_release(with_collateral): cpu={cpu} mem={mem}");
 }
@@ -276,13 +316,13 @@ fn gas_repay_and_release_with_collateral() {
 fn gas_repay_and_release_full_with_collateral() {
     let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
     let client = CreditClient::new(&env, &contract_id);
-    
+
     // Deposit collateral
     let collateral_token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let collateral_address = collateral_token_id.address();
     token::StellarAssetClient::new(&env, &collateral_address).mint(&borrower, &5_000_i128);
     client.deposit_collateral(&borrower, &5_000_i128);
-    
+
     // Draw credit
     client.draw_credit(&borrower, &1_000_i128);
 
@@ -291,7 +331,10 @@ fn gas_repay_and_release_full_with_collateral() {
     });
 
     assert!(cpu > 0);
-    assert!(cpu < 4_000_000, "repay_and_release full with collateral CPU unexpectedly high: {cpu}");
+    assert!(
+        cpu < 4_000_000,
+        "repay_and_release full with collateral CPU unexpectedly high: {cpu}"
+    );
 
     eprintln!("repay_and_release(full_with_collateral): cpu={cpu} mem={mem}");
 }
@@ -302,15 +345,17 @@ fn gas_repay_and_release_full_with_collateral() {
 /// same resources (deterministic cost model).
 #[test]
 fn gas_draw_credit_deterministic() {
-    let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
-    let client = CreditClient::new(&env, &contract_id);
+    let (env1, contract_id1, _admin1, borrower1) = setup(1_000_000_i128, 10_000_i128);
+    let client1 = CreditClient::new(&env1, &contract_id1);
+    let (env2, contract_id2, _admin2, borrower2) = setup(1_000_000_i128, 10_000_i128);
+    let client2 = CreditClient::new(&env2, &contract_id2);
 
-    let (cpu1, mem1) = measure(&env, || {
-        client.draw_credit(&borrower, &1_000_i128);
+    let (cpu1, mem1) = measure(&env1, || {
+        client1.draw_credit(&borrower1, &1_000_i128);
     });
-    
-    let (cpu2, mem2) = measure(&env, || {
-        client.draw_credit(&borrower, &1_000_i128);
+
+    let (cpu2, mem2) = measure(&env2, || {
+        client2.draw_credit(&borrower2, &1_000_i128);
     });
 
     assert_eq!(cpu1, cpu2, "draw_credit CPU must be deterministic");
@@ -325,17 +370,20 @@ fn gas_draw_credit_deterministic() {
 /// same resources (deterministic cost model).
 #[test]
 fn gas_repay_credit_deterministic() {
-    let (env, contract_id, _admin, borrower) = setup(1_000_000_i128, 10_000_i128);
-    let client = CreditClient::new(&env, &contract_id);
-    
-    client.draw_credit(&borrower, &2_000_i128);
+    let (env1, contract_id1, _admin1, borrower1) = setup(1_000_000_i128, 10_000_i128);
+    let client1 = CreditClient::new(&env1, &contract_id1);
+    client1.draw_credit(&borrower1, &2_000_i128);
 
-    let (cpu1, mem1) = measure(&env, || {
-        client.repay_credit(&borrower, &500_i128);
+    let (env2, contract_id2, _admin2, borrower2) = setup(1_000_000_i128, 10_000_i128);
+    let client2 = CreditClient::new(&env2, &contract_id2);
+    client2.draw_credit(&borrower2, &2_000_i128);
+
+    let (cpu1, mem1) = measure(&env1, || {
+        client1.repay_credit(&borrower1, &500_i128);
     });
-    
-    let (cpu2, mem2) = measure(&env, || {
-        client.repay_credit(&borrower, &500_i128);
+
+    let (cpu2, mem2) = measure(&env2, || {
+        client2.repay_credit(&borrower2, &500_i128);
     });
 
     assert_eq!(cpu1, cpu2, "repay_credit CPU must be deterministic");

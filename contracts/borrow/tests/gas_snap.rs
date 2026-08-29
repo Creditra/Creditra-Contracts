@@ -49,7 +49,7 @@ const START_TS: u64 = 10_000;
 
 /// Reset the budget to unlimited, run `f`, return (cpu, mem).
 fn measure(env: &Env, f: impl FnOnce()) -> (u64, u64) {
-    let budget = env.cost_estimate().budget();
+    let mut budget = env.cost_estimate().budget();
     budget.reset_unlimited();
     f();
     (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
@@ -85,6 +85,12 @@ fn setup(env: &Env) -> Fixture<'_> {
     StellarAssetClient::new(env, &token).mint(&contract_id, &(CREDIT_LIMIT * 10));
     // Fund the borrower so repay_credit can pull tokens in.
     StellarAssetClient::new(env, &token).mint(&borrower, &(CREDIT_LIMIT * 2));
+    soroban_sdk::token::Client::new(env, &token).approve(
+        &borrower,
+        &contract_id,
+        &(CREDIT_LIMIT * 10),
+        &100_000_u32,
+    );
 
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &300_u32, &50_u32);
 
@@ -242,10 +248,7 @@ fn gas_set_utilization_cap() {
     });
 
     assert!(cpu > 0, "set_utilization_cap must consume CPU");
-    assert!(
-        cpu < 5_000_000,
-        "set_utilization_cap CPU regression: {cpu}"
-    );
+    assert!(cpu < 5_000_000, "set_utilization_cap CPU regression: {cpu}");
     assert!(
         mem < 500_000,
         "set_utilization_cap memory regression: {mem}"
@@ -301,10 +304,7 @@ fn gas_borrow_read_only_queries() {
         let _ = f.client.get_utilization_cap(&f.borrower);
     });
     assert!(cpu > 0, "get_utilization_cap must consume CPU");
-    assert!(
-        cpu < 2_000_000,
-        "get_utilization_cap CPU regression: {cpu}"
-    );
+    assert!(cpu < 2_000_000, "get_utilization_cap CPU regression: {cpu}");
     assert!(
         mem < 200_000,
         "get_utilization_cap memory regression: {mem}"
@@ -318,14 +318,16 @@ fn gas_borrow_read_only_queries() {
 /// cost (deterministic budget model).
 #[test]
 fn gas_draw_credit_deterministic() {
-    let env = Env::default();
-    let f = setup(&env);
+    let env1 = Env::default();
+    let f1 = setup(&env1);
+    let env2 = Env::default();
+    let f2 = setup(&env2);
 
-    let (cpu1, mem1) = measure(&env, || {
-        f.client.draw_credit(&f.borrower, &DRAW_AMOUNT);
+    let (cpu1, mem1) = measure(&env1, || {
+        f1.client.draw_credit(&f1.borrower, &DRAW_AMOUNT);
     });
-    let (cpu2, mem2) = measure(&env, || {
-        f.client.draw_credit(&f.borrower, &DRAW_AMOUNT);
+    let (cpu2, mem2) = measure(&env2, || {
+        f2.client.draw_credit(&f2.borrower, &DRAW_AMOUNT);
     });
 
     assert_eq!(cpu1, cpu2, "draw_credit CPU must be deterministic");
@@ -361,15 +363,17 @@ fn gas_write_more_expensive_than_read() {
 /// accumulation between calls (each call is independently bounded).
 #[test]
 fn gas_admin_operations_independent_cost() {
-    let env = Env::default();
-    let f = setup(&env);
+    let env1 = Env::default();
+    let f1 = setup(&env1);
+    let env2 = Env::default();
+    let f2 = setup(&env2);
 
-    let (cpu1, _) = measure(&env, || {
-        f.client.set_draw_min_interval(&120_u64);
+    let (cpu1, _) = measure(&env1, || {
+        f1.client.set_draw_min_interval(&120_u64);
     });
 
-    let (cpu2, _) = measure(&env, || {
-        f.client.set_draw_min_interval(&240_u64);
+    let (cpu2, _) = measure(&env2, || {
+        f2.client.set_draw_min_interval(&240_u64);
     });
 
     assert_eq!(

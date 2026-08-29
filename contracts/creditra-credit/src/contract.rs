@@ -7,15 +7,14 @@ use crate::collateral;
 use crate::error::ContractError;
 use crate::fees;
 use crate::handshake::{self, ProtocolVersion};
-use crate::msg::{
-    CollateralAllowlistResponse, CollateralBalanceResponse, CollateralEntryResponse, ExecuteMsg,
-    InstantiateMsg, MigrateMsg, QueryMsg,
-};
+use crate::limits;
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::oracles;
 use crate::state::{
-    Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
-    CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
-    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
+    BORROWER_MAX_UTILIZATION, DEFAULT_MAX_UTILIZATION_BPS, Config, CreditLine, Draw,
+    DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID, CONFIG, CREDIT_LINES,
+    CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT, LATE_FEE_CONFIG,
+    ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG, PROTOCOL_FEE_BPS,
 };
 use crate::views;
 
@@ -160,7 +159,9 @@ pub fn execute(
             max_deviation_bps,
             max_age_seconds,
         ),
-        ExecuteMsg::AddOracle { oracle, weight } => execute_add_oracle(deps, info, oracle, weight),
+        ExecuteMsg::AddOracle { oracle, weight } => {
+            execute_add_oracle(deps, info, oracle, weight)
+        }
         ExecuteMsg::RemoveOracle { oracle } => execute_remove_oracle(deps, info, oracle),
         ExecuteMsg::ReportValue { value } => execute_report_value(deps, env, info, value),
         ExecuteMsg::SubmitOraclePrices { prices } => {
@@ -188,6 +189,13 @@ pub fn execute(
             denom,
             risk_weight_bps,
         } => execute_set_collateral_risk_weight(deps, info, denom, risk_weight_bps),
+        ExecuteMsg::SetMaxUtilization { max_utilization_bps } => {
+            execute_set_max_utilization(deps, info, max_utilization_bps)
+        }
+        ExecuteMsg::SetBorrowerMaxUtilization {
+            borrower,
+            max_utilization_bps,
+        } => execute_set_borrower_max_utilization(deps, info, borrower, max_utilization_bps),
     }
 }
 
@@ -300,7 +308,8 @@ pub fn execute_create_credit_line(
 /// Borrower: draw a specified amount from an active credit line.
 ///
 /// Loads the [`CreditLine`] at `credit_line_id`, verifies that the caller
-/// is the named borrower, creates a [`Draw`] record under a fresh
+/// is the named borrower, enforces the per-borrower max-utilization cap
+/// (default + per-borrower override), creates a [`Draw`] record under a fresh
 /// per-line auto-incremented id, and appends a `DrawCreated`
 /// [`DrawAuditEntry`] to the draw's audit trail.  **No tokens are
 /// transferred in v7** — the draw is an accounting-only record; actual
@@ -310,7 +319,8 @@ pub fn execute_create_credit_line(
 /// # Parameters
 ///
 /// - `deps` — Mutable storage; writes to [`DRAWS`], [`DRAW_COUNT`],
-///   [`DRAW_AUDIT`], and [`DRAW_AUDIT_COUNT`]; reads from [`CREDIT_LINES`].
+///   [`DRAW_AUDIT`], and [`DRAW_AUDIT_COUNT`]; reads from [`CREDIT_LINES`],
+///   [`DEFAULT_MAX_UTILIZATION_BPS`], and [`BORROWER_MAX_UTILIZATION`].
 /// - `env` — `env.block.time` is recorded as `drawn_at` on the new draw
 ///   and as `timestamp` on the initial audit entry; `env.block.height`
 ///   is also snapshotted for the audit log.
@@ -339,15 +349,16 @@ pub fn execute_create_credit_line(
 /// |---|---|
 /// | [`ContractError::CreditLineNotFound`] | `credit_line_id` has no stored [`CreditLine`] |
 /// | [`ContractError::Unauthorized`] | `info.sender != credit_line.borrower` |
-/// | `StdError::ParseErr` / `ContractError::Std(_)` | `amount` is not a valid `Uint128` |
-/// | Storage I/O errors | propagated from `cw-storage-plus` |
+/// [`ContractError::MaxUtilizationExceeded`] | the proposed draw would push total utilization over the borrower's cap |
+/// `StdError::ParseErr` / `ContractError::Std(_)` | `amount` is not a valid `Uint128` |
+/// Storage I/O errors | propagated from `cw-storage-plus` |
 ///
 /// # @notice
-/// v7 does **not** enforce a credit-limit ceiling on the sum of draws —
-/// this is intentional for the error-stability testing crate (see
-/// `tests/err_stab.rs`).  The production `credit` contract adds the
-/// full 25-step preflight chain including limit, collateral-ratio, and
-/// exposure caps.
+/// The max-utilization cap is enforced at draw creation time: the sum of all
+/// un-repaid draws for the credit line, plus the proposed draw amount, must not
+/// exceed `credit_amount * effective_cap_bps / 10_000`.  The default cap is
+/// 100% (`10_000` bps); admins can lower it protocol-wide or per-borrower via
+/// [`execute_set_max_utilization`] and [`execute_set_borrower_max_utilization`].
 ///
 /// # @dev
 /// The draw audit trail is initialized with a single `DrawCreated`
@@ -377,6 +388,21 @@ pub fn execute_create_draw(
     let draw_amount: cosmwasm_std::Uint128 = amount
         .parse()
         .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
+
+    // Enforce per-borrower max-utilization cap.
+    let default_cap = DEFAULT_MAX_UTILIZATION_BPS
+        .may_load(deps.storage)?
+        .unwrap_or(limits::MAX_UTILIZATION_BPS);
+    let borrower_override = BORROWER_MAX_UTILIZATION
+        .may_load(deps.storage, &credit_line.borrower)?;
+    let effective_cap = limits::effective_max_utilization_bps(default_cap, borrower_override);
+    let total_utilized = compute_total_utilized(deps.as_ref(), credit_line_id)?;
+    limits::check_utilization_within_cap(
+        total_utilized,
+        draw_amount,
+        credit_line.credit_amount,
+        effective_cap,
+    )?;
 
     let draw = Draw {
         id: draw_count,
@@ -489,7 +515,7 @@ pub fn execute_repay_draw(
         return Err(ContractError::Unauthorized);
     }
 
-    let fee_bps = fees::PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
+    let fee_bps = PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
     let mut fee_amount = Uint128::zero();
     if fee_bps > 0 && !draw.amount.is_zero() {
         fee_amount = draw.amount.multiply_ratio(fee_bps, 10_000u32);
@@ -714,9 +740,7 @@ pub fn execute_add_oracle(
     }
     let oracle_addr = deps.api.addr_validate(&oracle)?;
     oracles::add_oracle(deps, oracle_addr, weight)?;
-    Ok(Response::default()
-        .add_attribute("action", "add_oracle")
-        .add_attribute("oracle", oracle))
+    Ok(Response::default().add_attribute("action", "add_oracle").add_attribute("oracle", oracle))
 }
 
 pub fn execute_remove_oracle(
@@ -730,9 +754,7 @@ pub fn execute_remove_oracle(
     }
     let oracle_addr = deps.api.addr_validate(&oracle)?;
     oracles::remove_oracle(deps, oracle_addr)?;
-    Ok(Response::default()
-        .add_attribute("action", "remove_oracle")
-        .add_attribute("oracle", oracle))
+    Ok(Response::default().add_attribute("action", "remove_oracle").add_attribute("oracle", oracle))
 }
 
 pub fn execute_report_value(
@@ -742,25 +764,7 @@ pub fn execute_report_value(
     value: i128,
 ) -> Result<Response, ContractError> {
     oracles::report_value(deps, env, info, value)?;
-    Ok(Response::default()
-        .add_attribute("action", "report_value")
-        .add_attribute("value", value.to_string()))
-}
-
-/// Set or clear the structured late-fee configuration.
-pub fn execute_set_late_fee_config(
-    deps: DepsMut,
-    info: MessageInfo,
-    config: Option<crate::penalties::LateFeeConfig>,
-) -> Result<Response, ContractError> {
-    fees::assert_owner(deps.as_ref(), &info.sender)?;
-    if let Some(ref value) = config {
-        crate::penalties::validate_late_fee_config(value)?;
-        LATE_FEE_CONFIG.save(deps.storage, value)?;
-    } else {
-        LATE_FEE_CONFIG.remove(deps.storage);
-    }
-    Ok(Response::new().add_attribute("action", "set_late_fee_config"))
+    Ok(Response::default().add_attribute("action", "report_value").add_attribute("value", value.to_string()))
 }
 
 /// Submit N oracle prices and resolve a quorum canonical price (admin only).
@@ -823,9 +827,9 @@ pub fn execute_deposit_collateral(
         return Err(ContractError::Unauthorized);
     }
     let borrower_addr = deps.api.addr_validate(&borrower)?;
-    let parsed_amount: Uint128 = amount
-        .parse()
-        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
+    let parsed_amount: Uint128 = amount.parse().map_err(|_| {
+        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
+    })?;
     collateral::deposit_collateral(deps, &borrower_addr, &denom, parsed_amount)
 }
 
@@ -849,9 +853,9 @@ pub fn execute_withdraw_collateral(
         return Err(ContractError::Unauthorized);
     }
     let borrower_addr = deps.api.addr_validate(&borrower)?;
-    let parsed_amount: Uint128 = amount
-        .parse()
-        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
+    let parsed_amount: Uint128 = amount.parse().map_err(|_| {
+        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
+    })?;
     collateral::withdraw_collateral(deps, &borrower_addr, &denom, parsed_amount)
 }
 
@@ -913,6 +917,95 @@ pub fn execute_set_collateral_risk_weight(
         return Err(ContractError::Unauthorized);
     }
     collateral::set_collateral_risk_weight(deps, &denom, risk_weight_bps)
+}
+
+/// Admin: set the protocol-wide default max-utilization cap.
+///
+/// When no per-borrower override is configured, this default applies
+/// to all borrowers.  Pass `None` to reset the default to
+/// 100% (`10_000` bps).
+///
+/// # Errors
+///
+/// - [`ContractError::Unauthorized`] if the caller is not the
+///   contract owner.
+/// - [`ContractError::InvalidAmount`] if `max_utilization_bps`
+///   exceeds [`limits::MAX_UTILIZATION_BPS`].
+pub fn execute_set_max_utilization(
+    deps: DepsMut,
+    info: MessageInfo,
+    max_utilization_bps: Option<u32>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let bps = match max_utilization_bps {
+        Some(b) => limits::validate_utilization_bps(b)?,
+        None => limits::MAX_UTILIZATION_BPS,
+    };
+    DEFAULT_MAX_UTILIZATION_BPS.save(deps.storage, &bps)?;
+    Ok(Response::default()
+        .add_attribute("action", "set_max_utilization")
+        .add_attribute("max_utilization_bps", bps.to_string()))
+}
+
+/// Admin: set a per-borrower max-utilization override.
+///
+/// When present, the override supersedes the protocol-wide default
+/// returned by [`execute_set_max_utilization`] for the specified
+/// borrower.  Pass `None` to remove the override, falling the
+/// borrower back to the default.
+///
+/// # Errors
+///
+/// - [`ContractError::Unauthorized`] if the caller is not the
+///   contract owner.
+/// - [`ContractError::InvalidAmount`] if `max_utilization_bps`
+///   exceeds [`limits::MAX_UTILIZATION_BPS`].
+/// - [`ContractError::Std(AddrParseErr)`] if `borrower` is not a
+///   valid bech32 address.
+pub fn execute_set_borrower_max_utilization(
+    deps: DepsMut,
+    info: MessageInfo,
+    borrower: String,
+    max_utilization_bps: Option<u32>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized);
+    }
+    let borrower_addr = deps.api.addr_validate(&borrower)?;
+    match max_utilization_bps {
+        Some(bps) => {
+            let validated = limits::validate_utilization_bps(bps)?;
+            BORROWER_MAX_UTILIZATION.save(deps.storage, borrower_addr, &validated)?;
+        }
+        None => {
+            BORROWER_MAX_UTILIZATION.remove(deps.storage, &borrower_addr);
+        }
+    }
+    Ok(Response::default()
+        .add_attribute("action", "set_borrower_max_utilization")
+        .add_attribute("borrower", borrower))
+}
+
+fn compute_total_utilized(
+    deps: Deps,
+    credit_line_id: u64,
+) -> Result<Uint128, ContractError> {
+    let draw_count = DRAW_COUNT
+        .may_load(deps.storage, credit_line_id)?
+        .unwrap_or(0);
+    let mut total = Uint128::zero();
+    for did in 0..draw_count {
+        if let Some(draw) = DRAWS.may_load(deps.storage, (credit_line_id, did))? {
+            if !draw.repaid {
+                total = total.checked_add(draw.amount).map_err(|_| ContractError::Overflow)?;
+            }
+        }
+    }
+    Ok(total)
 }
 
 fn append_audit_entry(
@@ -1303,6 +1396,411 @@ mod tests {
 
             let stored = query_late_fee_config(&deps);
             assert_eq!(stored, Some(apr));
+        }
+    }
+
+    // ── max-utilization cap tests ─────────────────────────────────
+
+    fn create_credit_line(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        borrower: &str,
+        credit_amount: &str,
+    ) -> u64 {
+        let env = mock_env();
+        let info = message_info(&creator(deps), &[]);
+        let msg = ExecuteMsg::CreateCreditLine {
+            borrower: borrower.to_string(),
+            collateral_denom: "ucollateral".to_string(),
+            collateral_amount: "1000".to_string(),
+            credit_denom: "ucredit".to_string(),
+            credit_amount: credit_amount.to_string(),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+        0u64
+    }
+
+    fn create_draw(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        credit_line_id: u64,
+        amount: &str,
+    ) {
+        let env = mock_env();
+        let borrower_addr = deps.api.addr_make("borrower");
+        let info = message_info(&borrower_addr, &[]);
+        let msg = ExecuteMsg::CreateDraw {
+            credit_line_id,
+            amount: amount.to_string(),
+            denom: "ucredit".to_string(),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    mod execute_set_max_utilization {
+        use super::*;
+
+        #[test]
+        fn admin_sets_valid_cap() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let resp = execute_set_max_utilization(&mut deps, message_info(&admin, &[]), Some(8_000)).unwrap();
+            assert_eq!(resp.attributes[0].key, "action");
+            assert_eq!(resp.attributes[0].value, "set_max_utilization");
+
+            let stored = crate::state::DEFAULT_MAX_UTILIZATION_BPS.load(deps.as_ref().storage).unwrap();
+            assert_eq!(stored, 8_000);
+        }
+
+        #[test]
+        fn admin_resets_cap_to_default() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            execute_set_max_utilization(&mut deps, message_info(&admin, &[]), Some(8_000)).unwrap();
+            execute_set_max_utilization(&mut deps, message_info(&admin, &[]), None).unwrap();
+
+            let stored = crate::state::DEFAULT_MAX_UTILIZATION_BPS.load(deps.as_ref().storage).unwrap();
+            assert_eq!(stored, limits::MAX_UTILIZATION_BPS);
+        }
+
+        #[test]
+        fn non_admin_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let non_admin = non_admin(&deps);
+
+            let err = execute_set_max_utilization(
+                &mut deps,
+                message_info(&non_admin, &[]),
+                Some(5_000),
+            )
+            .unwrap_err();
+            assert_eq!(err, ContractError::Unauthorized);
+        }
+
+        #[test]
+        fn exceeds_max_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let err = execute_set_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                Some(10_001),
+            )
+            .unwrap_err();
+            assert_eq!(err, ContractError::InvalidAmount);
+        }
+
+        #[test]
+        fn zero_cap_accepted() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            execute_set_max_utilization(&mut deps, message_info(&admin, &[]), Some(0)).unwrap();
+
+            let stored = crate::state::DEFAULT_MAX_UTILIZATION_BPS.load(deps.as_ref().storage).unwrap();
+            assert_eq!(stored, 0);
+        }
+    }
+
+    mod execute_set_borrower_max_utilization {
+        use super::*;
+
+        #[test]
+        fn admin_sets_borrower_override() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let borrower = deps.api.addr_make("borrower").to_string();
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.clone(),
+                Some(5_000),
+            )
+            .unwrap();
+
+            let stored = crate::state::BORROWER_MAX_UTILIZATION
+                .may_load(deps.as_ref().storage, &deps.api.addr_validate(&borrower).unwrap())
+                .unwrap();
+            assert_eq!(stored, Some(5_000));
+        }
+
+        #[test]
+        fn admin_clears_borrower_override() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let borrower = deps.api.addr_make("borrower").to_string();
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.clone(),
+                Some(5_000),
+            )
+            .unwrap();
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.clone(),
+                None,
+            )
+            .unwrap();
+
+            let stored = crate::state::BORROWER_MAX_UTILIZATION
+                .may_load(deps.as_ref().storage, &deps.api.addr_validate(&borrower).unwrap())
+                .unwrap();
+            assert_eq!(stored, None);
+        }
+
+        #[test]
+        fn non_admin_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let non_admin = non_admin(&deps);
+
+            let err = execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&non_admin, &[]),
+                "borrower".to_string(),
+                Some(5_000),
+            )
+            .unwrap_err();
+            assert_eq!(err, ContractError::Unauthorized);
+        }
+
+        #[test]
+        fn exceeds_max_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+            let admin = creator(&deps);
+
+            let err = execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                "borrower".to_string(),
+                Some(10_001),
+            )
+            .unwrap_err();
+            assert_eq!(err, ContractError::InvalidAmount);
+        }
+    }
+
+    mod utilization_cap_enforcement {
+        use super::*;
+
+        #[test]
+        fn draw_within_cap_accepted() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            // Default cap is 100% (10_000 bps). Credit limit is 500.
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "400");
+            // 400 <= 500 * 10_000 / 10_000 = 500 -> OK
+        }
+
+        #[test]
+        fn draw_at_cap_boundary_accepted() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            // 500 is exactly 100% of 500
+            create_draw(&mut deps, line_id, "500");
+        }
+
+        #[test]
+        fn draw_exceeding_cap_rejected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            let borrower = deps.api.addr_make("borrower");
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "600".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::MaxUtilizationExceeded);
+        }
+
+        #[test]
+        fn cumulative_draws_respected() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            // Default cap is 100%. Credit limit is 500.
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "300");
+            let borrower = deps.api.addr_make("borrower");
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "201".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::MaxUtilizationExceeded);
+        }
+
+        #[test]
+        fn repaid_draws_free_up_capacity() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "400");
+
+            // Repay the draw
+            let borrower = deps.api.addr_make("borrower");
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::RepayDraw {
+                credit_line_id: line_id,
+                draw_id: 0,
+            };
+            execute(deps.as_mut(), env, info, msg).unwrap();
+
+            // Now draw again — the repaid amount frees up capacity
+            let info2 = message_info(&borrower, &[]);
+            let env2 = mock_env();
+            let msg2 = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "500".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            execute(deps.as_mut(), env2, info2, msg2).unwrap();
+        }
+
+        #[test]
+        fn lowered_default_cap_blocks_draws() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            // Set default cap to 50% (5_000 bps)
+            let admin = creator(&deps);
+            execute_set_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                Some(5_000),
+            )
+            .unwrap();
+
+            // Credit limit is 500, so max utilization is 250
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "200");
+
+            // 200 + 60 = 260 > 250 -> rejected
+            let borrower = deps.api.addr_make("borrower");
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "60".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::MaxUtilizationExceeded);
+        }
+
+        #[test]
+        fn borrower_override_lowers_cap() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            // Default cap is 100%. Set borrower override to 50% (5_000 bps).
+            let admin = creator(&deps);
+            let borrower = deps.api.addr_make("borrower");
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.to_string(),
+                Some(5_000),
+            )
+            .unwrap();
+
+            // Credit limit is 500, so max utilization is 250
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "200");
+
+            // 200 + 60 = 260 > 250 -> rejected
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "60".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::MaxUtilizationExceeded);
+        }
+
+        #[test]
+        fn zero_cap_blocks_all_draws() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            let admin = creator(&deps);
+            let borrower = deps.api.addr_make("borrower");
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.to_string(),
+                Some(0),
+            )
+            .unwrap();
+
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            let info = message_info(&borrower, &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::CreateDraw {
+                credit_line_id: line_id,
+                amount: "1".to_string(),
+                denom: "ucredit".to_string(),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::MaxUtilizationExceeded);
+        }
+
+        #[test]
+        fn cleared_override_uses_default() {
+            let mut deps = mock_dependencies();
+            setup(&mut deps);
+
+            let admin = creator(&deps);
+            let borrower = deps.api.addr_make("borrower");
+
+            // Set override to 50%, then clear it
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.to_string(),
+                Some(5_000),
+            )
+            .unwrap();
+            execute_set_borrower_max_utilization(
+                &mut deps,
+                message_info(&admin, &[]),
+                borrower.to_string(),
+                None,
+            )
+            .unwrap();
+
+            // Now the borrower should be able to draw up to 100% of credit
+            let line_id = create_credit_line(&mut deps, "borrower", "500");
+            create_draw(&mut deps, line_id, "500");
         }
     }
 }

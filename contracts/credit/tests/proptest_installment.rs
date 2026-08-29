@@ -255,7 +255,15 @@ proptest! {
             prop_assert_eq!(
                 schedule.next_due_ts,
                 expected_due,
-                "amount_per_period={amount_per_period}, period_seconds={period_seconds}, elapsed_seconds={elapsed_seconds}, requested_repay={requested_repay}, effective_repay={effective_repay}, interest_repaid={interest_repaid}, principal_repaid={principal_repaid}, outstanding={outstanding}",
+                "amount_per_period={}, period_seconds={}, elapsed_seconds={}, requested_repay={}, effective_repay={}, interest_repaid={}, principal_repaid={}, outstanding={}",
+                amount_per_period,
+                period_seconds,
+                elapsed_seconds,
+                requested_repay,
+                effective_repay,
+                interest_repaid,
+                principal_repaid,
+                outstanding,
             );
         }
     }

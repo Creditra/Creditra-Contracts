@@ -44,7 +44,8 @@
 //! The guard function [`admin::assert_risk_admin_cooldown_elapsed`] is called
 //! at the top of every state-changing entrypoint. It reads both values and
 //! reverts with [`ContractError::RiskAdminCooldownActive`] when the cooldown
-//! interval has not yet elapsed.
+//! interval has not yet elapsed. The public error-code values are ABI-stable
+//! and pinned in [`tests/err_stab.rs`](../tests/err_stab.rs).
 //!
 //! ## Why
 //!
@@ -84,7 +85,6 @@ pub use events::{
 /// | `NotAdmin`                 | 2            | Auth     |
 /// | `Paused`                   | 3            | Risk     |
 /// | `RiskAdminCooldownActive`  | 54           | Risk     |
-#[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
@@ -96,15 +96,50 @@ pub enum ContractError {
     Paused = 3,
     /// Risk admin cooldown has not yet elapsed since the last mutation.
     RiskAdminCooldownActive = 54,
+    UnknownError = 200,
 }
 
 impl ContractError {
-    /// Map this error to its category for client-side grouping.
+    pub fn from_u32_safe(code: u32) -> Self {
+        match code {
+            1 => Self::Unauthorized,
+            2 => Self::NotAdmin,
+            3 => Self::Paused,
+            54 => Self::RiskAdminCooldownActive,
+            200 => Self::UnknownError,
+            _ => Self::UnknownError,
+        }
+    }
+
     pub fn category(&self) -> ContractErrorCategory {
         match self {
             Self::Unauthorized | Self::NotAdmin => ContractErrorCategory::Auth,
-            Self::Paused | Self::RiskAdminCooldownActive => ContractErrorCategory::Risk,
+            Self::Paused | Self::RiskAdminCooldownActive | Self::UnknownError => {
+                ContractErrorCategory::Risk
+            }
         }
+    }
+}
+
+impl From<soroban_sdk::Error> for ContractError {
+    fn from(err: soroban_sdk::Error) -> Self {
+        if err.is_type(soroban_sdk::xdr::ScErrorType::Contract) {
+            Self::from_u32_safe(err.get_code())
+        } else {
+            Self::UnknownError
+        }
+    }
+}
+
+impl<'a> From<&'a ContractError> for soroban_sdk::Error {
+    fn from(err: &'a ContractError) -> Self {
+        soroban_sdk::Error::from_contract_error(*err as u32)
+    }
+}
+
+impl From<ContractError> for soroban_sdk::Error {
+    fn from(err: ContractError) -> Self {
+        soroban_sdk::Error::from_contract_error(err as u32)
     }
 }
 

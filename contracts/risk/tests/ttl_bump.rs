@@ -14,7 +14,9 @@
 //! | Cooldown enforcement is unaffected by the TTL change | `record_risk_admin_action` |
 //! | `init` bumps immediately on deployment | `init` |
 
-use creditra_risk::{RiskContract, RiskContractClient, INSTANCE_BUMP_AMOUNT, INSTANCE_BUMP_THRESHOLD};
+use creditra_risk::{
+    RiskContract, RiskContractClient, INSTANCE_BUMP_AMOUNT, INSTANCE_BUMP_THRESHOLD,
+};
 use soroban_sdk::testutils::storage::Instance as _;
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env};
@@ -38,9 +40,7 @@ fn setup() -> (Env, Address, Address, RiskContractClient<'static>) {
 /// Instance storage is a single slab; `get_ttl()` returns the TTL of the
 /// whole slab (no per-key argument in soroban-sdk 22.x).
 fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
-    env.as_contract(contract_id, || {
-        env.storage().instance().get_ttl()
-    })
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 /// Advance the ledger sequence number so that the instance storage TTL drops
@@ -155,7 +155,10 @@ fn get_admin_bumps_instance_ttl_when_below_threshold() {
     );
 
     let retrieved = client.get_admin();
-    assert_eq!(retrieved, admin, "get_admin must return the correct address");
+    assert_eq!(
+        retrieved, admin,
+        "get_admin must return the correct address"
+    );
 
     let after = instance_ttl(&env, &contract_id);
     assert!(
@@ -306,14 +309,12 @@ fn action_after_cooldown_elapsed_bumps_ttl() {
 fn ttl_constants_match_expected_policy() {
     // ~6 months at ~5 s/ledger: 6 * 30 * 24 * 3600 / 5 = 3_110_400
     assert_eq!(
-        INSTANCE_BUMP_AMOUNT,
-        3_110_400,
+        INSTANCE_BUMP_AMOUNT, 3_110_400,
         "INSTANCE_BUMP_AMOUNT must be 3_110_400 (~6 months)"
     );
     // ~3 months: 3 * 30 * 24 * 3600 / 5 = 1_555_200
     assert_eq!(
-        INSTANCE_BUMP_THRESHOLD,
-        1_555_200,
+        INSTANCE_BUMP_THRESHOLD, 1_555_200,
         "INSTANCE_BUMP_THRESHOLD must be 1_555_200 (~3 months)"
     );
     // 2:1 ratio between extend-to and threshold

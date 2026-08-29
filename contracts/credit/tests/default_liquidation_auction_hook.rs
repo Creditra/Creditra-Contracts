@@ -74,12 +74,19 @@ fn setup_defaulted_line(utilized_amount: i128) -> (Env, Address, Address) {
 fn has_event_topic(env: &Env, event_kind: &str) -> bool {
     let namespace = Symbol::new(env, "credit");
     let kind = Symbol::new(env, event_kind);
+    let events = env.events().all();
 
-    for (_contract, topics, _data) in env.events().all().iter() {
-        let t0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
-        let t1: Symbol = Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap();
-        if t0 == namespace && t1 == kind {
-            return true;
+    for i in 0..events.len() {
+        let (_contract, topics, _data) = events.get(i).unwrap();
+        if topics.len() >= 2 {
+            if let (Ok(t0), Ok(t1)) = (
+                Symbol::try_from_val(env, &topics.get(0).unwrap()),
+                Symbol::try_from_val(env, &topics.get(1).unwrap()),
+            ) {
+                if t0 == namespace && t1 == kind {
+                    return true;
+                }
+            }
         }
     }
 
@@ -141,35 +148,26 @@ fn settle_default_liquidation_requires_defaulted_status() {
     let borrower = Address::generate(&env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
-
     client.init(&admin);
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     let token_address = token_id.address();
     client.set_liquidity_token(&token_address);
     token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000_000_i128);
-    token::StellarAssetClient::new(&env, &token_address).mint(&borrower, &1_000_000_i128);
-    token::Client::new(&env, &token_address).approve(
-        &borrower,
-        &contract_id,
-        &1_000_000_i128,
-        &1_000_000_u32,
-    );
 
-    client.open_credit_line(&borrower, &5_000, &200_u32, &40_u32);
+    client.open_credit_line(&borrower, &10_000, &300_u32, &60_u32);
     client.draw_credit(&borrower, &500_i128);
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    let res = catch_unwind(AssertUnwindSafe(|| {
         client.settle_default_liquidation(
             &borrower,
-            &100_i128,
-            &Symbol::new(&env, "auc_bad"),
+            &200_i128,
+            &Symbol::new(&env, "auc_err"),
             &10_000_u32,
             &None,
         );
     }));
-
-    assert!(result.is_err(), "non-defaulted settlement should panic");
+    assert!(res.is_err(), "non-defaulted settlement must panic");
 }
 
 // ── Auction contract configuration ─────────────────────────────────────────
@@ -184,12 +182,10 @@ fn set_and_get_auction_contract_address() {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
 
-    // Initially no auction contract configured
     assert!(client.get_auction_contract().is_none());
 
     let auction_addr = Address::generate(&env);
     client.set_auction_contract(&auction_addr);
-
     assert_eq!(client.get_auction_contract().unwrap(), auction_addr);
 }
 
@@ -210,10 +206,10 @@ fn settle_with_auction_contract_configured_reduces_debt() {
     // Settle partial — will atomically invoke the configured auction hook!
     client.settle_default_liquidation(&borrower, &400_i128, &settlement_id, &10_000_u32, &None);
 
+    assert!(has_event_topic(&env, "liq_setl"));
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Defaulted);
     assert_eq!(line.utilized_amount, 600);
-    assert!(has_event_topic(&env, "liq_setl"));
 }
 
 #[test]
@@ -232,11 +228,11 @@ fn settle_full_with_auction_contract_closes_line() {
     // Full settlement: recovered == utilized → should close line atomically
     client.settle_default_liquidation(&borrower, &800_i128, &settlement_id, &10_000_u32, &None);
 
+    assert!(has_event_topic(&env, "liq_setl"));
+    assert!(has_event_topic(&env, "closed"));
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Closed);
     assert_eq!(line.utilized_amount, 0);
-    assert!(has_event_topic(&env, "liq_setl"));
-    assert!(has_event_topic(&env, "closed"));
 }
 
 #[test]
@@ -245,10 +241,22 @@ fn settle_clears_reentrancy_guard_on_success() {
     let client = CreditClient::new(&env, &contract_id);
 
     // First settlement — should set and clear reentrancy guard
-    client.settle_default_liquidation(&borrower, &200_i128, &Symbol::new(&env, "auc_re1"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &200_i128,
+        &Symbol::new(&env, "auc_re1"),
+        &10_000_u32,
+        &None,
+    );
 
     // Second settlement with different id — proves guard was cleared
-    client.settle_default_liquidation(&borrower, &100_i128, &Symbol::new(&env, "auc_re2"), &10_000_u32, &None);
+    client.settle_default_liquidation(
+        &borrower,
+        &100_i128,
+        &Symbol::new(&env, "auc_re2"),
+        &10_000_u32,
+        &None,
+    );
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 200); // 500 - 200 - 100

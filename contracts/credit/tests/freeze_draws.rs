@@ -225,7 +225,10 @@ fn freeze_draws_idempotent() {
 
     // Freeze again - should succeed and remain frozen
     client.freeze_draws(&FreezeReason::LiquidityReserve);
-    assert!(client.is_draws_frozen(), "should remain frozen after redundant freeze");
+    assert!(
+        client.is_draws_frozen(),
+        "should remain frozen after redundant freeze"
+    );
 }
 
 #[test]
@@ -235,5 +238,8 @@ fn unfreeze_draws_idempotent() {
 
     // Unfreeze when already unfrozen - should succeed
     client.unfreeze_draws();
-    assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
+    assert!(
+        !client.is_draws_frozen(),
+        "should remain unfrozen after redundant unfreeze"
+    );
 }

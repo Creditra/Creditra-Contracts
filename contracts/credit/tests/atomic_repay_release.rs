@@ -12,7 +12,7 @@ fn setup<'a>(
     draw_amount: i128,
     collateral: i128,
 ) -> (CreditClient<'a>, Address, Address, Address) {
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     env.ledger().with_mut(|li| li.timestamp = 1000);
 
     let admin = Address::generate(env);

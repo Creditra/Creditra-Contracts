@@ -70,7 +70,6 @@ use soroban_sdk::contracterror;
 /// - **Collateral-specific tier** (`100+`) — namespaced to leave a clear gap
 ///   from the credit contract's `1..49` range, defending against accidental
 ///   collisions if either contract appends to its enum in the future.
-#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum CollateralError {
@@ -79,7 +78,6 @@ pub enum CollateralError {
     // Each mirror variant carries the same discriminant *and* the same
     // semantic meaning as its canonical counterpart, so SDK consumers
     // can map an emitted integer against docs/ERROR_CODES.md directly.
-
     /// Amount is zero, negative, or otherwise not a valid token amount.
     ///
     /// Mirror of canonical `ContractError::InvalidAmount` (`= 5`).
@@ -124,7 +122,6 @@ pub enum CollateralError {
     // start at 100 to leave a 50-slot buffer above the credit contract's
     // 1..=49 range. New variants MUST be appended at the end of this
     // block (after 104) and paired with an assertion in tests/catalog.rs.
-
     /// The supplied collateral token address is not in the
     /// admin-managed allowlist used by the multi-collateral
     /// deposit/withdraw path.
@@ -161,6 +158,48 @@ pub enum CollateralError {
     /// lookup paths such as `get_balance_for_token` when the caller
     /// expects a balance to exist (e.g. for an oracle feed check).
     CollateralBalanceForTokenNotFound = 104,
+    UnknownError = 200,
+}
+
+impl CollateralError {
+    pub fn from_u32_safe(code: u32) -> Self {
+        match code {
+            5 => Self::InvalidAmount,
+            12 => Self::Overflow,
+            22 => Self::MissingLiquidityToken,
+            35 => Self::CollateralRatioBelowMinimum,
+            39 => Self::InsufficientCollateralBalance,
+            100 => Self::CollateralTokenNotAllowed,
+            101 => Self::CollateralRiskWeightOutOfRange,
+            102 => Self::CollateralTokenMismatch,
+            103 => Self::CollateralPositionLocked,
+            104 => Self::CollateralBalanceForTokenNotFound,
+            200 => Self::UnknownError,
+            _ => Self::UnknownError,
+        }
+    }
+}
+
+impl From<soroban_sdk::Error> for CollateralError {
+    fn from(err: soroban_sdk::Error) -> Self {
+        if err.is_type(soroban_sdk::xdr::ScErrorType::Contract) {
+            Self::from_u32_safe(err.get_code())
+        } else {
+            Self::UnknownError
+        }
+    }
+}
+
+impl<'a> From<&'a CollateralError> for soroban_sdk::Error {
+    fn from(err: &'a CollateralError) -> Self {
+        soroban_sdk::Error::from_contract_error(*err as u32)
+    }
+}
+
+impl From<CollateralError> for soroban_sdk::Error {
+    fn from(err: CollateralError) -> Self {
+        soroban_sdk::Error::from_contract_error(err as u32)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -194,7 +233,10 @@ mod tests {
         assert_eq!(CollateralError::CollateralRiskWeightOutOfRange as u32, 101);
         assert_eq!(CollateralError::CollateralTokenMismatch as u32, 102);
         assert_eq!(CollateralError::CollateralPositionLocked as u32, 103);
-        assert_eq!(CollateralError::CollateralBalanceForTokenNotFound as u32, 104);
+        assert_eq!(
+            CollateralError::CollateralBalanceForTokenNotFound as u32,
+            104
+        );
     }
 
     /// Verify no two `CollateralError` variants share a discriminant. This
@@ -214,6 +256,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::UnknownError as u32,
         ];
 
         // Manually detect duplicates to keep the test dependency-free.
@@ -233,7 +276,7 @@ mod tests {
     /// in this file's module-level docstring and to `tests/catalog.rs`.
     #[test]
     fn variant_count_is_known() {
-        const EXPECTED_VARIANT_COUNT: usize = 10;
+        const EXPECTED_VARIANT_COUNT: usize = 11;
 
         let codes = [
             CollateralError::InvalidAmount as u32,
@@ -246,6 +289,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::UnknownError as u32,
         ];
 
         assert_eq!(
@@ -267,6 +311,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::UnknownError as u32,
         ];
 
         for &code in &new_codes {
@@ -281,6 +326,59 @@ mod tests {
 
     /// Verify `Eq` / `PartialEq` round-trip both directions. Useful for
     /// `match` arms in the future contract logic.
+    #[test]
+    #[test]
+    fn test_golden_vector_encodings() {
+        assert_eq!(
+            CollateralError::from_u32_safe(5),
+            CollateralError::InvalidAmount
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(12),
+            CollateralError::Overflow
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(22),
+            CollateralError::MissingLiquidityToken
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(35),
+            CollateralError::CollateralRatioBelowMinimum
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(39),
+            CollateralError::InsufficientCollateralBalance
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(100),
+            CollateralError::CollateralTokenNotAllowed
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(101),
+            CollateralError::CollateralRiskWeightOutOfRange
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(102),
+            CollateralError::CollateralTokenMismatch
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(103),
+            CollateralError::CollateralPositionLocked
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(104),
+            CollateralError::CollateralBalanceForTokenNotFound
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(200),
+            CollateralError::UnknownError
+        );
+        assert_eq!(
+            CollateralError::from_u32_safe(999),
+            CollateralError::UnknownError
+        );
+    }
+
     #[test]
     fn equality_round_trips() {
         let a = CollateralError::InsufficientCollateralBalance;

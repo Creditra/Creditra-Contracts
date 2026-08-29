@@ -138,18 +138,36 @@ fn borrow_v7_category_mappings_are_pinned() {
 
     assert_eq!(ContractError::MissingLiquidityToken.category(), Liquidity);
     assert_eq!(ContractError::MissingLiquiditySource.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientLiquidityReserve.category(), Liquidity);
-    assert_eq!(ContractError::LiquidityTokenCallFailed.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentAllowance.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentBalance.category(), Liquidity);
+    assert_eq!(
+        ContractError::InsufficientLiquidityReserve.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::LiquidityTokenCallFailed.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentAllowance.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentBalance.category(),
+        Liquidity
+    );
     assert_eq!(ContractError::ExposureCapExceeded.category(), Liquidity);
 
     assert_eq!(ContractError::Paused.category(), Risk);
     assert_eq!(ContractError::DrawCooldownActive.category(), Risk);
     assert_eq!(ContractError::AdminCooldownActive.category(), Risk);
 
-    assert_eq!(ContractError::CollateralRatioBelowMinimum.category(), Collateral);
-    assert_eq!(ContractError::InsufficientCollateralBalance.category(), Collateral);
+    assert_eq!(
+        ContractError::CollateralRatioBelowMinimum.category(),
+        Collateral
+    );
+    assert_eq!(
+        ContractError::InsufficientCollateralBalance.category(),
+        Collateral
+    );
 
     assert_eq!(ContractError::BorrowerBlocked.category(), Block);
     assert_eq!(ContractError::DrawsFrozen.category(), Block);
@@ -347,7 +365,7 @@ mod integration {
         let client = CreditClient::new(&env, &contract_id);
         let borrower = Address::generate(&env);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
-        client.freeze_draws();
+        client.freeze_draws(&creditra_credit::types::FreezeReason::OperationalMaintenance);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.draw_credit(&borrower, &100_i128);

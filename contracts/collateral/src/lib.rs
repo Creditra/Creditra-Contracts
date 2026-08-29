@@ -62,6 +62,7 @@
 //! [`CollateralError`]: errors::CollateralError
 
 pub mod errors;
+pub mod events;
 pub mod views;
 pub use views::*;
 
@@ -93,18 +94,20 @@ impl Collateral {
         user.require_auth();
 
         if amount <= 0 {
-            return Err(CollateralError::InvalidAmount); 
+            return Err(CollateralError::InvalidAmount);
         }
 
         let key = DataKey::Balance(user.clone());
         let current_balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-        
+
         let new_balance = current_balance
             .checked_add(amount)
-            .ok_or(CollateralError::MathOverflow)?;
+            .ok_or(CollateralError::Overflow)?;
 
         env.storage().persistent().set(&key, &new_balance);
-        
+
+        events::publish_collateral_deposited(&env, &user, amount, new_balance);
+
         Ok(())
     }
 
@@ -126,13 +129,30 @@ impl Collateral {
 
         let key = DataKey::Balance(user.clone());
         let current_balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-        
+
+        if current_balance < amount {
+            return Err(CollateralError::InsufficientCollateralBalance);
+        }
+
         let new_balance = current_balance
             .checked_sub(amount)
-            .ok_or(CollateralError::InsufficientBalance)?;
+            .ok_or(CollateralError::InsufficientCollateralBalance)?;
 
         env.storage().persistent().set(&key, &new_balance);
 
+        events::publish_collateral_withdrawn(&env, &user, amount, new_balance);
+
         Ok(())
+    }
+
+    /// Gets the deposited collateral balance for a given user.
+    pub fn get_balance(env: Env, user: Address) -> i128 {
+        let key = DataKey::Balance(user);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Alias for get_balance.
+    pub fn balance(env: Env, user: Address) -> i128 {
+        Self::get_balance(env, user)
     }
 }

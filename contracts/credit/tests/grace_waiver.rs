@@ -93,12 +93,12 @@ fn find_grace_waiver_event(env: &Env) -> Option<GraceWaiverReceiptEvent> {
 /// `waived_amount == full-rate interest` and `mode == FullWaiver`.
 ///
 /// Setup:  100_000 principal, 1000 bps (10% p.a.), suspended at t=1.
-///         grace = 1 year (31_536_000 s), grace_end = 31_536_001.
-///         Accrue at t = 31_536_001 (inside window: now <= grace_end).
+///         grace = 1 year (31_557_600 s), grace_end = 31_557_601.
+///         Accrue at t = 31_557_601 (inside window: now <= grace_end).
 ///
 /// Expected:
-///   elapsed           = 31_536_000 s
-///   full_rate_interest = 100_000 * 1000 * 31_536_000 / (10_000 * 31_536_000) = 10_000
+///   elapsed           = 31_557_600 s
+///   full_rate_interest = 100_000 * 1000 * 31_557_600 / (10_000 * 31_557_600) = 10_000
 ///   actual_interest   = 0  (FullWaiver)
 ///   waived_amount     = 10_000
 #[test]
@@ -106,10 +106,10 @@ fn full_waiver_in_window_emits_event_with_correct_payload() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all(); // clear setup events
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env)
@@ -131,21 +131,21 @@ fn full_waiver_in_window_emits_event_with_correct_payload() {
 /// `waived_amount == full_rate_interest − reduced_rate_interest`.
 ///
 /// Setup:  100_000 principal, 1000 bps full / 200 bps reduced, suspended at t=1.
-///         grace = 1 year. Accrue at t = 31_536_001 (inside window).
+///         grace = 1 year. Accrue at t = 31_557_601 (inside window).
 ///
 /// Expected:
 ///   full_rate_interest    = 10_000
-///   reduced_rate_interest = 100_000 * 200 * 31_536_000 / (10_000 * 31_536_000) = 2_000
+///   reduced_rate_interest = 100_000 * 200 * 31_557_600 / (10_000 * 31_557_600) = 2_000
 ///   waived_amount         = 8_000
 #[test]
 fn reduced_rate_in_window_emits_event_waived_amount_is_difference() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::ReducedRate, &200_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::ReducedRate, &200_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env)
@@ -164,19 +164,19 @@ fn reduced_rate_in_window_emits_event_waived_amount_is_difference() {
 /// FullWaiver, straddle: event covers only the in-grace portion.
 ///
 /// Setup:  100_000 principal, 1000 bps, suspended at t=1.
-///         grace = 1 year (grace_end = 31_536_001).
-///         Accrue at t = 47_304_001 (0.5 year after grace end).
+///         grace = 1 year (grace_end = 31_557_601).
+///         Accrue at t = 47_336_401 (0.5 year after grace end).
 ///
-/// In-grace portion (1 → 31_536_001 = 31_536_000 s):
+/// In-grace portion (1 → 31_557_601 = 31_557_600 s):
 ///   full_rate_interest = 10_000, actual = 0 → waived = 10_000.
 #[test]
 fn full_waiver_straddle_emits_event_for_in_grace_portion() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
-    env.ledger().set_timestamp(47_304_001); // 1 + 31_536_000 + 15_768_000
+    env.ledger().set_timestamp(47_336_401); // 1 + 31_557_600 + 15_768_000
     let _ = env.events().all();
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
@@ -192,16 +192,16 @@ fn full_waiver_straddle_emits_event_for_in_grace_portion() {
 
 /// ReducedRate, straddle: waived_amount covers the in-grace portion only.
 ///
-/// In-grace portion (1 → 31_536_001 = 31_536_000 s):
+/// In-grace portion (1 → 31_557_601 = 31_557_600 s):
 ///   full_rate_interest = 10_000, reduced = 2_000 → waived = 8_000.
 #[test]
 fn reduced_rate_straddle_emits_event_with_correct_waived_amount() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::ReducedRate, &200_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::ReducedRate, &200_u32);
 
-    env.ledger().set_timestamp(47_304_001);
+    env.ledger().set_timestamp(47_336_401);
     let _ = env.events().all();
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
@@ -225,21 +225,32 @@ fn no_event_when_entirely_post_grace() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     // First accrual straddles grace_end — advances last_accrual_ts past grace_end.
-    env.ledger().set_timestamp(31_536_002);
+    env.ledger().set_timestamp(31_557_602);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
+
+    let count_before = env.events().all().len();
 
     // Second accrual is entirely post-grace.
-    let _ = env.events().all();
-    env.ledger().set_timestamp(63_072_002);
+    env.ledger().set_timestamp(63_115_202);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
-    assert!(
-        find_grace_waiver_event(&env).is_none(),
-        "No GraceWaiverReceiptEvent when accrual is entirely post-grace"
-    );
+    let events_after = env.events().all();
+    let new_events = events_after.slice(count_before..);
+    for event in new_events.iter() {
+        let topics = event.1;
+        if topics.len() >= 2 {
+            let t1_match = Symbol::try_from_val(&env, &topics.get(1).unwrap())
+                .map(|s| s == symbol_short!("grace_wv"))
+                .unwrap_or(false);
+            assert!(
+                !t1_match,
+                "No GraceWaiverReceiptEvent when accrual is entirely post-grace"
+            );
+        }
+    }
 }
 
 /// No grace config at all: accrues at full rate, no event.
@@ -250,7 +261,7 @@ fn no_event_when_no_grace_config() {
 
     // No call to set_grace_period_config.
     let _ = env.events().all();
-    env.ledger().set_timestamp(1 + 31_536_000);
+    env.ledger().set_timestamp(1 + 31_557_600);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(
@@ -268,7 +279,7 @@ fn no_event_when_grace_seconds_is_zero() {
     client.set_grace_period_config(&0_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(1 + 31_536_000);
+    env.ledger().set_timestamp(1 + 31_557_600);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(
@@ -299,10 +310,10 @@ fn no_event_for_active_line() {
     client.draw_credit(&borrower, &100_000);
 
     // Grace config set, but line is still Active (not suspended).
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(1 + 31_536_000);
+    env.ledger().set_timestamp(1 + 31_557_600);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(
@@ -332,10 +343,10 @@ fn no_event_when_utilized_amount_zero() {
     env.ledger().set_timestamp(1);
     client.suspend_credit_line(&borrower);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(1 + 31_536_000);
+    env.ledger().set_timestamp(1 + 31_557_600);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(
@@ -352,10 +363,10 @@ fn event_borrower_field_matches_actual_borrower() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("event must be emitted");
@@ -371,10 +382,10 @@ fn event_mode_field_matches_configured_mode() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::ReducedRate, &100_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::ReducedRate, &100_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("event must be emitted");
@@ -387,16 +398,16 @@ fn event_mode_field_matches_configured_mode() {
 
 /// FullWaiver: `waived_amount` equals the full-rate interest for the elapsed period.
 ///
-///   100_000 * 1000 bps * 31_536_000 s / (10_000 * 31_536_000) = 10_000
+///   100_000 * 1000 bps * 31_557_600 s / (10_000 * 31_557_600) = 10_000
 #[test]
 fn full_waiver_waived_amount_equals_full_rate_interest() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("event must be emitted");
@@ -408,18 +419,18 @@ fn full_waiver_waived_amount_equals_full_rate_interest() {
 
 /// ReducedRate: `waived_amount` equals `full_rate_interest − reduced_rate_interest`.
 ///
-///   full_rate_interest    = 100_000 * 1000 * 31_536_000 / (10_000 * 31_536_000) = 10_000
-///   reduced_rate_interest = 100_000 *  500 * 31_536_000 / (10_000 * 31_536_000) =  5_000
+///   full_rate_interest    = 100_000 * 1000 * 31_557_600 / (10_000 * 31_557_600) = 10_000
+///   reduced_rate_interest = 100_000 *  500 * 31_557_600 / (10_000 * 31_557_600) =  5_000
 ///   waived_amount         = 5_000
 #[test]
 fn reduced_rate_waived_amount_equals_difference() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::ReducedRate, &500_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::ReducedRate, &500_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("event must be emitted");
@@ -437,10 +448,10 @@ fn event_topic_is_stable() {
     let (env, contract_id, borrower) = setup_suspended(1_000_000, 100_000, 1000, 1);
     let client = CreditClient::new(&env, &contract_id);
 
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::FullWaiver, &0_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     let all = env.events().all();
@@ -478,10 +489,10 @@ fn reduced_rate_equal_to_full_rate_emits_no_event() {
     let client = CreditClient::new(&env, &contract_id);
 
     // reduced_rate_bps == interest_rate_bps (1000) → waived_amount == 0
-    client.set_grace_period_config(&31_536_000_u64, &GraceWaiverMode::ReducedRate, &1000_u32);
+    client.set_grace_period_config(&31_557_600_u64, &GraceWaiverMode::ReducedRate, &1000_u32);
 
     let _ = env.events().all();
-    env.ledger().set_timestamp(31_536_001);
+    env.ledger().set_timestamp(31_557_601);
     client.update_risk_parameters(&borrower, &1_000_000, &1000, &50);
 
     assert!(

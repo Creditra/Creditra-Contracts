@@ -58,3 +58,8 @@ Entrypoint: settle_default_liquidation(auction_id, credit_contract, borrower)
 - The integration is intentionally event-driven and accounting-only at settlement time.
 - No direct credit -> auction or auction -> credit value transfer path is introduced.
 - This keeps settlement deterministic and avoids inconsistent partial accounting from failed token transfers.
+
+## See Also
+
+- [`docs/cross-contract-contract.md`](./cross-contract-contract.md) — Formal contract specification with pre-conditions, post-conditions, and bilateral invariants
+- [`docs/CROSS_CONTRACT_HANDSHAKE.md`](./CROSS_CONTRACT_HANDSHAKE.md) — Full protocol specification with version negotiation and replay protection

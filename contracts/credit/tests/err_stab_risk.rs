@@ -79,13 +79,15 @@ fn risk_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::AdminCooldownActive.category(), Risk);
 
     // Lifecycle bucket (2)
-    assert_eq!(ContractError::CreditLineNotFound.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineClosed.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineSuspended.category(), Lifecycle);
     assert_eq!(ContractError::CreditLineDefaulted.category(), Lifecycle);
+
+    // Misc bucket
+    assert_eq!(ContractError::CreditLineNotFound.category(), Misc);
 }
 
-// Snapshot: JSON file stores variant→code mapping 
+// Snapshot: JSON file stores variant→code mapping
 
 fn snapshot_path() -> PathBuf {
     // Resolve relative to CARGO_MANIFEST_DIR so the path works regardless of cwd.
@@ -97,20 +99,44 @@ fn current_risk_snapshot() -> BTreeMap<String, u32> {
     let mut map = BTreeMap::new();
     map.insert("Unauthorized".into(), ContractError::Unauthorized as u32);
     map.insert("NotAdmin".into(), ContractError::NotAdmin as u32);
-    map.insert("CreditLineNotFound".into(), ContractError::CreditLineNotFound as u32);
-    map.insert("CreditLineClosed".into(), ContractError::CreditLineClosed as u32);
+    map.insert(
+        "CreditLineNotFound".into(),
+        ContractError::CreditLineNotFound as u32,
+    );
+    map.insert(
+        "CreditLineClosed".into(),
+        ContractError::CreditLineClosed as u32,
+    );
     map.insert("InvalidAmount".into(), ContractError::InvalidAmount as u32);
     map.insert("NegativeLimit".into(), ContractError::NegativeLimit as u32);
     map.insert("RateTooHigh".into(), ContractError::RateTooHigh as u32);
     map.insert("ScoreTooHigh".into(), ContractError::ScoreTooHigh as u32);
     map.insert("Overflow".into(), ContractError::Overflow as u32);
     map.insert("Paused".into(), ContractError::Paused as u32);
-    map.insert("CreditLineSuspended".into(), ContractError::CreditLineSuspended as u32);
-    map.insert("CreditLineDefaulted".into(), ContractError::CreditLineDefaulted as u32);
-    map.insert("AdminNotInitialized".into(), ContractError::AdminNotInitialized as u32);
-    map.insert("TimestampRegression".into(), ContractError::TimestampRegression as u32);
-    map.insert("LimitOutOfBounds".into(), ContractError::LimitOutOfBounds as u32);
-    map.insert("AdminCooldownActive".into(), ContractError::AdminCooldownActive as u32);
+    map.insert(
+        "CreditLineSuspended".into(),
+        ContractError::CreditLineSuspended as u32,
+    );
+    map.insert(
+        "CreditLineDefaulted".into(),
+        ContractError::CreditLineDefaulted as u32,
+    );
+    map.insert(
+        "AdminNotInitialized".into(),
+        ContractError::AdminNotInitialized as u32,
+    );
+    map.insert(
+        "TimestampRegression".into(),
+        ContractError::TimestampRegression as u32,
+    );
+    map.insert(
+        "LimitOutOfBounds".into(),
+        ContractError::LimitOutOfBounds as u32,
+    );
+    map.insert(
+        "AdminCooldownActive".into(),
+        ContractError::AdminCooldownActive as u32,
+    );
     map
 }
 
@@ -136,7 +162,12 @@ fn parse_snapshot(raw: &str) -> BTreeMap<String, u32> {
         let mut parts = line.splitn(2, ": ");
         let name_raw = parts.next().unwrap_or("").trim();
         let name = name_raw.trim_matches('"');
-        let code: u32 = parts.next().unwrap_or("0").trim().parse().unwrap_or(u32::MAX);
+        let code: u32 = parts
+            .next()
+            .unwrap_or("0")
+            .trim()
+            .parse()
+            .unwrap_or(u32::MAX);
         if !name.is_empty() {
             map.insert(name.to_string(), code);
         }
@@ -151,8 +182,7 @@ fn risk_error_snapshot_matches() {
 
     if std::env::var("UPDATE_SNAPSHOT").is_ok() {
         let json = serialize_snapshot(&current);
-        std::fs::write(&path, json.as_bytes())
-            .expect("write snapshot");
+        std::fs::write(&path, json.as_bytes()).expect("write snapshot");
         return;
     }
 
@@ -182,13 +212,13 @@ fn risk_v7_subset_variant_count_is_known() {
     assert_eq!(current_risk_snapshot().len(), 16);
 }
 
-//  Integration: runtime error paths 
+//  Integration: runtime error paths
 
 #[cfg(test)]
 mod integration {
     use super::*;
 
-    fn setup() -> (Env, CreditClient<'_>, Address) {
+    fn setup() -> (Env, CreditClient<'static>, Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -200,7 +230,7 @@ mod integration {
         (env, client, admin)
     }
 
-    fn setup_with_borrower() -> (Env, CreditClient<'_>, Address, Address) {
+    fn setup_with_borrower() -> (Env, CreditClient<'static>, Address, Address) {
         let (env, client, admin) = setup();
         let borrower = Address::generate(&env);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
@@ -371,17 +401,13 @@ mod integration {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
         client.set_liquidity_token(&token_address);
-        client.set_liquidity_source(&env.current_contract_address());
-        token::StellarAssetClient::new(&env, &token_address)
-            .mint(&env.current_contract_address(), &10_000_i128);
+        client.set_liquidity_source(&client.address);
+        token::StellarAssetClient::new(&env, &token_address).mint(&client.address, &10_000_i128);
 
         client.draw_credit(&borrower, &500_i128);
         client.update_risk_parameters(&borrower, &300_i128, &500_u32, &50_u32);
 
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(
-            line.credit_limit, 300,
-            "credit limit should be 300"
-        );
+        assert_eq!(line.credit_limit, 300, "credit limit should be 300");
     }
 }

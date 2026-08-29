@@ -128,10 +128,36 @@ pub fn mul_div(a: u128, numerator: u128, denominator: u128, rounding: Rounding) 
     match rounding {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
-            if product % denominator != 0 {
+            if !product.is_multiple_of(denominator) {
                 quotient.checked_add(1).expect("math_utils: ceil overflow")
             } else {
                 quotient
+            }
+        }
+    }
+}
+
+/// Non-panicking version of [`mul_div`].
+///
+/// Returns `None` if `denominator == 0` or if `a * numerator` overflows `u128`.
+pub fn safe_mul_div(
+    a: u128,
+    numerator: u128,
+    denominator: u128,
+    rounding: Rounding,
+) -> Option<u128> {
+    if denominator == 0 {
+        return None;
+    }
+    let product = a.checked_mul(numerator)?;
+    let quotient = product / denominator;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if !product.is_multiple_of(denominator) {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
             }
         }
     }
@@ -160,7 +186,7 @@ pub fn scale_down(amount: u128, rounding: Rounding) -> u128 {
     match rounding {
         Rounding::Floor => quotient,
         Rounding::Ceil => {
-            if amount % SCALE != 0 {
+            if !amount.is_multiple_of(SCALE) {
                 quotient
                     .checked_add(1)
                     .expect("math_utils: scale_down ceil overflow")
@@ -260,40 +286,39 @@ pub fn apply_bps(amount: u128, rate_bps: u32, rounding: Rounding) -> u128 {
 /// // Zero time → zero interest
 /// assert_eq!(prorate_interest(10_000, 300, 0, Rounding::Floor), 0);
 /// ```
+pub fn prorate_interest_checked(
+    principal: u128,
+    rate_bps: u32,
+    time_delta: u64,
+    rounding: Rounding,
+) -> Option<u128> {
+    if principal == 0 || rate_bps == 0 || time_delta == 0 {
+        return Some(0);
+    }
+
+    let step1 = principal.checked_mul(rate_bps as u128)?;
+    let step2 = step1.checked_mul(time_delta as u128)?;
+    let quotient = step2 / BPS_YEAR_DENOM;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if !step2.is_multiple_of(BPS_YEAR_DENOM) {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
+            }
+        }
+    }
+}
+
 pub fn prorate_interest(
     principal: u128,
     rate_bps: u32,
     time_delta: u64,
     rounding: Rounding,
 ) -> u128 {
-    if principal == 0 || rate_bps == 0 || time_delta == 0 {
-        return 0;
-    }
-
-    // Step 1: principal × rate_bps  (fits in u128 for principal ≤ ~3.4 × 10^34)
-    let step1 = principal
-        .checked_mul(rate_bps as u128)
-        .expect("math_utils: prorate overflow (step1)");
-
-    // Step 2: step1 × time_delta
-    let step2 = step1
-        .checked_mul(time_delta as u128)
-        .expect("math_utils: prorate overflow (step2)");
-
-    // Step 3: divide by (BPS_DENOMINATOR × SECONDS_PER_YEAR) with rounding
-    let quotient = step2 / BPS_YEAR_DENOM;
-    match rounding {
-        Rounding::Floor => quotient,
-        Rounding::Ceil => {
-            if step2 % BPS_YEAR_DENOM != 0 {
-                quotient
-                    .checked_add(1)
-                    .expect("math_utils: prorate ceil overflow")
-            } else {
-                quotient
-            }
-        }
-    }
+    prorate_interest_checked(principal, rate_bps, time_delta, rounding)
+        .expect("math_utils: prorate overflow")
 }
 
 // ─── Oracle deviation helper ──────────────────────────────────────────────────
@@ -330,8 +355,10 @@ pub fn compute_deviation_bps(new_price: i128, last_price: i128) -> Option<u32> {
     }
     let diff = (new_price - last_price).unsigned_abs();
     // diff * 10_000 / last_price — both operands are u128
-    let numerator = diff.checked_mul(BPS_DENOMINATOR)?;
-    let deviation = numerator / (last_price as u128);
+    let deviation = match diff.checked_mul(BPS_DENOMINATOR) {
+        Some(num) => num / (last_price as u128),
+        None => (diff / (last_price as u128)).saturating_mul(BPS_DENOMINATOR),
+    };
     // Cap at u32::MAX to avoid truncation; any value > 10_000 already exceeds any threshold
     Some(deviation.min(u32::MAX as u128) as u32)
 }

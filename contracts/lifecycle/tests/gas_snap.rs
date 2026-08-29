@@ -55,7 +55,7 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     let token_id = env.register_stellar_asset_contract_v2(admin.clone());
     client.set_liquidity_token(&token_id.address());
     client.set_liquidity_source(&admin);
@@ -114,7 +114,7 @@ fn gas_reinstate_credit_line() {
     let (env, client, _admin, borrower) = setup_with_credit();
     client.default_credit_line(&borrower);
     snap("reinstate_credit_line", &env, || {
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &creditra_credit::types::CreditStatus::Active);
     });
 }
 
@@ -140,7 +140,7 @@ fn lifecycle_gas_summary() {
         client.default_credit_line(&borrower);
     });
     measure_one!("reinstate_credit_line", {
-        client.reinstate_credit_line(&borrower);
+        client.reinstate_credit_line(&borrower, &creditra_credit::types::CreditStatus::Active);
     });
     measure_one!("self_suspend_credit_line", {
         client.self_suspend_credit_line(&borrower);

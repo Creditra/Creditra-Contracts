@@ -304,7 +304,7 @@ fn setting_cooldown_to_zero_disables_it() {
 // ── Error discriminant ───────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "Error(Contract, #54)")]
+#[should_panic(expected = "Error(Contract, #57)")]
 fn freeze_cooldown_active_error_has_correct_discriminant() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
@@ -312,7 +312,7 @@ fn freeze_cooldown_active_error_has_correct_discriminant() {
     client.set_freeze_cooldown(&3600);
     client.freeze_draws(&FreezeReason::LiquidityReserve);
 
-    // This should panic with #54 (FreezeCooldownActive)
+    // This should panic with #57 (FreezeCooldownActive)
     client.freeze_draws(&FreezeReason::Compliance);
 }
 

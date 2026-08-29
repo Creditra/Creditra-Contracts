@@ -56,7 +56,7 @@ proptest! {
             &min_increment_bps,
             &d_start,
             &d_floor,
-            &Some(decay.clone()),
+            &decay,
             &d_steps,
         );
 
@@ -84,7 +84,7 @@ proptest! {
             let fp = state.config.dutch_floor_price.unwrap();
             assert!(sp >= fp);
             assert!(sp >= state.config.min_bid);
-            
+
             if state.config.dutch_decay == DutchAuctionDecay::Stepped {
                 assert!(state.config.dutch_step_count.unwrap() > 0);
             }

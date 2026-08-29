@@ -73,6 +73,12 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
     client.set_liquidity_source(&contract_id);
     token::StellarAssetClient::new(&env, &token_addr).mint(&contract_id, &10_000_000_i128);
     token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
+    token::Client::new(&env, &token_addr).approve(
+        &borrower,
+        &contract_id,
+        &10_000_000_i128,
+        &20_000_u32,
+    );
 
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
 
@@ -104,10 +110,16 @@ fn setup_no_mock() -> (Env, CreditClient<'static>, Address, Address) {
         client.set_liquidity_source(&contract_id);
         token::StellarAssetClient::new(&env, &token_addr).mint(&contract_id, &10_000_000_i128);
         token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
+        token::Client::new(&env, &token_addr).approve(
+            &borrower,
+            &contract_id,
+            &10_000_000_i128,
+            &20_000_u32,
+        );
 
         client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
     }
-    // mock_all_auths is scoped: after the block, new invocations require real auth.
+    env.mock_auths(&[]);
     (env, client, admin, borrower)
 }
 
@@ -168,7 +180,10 @@ fn open_credit_line_reopen_requires_admin_auth() {
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "open_credit_line (re-open) must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "open_credit_line (re-open) must be authorised by admin"
+    );
 }
 
 /// Calling open_credit_line without admin auth panics.
@@ -181,6 +196,7 @@ fn open_credit_line_without_admin_auth_panics() {
         env.mock_all_auths();
         client.close_credit_line(&borrower, &admin);
     }
+    env.mock_auths(&[]);
     // Now call without any auth — must panic.
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
 }
@@ -194,7 +210,10 @@ fn draw_credit_requires_borrower_auth() {
     client.draw_credit(&borrower, &1_000_i128);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, borrower, "draw_credit must be authorised by the borrower");
+    assert_eq!(
+        last.0, borrower,
+        "draw_credit must be authorised by the borrower"
+    );
 }
 
 /// draw_credit without borrower auth panics.
@@ -215,7 +234,10 @@ fn repay_credit_requires_borrower_auth() {
     client.repay_credit(&borrower, &500_i128);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, borrower, "repay_credit must be authorised by the borrower");
+    assert_eq!(
+        last.0, borrower,
+        "repay_credit must be authorised by the borrower"
+    );
 }
 
 /// repay_credit without borrower auth panics.
@@ -227,6 +249,7 @@ fn repay_credit_without_borrower_auth_panics() {
         env.mock_all_auths();
         client.draw_credit(&borrower, &1_000_i128);
     }
+    env.mock_auths(&[]);
     client.repay_credit(&borrower, &500_i128);
 }
 
@@ -239,7 +262,10 @@ fn suspend_credit_line_requires_admin_auth() {
     client.suspend_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "suspend_credit_line must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "suspend_credit_line must be authorised by admin"
+    );
 }
 
 /// suspend_credit_line without admin auth panics.
@@ -259,7 +285,10 @@ fn self_suspend_credit_line_requires_borrower_auth() {
     client.self_suspend_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, borrower, "self_suspend_credit_line must be authorised by the borrower");
+    assert_eq!(
+        last.0, borrower,
+        "self_suspend_credit_line must be authorised by the borrower"
+    );
 }
 
 /// self_suspend_credit_line without borrower auth panics.
@@ -279,7 +308,10 @@ fn close_credit_line_admin_path_requires_admin_auth() {
     client.close_credit_line(&borrower, &admin);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "close_credit_line (admin) must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "close_credit_line (admin) must be authorised by admin"
+    );
 }
 
 /// close_credit_line called by borrower (zero util) records borrower as authorised.
@@ -290,7 +322,10 @@ fn close_credit_line_borrower_path_requires_borrower_auth() {
     client.close_credit_line(&borrower, &borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, borrower, "close_credit_line (borrower) must be authorised by borrower");
+    assert_eq!(
+        last.0, borrower,
+        "close_credit_line (borrower) must be authorised by borrower"
+    );
 }
 
 /// close_credit_line without the closer's auth panics.
@@ -312,7 +347,10 @@ fn default_credit_line_requires_admin_auth() {
     client.default_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "default_credit_line must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "default_credit_line must be authorised by admin"
+    );
 }
 
 /// default_credit_line without admin auth panics.
@@ -333,7 +371,10 @@ fn reinstate_credit_line_requires_admin_auth() {
     client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "reinstate_credit_line must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "reinstate_credit_line must be authorised by admin"
+    );
 }
 
 /// reinstate_credit_line without admin auth panics.
@@ -345,6 +386,7 @@ fn reinstate_credit_line_without_admin_auth_panics() {
         env.mock_all_auths();
         client.default_credit_line(&borrower);
     }
+    env.mock_auths(&[]);
     client.reinstate_credit_line(&borrower, &CreditStatus::Active);
 }
 
@@ -370,6 +412,7 @@ fn forgive_debt_without_admin_auth_panics() {
         env.mock_all_auths();
         client.draw_credit(&borrower, &1_000_i128);
     }
+    env.mock_auths(&[]);
     client.forgive_debt(&borrower, &500_i128);
 }
 
@@ -386,7 +429,10 @@ fn settle_default_liquidation_requires_admin_auth() {
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(last.0, admin, "settle_default_liquidation must be authorised by admin");
+    assert_eq!(
+        last.0, admin,
+        "settle_default_liquidation must be authorised by admin"
+    );
 }
 
 /// settle_default_liquidation without admin auth panics.
@@ -400,6 +446,7 @@ fn settle_default_liquidation_without_admin_auth_panics() {
         client.draw_credit(&borrower, &1_000_i128);
         client.default_credit_line(&borrower);
     }
+    env.mock_auths(&[]);
     let settlement_id = Symbol::new(&env, "settle01");
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
 }

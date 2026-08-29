@@ -11,8 +11,9 @@ use creditra_risk::{
     RiskContractClient,
 };
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Events, Ledger},
-    symbol_short, Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal,
+    Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -77,7 +78,10 @@ fn test_init_stores_admin() {
         })
         .expect("admin key must be set after init");
 
-    assert_eq!(retrieved, admin, "stored admin must match initialized value");
+    assert_eq!(
+        retrieved, admin,
+        "stored admin must match initialized value"
+    );
 }
 
 // ── Test: set_risk_admin_cooldown() event emission ───────────────────────

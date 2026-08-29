@@ -32,6 +32,7 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 | `collateral.rs` | Collateral balance tracking and `MinCollateralRatioBps` |
 | `contract_version.rs` | `get_contract_version() == (1,0,0)` |
 | `coverage_edge_cases.rs` | Edge-case coverage filler |
+| `coverage_gate.rs` | CI gate documentation + `math_utils` edge cases (PR #798) |
 | `credit_auction_e2e.rs` | **Cross-contract credit → auction → settlement flow** |
 | `credit_limit_bounds.rs` | `set_credit_limit_bounds(min,max)` enforcement |
 | `debt_monotonic_invariant.rs` | Total debt monotonicity invariants |
@@ -128,7 +129,10 @@ cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
 
 The CI workflow at `.github/workflows/coverage.yml` runs this on every push
-to `main`/`master` and on every PR.
+to `main`/`master` and on every PR.  The gate step carries **no**
+`continue-on-error` (hardened in PR #798), so a drop below 95 % will fail
+the check and block merge.  See [`docs/COVERAGE.md`](./COVERAGE.md) for full
+details.
 
 ### 2.3 What is not covered
 
@@ -172,13 +176,20 @@ CI workflows in `.github/workflows/`:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push (`main`/`master`/`develop`/`feature/**`) and PR | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, then WASM build with a hard **50 KB size budget** (`THRESHOLD_BYTES=51200`) |
+| `ci.yml` | push (`main`/`master`/`develop`/`feature/**`) and PR | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, **hard 95 % coverage gate** (`--fail-under-lines 95`), then WASM build with a hard **50 KB size budget** (`THRESHOLD_BYTES=51200`) |
 | `test.yml` | push / PR | `cargo test --workspace --all-targets` |
-| `coverage.yml` | push (`main`/`master`) and PR | `cargo llvm-cov --workspace --all-targets --fail-under-lines 95` |
-| `pr-coverage.yml` | PR | Comment-with-coverage-delta on PRs |
+| `coverage.yml` | push (`main`/`master`) and PR | **Hard 95 % line-coverage gate**: `cargo llvm-cov --workspace --all-targets --fail-under-lines 95`; LCOV upload to Codecov (soft) |
+| `pr-coverage.yml` | PR to `main`/`master`/`develop` | **Hard 95 % line-coverage gate** on every PR; LCOV artifact + step summary (soft) |
 | `build-wasm.yml` | push / PR | Release-WASM artifact build for `creditra-credit` and `gateway-auction`, uploads to artifact storage |
 | `wasm-size.yml` | push / PR | Build all workspace WASM via `scripts/check-wasm-size.sh`; fail if **any** artifact exceeds **100 KiB** (`THRESHOLD_BYTES=102400`) |
 | `gas.yml` | push / PR | Per-entrypoint CPU/memory budget regression against `contracts/.gas-baseline.json` (via `instrument` feature) |
+
+All three coverage workflows (`coverage.yml`, `ci.yml` coverage job,
+`pr-coverage.yml`) were hardened in PR #798: the `--fail-under-lines 95` step
+no longer carries `continue-on-error`, so a drop below 95 % fails the check
+and blocks merge.  Only soft steps (Codecov upload, LCOV artifact) carry
+`continue-on-error: true`.  See [`docs/COVERAGE.md`](./COVERAGE.md) for the
+full explanation.
 
 The size-budget enforcement is the load-bearing one: it guarantees the WASM
 artifact stays deployable under Soroban's per-contract bytecode limits. The

@@ -1,0 +1,9 @@
+---
+source: contracts/freeze/tests/gas_snap.rs
+expression: sample
+---
+FreezeGasSample {
+    entrypoint: "get_borrower_frozen_until_none",
+    cpu_instructions: 30400,
+    memory_bytes: 5491,
+}

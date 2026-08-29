@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // SPDX-License-Identifier: MIT
 
 //! Integration test matrix for credit-limit *increase* logic.
@@ -29,6 +30,14 @@ fn setup_contract_with_bounds(
     let client = CreditClient::new(&env, &contract_id);
 
     client.init(&admin);
+
+    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = token_id.address();
+    client.set_liquidity_token(&token);
+    client.set_liquidity_source(&contract_id);
+
+    let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    sac.mint(&contract_id, &1_000_000_000_i128);
 
     // Requirement #2: Use `set_credit_limit_bounds` within the Env setup.
     // We configure Min = 0 and Max = fixed value, to make assertions deterministic.

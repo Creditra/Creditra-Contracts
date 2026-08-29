@@ -16,6 +16,6 @@
 //!   with four boolean flags describing the current state of the accrual
 //!   engine for a given borrower. No auth, no mutations.
 
+pub mod events;
 pub mod views;
 pub use creditra_credit::*;
-

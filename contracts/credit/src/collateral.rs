@@ -48,9 +48,9 @@ use crate::events::{
     CollateralDepositedEvent, CollateralPartialReleasedEvent, CollateralWithdrawnEvent,
 };
 use crate::storage::{
-    get_collateral_balance, get_collateral_balance_for_token, get_collateral_risk_weight_bps,
-    get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
-    is_collateral_token_allowed, set_collateral_balance, set_collateral_balance_for_token,
+    get_collateral_balance, get_collateral_balance_for_token, get_collateral_token,
+    get_credit_line, get_min_collateral_ratio_bps, is_collateral_token_allowed,
+    set_collateral_balance, set_collateral_balance_for_token,
 };
 use crate::types::{CollateralEventKind, ContractError};
 use soroban_sdk::{token, Address, Env};
@@ -128,7 +128,8 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
         if credit_line.utilized_amount > 0 {
             // Compute required collateral after withdrawal
             let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15000);
-            let required = (credit_line.utilized_amount as i128)
+            let required = credit_line
+                .utilized_amount
                 .checked_mul(min_ratio_bps as i128)
                 .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
                 / 10_000;
@@ -272,18 +273,14 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
         u32::MAX
     } else {
         // post_balance * 10_000 fits in i128 for any realistic balance.
-        let hf = post_balance
-            .checked_mul(10_000_i128)
-            .unwrap_or(i128::MAX)
-            / utilized_amount;
+        let hf = post_balance.checked_mul(10_000_i128).unwrap_or(i128::MAX) / utilized_amount;
         // Saturate to u32::MAX if the ratio somehow exceeds 4_294_967_295 bps.
         u32::try_from(hf).unwrap_or(u32::MAX)
     };
 
     // ── 6. Token transfer ──────────────────────────────────────────────────
-    let token_addr = get_collateral_token(env).unwrap_or_else(|| {
-        env.panic_with_error(ContractError::MissingLiquidityToken)
-    });
+    let token_addr = get_collateral_token(env)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquidityToken));
     let token_client = token::Client::new(env, &token_addr);
     let contract_addr = env.current_contract_address();
     token_client.transfer(&contract_addr, borrower, &amount);
@@ -298,7 +295,7 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
             borrower: borrower.clone(),
             amount_released: amount,
             new_balance: post_balance,
-            health_factor_bps,
+            health_factor_bps: health_factor_bps as u64,
         },
     );
     publish_collateral_lifecycle_event(
@@ -411,7 +408,12 @@ pub fn deposit_collateral_token(env: &Env, borrower: &Address, token_addr: &Addr
 /// check on the per-token balance because cross-token ratio enforcement would require
 /// oracle pricing; callers relying on a collateral floor should use the single-token
 /// [`withdraw_collateral`] path.
-pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Address, amount: i128) {
+pub fn withdraw_collateral_token(
+    env: &Env,
+    borrower: &Address,
+    token_addr: &Address,
+    amount: i128,
+) {
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }

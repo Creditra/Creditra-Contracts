@@ -4,9 +4,10 @@
 use creditra_credit::events::{BorrowLifecycleEvent, BorrowLifecyclePhase, DebtForgivenEvent};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
-    testutils::{Address as _, Events},
+    symbol_short,
+    testutils::{Address as _, Events, Ledger as _},
     token::StellarAssetClient,
-    Address, Env, IntoVal, Symbol,
+    Address, Env, IntoVal, Symbol, TryFromVal, TryIntoVal,
 };
 
 fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
@@ -18,28 +19,36 @@ fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
     let client = CreditClient::new(env, &contract_id);
     client.init(&admin);
 
-    let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
-    let token = token_id.address();
+    let token_admin = Address::generate(env);
+    let token = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
     client.set_liquidity_token(&token);
-    client.set_liquidity_source(&token);
+    client.set_liquidity_source(&contract_id);
 
-    let token_admin = StellarAssetClient::new(env, &token);
-    token_admin.mint(&borrower, &100_000_i128);
-    token_admin.mint(&token, &100_000_i128);
+    let token_sac = StellarAssetClient::new(env, &token);
+    token_sac.mint(&borrower, &100_000_i128);
+    token_sac.mint(&contract_id, &100_000_i128);
+    soroban_sdk::token::Client::new(env, &token).approve(
+        &borrower,
+        &contract_id,
+        &100_000_i128,
+        &100_000_u32,
+    );
 
     (client, admin, borrower, token)
 }
 
-fn find_borrow_lifecycle_events(env: &Env) -> soroban_sdk::Vec<BorrowLifecycleEvent> {
-    let mut result = soroban_sdk::Vec::new(env);
+fn find_borrow_lifecycle_events(env: &Env) -> std::vec::Vec<BorrowLifecycleEvent> {
+    let mut result = std::vec::Vec::new();
     for (_, topics, data) in env.events().all().iter() {
         if topics.len() >= 2 {
             let t1: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(env);
             let t2: Result<soroban_sdk::Symbol, _> = topics.get(1).unwrap().try_into_val(env);
             if let (Ok(a), Ok(b)) = (t1, t2) {
-                if a == soroban_sdk::symbol_short!("credit") && b == Symbol::new(env, "borrow_lc") {
+                if a == symbol_short!("credit") && b == Symbol::new(env, "borrow_lc") {
                     if let Ok(ev) = data.try_into_val(env) {
-                        result.push_back(ev);
+                        result.push(ev);
                     }
                 }
             }
@@ -82,8 +91,8 @@ fn repay_credit_emits_borrow_lifecycle_repaid() {
     client.repay_credit(&borrower, &500);
 
     let events = find_borrow_lifecycle_events(&env);
-    let repaid_events: soroban_sdk::Vec<BorrowLifecycleEvent> = events
-        .iter()
+    let repaid_events: std::vec::Vec<BorrowLifecycleEvent> = events
+        .into_iter()
         .filter(|e| matches!(e.phase, BorrowLifecyclePhase::Repaid))
         .collect();
 
@@ -107,7 +116,8 @@ fn forgive_debt_emits_debt_forgiven_and_lifecycle_events() {
     client.draw_credit(&borrower, &1_000);
 
     // Advance time so interest accrues.
-    env.ledger().with_mut(|l| l.timestamp += 365 * 24 * 3600);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 365 * 24 * 3600);
     client.accrue_batch(&soroban_sdk::vec![&env, borrower.clone()]);
 
     client.forgive_debt(&borrower, &100);
@@ -131,8 +141,8 @@ fn forgive_debt_emits_debt_forgiven_and_lifecycle_events() {
 
     // Check BorrowLifecycleEvent with DebtForgiven phase.
     let lc_events = find_borrow_lifecycle_events(&env);
-    let forgiven_lc: soroban_sdk::Vec<BorrowLifecycleEvent> = lc_events
-        .iter()
+    let forgiven_lc: std::vec::Vec<BorrowLifecycleEvent> = lc_events
+        .into_iter()
         .filter(|e| matches!(e.phase, BorrowLifecyclePhase::DebtForgiven))
         .collect();
     assert!(

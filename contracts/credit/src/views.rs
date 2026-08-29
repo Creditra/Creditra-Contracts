@@ -9,7 +9,8 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    AccrualCapabilities, BorrowCapabilities, BorrowStateSnapshot, CollateralCapabilities,
+    CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -67,6 +68,26 @@ pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
         can_self_suspend,
     }
 }
+
+/// Return a borrower's current collateral capabilities bitmap.
+///
+/// This is a read-only, no-auth view that reports whether the borrower can
+/// currently attempt collateral deposit, withdrawal, or partial release.
+/// The view uses the same prerequisite checks that the entrypoints rely on:
+/// an explicitly configured collateral token and a positive collateral balance
+/// for withdraw/release operations.
+pub fn capabilities(env: Env, borrower: Address) -> CollateralCapabilities {
+    let token_configured = crate::storage::get_collateral_token(&env).is_some();
+    let has_balance = crate::storage::get_collateral_balance(&env, &borrower) > 0;
+
+    CollateralCapabilities {
+        can_deposit: token_configured,
+        can_withdraw: token_configured && has_balance,
+        can_partial_release: token_configured && has_balance,
+    }
+}
+
+// ── Protocol-level views ─────────────────────────────────────────────────────
 
 /// Assemble a full read-only snapshot of `borrower`'s credit line.
 ///
@@ -190,7 +211,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     let end_id = total_count.saturating_sub(1);
 
     // Iterate through IDs until we collect enough results or reach the end
-    while credit_lines.len() < limit as u32 && current_id <= end_id {
+    while credit_lines.len() < limit && current_id <= end_id {
         if let Some(borrower) = get_borrower_by_credit_line_id(&env, current_id) {
             if let Some(line) = get_credit_line(&env, &borrower) {
                 credit_lines.push_back(line);
@@ -198,7 +219,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         }
 
         // Prepare next cursor if we might have more results
-        if credit_lines.len() < limit as u32 && current_id < end_id {
+        if credit_lines.len() < limit && current_id < end_id {
             next_cursor = Some(current_id.saturating_add(1));
         } else if current_id < end_id {
             // We've filled the page but there are more results
@@ -209,7 +230,7 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     }
 
     // If we didn't fill the page, there are no more results
-    if credit_lines.len() < limit as u32 {
+    if credit_lines.len() < limit {
         next_cursor = None;
     }
 
@@ -247,7 +268,10 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
 /// and does not mutate any state. TTL may be bumped if the borrower's
 /// persistent entry is near expiry, but this does not change logical state.
 pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
-    let credit_line = get_credit_line(&env, &borrower);
+    let mut credit_line = soroban_sdk::Vec::new(&env);
+    if let Some(cl) = get_credit_line(&env, &borrower) {
+        credit_line.push_back(cl);
+    }
     let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
     let capabilities = borrow_capabilities(env.clone(), borrower.clone());
 
@@ -255,5 +279,70 @@ pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
         credit_line,
         collateral_balance,
         capabilities,
+    }
+}
+/// operations are currently available for a given borrower, without
+/// executing any state-mutating logic.
+///
+/// # Parameters
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+/// An [`AccrualCapabilities`] struct with four bool fields:
+/// - `can_accrue` — `accrue_batch` will process this borrower
+/// - `batch_open` — protocol accepts new `accrue_batch` submissions
+/// - `penalty_rate_active` — borrower is delinquent and a surcharge is configured
+/// - `grace_waiver_active` — borrower is within their suspension grace window
+///
+/// # Security
+/// Pure read-only query. No authentication required. No state mutations occur.
+pub fn accrual_capabilities(env: Env, borrower: Address) -> AccrualCapabilities {
+    let paused = is_paused(&env);
+
+    // batch_open: protocol not paused (batch size check is per-call; not evaluated here)
+    let batch_open = !paused;
+
+    let credit_line = get_credit_line(&env, &borrower);
+
+    // can_accrue: line exists, Active, has utilization, protocol not paused
+    let can_accrue = credit_line
+        .as_ref()
+        .map(|line| {
+            !paused && line.status == crate::types::CreditStatus::Active && line.utilized_amount > 0
+        })
+        .unwrap_or(false);
+
+    // penalty_rate_active: surcharge configured AND borrower is delinquent
+    let penalty_surcharge_bps = crate::storage::get_penalty_surcharge_bps(&env);
+    let penalty_rate_active = if penalty_surcharge_bps > 0 {
+        crate::query::is_delinquent(env.clone(), borrower.clone())
+    } else {
+        false
+    };
+
+    // grace_waiver_active: line is Suspended, a grace config exists, and now <= grace_end
+    let grace_waiver_active = credit_line
+        .as_ref()
+        .map(|line| {
+            if line.status != crate::types::CreditStatus::Suspended {
+                return false;
+            }
+            let grace_cfg = crate::storage::get_grace_period_config(&env);
+            match grace_cfg {
+                Some(cfg) if cfg.grace_period_seconds > 0 => {
+                    let now = env.ledger().timestamp();
+                    let grace_end = line.suspension_ts.saturating_add(cfg.grace_period_seconds);
+                    now <= grace_end
+                }
+                _ => false,
+            }
+        })
+        .unwrap_or(false);
+
+    AccrualCapabilities {
+        can_accrue,
+        batch_open,
+        penalty_rate_active,
+        grace_waiver_active,
     }
 }

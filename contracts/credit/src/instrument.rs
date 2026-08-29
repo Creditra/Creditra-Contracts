@@ -26,12 +26,17 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+extern crate std;
+
+use std::string::String;
+use std::vec::Vec;
+
 use soroban_sdk::{
     testutils::{budget::Budget, Address as _},
     token, Address, Env,
 };
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, string::ToString};
 
 /// Relative path (from the `creditra-credit` crate root) to the pinned snapshot.
 pub const SNAPSHOT_REL_PATH: &str = "test_snapshots/budget.json";
@@ -93,7 +98,7 @@ pub struct BudgetBaseline {
 impl BudgetBaseline {
     pub fn new(entrypoint: &'static str, cpu_instructions: u64, memory_bytes: u64) -> Self {
         Self {
-            entrypoint: entrypoint.to_string(),
+            entrypoint: String::from(entrypoint),
             cpu_instructions,
             memory_bytes,
             tolerance_pct: Some(DEFAULT_TOLERANCE_PCT),
@@ -175,12 +180,11 @@ pub fn write_baselines_to_manifest_dir(
 ) -> std::path::PathBuf {
     let path = manifest_dir.join(SNAPSHOT_REL_PATH);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .unwrap_or_else(|e| panic!("cannot create {}: {e}", parent.display()));
+        std::fs::create_dir_all(parent).expect("cannot create directory");
     }
     let json = serde_json::to_string_pretty(baselines).expect("serialization failed");
     std::fs::write(&path, format!("{json}\n"))
-        .unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+        .unwrap_or_else(|e: std::io::Error| panic!("cannot write {}: {e}", path.display()));
     path
 }
 

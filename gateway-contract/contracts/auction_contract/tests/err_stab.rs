@@ -185,7 +185,7 @@ mod integration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
         (contract_id, factory, auction_id)
@@ -286,7 +286,7 @@ mod integration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
 
@@ -319,7 +319,6 @@ mod integration {
         client.set_factory_contract(&factory);
 
         // Set a 1000-second grace window.
-        client.set_liquidation_grace_window(&1000_u64);
 
         let auction_id = Symbol::new(&env, "grace_test");
         client.init_auction(
@@ -331,7 +330,7 @@ mod integration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
 
@@ -668,7 +667,7 @@ mod integration {
             &0_u32,
             &None,
             &None,
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
 
@@ -789,7 +788,6 @@ mod integration {
         let client = AuctionClient::new(&env, &contract_id);
         let factory = Address::generate(&env);
         client.set_factory_contract(&factory);
-        client.set_liquidation_grace_window(&500_u64);
 
         let auction_id = Symbol::new(&env, "dutch_grace");
         client.init_auction(
@@ -801,7 +799,7 @@ mod integration {
             &0_u32,
             &Some(500_i128), // dutch_start_price
             &Some(100_i128), // dutch_floor_price
-            &None,
+            &gateway_auction::DutchAuctionDecay::None,
             &None,
         );
 

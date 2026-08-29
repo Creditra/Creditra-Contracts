@@ -1,0 +1,17 @@
+---
+source: contracts/credit/tests/auth_snap.rs
+expression: auths.last().unwrap()
+---
+(
+    Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM),
+    AuthorizedInvocation {
+        function: Contract(
+            (
+                Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M),
+                Symbol(set_penalty_surcharge_bps),
+                Vec(Ok(U32(500))),
+            ),
+        ),
+        sub_invocations: [],
+    },
+)

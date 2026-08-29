@@ -42,7 +42,7 @@
 //! for the full testnet / mainnet checklist.
 
 use crate::auth::require_admin_auth;
-use crate::storage::{admin_key, set_schema_version, DataKey};
+use crate::storage::{admin_key, assert_not_paused, set_schema_version, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env};
 
@@ -64,15 +64,13 @@ pub fn init(env: Env, admin: Address) {
         .instance()
         .set(&DataKey::TotalUtilized, &0_i128);
     set_schema_version(&env, crate::SCHEMA_VERSION);
-    // Set default minimum collateral ratio to 150% (15000 bps) in production, 0 in tests
-    #[cfg(not(test))]
-    crate::storage::set_min_collateral_ratio_bps(&env, 15000);
 }
 
 /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
 /// @dev Admin-only.
 #[allow(dead_code)]
 pub fn set_liquidity_token(env: Env, token_address: Address) {
+    assert_not_paused(&env);
     require_admin_auth(&env);
     env.storage()
         .instance()
@@ -83,6 +81,7 @@ pub fn set_liquidity_token(env: Env, token_address: Address) {
 /// @dev Admin-only. If unset, init config uses the contract address.
 #[allow(dead_code)]
 pub fn set_liquidity_source(env: Env, reserve_address: Address) {
+    assert_not_paused(&env);
     require_admin_auth(&env);
     env.storage()
         .instance()

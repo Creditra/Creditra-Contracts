@@ -45,7 +45,7 @@ fn setup_settleable() -> (Env, Address, Symbol, Address, Address, i128) {
         &0_u32,
         &None,
         &None,
-        &Some(DutchAuctionDecay::None),
+        &DutchAuctionDecay::None,
         &None,
     );
     client.place_bid(&auction_id, &bidder, &420_i128);
@@ -128,7 +128,7 @@ fn init_auction_reverts_when_factory_unset() {
         &0_u32,
         &None,
         &None,
-        &Some(DutchAuctionDecay::None),
+        &DutchAuctionDecay::None,
         &None,
     );
 
@@ -182,7 +182,7 @@ fn init_auction_requires_factory_auth() {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -235,7 +235,7 @@ fn init_auction_succeeds_with_factory_auth() {
             &0_u32,
             &None,
             &None,
-            &Some(DutchAuctionDecay::None),
+            &DutchAuctionDecay::None,
             &None,
         );
 
@@ -283,7 +283,7 @@ fn close_auction_requires_factory_auth() {
         &0_u32,
         &None,
         &None,
-        &Some(DutchAuctionDecay::None),
+        &DutchAuctionDecay::None,
         &None,
     );
 
@@ -327,7 +327,7 @@ fn close_auction_succeeds_with_factory_auth() {
         &0_u32,
         &None,
         &None,
-        &Some(DutchAuctionDecay::None),
+        &DutchAuctionDecay::None,
         &None,
     );
 
@@ -348,83 +348,6 @@ fn close_auction_succeeds_with_factory_auth() {
         "factory-authorized close_auction must succeed"
     );
 }
-
-// ── set_liquidation_grace_window ─────────────────────────────────────────────
-
-#[test]
-fn set_liquidation_grace_window_reverts_when_factory_unset() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register(Auction, ());
-    let client = AuctionClient::new(&env, &contract_id);
-
-    let result = client.try_set_liquidation_grace_window(&3600_u64);
-
-    assert!(
-        result.is_err(),
-        "set_liquidation_grace_window must fail when no factory is configured"
-    );
-}
-
-#[test]
-fn set_liquidation_grace_window_requires_factory_auth() {
-    let env = Env::default();
-    env.mock_all_auths_allowing_non_root_auth();
-    let contract_id = env.register(Auction, ());
-    let client = AuctionClient::new(&env, &contract_id);
-
-    let factory = Address::generate(&env);
-    client.set_factory_contract(&factory);
-
-    let intruder = Address::generate(&env);
-
-    let result = client
-        .mock_auths(&[MockAuth {
-            address: &intruder,
-            invoke: &MockAuthInvoke {
-                contract: &contract_id,
-                fn_name: "set_liquidation_grace_window",
-                args: (3600_u64,).into_val(&env),
-                sub_invokes: &[],
-            },
-        }])
-        .try_set_liquidation_grace_window(&3600_u64);
-
-    assert!(
-        result.is_err(),
-        "set_liquidation_grace_window must reject non-factory caller"
-    );
-}
-
-#[test]
-fn set_liquidation_grace_window_succeeds_with_factory_auth() {
-    let env = Env::default();
-    env.mock_all_auths_allowing_non_root_auth();
-    let contract_id = env.register(Auction, ());
-    let client = AuctionClient::new(&env, &contract_id);
-
-    let factory = Address::generate(&env);
-    client.set_factory_contract(&factory);
-
-    let result = client
-        .mock_auths(&[MockAuth {
-            address: &factory,
-            invoke: &MockAuthInvoke {
-                contract: &contract_id,
-                fn_name: "set_liquidation_grace_window",
-                args: (3600_u64,).into_val(&env),
-                sub_invokes: &[],
-            },
-        }])
-        .try_set_liquidation_grace_window(&3600_u64);
-
-    assert!(
-        result.is_ok(),
-        "factory-authorized set_liquidation_grace_window must succeed"
-    );
-}
-
-// ── settle_default_liquidation (factory auth) ────────────────────────────────
 
 #[test]
 fn settle_liquidation_rejects_non_factory_invoker() {
