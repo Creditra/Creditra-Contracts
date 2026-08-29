@@ -54,6 +54,9 @@ jobs:
       - name: Verify reproducible-build policy
         run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
 
+      - name: Validate generated contract interfaces
+        run: scripts/validate_schemas.sh
+
       # The reproducible-build guard scripts are the enforcement layer for the
       # pinned-toolchain policy. Run their own test suites so a regression in
       # the guards themselves fails CI, not just a regression in the contracts.
