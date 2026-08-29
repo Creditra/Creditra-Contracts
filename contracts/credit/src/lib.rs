@@ -1840,6 +1840,7 @@ impl Credit {
     ) {
         // Reentrancy guard: settlement touches accounting and may interact
         // with an external auction contract, so we guard the full path.
+        require_admin_auth(&env);
         set_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.

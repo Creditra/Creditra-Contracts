@@ -23,6 +23,7 @@
 //! | `102` | `CollateralTokenMismatch`            | Collateral      |
 //! | `103` | `CollateralPositionLocked`           | Collateral      |
 //! | `104` | `CollateralBalanceForTokenNotFound`  | Collateral      |
+//! | `105` | `AuctionBidTooLate`                  | Collateral      |
 //!
 //! # Mirror tier semantics
 //!
@@ -123,7 +124,7 @@ pub enum CollateralError {
     // These discriminants are exclusive to the collateral contract and
     // start at 100 to leave a 50-slot buffer above the credit contract's
     // 1..=49 range. New variants MUST be appended at the end of this
-    // block (after 104) and paired with an assertion in tests/catalog.rs.
+    // block (after 105) and paired with an assertion in tests/catalog.rs.
 
     /// The supplied collateral token address is not in the
     /// admin-managed allowlist used by the multi-collateral
@@ -161,6 +162,15 @@ pub enum CollateralError {
     /// lookup paths such as `get_balance_for_token` when the caller
     /// expects a balance to exist (e.g. for an oracle feed check).
     CollateralBalanceForTokenNotFound = 104,
+
+    /// A bid was submitted after the auction's anti-sniping deadline.
+    ///
+    /// Bids at or before the deadline are accepted; this error is raised
+    /// only when the bid timestamp is strictly after the current auction
+    /// end time. Rejecting late bids prevents a bidder from bypassing the
+    /// anti-sniping extension and winning without giving other bidders a
+    /// fair chance to respond.
+    AuctionBidTooLate = 105,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -195,6 +205,7 @@ mod tests {
         assert_eq!(CollateralError::CollateralTokenMismatch as u32, 102);
         assert_eq!(CollateralError::CollateralPositionLocked as u32, 103);
         assert_eq!(CollateralError::CollateralBalanceForTokenNotFound as u32, 104);
+        assert_eq!(CollateralError::AuctionBidTooLate as u32, 105);
     }
 
     /// Verify no two `CollateralError` variants share a discriminant. This
@@ -214,6 +225,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::AuctionBidTooLate as u32,
         ];
 
         // Manually detect duplicates to keep the test dependency-free.
@@ -233,7 +245,7 @@ mod tests {
     /// in this file's module-level docstring and to `tests/catalog.rs`.
     #[test]
     fn variant_count_is_known() {
-        const EXPECTED_VARIANT_COUNT: usize = 10;
+        const EXPECTED_VARIANT_COUNT: usize = 11;
 
         let codes = [
             CollateralError::InvalidAmount as u32,
@@ -246,6 +258,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::AuctionBidTooLate as u32,
         ];
 
         assert_eq!(
@@ -267,6 +280,7 @@ mod tests {
             CollateralError::CollateralTokenMismatch as u32,
             CollateralError::CollateralPositionLocked as u32,
             CollateralError::CollateralBalanceForTokenNotFound as u32,
+            CollateralError::AuctionBidTooLate as u32,
         ];
 
         for &code in &new_codes {
