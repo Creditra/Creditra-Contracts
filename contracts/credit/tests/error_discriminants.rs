@@ -69,8 +69,10 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
     assert_eq!(ContractError::InvalidAttestation as u32, 53);
     assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
-    assert_eq!(ContractError::IncompatibleVersion as u32, 60);
-    assert_eq!(ContractError::AuctionCallFailed as u32, 61);
+    // Appended in Issue #1146 — reject stale credit-line state transitions.
+    assert_eq!(ContractError::StaleStateTransition as u32, 60);
+    assert_eq!(ContractError::IncompatibleVersion as u32, 61);
+    assert_eq!(ContractError::AuctionCallFailed as u32, 62);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -148,7 +150,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 61;
+    const EXPECTED_VARIANT_COUNT: usize = 62;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -205,8 +207,9 @@ fn variant_count_is_known() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
-        ContractError::IncompatibleVersion as u32,
-        ContractError::AuctionCallFailed as u32,
+    ContractError::IncompatibleVersion as u32,
+    ContractError::AuctionCallFailed as u32,
+    ContractError::StaleStateTransition as u32,
     ];
 
     assert_eq!(
@@ -560,6 +563,11 @@ fn category_mappings_are_stable() {
         ContractError::AuctionCallFailed.category(),
         ContractErrorCategory::Handshake
     );
+    // Lifecycle — stale state transition guard (Issue #1146)
+    assert_eq!(
+        ContractError::StaleStateTransition.category(),
+        ContractErrorCategory::Lifecycle
+    );
 }
 
 /// Verify the borrow error catalog remains synchronized with the enum.
@@ -698,6 +706,8 @@ fn every_variant_has_known_category() {
         ContractError::InvalidRiskWeight.category(),
         ContractError::InvalidAttestation.category(),
         ContractError::RiskAdminCooldownActive.category(),
+        // Issue #1146: stale state transition guard (Lifecycle category)
+        ContractError::StaleStateTransition.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -706,7 +716,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 59, "Expected 59 ContractError variants");
+    assert_eq!(all_variants.len(), 60, "Expected 60 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

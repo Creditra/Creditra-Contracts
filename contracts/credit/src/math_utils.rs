@@ -207,6 +207,50 @@ pub fn apply_bps(amount: u128, rate_bps: u32, rounding: Rounding) -> u128 {
 
 // ─── Time-prorating helper ────────────────────────────────────────────────────
 
+/// Overflow-checked variant of [`prorate_interest`].
+///
+/// Computes the same floor/ceil interest as [`prorate_interest`] but returns
+/// `None` (instead of panicking on the `checked_mul` steps) when the
+/// intermediate product `principal × rate_bps × time_delta` would exceed
+/// `u128::MAX`. This lets the accrual layer translate an extreme rate or
+/// timestamp into a deterministic [`ContractError::Overflow`] revert rather
+/// than a bare panic.
+///
+/// # Returns
+///
+/// - `Some(0)` when any of `principal`, `rate_bps`, or `time_delta` is zero.
+/// - `Some(interest)` when the product fits in `u128`.
+/// - `None` when `principal × rate_bps × time_delta` would overflow `u128`.
+pub fn checked_prorate_interest(
+    principal: u128,
+    rate_bps: u32,
+    time_delta: u64,
+    rounding: Rounding,
+) -> Option<u128> {
+    if principal == 0 || rate_bps == 0 || time_delta == 0 {
+        return Some(0);
+    }
+
+    // Step 1: principal × rate_bps  (fits in u128 for principal ≤ ~3.4 × 10^34)
+    let step1 = principal.checked_mul(rate_bps as u128)?;
+
+    // Step 2: step1 × time_delta
+    let step2 = step1.checked_mul(time_delta as u128)?;
+
+    // Step 3: divide by (BPS_DENOMINATOR × SECONDS_PER_YEAR) with rounding
+    let quotient = step2 / BPS_YEAR_DENOM;
+    match rounding {
+        Rounding::Floor => Some(quotient),
+        Rounding::Ceil => {
+            if step2 % BPS_YEAR_DENOM != 0 {
+                quotient.checked_add(1)
+            } else {
+                Some(quotient)
+            }
+        }
+    }
+}
+
 /// Compute the interest accrued on `principal` over `time_delta` seconds at an
 /// annual rate of `rate_bps` basis points.
 ///
@@ -219,6 +263,14 @@ pub fn apply_bps(amount: u128, rate_bps: u32, rounding: Rounding) -> u128 {
 /// Intermediate arithmetic is performed in `u128` with checked multiplication
 /// to detect overflow early.  The final division uses [`Rounding`] to control
 /// whether the fractional remainder is discarded or rounded up.
+///
+/// # Overflows
+///
+/// This infallible wrapper delegates to [`checked_prorate_interest`] and
+/// panics via `expect` when the intermediate product would overflow `u128`.
+/// Callers that must revert deterministically (e.g. the accrual path in
+/// [`crate::accrual::apply_accrual`]) should use [`checked_prorate_interest`]
+/// and translate `None` into `ContractError::Overflow`.
 ///
 /// # Parameters
 ///
@@ -266,34 +318,8 @@ pub fn prorate_interest(
     time_delta: u64,
     rounding: Rounding,
 ) -> u128 {
-    if principal == 0 || rate_bps == 0 || time_delta == 0 {
-        return 0;
-    }
-
-    // Step 1: principal × rate_bps  (fits in u128 for principal ≤ ~3.4 × 10^34)
-    let step1 = principal
-        .checked_mul(rate_bps as u128)
-        .expect("math_utils: prorate overflow (step1)");
-
-    // Step 2: step1 × time_delta
-    let step2 = step1
-        .checked_mul(time_delta as u128)
-        .expect("math_utils: prorate overflow (step2)");
-
-    // Step 3: divide by (BPS_DENOMINATOR × SECONDS_PER_YEAR) with rounding
-    let quotient = step2 / BPS_YEAR_DENOM;
-    match rounding {
-        Rounding::Floor => quotient,
-        Rounding::Ceil => {
-            if step2 % BPS_YEAR_DENOM != 0 {
-                quotient
-                    .checked_add(1)
-                    .expect("math_utils: prorate ceil overflow")
-            } else {
-                quotient
-            }
-        }
-    }
+    checked_prorate_interest(principal, rate_bps, time_delta, rounding)
+        .expect("math_utils: prorate overflow")
 }
 
 // ─── Oracle deviation helper ──────────────────────────────────────────────────

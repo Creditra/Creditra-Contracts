@@ -128,10 +128,13 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
         if credit_line.utilized_amount > 0 {
             // Compute required collateral after withdrawal
             let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15000);
-            let required = (credit_line.utilized_amount as i128)
+            // Round up so a dust-sized utilization cannot leave the credit line
+            // below the configured minimum collateral ratio.
+            let required_numerator = (credit_line.utilized_amount as i128)
                 .checked_mul(min_ratio_bps as i128)
-                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
-                / 10_000;
+                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+            let required = required_numerator / 10_000
+                + if required_numerator % 10_000 == 0 { 0 } else { 1 };
 
             if post_balance < required {
                 env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
@@ -254,11 +257,13 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
         let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
 
         // required = ceil(utilized * min_ratio_bps / 10_000)
-        // We use checked_mul to detect overflow; the division itself cannot overflow.
-        let required = utilized_amount
+        // Round up so a dust-sized utilization cannot leave the credit line
+        // below the configured minimum collateral ratio.
+        let required_numerator = utilized_amount
             .checked_mul(min_ratio_bps as i128)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
-            / 10_000_i128;
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+        let required = required_numerator / 10_000_i128
+            + if required_numerator % 10_000_i128 == 0 { 0 } else { 1 };
 
         if post_balance < required {
             env.panic_with_error(ContractError::CollateralRatioBelowMinimum);

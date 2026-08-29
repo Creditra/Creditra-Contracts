@@ -154,8 +154,9 @@ pub enum CreditStatus {
 /// | 52   | `InvalidRiskWeight`            | Numeric       | Collateral risk weight exceeds the maximum allowed (10 000 bps) |
 /// | 53   | `InvalidAttestation`           | Misc          | Attestation proof is invalid or no attestation batch has been committed |
 /// | 54   | `RiskAdminCooldownActive`      | Risk          | Risk admin cooldown has not yet elapsed since the last mutation |
-/// | 60   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
-/// | 61   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
+/// | 60   | `StaleStateTransition`         | Lifecycle     | Transition rejected: the credit line is already in the requested target state |
+/// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
+/// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 #[soroban_sdk::contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -226,18 +227,21 @@ pub enum ContractError {
     FreezeCooldownActive = 57,
     AdminCollateralCooldownActive = 58,
     LiquidationGraceActive = 59,
+    /// Transition rejected because the credit line is already in the requested
+    /// target state (stale/duplicate).
+    StaleStateTransition = 60,
     /// Auction contract's protocol version does not match the credit contract.
     ///
     /// The version handshake check failed before any state mutation occurred.
     /// The reentrancy guard has been cleared; the settlement is safe to retry
     /// once the auction or credit contract is upgraded to a compatible version.
-    IncompatibleVersion = 60,
+    IncompatibleVersion = 61,
     /// The cross-contract auction CPI call failed or returned an unexpected value.
     ///
     /// No credit-line state was mutated. The reentrancy guard has been cleared.
     /// The settlement is safe to retry with a corrected `recovered_amount` or
     /// after the auction contract issue is resolved.
-    AuctionCallFailed = 61,
+    AuctionCallFailed = 62,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -292,7 +296,8 @@ impl ContractError {
             | Self::CreditLineSuspended
             | Self::CreditLineDefaulted
             | Self::AlreadySettled
-            | Self::LiquidationGraceActive => Lifecycle,
+            | Self::LiquidationGraceActive
+            | Self::StaleStateTransition => Lifecycle,
 
             Self::InvalidAmount
             | Self::NegativeLimit

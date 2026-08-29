@@ -114,6 +114,7 @@ mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
+mod oracle_validation;
 mod oracles;
 
 #[path = "../../lifecycle/src/views.rs"]
@@ -1843,6 +1844,7 @@ impl Credit {
         // INVARIANT: every exit path below must clear the guard before
         // propagating a panic; CPI calls use try_* variants so a remote
         // contract panic cannot escape without clearing.
+        require_admin_auth(&env);
         set_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.

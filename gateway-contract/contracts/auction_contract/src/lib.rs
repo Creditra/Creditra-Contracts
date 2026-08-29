@@ -202,6 +202,11 @@ pub struct Auction;
 pub enum AuctionKey {
     Closed(Symbol),
     LiquidationSettled(Symbol),
+    /// Replay barrier for a successful bid acceptance. The identity is the
+    /// auction id plus the bidder address and exact bid amount. Reusing the same
+    /// identity is treated as a no-op so a retried transaction cannot re-apply
+    /// the same state transition or refund path.
+    BidAccepted(Symbol, Address, i128),
 }
 
 #[contractimpl]
@@ -301,6 +306,16 @@ impl Auction {
         bump_instance_ttl(&env);
         bidder.require_auth();
 
+        let bid_identity = AuctionKey::BidAccepted(auction_id.clone(), bidder.clone(), amount);
+        if env.storage().persistent().has(&bid_identity) {
+            env.storage().persistent().extend_ttl(
+                &bid_identity,
+                crate::storage::PERSISTENT_LIFETIME_THRESHOLD,
+                crate::storage::PERSISTENT_BUMP_AMOUNT,
+            );
+            return;
+        }
+
         if amount <= 0 {
             env.panic_with_error(AuctionError::BidTooLow);
         }
@@ -346,23 +361,27 @@ impl Auction {
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
 
+                let previous_bidder = state.highest_bidder.clone();
+                let previous_bid_amount = state.highest_bid;
+
+                // The outbid refund and the incoming bid escrow must complete as one
+                // atomic ledger transition. The state update only happens after both
+                // token transfers succeed; otherwise the entire transaction reverts and
+                // the auction remains unchanged.
                 if let Some(ref tkn) = token_addr {
                     set_reentrancy_guard(&env);
                     let token_client = token::Client::new(&env, tkn);
                     token_client.transfer(&bidder, &env.current_contract_address(), &amount);
-                    clear_reentrancy_guard(&env);
-                }
 
-                if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
-                    let refund_amount = state.highest_bid;
-                    publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
-                    set_reentrancy_guard(&env);
-                    let token_client = token::Client::new(&env, &tkn);
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &prev_bidder,
-                        &refund_amount,
-                    );
+                    if let Some(prev_bidder) = previous_bidder.clone() {
+                        publish_bid_refunded_event(&env, prev_bidder.clone(), previous_bid_amount);
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &prev_bidder,
+                            &previous_bid_amount,
+                        );
+                    }
+
                     clear_reentrancy_guard(&env);
                 }
 
@@ -433,6 +452,13 @@ impl Auction {
 
         env.storage().persistent().set(&auction_id, &state);
         bump_auction_state_ttl(&env, &auction_id);
+
+        env.storage().persistent().set(&bid_identity, &true);
+        env.storage().persistent().extend_ttl(
+            &bid_identity,
+            crate::storage::PERSISTENT_LIFETIME_THRESHOLD,
+            crate::storage::PERSISTENT_BUMP_AMOUNT,
+        );
     }
 
     /// Closes an open auction, transitioning its status from `Open` to `Closed`.

@@ -131,6 +131,16 @@ pub struct OraclePriceRecord {
 /// Adjust after gas profiling if the protocol sources more feeds.
 pub const MAX_ORACLE_FEEDS: usize = 20;
 
+/// Maximum number of collateral denominations allowed in the allowlist.
+///
+/// Bounds storage growth and keeps the per-deposit allowlist membership scan
+/// (`is_collateral_token_allowed`, O(n)) inside predictable transaction
+/// resource limits. The allowlist is also returned wholesale by
+/// [`crate::collateral::query_collateral_allowlist`], so an unbounded list
+/// would make that query unbounded too. Adjust after gas profiling if the
+/// protocol lists more assets.
+pub const MAX_COLLATERAL_TOKENS: usize = 50;
+
 /// Storage key for the oracle quorum configuration.
 pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg");
 

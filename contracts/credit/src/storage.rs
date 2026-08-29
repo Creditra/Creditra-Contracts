@@ -232,6 +232,12 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Multi-oracle quorum configuration.
+    OracleQuorumConfig,
+    /// Last resolved multi-oracle quorum price.
+    OracleQuorumPrice,
+    /// Timestamp of the last resolved multi-oracle quorum price.
+    OracleQuorumPriceTs,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
     /// Pending treasury withdrawal proposal (at most one at a time).
@@ -1208,6 +1214,38 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
     env.storage()
         .instance()
         .set(&DataKey::OracleLastPriceTs, &ts);
+}
+
+// ── Multi-oracle quorum price (resolved from multiple feeds) ────────────────
+
+/// Get the last accepted multi-oracle quorum price, if any.
+///
+/// Returns `None` before the first successful `submit_oracle_prices` call.
+/// Always read together with [`get_oracle_quorum_price_ts`] to interpret staleness.
+pub fn get_oracle_quorum_price(env: &Env) -> Option<i128> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPrice)
+}
+
+/// Get the timestamp of the last accepted multi-oracle quorum price, if any.
+pub fn get_oracle_quorum_price_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPriceTs)
+}
+
+/// Persist a newly resolved quorum price and its timestamp atomically.
+///
+/// Called after `submit_oracle_prices` resolves the quorum median.
+/// The two `instance().set(..)` calls are part of the same host transaction.
+pub fn set_oracle_quorum_price(env: &Env, price: i128, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPrice, &price);
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPriceTs, &ts);
 }
 
 // ── Penalty surcharge for delinquent lines ───────────────────────────────────

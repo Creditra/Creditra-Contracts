@@ -117,6 +117,18 @@ pub enum ContractError {
     /// Requested bounty withdrawal exceeds the accumulated bounty balance.
     #[error("InsufficientBountyBalance")]
     InsufficientBountyBalance,
+
+    /// The collateral token allowlist is at its maximum size and cannot
+    /// accept another denomination.
+    ///
+    /// Raised when an admin attempts to add a collateral token to a full
+    /// allowlist (see [`crate::state::MAX_COLLATERAL_TOKENS`]). The cap
+    /// protects transaction resource limits: the allowlist is scanned
+    /// linearly on every collateral deposit and returned wholesale by
+    /// queries, so an unbounded list would grow storage and gas costs
+    /// without bound.
+    #[error("TooManyCollateralTokens")]
+    TooManyCollateralTokens,
 }
 
 impl ContractError {
@@ -146,6 +158,7 @@ impl ContractError {
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
             ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
+            ContractError::TooManyCollateralTokens => ContractErrorCategory::Validation,
         }
     }
 }
@@ -292,6 +305,22 @@ mod tests {
         assert_eq!(err.to_string(), "InvalidAmount");
         assert_eq!(err, ContractError::InvalidAmount);
         assert_ne!(err, ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn too_many_collateral_tokens_category() {
+        let err = ContractError::TooManyCollateralTokens;
+        assert_eq!(err.category(), ContractErrorCategory::Validation);
+    }
+
+    #[test]
+    fn too_many_collateral_tokens_display_and_equality() {
+        let err = ContractError::TooManyCollateralTokens;
+        assert_eq!(err.to_string(), "TooManyCollateralTokens");
+        assert_eq!(err, ContractError::TooManyCollateralTokens);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::Unauthorized);
+        assert_ne!(err, ContractError::AlreadySettled);
     }
 
     #[test]

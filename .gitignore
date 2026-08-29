@@ -1,5 +1,8 @@
 /target
-Cargo.lock
+# Root workspace lock is committed (reproducible builds); the anchored pattern
+# keeps sub-workspace lock files (e.g. contracts/creditra-credit/Cargo.lock)
+# committable too.
+/Cargo.lock
 **/*.rs.bk
 .env
 /coverage
