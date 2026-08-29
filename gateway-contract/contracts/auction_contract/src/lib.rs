@@ -346,23 +346,27 @@ impl Auction {
                     .instance()
                     .get(&Symbol::new(&env, "bid_token"));
 
+                let previous_bidder = state.highest_bidder.clone();
+                let previous_bid_amount = state.highest_bid;
+
+                // The outbid refund and the incoming bid escrow must complete as one
+                // atomic ledger transition. The state update only happens after both
+                // token transfers succeed; otherwise the entire transaction reverts and
+                // the auction remains unchanged.
                 if let Some(ref tkn) = token_addr {
                     set_reentrancy_guard(&env);
                     let token_client = token::Client::new(&env, tkn);
                     token_client.transfer(&bidder, &env.current_contract_address(), &amount);
-                    clear_reentrancy_guard(&env);
-                }
 
-                if let (Some(prev_bidder), Some(tkn)) = (state.highest_bidder.clone(), token_addr) {
-                    let refund_amount = state.highest_bid;
-                    publish_bid_refunded_event(&env, prev_bidder.clone(), state.highest_bid);
-                    set_reentrancy_guard(&env);
-                    let token_client = token::Client::new(&env, &tkn);
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &prev_bidder,
-                        &refund_amount,
-                    );
+                    if let Some(prev_bidder) = previous_bidder.clone() {
+                        publish_bid_refunded_event(&env, prev_bidder.clone(), previous_bid_amount);
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &prev_bidder,
+                            &previous_bid_amount,
+                        );
+                    }
+
                     clear_reentrancy_guard(&env);
                 }
 
