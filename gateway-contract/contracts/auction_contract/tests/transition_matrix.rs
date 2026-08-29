@@ -218,6 +218,7 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
     let bid_token = token_id.address();
     let sac = StellarAssetClient::new(&env, &bid_token);
     sac.mint(&contract_id, &1_000_000_i128);
+    sac.mint(&winner, &1_000_000_i128);
     env.as_contract(&contract_id, || {
         env.storage()
             .instance()
@@ -268,6 +269,18 @@ fn invoke_entrypoint(
     match case.entrypoint {
         Entrypoint::PlaceBid => {
             let bidder = Address::generate(&client.env);
+            // `place_bid` pulls the bid amount from the bidder at bid time, so
+            // the (fresh) bidder must hold enough balance to cover the bid.
+            let bid_token: Address = client.env.as_contract(&client.address, || {
+                client
+                    .env
+                    .storage()
+                    .instance()
+                    .get::<_, Address>(&Symbol::new(&client.env, "bid_token"))
+                    .unwrap()
+            });
+            let sac = StellarAssetClient::new(&client.env, &bid_token);
+            sac.mint(&bidder, &1_000_000_i128);
             client
                 .try_place_bid(auction_id, &bidder, &case.qualifying_bid)
                 .map(|_| ())
