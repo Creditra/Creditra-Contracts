@@ -291,6 +291,32 @@ impl Credit {
         CONTRACT_API_VERSION
     }
 
+    pub fn commit_attestation_batch(
+        env: Env,
+        borrower: Address,
+        merkle_root: BytesN<32>,
+        count: u32,
+    ) {
+        attestation::commit_attestation_batch(env, borrower, merkle_root, count)
+    }
+
+    pub fn get_attestation_batch(env: Env, borrower: Address) -> Option<AttestationBatch> {
+        attestation::get_attestation_batch(env, borrower)
+    }
+
+    pub fn verify_attestation_proof(
+        env: Env,
+        borrower: Address,
+        leaf: BytesN<32>,
+        proof: Vec<BytesN<32>>,
+    ) -> bool {
+        attestation::verify_attestation_proof(env, borrower, leaf, proof)
+    }
+
+    pub fn clear_attestation_batch(env: Env, borrower: Address) {
+        attestation::clear_attestation_batch(env, borrower)
+    }
+
     pub fn propose_admin(env: Env, new_admin: Address, delay_seconds: u64) {
         require_admin_auth(&env);
         let accept_after = env.ledger().timestamp().saturating_add(delay_seconds);
@@ -1185,6 +1211,92 @@ impl Credit {
     /// Get configured treasury address, if any.
     pub fn get_treasury(env: Env) -> Option<Address> {
         crate::storage::get_treasury_address(&env)
+    }
+
+    /// Propose a treasury withdrawal to the configured treasury address.
+    ///
+    /// The proposal is stored as a single pending operation with a 24-hour
+    /// timelock. The amount is a snapshot of the current treasury balance at
+    /// proposal time, and the proposal may be executed only after the timelock
+    /// expires.
+    pub fn propose_treasury_withdrawal(env: Env, admin: Address) {
+        admin.require_auth();
+        require_admin_auth(&env);
+
+        let treasury = crate::storage::get_treasury_address(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::TreasuryNotSet));
+
+        if get_pending_treasury_withdrawal(&env).is_some() {
+            env.panic_with_error(ContractError::TreasuryProposalExists);
+        }
+
+        let amount = crate::storage::get_treasury_balance(&env);
+        let proposed_at = env.ledger().timestamp();
+        let proposal = TreasuryWithdrawalProposal {
+            recipient: treasury,
+            amount,
+            proposer: admin.clone(),
+            proposed_at,
+            execute_after: proposed_at.saturating_add(86_400),
+        };
+
+        set_pending_treasury_withdrawal(&env, &proposal);
+        publish_treasury_withdrawal_proposed(
+            &env,
+            TreasuryWithdrawalProposedEvent {
+                recipient: proposal.recipient.clone(),
+                amount: proposal.amount,
+                proposer: proposal.proposer.clone(),
+                proposed_at: proposal.proposed_at,
+                execute_after: proposal.execute_after,
+            },
+        );
+    }
+
+    /// Execute the currently pending treasury withdrawal, if the timelock has elapsed.
+    pub fn execute_treasury_withdrawal(env: Env, admin: Address) {
+        admin.require_auth();
+        require_admin_auth(&env);
+
+        let proposal = get_pending_treasury_withdrawal(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::NoPendingTreasuryWithdrawal));
+
+        let now = env.ledger().timestamp();
+        if now < proposal.execute_after {
+            env.panic_with_error(ContractError::TreasuryTimelockActive);
+        }
+
+        if proposal.amount > 0 {
+            let token_address: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::LiquidityToken)
+                .unwrap_or_else(|| {
+                    env.panic_with_error(crate::types::ContractError::MissingLiquidityToken)
+                });
+
+            let token_client = token::Client::new(&env, &token_address);
+            let contract_address = env.current_contract_address();
+            token_client.transfer(&contract_address, &proposal.recipient, &proposal.amount);
+        }
+
+        clear_pending_treasury_withdrawal(&env);
+        crate::storage::clear_treasury_balance(&env);
+
+        publish_treasury_withdrawal_executed(
+            &env,
+            TreasuryWithdrawalExecutedEvent {
+                recipient: proposal.recipient,
+                amount: proposal.amount,
+                executor: admin,
+                executed_at: now,
+            },
+        );
+    }
+
+    /// Get the currently pending treasury withdrawal proposal, if any.
+    pub fn get_pending_treasury_withdrawal(env: Env) -> Option<TreasuryWithdrawalProposal> {
+        get_pending_treasury_withdrawal(&env)
     }
 
     /// Set the treasury share of skimmed protocol fees in basis points (admin only).
@@ -5939,9 +6051,10 @@ mod test_max_draw_amount {
         fn draw_without_liquidity_token_uses_stable_error_code() {
             let env = Env::default();
             env.mock_all_auths();
-            let admin = Address::generate(env);
+            let admin = Address::generate(&env);
+            let borrower = Address::generate(&env);
             let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(env, &contract_id);
+            let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
             client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
 
