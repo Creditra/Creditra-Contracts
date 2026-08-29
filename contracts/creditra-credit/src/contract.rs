@@ -870,11 +870,17 @@ pub fn execute_withdraw_collateral(
 
 /// Add a denomination to the collateral allowlist (admin only).
 ///
+/// The allowlist is bounded at [`crate::state::MAX_COLLATERAL_TOKENS`] entries;
+/// adding to a full allowlist is rejected atomically with
+/// [`ContractError::TooManyCollateralTokens`].
+///
 /// # Errors
 ///
 /// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
 /// - [`ContractError::InvalidAmount`] if `risk_weight_bps > 10_000`.
 /// - [`ContractError::AlreadySettled`] if `denom` is already in the allowlist.
+/// - [`ContractError::TooManyCollateralTokens`] if the allowlist is already at
+///   [`crate::state::MAX_COLLATERAL_TOKENS`] and `denom` is not yet listed.
 pub fn execute_add_collateral_token(
     deps: DepsMut,
     info: MessageInfo,

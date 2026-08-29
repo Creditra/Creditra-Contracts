@@ -22,9 +22,7 @@ use cosmwasm_std::{
 };
 use creditra_credit::{
     contract::{execute, instantiate, query},
-    msg::{
-        CollateralEntryResponse, CreditLineSnapshotResponse, ExecuteMsg, InstantiateMsg, QueryMsg,
-    },
+    msg::{CreditLineSnapshotResponse, ExecuteMsg, InstantiateMsg, QueryMsg},
     state::CREDIT_LINES,
 };
 

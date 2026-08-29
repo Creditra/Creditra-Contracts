@@ -81,6 +81,9 @@ pub enum ExecuteMsg {
         amount: String,
     },
     /// Add a denomination to the collateral allowlist (admin only).
+    ///
+    /// Rejected with `TooManyCollateralTokens` when the allowlist is already
+    /// at [`crate::state::MAX_COLLATERAL_TOKENS`] entries.
     AddCollateralToken {
         denom: String,
         risk_weight_bps: u32,

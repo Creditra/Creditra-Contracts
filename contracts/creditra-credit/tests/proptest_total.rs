@@ -9,7 +9,7 @@
 use cosmwasm_std::testing::{
     message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
 };
-use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
+use cosmwasm_std::{from_json, OwnedDeps, Uint128};
 use creditra_credit::contract;
 use creditra_credit::msg::{ExecuteMsg, InstantiateMsg, ProofOfReserveResponse, QueryMsg};
 use proptest::collection::vec as proptest_vec;
@@ -146,7 +146,7 @@ proptest! {
         let mut modeled: Vec<Vec<(u128, bool)>> = vec![Vec::new(); BORROWER_COUNT];
 
         // Helper to compute modeled net outstanding
-        fn modeled_net(modeled: &Vec<Vec<(u128, bool)>>) -> u128 {
+        fn modeled_net(modeled: &[Vec<(u128, bool)>]) -> u128 {
             modeled.iter().flat_map(|v| v.iter()).filter(|(_, r)| !*r).map(|(a, _)| *a).sum()
         }
 

@@ -3,7 +3,7 @@ use cosmwasm_std::{Addr, Deps, DepsMut, Response, Uint128};
 use crate::error::ContractError;
 use crate::state::{
     BORROWER_COLLATERAL_TOKENS, COLLATERAL_BALANCES, COLLATERAL_RISK_WEIGHTS,
-    COLLATERAL_TOKEN_ALLOWLIST, DEFAULT_COLLATERAL_RISK_WEIGHT_BPS,
+    COLLATERAL_TOKEN_ALLOWLIST, DEFAULT_COLLATERAL_RISK_WEIGHT_BPS, MAX_COLLATERAL_TOKENS,
 };
 
 /// Return `true` if `denom` is in the admin-managed collateral allowlist.
@@ -200,10 +200,17 @@ pub fn query_collateral_allowlist(deps: Deps) -> Vec<String> {
 
 /// Add a denomination to the collateral allowlist with an optional risk weight.
 ///
+/// The allowlist is bounded at [`MAX_COLLATERAL_TOKENS`] entries to keep
+/// storage and the per-deposit membership scan inside transaction resource
+/// limits. Adding a new token to a full allowlist is rejected atomically;
+/// removing a token frees a slot.
+///
 /// # Errors
 ///
 /// - [`ContractError::InvalidAmount`] if `risk_weight_bps > 10_000`.
 /// - [`ContractError::AlreadySettled`] if `denom` is already in the allowlist.
+/// - [`ContractError::TooManyCollateralTokens`] if the allowlist is already at
+///   [`MAX_COLLATERAL_TOKENS`] and `denom` is not yet listed.
 pub fn add_collateral_token(
     deps: DepsMut,
     denom: &str,
@@ -219,6 +226,10 @@ pub fn add_collateral_token(
 
     if list.contains(&denom.to_string()) {
         return Err(ContractError::AlreadySettled);
+    }
+
+    if list.len() >= MAX_COLLATERAL_TOKENS {
+        return Err(ContractError::TooManyCollateralTokens);
     }
 
     list.push(denom.to_string());
@@ -784,6 +795,61 @@ mod tests {
             assert_eq!(attrs[0].value, "add_collateral_token");
             assert_eq!(attrs[1].value, "uusd");
             assert_eq!(attrs[2].value, "7500");
+        }
+
+        #[test]
+        fn accepts_exactly_max_tokens() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let list = COLLATERAL_TOKEN_ALLOWLIST
+                .may_load(deps.as_ref().storage)
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.len(), MAX_COLLATERAL_TOKENS);
+        }
+
+        #[test]
+        fn rejects_new_token_when_allowlist_is_full() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let err = add_collateral_token(deps.as_mut(), "overflow", 10_000).unwrap_err();
+            assert_eq!(err, ContractError::TooManyCollateralTokens);
+        }
+
+        #[test]
+        fn duplicate_on_full_list_still_reports_duplicate() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let err = add_collateral_token(deps.as_mut(), "token000", 10_000).unwrap_err();
+            assert_eq!(err, ContractError::AlreadySettled);
+        }
+
+        #[test]
+        fn removing_token_frees_slot() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            remove_collateral_token(deps.as_mut(), "token000").unwrap();
+            add_collateral_token(deps.as_mut(), "replacement", 10_000).unwrap();
+
+            let list = COLLATERAL_TOKEN_ALLOWLIST
+                .may_load(deps.as_ref().storage)
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.len(), MAX_COLLATERAL_TOKENS);
+            assert!(list.contains(&"replacement".to_string()));
+            assert!(!list.contains(&"token000".to_string()));
         }
     }
 

@@ -542,7 +542,7 @@ fn test_edge_case_sequential_addresses() {
         addresses.push(make_addr(&deps, &label));
     }
 
-    let keys: Vec<Vec<u8>> = addresses.iter().map(|a| borrower_key_bytes(a)).collect();
+    let keys: Vec<Vec<u8>> = addresses.iter().map(borrower_key_bytes).collect();
 
     let unique: HashSet<&Vec<u8>> = keys.iter().collect();
     assert_eq!(
