@@ -1,0 +1,11 @@
+{
+  "contract_name": "creditra-credit",
+  "contract_version": "0.1.0",
+  "idl_version": "1.0.0",
+  "instantiate": null,
+  "execute": null,
+  "query": null,
+  "migrate": null,
+  "sudo": null,
+  "responses": null
+}
