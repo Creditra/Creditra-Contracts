@@ -57,6 +57,16 @@ jobs:
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
 
+      # The reproducible-build guard scripts are the enforcement layer for the
+      # pinned-toolchain policy. Run their own test suites so a regression in
+      # the guards themselves fails CI, not just a regression in the contracts.
+      # (Bash-only, no Rust toolchain required.)
+      - name: Test reproducible-build guard scripts
+        run: |
+          set -euo pipefail
+          scripts/test_check_toolchain.sh
+          scripts/test_check_wasm_size.sh
+
       - name: Print toolchain versions
         run: |
           rustc --version
@@ -85,15 +95,14 @@ jobs:
           RUSTFLAGS: -C link-arg=--allow-undefined
         run: cargo build $CARGOFLAGS --release --target wasm32-unknown-unknown
 
+      # Enforce the artifact size budget with the same scanner the guard tests
+      # exercise (scripts/check-wasm-size.sh), so CI and local policy checks
+      # share one implementation. Threshold is unchanged at 614,400 bytes.
       - name: Verify WASM artifact
-        working-directory: contracts/creditra-credit
-        run: |
-          set -euo pipefail
-          wasm_path="target/wasm32-unknown-unknown/release/creditra_credit.wasm"
-          test -f "$wasm_path"
-          size_bytes=$(stat -c '%s' "$wasm_path")
-          echo "WASM size: ${size_bytes} bytes"
-          test "$size_bytes" -le 614400
+        env:
+          THRESHOLD_BYTES: "614400"
+          WASM_DIR: contracts/creditra-credit/target/wasm32-unknown-unknown/release
+        run: scripts/check-wasm-size.sh --check-only
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
