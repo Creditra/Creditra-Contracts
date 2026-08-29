@@ -54,6 +54,9 @@ jobs:
       - name: Verify reproducible-build policy
         run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
 
+      - name: Validate generated contract interfaces
+        run: scripts/validate_schemas.sh
+
       - name: Print toolchain versions
         run: |
           rustc --version
