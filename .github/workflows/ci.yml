@@ -10,38 +10,80 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  # Reproducible builds: resolve dependencies strictly from the committed
+  # Cargo.lock. Any drift (manifest edit without lock refresh) fails the build
+  # instead of silently picking new dependency versions.
+  CARGOFLAGS: --locked
+
 jobs:
   contract:
     name: Creditra credit contract
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: contracts/creditra-credit
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Single source of truth: the exact channel pinned in
+      # rust-toolchain.toml. Do not hardcode versions here and do not use
+      # floating channel refs for the toolchain action — both are rejected
+      # by scripts/check-toolchain.sh so local and CI builds cannot diverge.
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Pinned toolchain channel: $channel"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: wasm32-unknown-unknown
-          components: rustfmt
+          components: rustfmt, clippy
+
+      # Fail fast — before any compile — if the runner's active toolchain,
+      # lock files, or the workflow itself drift from the reproducible-build
+      # policy (e.g. a stray rustup override or an uncommitted Cargo.lock).
+      - name: Verify reproducible-build policy
+        run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
+
+      - name: Print toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          rustup target list --installed
 
       - name: Check formatting
+        working-directory: contracts/creditra-credit
         run: cargo fmt -- --check
 
+      - name: Run clippy
+        working-directory: contracts/creditra-credit
+        run: cargo clippy $CARGOFLAGS --all-targets -- -D warnings
+
       - name: Run tests
-        run: cargo test --no-fail-fast
+        working-directory: contracts/creditra-credit
+        run: cargo test $CARGOFLAGS --no-fail-fast
 
       - name: Build native release
-        run: cargo build --release
+        working-directory: contracts/creditra-credit
+        run: cargo build $CARGOFLAGS --release
 
       - name: Build WASM release
+        working-directory: contracts/creditra-credit
         env:
           RUSTFLAGS: -C link-arg=--allow-undefined
-        run: cargo build --release --target wasm32-unknown-unknown
+        run: cargo build $CARGOFLAGS --release --target wasm32-unknown-unknown
 
       - name: Verify WASM artifact
+        working-directory: contracts/creditra-credit
         run: |
           set -euo pipefail
           wasm_path="target/wasm32-unknown-unknown/release/creditra_credit.wasm"
@@ -49,3 +91,10 @@ jobs:
           size_bytes=$(stat -c '%s' "$wasm_path")
           echo "WASM size: ${size_bytes} bytes"
           test "$size_bytes" -le 614400
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: creditra-credit-wasm
+          path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          if-no-files-found: error

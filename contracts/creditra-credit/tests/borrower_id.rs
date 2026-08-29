@@ -25,7 +25,7 @@
 use cosmwasm_std::testing::{
     message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
 };
-use cosmwasm_std::{Addr, Api, OwnedDeps, Uint128};
+use cosmwasm_std::{Addr, Api, OwnedDeps};
 use creditra_credit::contract;
 use creditra_credit::msg::{ExecuteMsg, InstantiateMsg};
 use creditra_credit::state::{CREDIT_LINES, CREDIT_LINE_COUNT};
