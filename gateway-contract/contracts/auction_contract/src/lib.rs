@@ -44,6 +44,50 @@ fn min_next_bid(env: &Env, highest_bid: i128, min_increment_bps: u32) -> i128 {
         .unwrap_or_else(|| env.panic_with_error(AuctionError::BidTooLow))
 }
 
+fn validate_auction_curve_params(
+    mode: AuctionMode,
+    min_bid: i128,
+    dutch_start_price: Option<i128>,
+    dutch_floor_price: Option<i128>,
+    dutch_decay: DutchAuctionDecay,
+    dutch_step_count: Option<u32>,
+) {
+    if mode != AuctionMode::Dutch {
+        if dutch_start_price.is_some()
+            || dutch_floor_price.is_some()
+            || dutch_step_count.is_some()
+        {
+            panic!("dutch curve parameters are only valid in Dutch mode");
+        }
+        return;
+    }
+
+    let start = dutch_start_price.expect("dutch_start_price required for Dutch mode");
+    let floor = dutch_floor_price.expect("dutch_floor_price required for Dutch mode");
+
+    if start < floor {
+        panic!("dutch_start_price must be >= dutch_floor_price");
+    }
+    if start < min_bid {
+        panic!("dutch_start_price must be >= min_bid");
+    }
+
+    match dutch_decay {
+        DutchAuctionDecay::None | DutchAuctionDecay::Linear | DutchAuctionDecay::Exponential => {
+            if dutch_step_count.is_some() {
+                panic!("dutch_step_count must be None unless DutchAuctionDecay::Stepped");
+            }
+        }
+        DutchAuctionDecay::Stepped => {
+            let step_count = dutch_step_count
+                .unwrap_or_else(|| panic!("dutch_step_count required for stepped Dutch auctions"));
+            if step_count == 0 {
+                panic!("dutch_step_count must be > 0 for stepped Dutch auctions");
+            }
+        }
+    }
+}
+
 /// Computes the current Dutch auction price based on elapsed time.
 ///
 /// # Overview
@@ -249,26 +293,14 @@ impl Auction {
             panic!("min_increment_bps exceeds maximum of 10000 (100%)");
         }
 
-        if mode == AuctionMode::Dutch {
-            let start = dutch_start_price.expect("dutch_start_price required for Dutch mode");
-            let floor = dutch_floor_price.expect("dutch_floor_price required for Dutch mode");
-            if start < floor {
-                panic!("dutch_start_price must be >= dutch_floor_price");
-            }
-            if start < min_bid {
-                panic!("dutch_start_price must be >= min_bid");
-            }
-
-            match &dutch_decay {
-                DutchAuctionDecay::None | DutchAuctionDecay::Linear => {}
-                DutchAuctionDecay::Stepped => match dutch_step_count {
-                    Some(0) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
-                    Some(_) => {}
-                    None => panic!("dutch_step_count required for stepped Dutch auctions"),
-                },
-                DutchAuctionDecay::Exponential => {}
-            }
-        }
+        validate_auction_curve_params(
+            mode,
+            min_bid,
+            dutch_start_price,
+            dutch_floor_price,
+            dutch_decay,
+            dutch_step_count,
+        );
 
         let config = AuctionConfig {
             mode,
