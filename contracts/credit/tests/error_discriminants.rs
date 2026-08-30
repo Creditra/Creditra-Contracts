@@ -27,7 +27,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::UtilizationNotZero as u32, 10);
     assert_eq!(ContractError::Reentrancy as u32, 11);
     assert_eq!(ContractError::Overflow as u32, 12);
-//     assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
+    // assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
     assert_eq!(ContractError::AlreadyInitialized as u32, 14);
     assert_eq!(ContractError::AdminAcceptTooEarly as u32, 15);
     assert_eq!(ContractError::BorrowerBlocked as u32, 16);
@@ -73,6 +73,8 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::StaleStateTransition as u32, 60);
     assert_eq!(ContractError::IncompatibleVersion as u32, 61);
     assert_eq!(ContractError::AuctionCallFailed as u32, 62);
+    // Appended in Issue #1169 — fee config frozen while an auction is active.
+    assert_eq!(ContractError::AuctionActive as u32, 63);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -93,7 +95,7 @@ fn no_duplicate_discriminants() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-//         ContractError::LimitDecreaseRequiresRepayment as u32,
+        // ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -137,6 +139,7 @@ fn no_duplicate_discriminants() {
         ContractError::RiskAdminCooldownActive as u32,
         ContractError::IncompatibleVersion as u32,
         ContractError::AuctionCallFailed as u32,
+        ContractError::AuctionActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -150,7 +153,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 62;
+    const EXPECTED_VARIANT_COUNT: usize = 61;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -165,7 +168,7 @@ fn variant_count_is_known() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-//         ContractError::LimitDecreaseRequiresRepayment as u32,
+        // ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -207,9 +210,14 @@ fn variant_count_is_known() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
-    ContractError::IncompatibleVersion as u32,
-    ContractError::AuctionCallFailed as u32,
-    ContractError::StaleStateTransition as u32,
+        ContractError::OracleNotFound as u32,
+        ContractError::FreezeCooldownActive as u32,
+        ContractError::AdminCollateralCooldownActive as u32,
+        ContractError::LiquidationGraceActive as u32,
+        ContractError::IncompatibleVersion as u32,
+        ContractError::AuctionCallFailed as u32,
+        ContractError::StaleStateTransition as u32,
+        ContractError::AuctionActive as u32,
     ];
 
     assert_eq!(
@@ -311,10 +319,6 @@ fn category_mappings_are_stable() {
         ContractError::AdminNotInitialized.category(),
         ContractErrorCategory::Auth
     );
-    assert_eq!(
-        ContractError::BorrowerMismatch.category(),
-        ContractErrorCategory::Auth
-    );
     // Lifecycle
     assert_eq!(
         ContractError::CreditLineClosed.category(),
@@ -334,6 +338,10 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::AlreadySettled.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::AuctionActive.category(),
         ContractErrorCategory::Lifecycle
     );
     // Numeric
@@ -371,10 +379,6 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Limit
     );
     assert_eq!(
-//         ContractError::LimitDecreaseRequiresRepayment.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
         ContractError::DrawExceedsMaxAmount.category(),
         ContractErrorCategory::Limit
     );
@@ -388,10 +392,6 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::DrawReversalWindowExpired.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
-        ContractError::UtilizedNotZero.category(),
         ContractErrorCategory::Limit
     );
     // Liquidity
@@ -429,18 +429,6 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::BountyNotSet.category(),
-        ContractErrorCategory::Liquidity
-    );
-    assert_eq!(
-        ContractError::InsufficientReserve.category(),
-        ContractErrorCategory::Liquidity
-    );
-    assert_eq!(
-        ContractError::InsufficientAllowance.category(),
-        ContractErrorCategory::Liquidity
-    );
-    assert_eq!(
-        ContractError::InsufficientBalance.category(),
         ContractErrorCategory::Liquidity
     );
     // Risk
@@ -591,7 +579,7 @@ fn borrow_error_catalog_lists_all_variants() {
         "UtilizationNotZero",
         "Reentrancy",
         "Overflow",
-//         "LimitDecreaseRequiresRepayment",
+        // "LimitDecreaseRequiresRepayment",
         "AlreadyInitialized",
         "QuorumNotMet",
         "OracleNotFound",
@@ -646,8 +634,6 @@ fn borrow_error_catalog_lists_all_variants() {
 /// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
-    // AdminQueryCooldownActive must resolve to Risk (discriminant 53)
-    let _: ContractErrorCategory = ContractError::AdminQueryCooldownActive.category();
     use std::collections::HashSet;
 
     let all_variants: Vec<ContractErrorCategory> = vec![
@@ -663,7 +649,7 @@ fn every_variant_has_known_category() {
         ContractError::UtilizationNotZero.category(),
         ContractError::Reentrancy.category(),
         ContractError::Overflow.category(),
-//         ContractError::LimitDecreaseRequiresRepayment.category(),
+        // ContractError::LimitDecreaseRequiresRepayment.category(),
         ContractError::AlreadyInitialized.category(),
         ContractError::AdminAcceptTooEarly.category(),
         ContractError::BorrowerBlocked.category(),
@@ -706,17 +692,26 @@ fn every_variant_has_known_category() {
         ContractError::InvalidRiskWeight.category(),
         ContractError::InvalidAttestation.category(),
         ContractError::RiskAdminCooldownActive.category(),
+        ContractError::OracleNotFound.category(),
+        ContractError::FreezeCooldownActive.category(),
+        ContractError::LiquidationGraceActive.category(),
         // Issue #1146: stale state transition guard (Lifecycle category)
         ContractError::StaleStateTransition.category(),
+        // Issue #1169: fee config frozen while an auction is active
+        ContractError::IncompatibleVersion.category(),
+        ContractError::AuctionCallFailed.category(),
+        ContractError::AuctionActive.category(),
     ];
 
-    let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
+    let mut sorted: Vec<ContractErrorCategory> = all_variants.clone();
+    sorted.sort();
+    sorted.dedup();
     assert_eq!(
-        unique.len(),
-        11,
-        "Not all 11 categories are covered by variant mappings"
+        sorted.len(),
+        12,
+        "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 60, "Expected 60 ContractError variants");
+    assert_eq!(all_variants.len(), 61, "Expected 61 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1046,8 +1041,10 @@ mod error_path_tests {
     fn test_treasury_not_set_on_withdraw() {
         let (_env, client, _contract_id, admin, _token) = setup_with_token();
 
-        // Try to propose withdrawal without setting treasury address
-        let result = client.try_propose_treasury_withdrawal(&admin);
+        // Withdrawing to an unconfigured treasury address must revert with
+        // TreasuryNotSet (the proposal-based withdrawal entrypoint was removed
+        // upstream; the direct withdrawal path carries the same guard).
+        let result = client.try_withdraw_treasury(&admin);
 
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();

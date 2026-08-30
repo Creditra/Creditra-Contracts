@@ -144,6 +144,9 @@ pub fn set_borrower_rate_ceiling(env: Env, borrower: Address, ceiling_bps: Optio
 pub fn set_penalty_surcharge_bps(env: Env, bps: u32) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    // Issue #1169: fee parameters are frozen while a liquidation auction is
+    // active so in-flight auction economics stay deterministic.
+    crate::storage::assert_no_active_auctions(&env);
     assert!(
         bps <= MAX_INTEREST_RATE_BPS,
         "penalty surcharge exceeds max rate"

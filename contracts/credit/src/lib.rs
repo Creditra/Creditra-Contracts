@@ -287,6 +287,10 @@ impl Credit {
         (1, 0, 0)
     }
 
+    pub fn init(env: Env, admin: Address) {
+        config::init(env, admin)
+    }
+
     pub fn get_contract_version() -> (u32, u32, u32) {
         CONTRACT_API_VERSION
     }
@@ -1030,8 +1034,13 @@ impl Credit {
     ///   [`ContractError::InvalidAmount`].
     /// - `AprBased` mode: `surcharge_bps` must be `<= 10_000`; values above
     ///   the cap revert with [`ContractError::RateTooHigh`].
+    ///
+    /// Reverts with [`ContractError::AuctionActive`] while any liquidation
+    /// auction is in flight (Issue #1169): the late-fee schedule is frozen
+    /// until the last active auction exits the `Defaulted` pipeline.
     pub fn set_late_fee_config(env: Env, config: Option<LateFeeConfig>) {
         require_admin_auth(&env);
+        crate::storage::assert_no_active_auctions(&env);
         if let Some(cfg) = config {
             match cfg {
                 LateFeeConfig::Flat(crate::penalties::FlatFeeConfig { amount }) => {
@@ -1188,8 +1197,13 @@ impl Credit {
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
     /// Admin only. Fee is bounded by `MAX_PROTOCOL_FEE_BPS`.
+    ///
+    /// Reverts with [`ContractError::AuctionActive`] while any liquidation
+    /// auction is in flight (Issue #1169): the fee is frozen until the last
+    /// active auction exits the `Defaulted` pipeline.
     pub fn set_protocol_fee_bps(env: Env, bps: u32) {
         require_admin_auth(&env);
+        crate::storage::assert_no_active_auctions(&env);
         if bps > MAX_PROTOCOL_FEE_BPS {
             env.panic_with_error(crate::types::ContractError::Overflow);
         }
@@ -1304,8 +1318,13 @@ impl Credit {
     /// `treasury_share_bps` must be in `0..=10_000`. The bounty pool receives the
     /// remainder of each fee after the treasury portion is floored. When unset,
     /// the default is `10_000` (100 % treasury, backward compatible).
+    ///
+    /// Reverts with [`ContractError::AuctionActive`] while any liquidation
+    /// auction is in flight (Issue #1169): the split is frozen until the last
+    /// active auction exits the `Defaulted` pipeline.
     pub fn set_treasury_fee_share_bps(env: Env, treasury_share_bps: u32) {
         require_admin_auth(&env);
+        crate::storage::assert_no_active_auctions(&env);
         if treasury_share_bps > crate::fees::MAX_FEE_SHARE_BPS {
             env.panic_with_error(crate::types::ContractError::Overflow);
         }
@@ -2051,6 +2070,15 @@ impl Credit {
     /// Return the configured auction contract address, if set.
     pub fn get_auction_contract(env: Env) -> Option<Address> {
         crate::storage::get_auction_contract(&env)
+    }
+
+    /// Return the number of liquidation auctions currently active (read-only).
+    ///
+    /// An auction is active while its credit line is in `Defaulted` status.
+    /// While this count is non-zero, fee-configuration entrypoints revert with
+    /// [`ContractError::AuctionActive`] (Issue #1169).
+    pub fn get_pending_auction_count(env: Env) -> u32 {
+        crate::storage::get_pending_auction_count(&env)
     }
 
     // ── Close factor (partial liquidation cap) ────────────────────────────────
