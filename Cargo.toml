@@ -10,9 +10,6 @@ members = [
     "gateway-contract/contracts/auction_contract",
 ]
 
-[workspace.package]
-edition = "2021"
-
 [workspace.dependencies]
 soroban-sdk = "22"
 

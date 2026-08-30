@@ -365,24 +365,6 @@ version = "0.1.0"
 dependencies = [
  "creditra-credit",
  "proptest",
-
- "soroban-sdk",
-]
-
-[[package]]
-name = "creditra-collateral"
-version = "0.1.0"
-dependencies = [
- "creditra-credit",
- "soroban-sdk",
-]
-
-[[package]]
-name = "creditra-collateral"
-version = "0.1.0"
-dependencies = [
- "creditra-credit",
- "proptest",
  "soroban-sdk",
 ]
 
@@ -405,6 +387,22 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "creditra-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "creditra-query"
+version = "0.1.0"
+dependencies = [
+ "creditra-credit",
  "soroban-sdk",
 ]
 

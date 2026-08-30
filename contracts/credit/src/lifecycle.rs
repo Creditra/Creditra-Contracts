@@ -197,7 +197,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address) {
         &credit_line,
         previous_utilized,
         Some(previous_status),
-nano +100 contracts/credit/src/lifecycle.rs    );
+    );
 
     publish_credit_line_event(
         env,
