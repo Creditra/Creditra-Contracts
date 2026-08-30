@@ -2440,8 +2440,33 @@ impl Credit {
     ///
     /// # Events
     /// Emits `("credit", "paused")` with `true` or `("credit", "unpaused")` with `false`.
+    ///
+    /// # Idempotency and observability
+    /// The transition is idempotent: a request to move to the state the contract
+    /// is **already** in is a safe no-op that neither rewrites the pause reason
+    /// nor emits a misleading transition event. Only a genuine state change
+    /// writes the flag and emits an event, so off-chain monitors see exactly one
+    /// event per real pause/unpause and never a spurious duplicate from a retry.
+    /// A reason-less pause additionally clears any stale reason recorded by an
+    /// earlier `set_protocol_paused_with_reason` call.
     pub fn set_protocol_paused(env: Env, paused: bool) {
         require_admin_auth(&env);
+        let already = crate::storage::is_paused(&env);
+
+        if paused == already {
+            // Idempotent no-op: do not rewrite state or emit a duplicate event.
+            if paused {
+                // Reason-less pause — the latest intent carries no reason, so
+                // drop any stale reason recorded by an earlier pause-with-reason.
+                crate::storage::clear_pause_reason(&env);
+            }
+            return;
+        }
+
+        if !paused {
+            // Unpause clears the recorded reason.
+            crate::storage::clear_pause_reason(&env);
+        }
         crate::storage::set_paused(&env, paused);
         publish_paused_event(&env, paused);
     }
@@ -2478,20 +2503,42 @@ impl Credit {
     ///
     /// # Events
     /// Emits `("credit", "paused")` or `("credit", "unpaused")`.
+    ///
+    /// # Idempotency and observability
+    /// Idempotent and observable like [`Self::set_protocol_paused`]. A request to
+    /// pause while already paused refreshes the recorded reason (timestamp and
+    /// actor reflect this latest invocation) but does **not** emit a duplicate
+    /// `"paused"` event, because the flag did not change; unpausing while already
+    /// unpaused is a pure no-op. This guarantees one event per real transition so
+    /// retries and duplicate admin calls cannot mislead monitors or corrupt the
+    /// audit trail.
     pub fn set_protocol_paused_with_reason(env: Env, paused: bool, reason: soroban_sdk::Symbol) {
         let admin = require_admin_auth(&env);
+        let already = crate::storage::is_paused(&env);
 
         if paused {
+            // Record the reason for this pause invocation (fresh timestamp/actor).
             let pause_reason = crate::types::PauseReason {
                 reason,
                 timestamp: env.ledger().timestamp(),
                 actor: admin,
             };
             crate::storage::set_pause_reason(&env, &pause_reason);
-        }
 
-        crate::storage::set_paused(&env, paused);
-        publish_paused_event(&env, paused);
+            if already {
+                // No flag change: refresh the reason but emit no duplicate event.
+                return;
+            }
+            crate::storage::set_paused(&env, true);
+            publish_paused_event(&env, true);
+        } else {
+            if already {
+                crate::storage::clear_pause_reason(&env);
+                crate::storage::set_paused(&env, false);
+                publish_paused_event(&env, false);
+            }
+            // Already unpaused: idempotent no-op.
+        }
     }
 
     /// Freeze all draws globally (admin only).

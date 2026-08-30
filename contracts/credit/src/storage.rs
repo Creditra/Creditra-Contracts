@@ -1187,16 +1187,32 @@ pub fn is_paused(env: &Env) -> bool {
 
 /// Set the protocol pause state (admin only, enforced by caller).
 ///
+/// This is a **pure flag write** — it never touches the pause reason. Reason
+/// maintenance (clear on unpause / on reason-less pause, write on pause-with-
+/// reason) is the responsibility of the entrypoints so that idempotent
+/// no-ops cannot clobber the audit trail. See [`set_pause_reason`] and
+/// [`clear_pause_reason`].
+///
+/// Callers are expected to detect no-op transitions (requesting the state the
+/// contract is already in) *before* calling this, so that duplicate pause or
+/// unpause requests do not emit misleading transition events.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `Symbol("paused")`
 /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
-    if !paused {
-        // Clear the pause reason when unpausing.
-        env.storage().instance().remove(&DataKey::PauseReason);
-    }
+}
+
+/// Clear any stored pause reason.
+///
+/// Called on unpause and on a reason-less pause so the stored reason always
+/// reflects the most recent pause invocation. This prevents a stale reason
+/// (recorded by an earlier pause-with-reason) from surviving into a later
+/// reason-less pause or unpause.
+pub fn clear_pause_reason(env: &Env) {
+    env.storage().instance().remove(&DataKey::PauseReason);
 }
 
 /// Get the structured pause reason, if one was recorded during the last pause.
