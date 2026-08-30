@@ -21,6 +21,13 @@
 //! revert with the documented `AuctionError` discriminant and leave stored status
 //! unchanged.
 //!
+//! `close_auction`'s `Open → Closed` transition is additionally gated on the
+//! `end_time` ledger boundary: before it, only the factory may close
+//! (`Address::require_auth`); at or after it, closing is permissionless. All
+//! cases below run under `env.mock_all_auths()`, so both sides of that
+//! boundary succeed identically here — the boundary itself is covered by the
+//! dedicated `close_auction_*` tests in `src/test.rs`.
+//!
 //! # Running
 //!
 //! ```bash
@@ -218,6 +225,7 @@ fn setup_auction(mode: AuctionMode, from: AuctionStatus) -> (Env, Address, Symbo
     let bid_token = token_id.address();
     let sac = StellarAssetClient::new(&env, &bid_token);
     sac.mint(&contract_id, &1_000_000_i128);
+    sac.mint(&winner, &1_000_000_i128);
     env.as_contract(&contract_id, || {
         env.storage()
             .instance()
@@ -268,6 +276,18 @@ fn invoke_entrypoint(
     match case.entrypoint {
         Entrypoint::PlaceBid => {
             let bidder = Address::generate(&client.env);
+            // `place_bid` pulls the bid amount from the bidder at bid time, so
+            // the (fresh) bidder must hold enough balance to cover the bid.
+            let bid_token: Address = client.env.as_contract(&client.address, || {
+                client
+                    .env
+                    .storage()
+                    .instance()
+                    .get::<_, Address>(&Symbol::new(&client.env, "bid_token"))
+                    .unwrap()
+            });
+            let sac = StellarAssetClient::new(&client.env, &bid_token);
+            sac.mint(&bidder, &1_000_000_i128);
             client
                 .try_place_bid(auction_id, &bidder, &case.qualifying_bid)
                 .map(|_| ())

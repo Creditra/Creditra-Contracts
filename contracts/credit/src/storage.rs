@@ -59,8 +59,8 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, RepaymentSchedule,
-    TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
+    OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
@@ -123,8 +123,6 @@ pub struct DrawAuditKey {
     pub borrower: Address,
     pub timestamp: u64,
 }
-
-
 
 /// Composite key for per-borrower per-token collateral balance entries (v2).
 /// Wraps `(borrower, token)` for use as a single storage key.
@@ -207,6 +205,7 @@ pub enum DataKey {
     /// Flat fee charged per missed installment.
     /// Admin-configurable via `set_late_fee_flat`. Default is 0 (disabled).
     LateFeeFlat,
+    LateFeeConfig,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
     /// is skipped and settlement proceeds as an accounting-only operation.
@@ -249,6 +248,12 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Multi-oracle quorum configuration.
+    OracleQuorumConfig,
+    /// Last resolved multi-oracle quorum price.
+    OracleQuorumPrice,
+    /// Timestamp of the last resolved multi-oracle quorum price.
+    OracleQuorumPriceTs,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
     /// Pending treasury withdrawal proposal (at most one at a time).
@@ -273,24 +278,17 @@ pub enum DataKey {
     LiquidationGracePeriod(Address),
     /// Per-borrower absolute exposure cap (i128 amount).
     BorrowerExposureCap(Address),
-    /// Admin-configured allowlist of accepted multi-collateral token addresses.
+    /// Per-borrower allowlist of accepted multi-collateral token addresses.
     CollateralTokenAllowlist,
-    /// Per-borrower, per-token collateral balance (multi-collateral path).
-    CollateralBalanceV2(Address, Address),
+    /// Per-borrower committed attestation batch.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
 
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 // ── Persistent storage TTL policy ────────────────────────────────────────────
 //
@@ -1232,6 +1230,38 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
         .set(&DataKey::OracleLastPriceTs, &ts);
 }
 
+// ── Multi-oracle quorum price (resolved from multiple feeds) ────────────────
+
+/// Get the last accepted multi-oracle quorum price, if any.
+///
+/// Returns `None` before the first successful `submit_oracle_prices` call.
+/// Always read together with [`get_oracle_quorum_price_ts`] to interpret staleness.
+pub fn get_oracle_quorum_price(env: &Env) -> Option<i128> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPrice)
+}
+
+/// Get the timestamp of the last accepted multi-oracle quorum price, if any.
+pub fn get_oracle_quorum_price_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPriceTs)
+}
+
+/// Persist a newly resolved quorum price and its timestamp atomically.
+///
+/// Called after `submit_oracle_prices` resolves the quorum median.
+/// The two `instance().set(..)` calls are part of the same host transaction.
+pub fn set_oracle_quorum_price(env: &Env, price: i128, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPrice, &price);
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPriceTs, &ts);
+}
+
 // ── Penalty surcharge for delinquent lines ───────────────────────────────────
 
 /// Get the configured penalty surcharge in basis points, if set.
@@ -1509,4 +1539,118 @@ pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
     if now < last_ts.saturating_add(cooldown) {
         env.panic_with_error(ContractError::RiskAdminCooldownActive);
     }
+}
+
+// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+
+pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::FreezeCooldownSeconds)
+        .filter(|&secs: &u64| secs > 0)
+}
+
+pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FreezeCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+    }
+}
+
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastFreezeTimestamp)
+}
+
+pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastFreezeTimestamp, &ts);
+}
+
+pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
+    if get_freeze_cooldown_seconds(env).is_some() {
+        set_last_freeze_timestamp(env, env.ledger().timestamp());
+    }
+}
+
+pub fn enforce_freeze_cooldown(env: &Env) {
+    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+        return;
+    };
+    if let Some(last_ts) = get_last_freeze_timestamp(env) {
+        let now = env.ledger().timestamp();
+        if now < last_ts.saturating_add(cooldown_secs) {
+            env.panic_with_error(ContractError::FreezeCooldownActive);
+        }
+    }
+}
+
+// ── Grace period config (instance) ───────────────────────────────────────────
+
+pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
+    env.storage().instance().get(&grace_period_key(env))
+}
+
+// ── Per-borrower liquidation grace (persistent) ───────────────────────────────
+
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+        .unwrap_or(0)
+}
+
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, secs: u64) {
+    let key = DataKey::LiquidationGracePeriod(borrower.clone());
+    if secs == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &secs);
+        bump_persistent_ttl(env, &key);
+    }
+}
+
+// ── Oracle quorum config (instance) ─────────────────────────────────────────
+
+pub fn get_oracle_quorum_config(env: &Env) -> Option<OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+pub fn set_oracle_quorum_config(env: &Env, cfg: &OracleQuorumConfig) {
+    env.storage().instance().set(&DataKey::OracleQuorumConfig, cfg);
+}
+
+// ── Treasury withdrawal proposal (instance) ───────────────────────────────────
+
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<TreasuryWithdrawalProposal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &TreasuryWithdrawalProposal) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
+}
+
+// ── Max borrower exposure (persistent) ────────────────────────────────────────
+
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }

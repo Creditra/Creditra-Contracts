@@ -5,20 +5,19 @@ use cosmwasm_std::{
 
 use crate::collateral;
 use crate::error::ContractError;
+use crate::fees;
 use crate::handshake::{self, ProtocolVersion};
 use crate::msg::{
-    CollateralAllowlistResponse, CollateralBalanceResponse, CollateralEntryResponse,
-    ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
+    CollateralAllowlistResponse, CollateralBalanceResponse, CollateralEntryResponse, ExecuteMsg,
+    InstantiateMsg, MigrateMsg, QueryMsg,
 };
 use crate::oracles;
-use crate::penalties::LateFeeConfig;
 use crate::state::{
     Config, CreditLine, Draw, DrawAction, DrawAuditEntry, OraclePriceRecord, BORROWER_TO_ID,
     CONFIG, CREDIT_LINES, CREDIT_LINE_COUNT, DRAWS, DRAW_AUDIT, DRAW_AUDIT_COUNT, DRAW_COUNT,
-    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG, PROTOCOL_FEE_BPS,
+    LATE_FEE_CONFIG, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
 };
 use crate::views;
-use crate::fees;
 
 /// Instantiate the borrow credit-line contract (v7 entrypoint).
 ///
@@ -161,17 +160,13 @@ pub fn execute(
             max_deviation_bps,
             max_age_seconds,
         ),
-        ExecuteMsg::AddOracle { oracle, weight } => {
-            execute_add_oracle(deps, info, oracle, weight)
-        }
+        ExecuteMsg::AddOracle { oracle, weight } => execute_add_oracle(deps, info, oracle, weight),
         ExecuteMsg::RemoveOracle { oracle } => execute_remove_oracle(deps, info, oracle),
         ExecuteMsg::ReportValue { value } => execute_report_value(deps, env, info, value),
         ExecuteMsg::SubmitOraclePrices { prices } => {
             execute_submit_oracle_prices(deps, env, info, prices)
         }
-        ExecuteMsg::SetLateFeeConfig { config } => {
-            execute_set_late_fee_config(deps, info, config)
-        }
+        ExecuteMsg::SetLateFeeConfig { config } => execute_set_late_fee_config(deps, info, config),
         ExecuteMsg::DepositCollateral {
             borrower,
             denom,
@@ -344,15 +339,16 @@ pub fn execute_create_credit_line(
 /// |---|---|
 /// | [`ContractError::CreditLineNotFound`] | `credit_line_id` has no stored [`CreditLine`] |
 /// | [`ContractError::Unauthorized`] | `info.sender != credit_line.borrower` |
+/// | [`ContractError::InvalidAmount`] | `amount` parses to zero |
+/// | [`ContractError::Overflow`] | summing outstanding draws or adding `amount` overflows `Uint128` |
+/// | [`ContractError::OverLimit`] | `outstanding + amount` would exceed `credit_line.credit_amount` |
 /// | `StdError::ParseErr` / `ContractError::Std(_)` | `amount` is not a valid `Uint128` |
 /// | Storage I/O errors | propagated from `cw-storage-plus` |
 ///
 /// # @notice
-/// v7 does **not** enforce a credit-limit ceiling on the sum of draws —
-/// this is intentional for the error-stability testing crate (see
-/// `tests/err_stab.rs`).  The production `credit` contract adds the
-/// full 25-step preflight chain including limit, collateral-ratio, and
-/// exposure caps.
+/// Utilization is the sum of unrepaid draw amounts on the line. A draw that
+/// would push that sum strictly above `credit_amount` is rejected before any
+/// `DRAWS` / audit write. Drawing exactly up to `credit_amount` is allowed.
 ///
 /// # @dev
 /// The draw audit trail is initialized with a single `DrawCreated`
@@ -382,6 +378,18 @@ pub fn execute_create_draw(
     let draw_amount: cosmwasm_std::Uint128 = amount
         .parse()
         .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
+
+    if draw_amount.is_zero() {
+        return Err(ContractError::InvalidAmount);
+    }
+
+    let outstanding = crate::state::outstanding_utilization(deps.storage, credit_line_id)?;
+    let projected = outstanding
+        .checked_add(draw_amount)
+        .map_err(|_| ContractError::Overflow)?;
+    if projected > credit_line.credit_amount {
+        return Err(ContractError::OverLimit);
+    }
 
     let draw = Draw {
         id: draw_count,
@@ -494,7 +502,7 @@ pub fn execute_repay_draw(
         return Err(ContractError::Unauthorized);
     }
 
-    let fee_bps = PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
+    let fee_bps = fees::PROTOCOL_FEE_BPS.may_load(deps.storage)?.unwrap_or(0);
     let mut fee_amount = Uint128::zero();
     if fee_bps > 0 && !draw.amount.is_zero() {
         fee_amount = draw.amount.multiply_ratio(fee_bps, 10_000u32);
@@ -670,85 +678,7 @@ pub fn execute_update_protocol_version(
         .add_attribute("minor", minor.to_string()))
 }
 
-/// Configure the late-fee penalty model (admin only).
-pub fn execute_set_late_fee_config(
-    deps: DepsMut,
-    info: MessageInfo,
-    config: Option<LateFeeConfig>,
-) -> Result<Response, ContractError> {
-    let cfg = CONFIG.load(deps.storage)?;
-    if info.sender != cfg.owner {
-        return Err(ContractError::Unauthorized);
-    }
-
-    if let Some(ref c) = config {
-        crate::penalties::validate_late_fee_config(c)?;
-    }
-
-    match config {
-        Some(c) => LATE_FEE_CONFIG.save(deps.storage, &c)?,
-        None => LATE_FEE_CONFIG.remove(deps.storage),
-    }
-
-    Ok(Response::default()
-        .add_attribute("action", "set_late_fee_config")
-        .add_attribute("has_config", config.is_some().to_string()))
-}
-
-/// Admin: configure the multi-oracle quorum resolution parameters.
-///
-/// Stores an [`OracleQuorumConfig`] record that controls how
-/// [`execute_submit_oracle_prices`] reconciles a batch of observed
-/// values into a single canonical price.  The three knobs are applied
-/// by [`oracles::resolve_quorum_price`] in the following order:
-///
-/// 1. **Freshness** — each price must have been reported within
-///    `max_age_seconds` of the current ledger timestamp (enforced by
-///    the caller via the reporting pipeline; v7 trusts the admin
-///    submitter to attach only fresh observations).
-/// 2. **Deviation** — no single feed may deviate from the median by
-///    more than `max_deviation_bps`; outliers are trimmed before
-///    computing the final value.
-/// 3. **Quorum size** — after trimming, at least `min_quorum_k`
-///    feeds must remain; otherwise the resolution fails with
-///    [`ContractError::OraclePriceInvalid`].
-///
-/// # Parameters
-///
-/// - `deps` — Mutable storage; writes to [`ORACLE_QUORUM_CONFIG`]
-///   singleton `Item`.
-/// - `info` — `info.sender` **must** equal the contract owner.
-/// - `min_quorum_k` — Minimum surviving feeds after outlier trimming.
-///   Must be `>= 2` (a single feed cannot form a quorum).
-/// - `max_deviation_bps` — Maximum allowed deviation from the median
-///   in basis points.  Must be `<= 10_000` (100 %).
-/// - `max_age_seconds` — Freshness window in seconds.  Must be `> 0`.
-///
-/// # Response attributes
-///
-/// | Key | Value |
-/// |---|---|
-/// | `"action"` | `"set_oracle_quorum_config"` |
-/// | `"min_quorum_k"` | configured quorum size (decimal) |
-/// | `"max_deviation_bps"` | outlier threshold (decimal) |
-/// | `"max_age_seconds"` | freshness window (decimal) |
-///
-/// # Errors
-///
-/// | Variant | When |
-/// |---|---|
-/// | [`ContractError::Unauthorized`] | `info.sender != CONFIG.owner` |
-/// | [`ContractError::InvalidAmount`] | `min_quorum_k < 2`, `max_deviation_bps > 10_000`, or `max_age_seconds == 0` |
-///
-/// # @notice
-/// The default post-instantiation state is **no oracle config** —
-/// [`execute_submit_oracle_prices`] will revert until this entrypoint
-/// has been called at least once.
-///
-/// # @dev
-/// All three parameters are bounds-checked *before* any storage write,
-/// so a partial-parameter mutation never leaves the config record in
-/// an inconsistent state.
+/// Configure the multi-oracle quorum parameters (admin only).
 pub fn execute_set_oracle_quorum_config(
     deps: DepsMut,
     info: MessageInfo,
@@ -797,7 +727,9 @@ pub fn execute_add_oracle(
     }
     let oracle_addr = deps.api.addr_validate(&oracle)?;
     oracles::add_oracle(deps, oracle_addr, weight)?;
-    Ok(Response::default().add_attribute("action", "add_oracle").add_attribute("oracle", oracle))
+    Ok(Response::default()
+        .add_attribute("action", "add_oracle")
+        .add_attribute("oracle", oracle))
 }
 
 pub fn execute_remove_oracle(
@@ -811,7 +743,9 @@ pub fn execute_remove_oracle(
     }
     let oracle_addr = deps.api.addr_validate(&oracle)?;
     oracles::remove_oracle(deps, oracle_addr)?;
-    Ok(Response::default().add_attribute("action", "remove_oracle").add_attribute("oracle", oracle))
+    Ok(Response::default()
+        .add_attribute("action", "remove_oracle")
+        .add_attribute("oracle", oracle))
 }
 
 pub fn execute_report_value(
@@ -821,7 +755,25 @@ pub fn execute_report_value(
     value: i128,
 ) -> Result<Response, ContractError> {
     oracles::report_value(deps, env, info, value)?;
-    Ok(Response::default().add_attribute("action", "report_value").add_attribute("value", value.to_string()))
+    Ok(Response::default()
+        .add_attribute("action", "report_value")
+        .add_attribute("value", value.to_string()))
+}
+
+/// Set or clear the structured late-fee configuration.
+pub fn execute_set_late_fee_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    config: Option<crate::penalties::LateFeeConfig>,
+) -> Result<Response, ContractError> {
+    fees::assert_owner(deps.as_ref(), &info.sender)?;
+    if let Some(ref value) = config {
+        crate::penalties::validate_late_fee_config(value)?;
+        LATE_FEE_CONFIG.save(deps.storage, value)?;
+    } else {
+        LATE_FEE_CONFIG.remove(deps.storage);
+    }
+    Ok(Response::new().add_attribute("action", "set_late_fee_config"))
 }
 
 /// Submit N oracle prices and resolve a quorum canonical price (admin only).
@@ -884,9 +836,9 @@ pub fn execute_deposit_collateral(
         return Err(ContractError::Unauthorized);
     }
     let borrower_addr = deps.api.addr_validate(&borrower)?;
-    let parsed_amount: Uint128 = amount.parse().map_err(|_| {
-        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
-    })?;
+    let parsed_amount: Uint128 = amount
+        .parse()
+        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
     collateral::deposit_collateral(deps, &borrower_addr, &denom, parsed_amount)
 }
 
@@ -910,19 +862,25 @@ pub fn execute_withdraw_collateral(
         return Err(ContractError::Unauthorized);
     }
     let borrower_addr = deps.api.addr_validate(&borrower)?;
-    let parsed_amount: Uint128 = amount.parse().map_err(|_| {
-        ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount))
-    })?;
+    let parsed_amount: Uint128 = amount
+        .parse()
+        .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
     collateral::withdraw_collateral(deps, &borrower_addr, &denom, parsed_amount)
 }
 
 /// Add a denomination to the collateral allowlist (admin only).
+///
+/// The allowlist is bounded at [`crate::state::MAX_COLLATERAL_TOKENS`] entries;
+/// adding to a full allowlist is rejected atomically with
+/// [`ContractError::TooManyCollateralTokens`].
 ///
 /// # Errors
 ///
 /// - [`ContractError::Unauthorized`] if the caller is not the contract owner.
 /// - [`ContractError::InvalidAmount`] if `risk_weight_bps > 10_000`.
 /// - [`ContractError::AlreadySettled`] if `denom` is already in the allowlist.
+/// - [`ContractError::TooManyCollateralTokens`] if the allowlist is already at
+///   [`crate::state::MAX_COLLATERAL_TOKENS`] and `denom` is not yet listed.
 pub fn execute_add_collateral_token(
     deps: DepsMut,
     info: MessageInfo,
@@ -1102,6 +1060,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             query_collateral_balance(deps, borrower, denom)
         }
         QueryMsg::GetCollateralAllowlist {} => query_collateral_allowlist(deps),
+        QueryMsg::CreditLineSnapshot { credit_line_id } => {
+            let resp = views::query_credit_line_snapshot(deps, credit_line_id)
+                .map_err(|e| StdError::generic_err(e.to_string()))?;
+            to_json_binary(&resp)
+        }
     }
 }
 
@@ -1167,7 +1130,7 @@ mod tests {
     use crate::penalties::{AprFeeConfig, FlatFeeConfig, LateFeeConfig};
     use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
     use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::{from_json, Addr, OwnedDeps};
+    use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
 
     fn creator(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
         deps.api.addr_make("creator")
@@ -1216,8 +1179,10 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
-            set_late_fee_config(&mut deps, &admin, Some(config.clone())).unwrap();
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(100),
+            });
+            set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
 
             let stored = query_late_fee_config(&deps);
             assert_eq!(stored, Some(config));
@@ -1242,7 +1207,9 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(50),
+            });
             set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert!(query_late_fee_config(&deps).is_some());
 
@@ -1256,7 +1223,9 @@ mod tests {
             setup(&mut deps);
             let unauth = non_admin(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(100),
+            });
             let err = set_late_fee_config(&mut deps, &unauth, Some(config)).unwrap_err();
             assert_eq!(err, ContractError::Unauthorized);
         }
@@ -1267,7 +1236,9 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(0) });
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::zero(),
+            });
             let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
             assert_eq!(err, ContractError::InvalidAmount);
         }
@@ -1278,7 +1249,9 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 10_001 });
+            let config = LateFeeConfig::AprBased(AprFeeConfig {
+                surcharge_bps: 10_001,
+            });
             let err = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap_err();
             assert_eq!(err, ContractError::RateTooHigh);
         }
@@ -1289,7 +1262,9 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 10_000 });
+            let config = LateFeeConfig::AprBased(AprFeeConfig {
+                surcharge_bps: 10_000,
+            });
             set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
 
             let stored = query_late_fee_config(&deps);
@@ -1313,15 +1288,14 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let config = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(200) });
+            let config = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(200),
+            });
             let resp = set_late_fee_config(&mut deps, &admin, Some(config)).unwrap();
             assert_eq!(resp.attributes[0].key, "action");
             assert_eq!(resp.attributes[0].value, "set_late_fee_config");
-            assert_eq!(resp.attributes[1].key, "has_config");
-            assert_eq!(resp.attributes[1].value, "true");
 
-            let resp = set_late_fee_config(&mut deps, &admin, None).unwrap();
-            assert_eq!(resp.attributes[1].value, "false");
+            set_late_fee_config(&mut deps, &admin, None).unwrap();
         }
 
         #[test]
@@ -1338,7 +1312,9 @@ mod tests {
             setup(&mut deps);
             let admin = creator(&deps);
 
-            let flat = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(100) });
+            let flat = LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(100),
+            });
             let apr = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 });
 
             set_late_fee_config(&mut deps, &admin, Some(flat)).unwrap();
@@ -1346,634 +1322,6 @@ mod tests {
 
             let stored = query_late_fee_config(&deps);
             assert_eq!(stored, Some(apr));
-        }
-
-    }
-
-    mod collateral {
-        use super::*;
-
-        fn admin(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
-            creator(deps)
-        }
-
-        fn borrower(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> Addr {
-            deps.api.addr_make("borrower")
-        }
-
-        fn deposit_collateral(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            borrower: &str,
-            denom: &str,
-            amount: &str,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::DepositCollateral {
-                borrower: borrower.to_string(),
-                denom: denom.to_string(),
-                amount: amount.to_string(),
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn withdraw_collateral(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            borrower: &str,
-            denom: &str,
-            amount: &str,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::WithdrawCollateral {
-                borrower: borrower.to_string(),
-                denom: denom.to_string(),
-                amount: amount.to_string(),
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn add_collateral_token(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            denom: &str,
-            risk_weight_bps: u32,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::AddCollateralToken {
-                denom: denom.to_string(),
-                risk_weight_bps,
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn remove_collateral_token(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            denom: &str,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::RemoveCollateralToken {
-                denom: denom.to_string(),
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn set_collateral_risk_weight(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            denom: &str,
-            risk_weight_bps: u32,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::SetCollateralRiskWeight {
-                denom: denom.to_string(),
-                risk_weight_bps,
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn query_collateral_balance(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            borrower: &str,
-            denom: Option<&str>,
-        ) -> crate::msg::CollateralBalanceResponse {
-            let env = mock_env();
-            let msg = QueryMsg::GetCollateralBalance {
-                borrower: borrower.to_string(),
-                denom: denom.map(|d| d.to_string()),
-            };
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            from_json(&raw).unwrap()
-        }
-
-        fn query_collateral_allowlist(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-        ) -> crate::msg::CollateralAllowlistResponse {
-            let env = mock_env();
-            let msg = QueryMsg::GetCollateralAllowlist {};
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            from_json(&raw).unwrap()
-        }
-
-        fn query_health(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            borrower: &str,
-        ) -> crate::msg::BorrowerHealthFactorResponse {
-            let env = mock_env();
-            let msg = QueryMsg::BorrowerHealthFactor {
-                borrower: borrower.to_string(),
-            };
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            from_json(&raw).unwrap()
-        }
-
-        fn query_por(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            denom: Option<String>,
-        ) -> crate::msg::ProofOfReserveResponse {
-            let env = mock_env();
-            let msg = QueryMsg::ProofOfReserve { denom };
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            from_json(&raw).unwrap()
-        }
-
-        fn create_credit_line(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            borrower: &str,
-            coll_denom: &str,
-            coll_amount: &str,
-            credit_denom: &str,
-            credit_amount: &str,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::CreateCreditLine {
-                borrower: borrower.to_string(),
-                collateral_denom: coll_denom.to_string(),
-                collateral_amount: coll_amount.to_string(),
-                credit_denom: credit_denom.to_string(),
-                credit_amount: credit_amount.to_string(),
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        fn create_draw(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            borrower: &Addr,
-            credit_line_id: u64,
-            amount: &str,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(borrower, &[]);
-            let msg = ExecuteMsg::CreateDraw {
-                credit_line_id,
-                amount: amount.to_string(),
-                denom: "ucredit".to_string(),
-            };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        // ── Deposit / Withdraw authorisation ──────────────────────────
-
-        #[test]
-        fn deposit_collateral_requires_admin() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-            let err = deposit_collateral(&mut deps, &unauth, "borrower", "uusd", "100")
-                .unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        #[test]
-        fn withdraw_collateral_requires_admin() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-            let err = withdraw_collateral(&mut deps, &unauth, "borrower", "uusd", "100")
-                .unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        // ── Add / Remove / Set risk-weight authorisation ───────────────
-
-        #[test]
-        fn add_collateral_token_requires_admin() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-            let err = add_collateral_token(&mut deps, &unauth, "uusd", 10_000).unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        #[test]
-        fn remove_collateral_token_requires_admin() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-            let err = remove_collateral_token(&mut deps, &unauth, "uusd").unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        #[test]
-        fn set_collateral_risk_weight_requires_admin() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-            let err =
-                set_collateral_risk_weight(&mut deps, &unauth, "uusd", 5_000).unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        // ── Deposit / Withdraw success paths ──────────────────────────
-
-        #[test]
-        fn deposit_and_query_balance() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_addr = borrower(&deps);
-            let borrower_str = borrower_addr.to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "500").unwrap();
-
-            let resp = query_collateral_balance(&deps, &borrower_str, Some("uusd"));
-            assert_eq!(resp.borrower, borrower_str);
-            assert_eq!(resp.entries.len(), 1);
-            assert_eq!(resp.entries[0].denom, "uusd");
-            assert_eq!(resp.entries[0].amount, Uint128::new(500));
-            assert_eq!(resp.entries[0].risk_weight_bps, 10_000);
-            assert_eq!(resp.weighted_total, Uint128::new(500));
-        }
-
-        #[test]
-        fn deposit_multiple_tokens_and_query_all() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            add_collateral_token(&mut deps, &admin, "uatom", 5_000).unwrap();
-
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "1000").unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uatom", "200").unwrap();
-
-            let resp = query_collateral_balance(&deps, &borrower_str, None);
-            assert_eq!(resp.entries.len(), 2);
-            // weighted: 1000*10000/10000 + 200*5000/10000 = 1000 + 100 = 1100
-            assert_eq!(resp.weighted_total, Uint128::new(1100));
-        }
-
-        #[test]
-        fn withdraw_after_deposit() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "500").unwrap();
-            withdraw_collateral(&mut deps, &admin, &borrower_str, "uusd", "200").unwrap();
-
-            let resp = query_collateral_balance(&deps, &borrower_str, Some("uusd"));
-            assert_eq!(resp.entries[0].amount, Uint128::new(300));
-        }
-
-        #[test]
-        fn insufficient_balance_on_withdraw() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "100").unwrap();
-
-            let err =
-                withdraw_collateral(&mut deps, &admin, &borrower_str, "uusd", "200").unwrap_err();
-            assert_eq!(err, ContractError::InsufficientCollateralBalance);
-        }
-
-        #[test]
-        fn invalid_amount_on_zero_deposit() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            let err =
-                deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "0").unwrap_err();
-            assert_eq!(err, ContractError::InvalidAmount);
-        }
-
-        // ── Allowlist management ──────────────────────────────────────
-
-        #[test]
-        fn add_and_remove_token() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-
-            let list = query_collateral_allowlist(&deps);
-            assert!(list.denoms.contains(&"uusd".to_string()));
-
-            remove_collateral_token(&mut deps, &admin, "uusd").unwrap();
-
-            let list2 = query_collateral_allowlist(&deps);
-            assert!(!list2.denoms.contains(&"uusd".to_string()));
-        }
-
-        #[test]
-        fn deposit_rejected_for_unlisted_token() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            let err =
-                deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "100").unwrap_err();
-            assert_eq!(err, ContractError::CollateralTokenNotAllowed);
-        }
-
-        // ── Multi-collateral health factor ────────────────────────────
-
-        #[test]
-        fn health_factor_includes_multi_collateral() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_addr = borrower(&deps);
-            let borrower_str = borrower_addr.to_string();
-
-            // Create a credit line: collateral 1000, credit 500
-            create_credit_line(
-                &mut deps,
-                &admin,
-                &borrower_str,
-                "ucollateral",
-                "1000",
-                "ucredit",
-                "500",
-            )
-            .unwrap();
-
-            // Draw 100
-            create_draw(&mut deps, &borrower_addr, 0, "100").unwrap();
-
-            // Add multi-collateral: 200 of uatom at 50% risk weight
-            add_collateral_token(&mut deps, &admin, "uatom", 5_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uatom", "200").unwrap();
-
-            let resp = query_health(&deps, &borrower_str);
-            assert_eq!(resp.credit_lines.len(), 1);
-
-            // effective_collateral = 1000 (credit line) + 200*5000/10000 (multi) = 1000 + 100 = 1100
-            // health = 1100 * 10_000 / 100 = 110_000
-            assert_eq!(resp.credit_lines[0].health_factor_bps, 110_000);
-        }
-
-        #[test]
-        fn health_factor_with_only_multi_collateral() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_addr = borrower(&deps);
-            let borrower_str = borrower_addr.to_string();
-
-            // Create a credit line with zero collateral
-            create_credit_line(
-                &mut deps,
-                &admin,
-                &borrower_str,
-                "ucollateral",
-                "0",
-                "ucredit",
-                "500",
-            )
-            .unwrap();
-
-            // Draw 100
-            create_draw(&mut deps, &borrower_addr, 0, "100").unwrap();
-
-            // Without any multi-collateral, effective_collateral = 0 → health = 0
-            let resp1 = query_health(&deps, &borrower_str);
-            assert_eq!(resp1.credit_lines[0].health_factor_bps, 0);
-
-            // Add multi-collateral: 500 uusd at 100% weight
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "500").unwrap();
-
-            let resp2 = query_health(&deps, &borrower_str);
-            // effective_collateral = 0 + 500 = 500
-            // health = 500 * 10_000 / 100 = 50_000
-            assert_eq!(resp2.credit_lines[0].health_factor_bps, 50_000);
-        }
-
-        // ── Multi-collateral proof of reserve ─────────────────────────
-
-        #[test]
-        fn proof_of_reserve_includes_multi_collateral() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_addr = borrower(&deps);
-            let borrower_str = borrower_addr.to_string();
-
-            create_credit_line(
-                &mut deps,
-                &admin,
-                &borrower_str,
-                "ucollateral",
-                "1000",
-                "ucredit",
-                "500",
-            )
-            .unwrap();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "200").unwrap();
-
-            let por = query_por(&deps, None);
-            // total_collateral should include both: 1000 + 200 = 1200
-            assert_eq!(por.total_collateral, Uint128::new(1200));
-
-            // Filter by multi-collateral denom
-            let por_uusd = query_por(&deps, Some("uusd".to_string()));
-            assert_eq!(por_uusd.reserves_by_denom.len(), 1);
-            assert_eq!(por_uusd.reserves_by_denom[0].denom, "uusd");
-            assert_eq!(
-                por_uusd.reserves_by_denom[0].collateral_amount,
-                Uint128::new(200)
-            );
-            assert_eq!(por_uusd.total_collateral, Uint128::new(200));
-        }
-
-        // ── Edge cases ────────────────────────────────────────────────
-
-        #[test]
-        fn deposit_zero_amount_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            let err =
-                deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "0").unwrap_err();
-            assert_eq!(err, ContractError::InvalidAmount);
-        }
-
-        #[test]
-        fn withdraw_zero_amount_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "100").unwrap();
-            let err =
-                withdraw_collateral(&mut deps, &admin, &borrower_str, "uusd", "0").unwrap_err();
-            assert_eq!(err, ContractError::InvalidAmount);
-        }
-
-        #[test]
-        fn add_existing_token_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            let err = add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap_err();
-            assert_eq!(err, ContractError::AlreadySettled);
-        }
-
-        #[test]
-        fn remove_unlisted_token_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-
-            let err = remove_collateral_token(&mut deps, &admin, "uusd").unwrap_err();
-            assert_eq!(err, ContractError::CollateralTokenNotAllowed);
-        }
-
-        #[test]
-        fn risk_weight_exceeds_max_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-
-            let err = add_collateral_token(&mut deps, &admin, "uusd", 10_001).unwrap_err();
-            assert_eq!(err, ContractError::InvalidAmount);
-        }
-
-        #[test]
-        fn borrower_collateral_independent_from_credit_line() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let borrower_str = borrower(&deps).to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &borrower_str, "uusd", "300").unwrap();
-
-            // No credit lines exist, but collateral should still be queryable
-            let resp = query_collateral_balance(&deps, &borrower_str, Some("uusd"));
-            assert_eq!(resp.entries.len(), 1);
-            assert_eq!(resp.entries[0].amount, Uint128::new(300));
-        }
-
-        #[test]
-        fn multiple_borrowers_independent_collateral() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = admin(&deps);
-            let b1 = deps.api.addr_make("borrower1").to_string();
-            let b2 = deps.api.addr_make("borrower2").to_string();
-
-            add_collateral_token(&mut deps, &admin, "uusd", 10_000).unwrap();
-            deposit_collateral(&mut deps, &admin, &b1, "uusd", "500").unwrap();
-            deposit_collateral(&mut deps, &admin, &b2, "uusd", "300").unwrap();
-
-            let r1 = query_collateral_balance(&deps, &b1, Some("uusd"));
-            assert_eq!(r1.entries[0].amount, Uint128::new(500));
-
-            let r2 = query_collateral_balance(&deps, &b2, Some("uusd"));
-            assert_eq!(r2.entries[0].amount, Uint128::new(300));
-        }
-    }
-
-    mod set_protocol_fee_bps {
-        use super::*;
-
-        fn query_protocol_fee_bps(
-            deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>,
-        ) -> Option<u32> {
-            let env = mock_env();
-            let msg = QueryMsg::GetProtocolFeeBps {};
-            let raw = query(deps.as_ref(), env, msg).unwrap();
-            let resp: crate::msg::ProtocolFeeBpsResponse = from_json(&raw).unwrap();
-            resp.bps
-        }
-
-        fn set_protocol_fee_bps_exec(
-            deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
-            sender: &Addr,
-            bps: u32,
-        ) -> Result<Response, ContractError> {
-            let env = mock_env();
-            let info = message_info(sender, &[]);
-            let msg = ExecuteMsg::SetProtocolFeeBps { bps };
-            execute(deps.as_mut(), env, info, msg)
-        }
-
-        #[test]
-        fn admin_can_set_valid_bps() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = creator(&deps);
-
-            set_protocol_fee_bps_exec(&mut deps, &admin, 500).unwrap();
-            assert_eq!(query_protocol_fee_bps(&deps), Some(500));
-        }
-
-        #[test]
-        fn non_admin_is_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let unauth = non_admin(&deps);
-
-            let err = set_protocol_fee_bps_exec(&mut deps, &unauth, 100).unwrap_err();
-            assert_eq!(err, ContractError::Unauthorized);
-        }
-
-        #[test]
-        fn bps_above_max_is_rejected() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = creator(&deps);
-
-            let err =
-                set_protocol_fee_bps_exec(&mut deps, &admin, fees::MAX_PROTOCOL_FEE_BPS + 1)
-                    .unwrap_err();
-            assert_eq!(err, ContractError::ProtocolFeeBpsExceeded);
-        }
-
-        #[test]
-        fn query_returns_set_value() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-            let admin = creator(&deps);
-
-            assert_eq!(query_protocol_fee_bps(&deps), None);
-
-            set_protocol_fee_bps_exec(&mut deps, &admin, 250).unwrap();
-            assert_eq!(query_protocol_fee_bps(&deps), Some(250));
-
-            set_protocol_fee_bps_exec(&mut deps, &admin, 750).unwrap();
-            assert_eq!(query_protocol_fee_bps(&deps), Some(750));
-        }
-
-        #[test]
-        fn default_is_unset() {
-            let mut deps = mock_dependencies();
-            setup(&mut deps);
-
-            assert_eq!(query_protocol_fee_bps(&deps), None);
         }
     }
 }

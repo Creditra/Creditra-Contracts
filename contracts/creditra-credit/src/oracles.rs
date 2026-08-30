@@ -29,7 +29,10 @@
 //!   for sorting and O(n) for window scanning.
 
 use crate::error::ContractError;
-use crate::state::{OraclePriceRecord, OracleQuorumConfig, OracleReportData, MAX_ORACLE_FEEDS, ORACLE_LIST, ORACLE_REPORT, ORACLE_WEIGHT};
+use crate::state::{
+    OraclePriceRecord, OracleQuorumConfig, OracleReportData, MAX_ORACLE_FEEDS, ORACLE_LIST,
+    ORACLE_REPORT, ORACLE_WEIGHT,
+};
 use cosmwasm_std::{Addr, DepsMut, Env, MessageInfo};
 
 /// Add or update an oracle's weight in the registry.
@@ -52,7 +55,7 @@ pub fn add_oracle(deps: DepsMut, oracle: Addr, weight: u32) -> Result<(), Contra
 /// Admin only.
 pub fn remove_oracle(deps: DepsMut, oracle: Addr) -> Result<(), ContractError> {
     let mut oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
-    if let Some(idx) = oracle_list.iter().position(|x| x == &oracle) {
+    if let Some(idx) = oracle_list.iter().position(|x| *x == oracle) {
         oracle_list.remove(idx);
         ORACLE_LIST.save(deps.storage, &oracle_list)?;
         ORACLE_WEIGHT.remove(deps.storage, oracle.clone());
@@ -65,7 +68,12 @@ pub fn remove_oracle(deps: DepsMut, oracle: Addr) -> Result<(), ContractError> {
 
 /// Oracles report their observed value.
 /// Requires reporting oracle's auth.
-pub fn report_value(deps: DepsMut, env: Env, info: MessageInfo, value: i128) -> Result<(), ContractError> {
+pub fn report_value(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    value: i128,
+) -> Result<(), ContractError> {
     // Verify the oracle is registered
     let oracle_list = ORACLE_LIST.load(deps.storage).unwrap_or_default();
 
@@ -82,9 +90,9 @@ pub fn report_value(deps: DepsMut, env: Env, info: MessageInfo, value: i128) -> 
     Ok(())
 }
 
-/// Check if an oracle price record is stale relative to the current block timestamp and quorum configuration.
-// ... (rest of the file)
-
+/// Check if an oracle price record is stale relative to the current block
+/// timestamp and quorum configuration.
+///
 /// # Parameters
 /// - `record`: The stored [`OraclePriceRecord`].
 /// - `cfg`: The active [`OracleQuorumConfig`].
@@ -103,7 +111,6 @@ pub fn is_price_stale(
     }
     current_timestamp.saturating_sub(record.timestamp) > cfg.max_age_seconds
 }
-
 
 /// Resolve a single canonical price from N submitted oracle prices using
 /// the quorum-of-K sliding-window algorithm.
@@ -128,7 +135,10 @@ pub fn is_price_stale(
 /// - `min_quorum_k < 2` (a single feed is not a meaningful quorum).
 /// - `min_quorum_k > n` (cannot form a window larger than the input).
 /// - No K-wide window in the sorted array satisfies the deviation bound.
-pub fn resolve_quorum_price(prices: &[i128], cfg: &OracleQuorumConfig) -> Result<i128, ContractError> {
+pub fn resolve_quorum_price(
+    prices: &[i128],
+    cfg: &OracleQuorumConfig,
+) -> Result<i128, ContractError> {
     let n = prices.len();
 
     if n == 0 || n > MAX_ORACLE_FEEDS {
@@ -194,7 +204,7 @@ fn compute_deviation_bps(price: i128, last_price: i128) -> Option<u32> {
     let diff = price.abs_diff(last_price);
     // Use u128 intermediate to avoid overflow: diff * 10_000 fits in u128
     // for any i128 price.
-    let bps = (diff as u128)
+    let bps = diff
         .checked_mul(10_000)?
         .checked_add(last_price as u128 - 1)? // ceiling division
         .checked_div(last_price as u128)?;
@@ -393,10 +403,7 @@ mod tests {
     #[test]
     fn exactly_max_oracle_feeds_ok() {
         let prices = vec![1_000i128; MAX_ORACLE_FEEDS];
-        assert_eq!(
-            resolve_quorum_price(&prices, &cfg(2, 0)).unwrap(),
-            1_000
-        );
+        assert_eq!(resolve_quorum_price(&prices, &cfg(2, 0)).unwrap(), 1_000);
     }
 
     #[test]
@@ -420,4 +427,3 @@ mod tests {
         assert!(is_price_stale(&record, &qcfg, 9_999));
     }
 }
-

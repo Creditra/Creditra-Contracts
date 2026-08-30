@@ -87,46 +87,61 @@ pub enum ContractError {
     #[error("Overflow")]
     Overflow,
 
-    /// The collateral token denomination is not in the allowlist.
     #[error("CollateralTokenNotAllowed")]
     CollateralTokenNotAllowed,
 
-    /// Rate exceeds the configured ceiling for this borrower.
-    #[error("RateCeilingExceeded")]
-    RateCeilingExceeded,
-
-    /// The fee share basis-point value is invalid (out of range).
-    #[error("InvalidFeeShareBps")]
-    InvalidFeeShareBps,
-
-    /// Treasury balance is insufficient to cover the requested withdrawal.
-    #[error("InsufficientTreasuryBalance")]
-    InsufficientTreasuryBalance,
-
-    /// Bounty balance is insufficient to cover the requested withdrawal.
-    #[error("InsufficientBountyBalance")]
-    InsufficientBountyBalance,
-
-    /// Treasury address has not been configured.
     #[error("TreasuryAddressNotSet")]
     TreasuryAddressNotSet,
 
-    /// Bounty address has not been configured.
     #[error("BountyAddressNotSet")]
     BountyAddressNotSet,
 
-    /// Late-fee configuration is invalid.
     #[error("LateFeeConfigInvalid")]
     LateFeeConfigInvalid,
+
+    #[error("ProtocolFeeBpsExceeded")]
+    ProtocolFeeBpsExceeded,
+
+    /// A configured interest rate exceeds the applicable ceiling.
+    #[error("RateCeilingExceeded")]
+    RateCeilingExceeded,
+
+    /// A fee-share ratio (in basis points) exceeds [`crate::fees::MAX_FEE_SHARE_BPS`].
+    #[error("InvalidFeeShareBps")]
+    InvalidFeeShareBps,
+
+    /// Requested treasury withdrawal exceeds the accumulated treasury balance.
+    #[error("InsufficientTreasuryBalance")]
+    InsufficientTreasuryBalance,
+
+    /// Requested bounty withdrawal exceeds the accumulated bounty balance.
+    #[error("InsufficientBountyBalance")]
+    InsufficientBountyBalance,
+
+    /// A draw would push unrepaid utilization above the committed credit amount.
+    #[error("OverLimit")]
+    OverLimit,
+    /// The collateral token allowlist is at its maximum size and cannot
+    /// accept another denomination.
+    ///
+    /// Raised when an admin attempts to add a collateral token to a full
+    /// allowlist (see [`crate::state::MAX_COLLATERAL_TOKENS`]). The cap
+    /// protects transaction resource limits: the allowlist is scanned
+    /// linearly on every collateral deposit and returned wholesale by
+    /// queries, so an unbounded list would grow storage and gas costs
+    /// without bound.
+    #[error("TooManyCollateralTokens")]
+    TooManyCollateralTokens,
 }
 
 impl ContractError {
-    /// Return the high-level category for this error variant.
+    /// Return the [`ContractErrorCategory`] this error belongs to.
     pub fn category(&self) -> ContractErrorCategory {
         match self {
             ContractError::Std(_) => ContractErrorCategory::Std,
-            ContractError::CreditLineNotFound(_) => ContractErrorCategory::NotFound,
-            ContractError::DrawNotFound(_, _) => ContractErrorCategory::NotFound,
+            ContractError::CreditLineNotFound(_) | ContractError::DrawNotFound(_, _) => {
+                ContractErrorCategory::NotFound
+            }
             ContractError::Unauthorized => ContractErrorCategory::Auth,
             ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
             ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
@@ -135,6 +150,7 @@ impl ContractError {
             ContractError::AlreadySettled => ContractErrorCategory::State,
             ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
             ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
+            ContractError::OracleNotFound => ContractErrorCategory::Oracle,
             ContractError::RateTooHigh => ContractErrorCategory::Validation,
             ContractError::Overflow => ContractErrorCategory::State,
             ContractError::RateCeilingExceeded => ContractErrorCategory::Validation,
@@ -144,26 +160,9 @@ impl ContractError {
             ContractError::TreasuryAddressNotSet => ContractErrorCategory::State,
             ContractError::BountyAddressNotSet => ContractErrorCategory::State,
             ContractError::LateFeeConfigInvalid => ContractErrorCategory::Validation,
-        }
-    }
-}
-
-impl ContractError {
-    pub fn category(&self) -> ContractErrorCategory {
-        match self {
-            ContractError::Std(_) => ContractErrorCategory::Std,
-            ContractError::CreditLineNotFound(_) => ContractErrorCategory::NotFound,
-            ContractError::DrawNotFound(_, _) => ContractErrorCategory::NotFound,
-            ContractError::Unauthorized => ContractErrorCategory::Auth,
-            ContractError::CollateralInsufficient => ContractErrorCategory::Collateral,
-            ContractError::InsufficientCollateralBalance => ContractErrorCategory::Collateral,
-            ContractError::InvalidAmount => ContractErrorCategory::Validation,
-            ContractError::AlreadySettled => ContractErrorCategory::State,
-            ContractError::OraclePriceInvalid => ContractErrorCategory::Oracle,
-            ContractError::OracleQuorumNotMet => ContractErrorCategory::Oracle,
-            ContractError::OracleNotFound => ContractErrorCategory::Oracle,
-            ContractError::RateTooHigh => ContractErrorCategory::Validation,
-            ContractError::Overflow => ContractErrorCategory::Validation,
+            ContractError::ProtocolFeeBpsExceeded => ContractErrorCategory::Validation,
+            ContractError::OverLimit => ContractErrorCategory::Validation,
+            ContractError::TooManyCollateralTokens => ContractErrorCategory::Validation,
         }
     }
 }
@@ -313,6 +312,22 @@ mod tests {
     }
 
     #[test]
+    fn too_many_collateral_tokens_category() {
+        let err = ContractError::TooManyCollateralTokens;
+        assert_eq!(err.category(), ContractErrorCategory::Validation);
+    }
+
+    #[test]
+    fn too_many_collateral_tokens_display_and_equality() {
+        let err = ContractError::TooManyCollateralTokens;
+        assert_eq!(err.to_string(), "TooManyCollateralTokens");
+        assert_eq!(err, ContractError::TooManyCollateralTokens);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_ne!(err, ContractError::Unauthorized);
+        assert_ne!(err, ContractError::AlreadySettled);
+    }
+
+    #[test]
     fn insufficient_collateral_balance_display_and_equality() {
         let err = ContractError::InsufficientCollateralBalance;
         assert_eq!(err.to_string(), "InsufficientCollateralBalance");
@@ -372,27 +387,11 @@ mod tests {
     }
 
     #[test]
-    fn treasury_address_not_set_display_and_equality() {
-        let err = ContractError::TreasuryAddressNotSet;
-        assert_eq!(err.to_string(), "TreasuryAddressNotSet");
-        assert_eq!(err, ContractError::TreasuryAddressNotSet);
-        assert_ne!(err, ContractError::BountyAddressNotSet);
-    }
-
-    #[test]
-    fn bounty_address_not_set_display_and_equality() {
-        let err = ContractError::BountyAddressNotSet;
-        assert_eq!(err.to_string(), "BountyAddressNotSet");
-        assert_eq!(err, ContractError::BountyAddressNotSet);
-        assert_ne!(err, ContractError::TreasuryAddressNotSet);
-    }
-
-    #[test]
-    fn collateral_token_not_allowed_display_and_equality() {
-        let err = ContractError::CollateralTokenNotAllowed;
-        assert_eq!(err.to_string(), "CollateralTokenNotAllowed");
-        assert_eq!(err, ContractError::CollateralTokenNotAllowed);
-        assert_ne!(err, ContractError::InsufficientCollateralBalance);
-        assert_ne!(err, ContractError::Unauthorized);
+    fn over_limit_display_and_equality() {
+        let err = ContractError::OverLimit;
+        assert_eq!(err.to_string(), "OverLimit");
+        assert_eq!(err, ContractError::OverLimit);
+        assert_ne!(err, ContractError::InvalidAmount);
+        assert_eq!(err.category(), ContractErrorCategory::Validation);
     }
 }

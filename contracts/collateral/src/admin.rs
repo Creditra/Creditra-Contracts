@@ -2,10 +2,11 @@
 
 //! Admin collateral configuration with a cool-off between critical actions (v7).
 //!
-//! Critical admin entrypoints (`set_min_collateral_ratio_bps`,
-//! `set_collateral_risk_weight`, `set_collateral_token_allowlist`) share a single
-//! cooldown clock stored in instance storage. The interval is configured via
-//! [`set_admin_collateral_cooldown_seconds`]; when unset or zero, the guard is
+//! Critical admin entrypoints (`set_admin_collateral_cooldown_seconds`,
+//! `set_min_collateral_ratio_bps`, `collateral_risk_weight`,
+//! `collateral_token_allowlist`) share a single cooldown clock stored in
+//! instance storage. The interval is configured via
+//! [``set_admin_collateral_cooldown_seconds``]; when unset or zero, the guard is
 //! disabled (same semantics as borrower draw cooldown).
 
 use crate::auth::require_admin_auth;
@@ -37,11 +38,14 @@ fn touch_admin_collateral_critical_action_ts(env: &Env) {
 
 /// Set the minimum interval between critical collateral admin actions (admin only).
 ///
-/// Pass `0` to disable the cool-off guard.
+/// This action is itself a critical admin action and is subject to the
+/// currently configured cool-off. Pass `0`to disable the cool-off guard.
 pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
     assert_not_paused(env);
     require_admin_auth(env);
+    enforce_admin_collateral_cooldown(env);
     storage::set_admin_collateral_cooldown_seconds(env, seconds);
+    touch_admin_collateral_critical_action_ts(env);
 }
 
 /// Return the configured admin collateral cool-off interval, if set.
@@ -80,6 +84,14 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &Vec<Address>) {
     assert_not_paused(env);
     require_admin_auth(env);
     enforce_admin_collateral_cooldown(env);
+
+    // Validate factory-created contract addresses before registration.
+    // Ensure every address is a valid contract using the Soroban host environment.
+    for token in tokens.iter() {
+        // Invoking a standard method lets the host trap if the address is not a contract.
+        let _ = soroban_sdk::token::Client::new(env, &token).decimals();
+    }
+
     storage::set_collateral_token_allowlist(env, tokens);
     touch_admin_collateral_critical_action_ts(env);
 }

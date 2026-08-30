@@ -6,10 +6,12 @@
 //! repays, and after every step asserts the protocol's reported
 //! `net_outstanding` equals the modeled sum of unrepaid draws.
 
-use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
+use cosmwasm_std::testing::{
+    message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
+};
+use cosmwasm_std::{from_json, OwnedDeps, Uint128};
 use creditra_credit::contract;
-use creditra_credit::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ProofOfReserveResponse};
+use creditra_credit::msg::{ExecuteMsg, InstantiateMsg, ProofOfReserveResponse, QueryMsg};
 use proptest::collection::vec as proptest_vec;
 use proptest::prelude::*;
 use proptest::test_runner::Config as ProptestConfig;
@@ -27,24 +29,29 @@ struct RawStep {
 }
 
 fn raw_steps_strategy() -> impl Strategy<Value = Vec<RawStep>> {
-    proptest_vec((0usize..BORROWER_COUNT, any::<bool>(), 1u128..=MAX_REQUEST), 1..=MAX_STEPS)
-        .prop_map(|steps| {
-            steps
-                .into_iter()
-                .map(|(borrower_index, wants_draw, amount)| RawStep {
-                    borrower_index,
-                    wants_draw,
-                    amount,
-                })
-                .collect()
-        })
+    proptest_vec(
+        (0usize..BORROWER_COUNT, any::<bool>(), 1u128..=MAX_REQUEST),
+        1..=MAX_STEPS,
+    )
+    .prop_map(|steps| {
+        steps
+            .into_iter()
+            .map(|(borrower_index, wants_draw, amount)| RawStep {
+                borrower_index,
+                wants_draw,
+                amount,
+            })
+            .collect()
+    })
 }
 
 fn setup_contract(deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>) {
     let env = mock_env();
     let owner = deps.api.addr_make("owner");
     let info = message_info(&owner, &[]);
-    let msg = InstantiateMsg { owner: owner.to_string() };
+    let msg = InstantiateMsg {
+        owner: owner.to_string(),
+    };
     contract::instantiate(deps.as_mut(), env, info, msg).unwrap();
 }
 
@@ -101,13 +108,17 @@ fn repay_draw(
     let env = mock_env();
     let borrower = deps.api.addr_make(borrower_label);
     let info = message_info(&borrower, &[]);
-    let msg = ExecuteMsg::RepayDraw { credit_line_id, draw_id };
+    let msg = ExecuteMsg::RepayDraw {
+        credit_line_id,
+        draw_id,
+    };
     contract::execute(deps.as_mut(), env, info, msg).unwrap();
 }
 
 fn query_por(deps: &OwnedDeps<MockStorage, MockApi, MockQuerier>) -> ProofOfReserveResponse {
     let env = mock_env();
-    let raw = contract::query(deps.as_ref(), env, QueryMsg::ProofOfReserve { denom: None }).unwrap();
+    let raw =
+        contract::query(deps.as_ref(), env, QueryMsg::ProofOfReserve { denom: None }).unwrap();
     from_json(&raw).unwrap()
 }
 
@@ -128,14 +139,14 @@ proptest! {
         // Create credit lines for each borrower. The contract assigns sequential ids
         // starting at 0; we track the mapping implicitly by creation order.
         for label in &borrower_labels {
-            create_credit_line(&mut deps, label, "1000", "500");
+            create_credit_line(&mut deps, label, "1000", "1000000");
         }
 
         // Model: per-credit-line list of draws (amount, repaid)
         let mut modeled: Vec<Vec<(u128, bool)>> = vec![Vec::new(); BORROWER_COUNT];
 
         // Helper to compute modeled net outstanding
-        fn modeled_net(modeled: &Vec<Vec<(u128, bool)>>) -> u128 {
+        fn modeled_net(modeled: &[Vec<(u128, bool)>]) -> u128 {
             modeled.iter().flat_map(|v| v.iter()).filter(|(_, r)| !*r).map(|(a, _)| *a).sum()
         }
 

@@ -28,8 +28,22 @@ required-features = ["instrument"]
 name = "rustdoc_risk_tests"
 path = "tests/rustdoc_risk_tests.rs"
 
+[[test]]
+name = "proptest"
+path = "tests/proptest.rs"
+required-features = ["instrument"]
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-proptest = "1.4"
+proptest = "=1.3.1"
+[[test]]
+name = "ttl_bump"
+path = "tests/ttl_bump.rs"
+
+[[test]]
+name = "risk_fuzz_tests"
+path = "tests/risk_fuzz_tests.rs"
+required-features = ["instrument"]
+

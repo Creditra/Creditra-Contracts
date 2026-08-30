@@ -3,7 +3,7 @@ use cosmwasm_std::{Addr, Deps, DepsMut, Response, Uint128};
 use crate::error::ContractError;
 use crate::state::{
     BORROWER_COLLATERAL_TOKENS, COLLATERAL_BALANCES, COLLATERAL_RISK_WEIGHTS,
-    COLLATERAL_TOKEN_ALLOWLIST, DEFAULT_COLLATERAL_RISK_WEIGHT_BPS,
+    COLLATERAL_TOKEN_ALLOWLIST, DEFAULT_COLLATERAL_RISK_WEIGHT_BPS, MAX_COLLATERAL_TOKENS,
 };
 
 /// Return `true` if `denom` is in the admin-managed collateral allowlist.
@@ -59,7 +59,9 @@ pub fn deposit_collateral(
     let balance = COLLATERAL_BALANCES
         .may_load(deps.storage, key)?
         .unwrap_or_default();
-    let new_balance = balance.checked_add(amount).map_err(|_| ContractError::Overflow)?;
+    let new_balance = balance
+        .checked_add(amount)
+        .map_err(|_| ContractError::Overflow)?;
     COLLATERAL_BALANCES.save(deps.storage, key, &new_balance)?;
 
     let mut tokens = BORROWER_COLLATERAL_TOKENS
@@ -143,10 +145,7 @@ pub fn query_collateral_balance(deps: Deps, borrower: &Addr, denom: &str) -> Uin
 /// Return all token denominations and balances deposited by `borrower`.
 ///
 /// The returned vector is sorted by denomination for deterministic output.
-pub fn query_borrower_collateral(
-    deps: Deps,
-    borrower: &Addr,
-) -> Vec<(String, Uint128)> {
+pub fn query_borrower_collateral(deps: Deps, borrower: &Addr) -> Vec<(String, Uint128)> {
     let tokens = BORROWER_COLLATERAL_TOKENS
         .may_load(deps.storage, borrower)
         .unwrap_or_default()
@@ -184,7 +183,9 @@ pub fn weighted_collateral_total(deps: Deps, borrower: &Addr) -> Result<Uint128,
             .map_err(|_| ContractError::Overflow)?
             .checked_div(Uint128::from(10_000u32))
             .map_err(|_| ContractError::Overflow)?;
-        total = total.checked_add(weighted).map_err(|_| ContractError::Overflow)?;
+        total = total
+            .checked_add(weighted)
+            .map_err(|_| ContractError::Overflow)?;
     }
     Ok(total)
 }
@@ -199,10 +200,17 @@ pub fn query_collateral_allowlist(deps: Deps) -> Vec<String> {
 
 /// Add a denomination to the collateral allowlist with an optional risk weight.
 ///
+/// The allowlist is bounded at [`MAX_COLLATERAL_TOKENS`] entries to keep
+/// storage and the per-deposit membership scan inside transaction resource
+/// limits. Adding a new token to a full allowlist is rejected atomically;
+/// removing a token frees a slot.
+///
 /// # Errors
 ///
 /// - [`ContractError::InvalidAmount`] if `risk_weight_bps > 10_000`.
 /// - [`ContractError::AlreadySettled`] if `denom` is already in the allowlist.
+/// - [`ContractError::TooManyCollateralTokens`] if the allowlist is already at
+///   [`MAX_COLLATERAL_TOKENS`] and `denom` is not yet listed.
 pub fn add_collateral_token(
     deps: DepsMut,
     denom: &str,
@@ -218,6 +226,10 @@ pub fn add_collateral_token(
 
     if list.contains(&denom.to_string()) {
         return Err(ContractError::AlreadySettled);
+    }
+
+    if list.len() >= MAX_COLLATERAL_TOKENS {
+        return Err(ContractError::TooManyCollateralTokens);
     }
 
     list.push(denom.to_string());
@@ -237,10 +249,7 @@ pub fn add_collateral_token(
 ///
 /// Existing deposits of this token remain in storage but new deposits are
 /// rejected.  The risk weight entry is also removed.
-pub fn remove_collateral_token(
-    deps: DepsMut,
-    denom: &str,
-) -> Result<Response, ContractError> {
+pub fn remove_collateral_token(deps: DepsMut, denom: &str) -> Result<Response, ContractError> {
     let mut list = COLLATERAL_TOKEN_ALLOWLIST
         .may_load(deps.storage)?
         .unwrap_or_default();
@@ -318,13 +327,7 @@ mod tests {
         amount: u128,
     ) {
         setup_allowlist(deps, &[denom]);
-        deposit_collateral(
-            deps.as_mut(),
-            borrower,
-            denom,
-            Uint128::new(amount),
-        )
-        .unwrap();
+        deposit_collateral(deps.as_mut(), borrower, denom, Uint128::new(amount)).unwrap();
     }
 
     mod is_collateral_token_allowed {
@@ -399,21 +402,16 @@ mod tests {
         fn rejects_zero_amount() {
             let mut deps = mock_dependencies();
             setup_allowlist(&mut deps, &["uusd"]);
-            let err = deposit_collateral(deps.as_mut(), &alice(), "uusd", Uint128::zero())
-                .unwrap_err();
+            let err =
+                deposit_collateral(deps.as_mut(), &alice(), "uusd", Uint128::zero()).unwrap_err();
             assert_eq!(err, ContractError::InvalidAmount);
         }
 
         #[test]
         fn rejects_unallowed_token() {
             let mut deps = mock_dependencies();
-            let err = deposit_collateral(
-                deps.as_mut(),
-                &alice(),
-                "uusd",
-                Uint128::new(100),
-            )
-            .unwrap_err();
+            let err =
+                deposit_collateral(deps.as_mut(), &alice(), "uusd", Uint128::new(100)).unwrap_err();
             assert_eq!(err, ContractError::CollateralTokenNotAllowed);
         }
 
@@ -518,8 +516,8 @@ mod tests {
         #[test]
         fn rejects_zero_amount() {
             let mut deps = mock_dependencies();
-            let err = withdraw_collateral(deps.as_mut(), &alice(), "uusd", Uint128::zero())
-                .unwrap_err();
+            let err =
+                withdraw_collateral(deps.as_mut(), &alice(), "uusd", Uint128::zero()).unwrap_err();
             assert_eq!(err, ContractError::InvalidAmount);
         }
 
@@ -762,8 +760,7 @@ mod tests {
         #[test]
         fn rejects_risk_weight_over_max() {
             let mut deps = mock_dependencies();
-            let err =
-                add_collateral_token(deps.as_mut(), "uusd", 10_001).unwrap_err();
+            let err = add_collateral_token(deps.as_mut(), "uusd", 10_001).unwrap_err();
             assert_eq!(err, ContractError::InvalidAmount);
         }
 
@@ -798,6 +795,61 @@ mod tests {
             assert_eq!(attrs[0].value, "add_collateral_token");
             assert_eq!(attrs[1].value, "uusd");
             assert_eq!(attrs[2].value, "7500");
+        }
+
+        #[test]
+        fn accepts_exactly_max_tokens() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let list = COLLATERAL_TOKEN_ALLOWLIST
+                .may_load(deps.as_ref().storage)
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.len(), MAX_COLLATERAL_TOKENS);
+        }
+
+        #[test]
+        fn rejects_new_token_when_allowlist_is_full() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let err = add_collateral_token(deps.as_mut(), "overflow", 10_000).unwrap_err();
+            assert_eq!(err, ContractError::TooManyCollateralTokens);
+        }
+
+        #[test]
+        fn duplicate_on_full_list_still_reports_duplicate() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            let err = add_collateral_token(deps.as_mut(), "token000", 10_000).unwrap_err();
+            assert_eq!(err, ContractError::AlreadySettled);
+        }
+
+        #[test]
+        fn removing_token_frees_slot() {
+            let mut deps = mock_dependencies();
+            for i in 0..MAX_COLLATERAL_TOKENS {
+                add_collateral_token(deps.as_mut(), &format!("token{i:03}"), 10_000).unwrap();
+            }
+
+            remove_collateral_token(deps.as_mut(), "token000").unwrap();
+            add_collateral_token(deps.as_mut(), "replacement", 10_000).unwrap();
+
+            let list = COLLATERAL_TOKEN_ALLOWLIST
+                .may_load(deps.as_ref().storage)
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.len(), MAX_COLLATERAL_TOKENS);
+            assert!(list.contains(&"replacement".to_string()));
+            assert!(!list.contains(&"token000".to_string()));
         }
     }
 
@@ -949,8 +1001,8 @@ mod tests {
             setup_allowlist(&mut deps, &["uusd"]);
 
             deposit_collateral(deps.as_mut(), &alice(), "uusd", Uint128::new(100)).unwrap();
-            let err = deposit_collateral(deps.as_mut(), &bob(), "uatom", Uint128::new(100))
-                .unwrap_err();
+            let err =
+                deposit_collateral(deps.as_mut(), &bob(), "uatom", Uint128::new(100)).unwrap_err();
             assert_eq!(err, ContractError::CollateralTokenNotAllowed);
         }
 
@@ -963,8 +1015,8 @@ mod tests {
 
             remove_collateral_token(deps.as_mut(), "uusd").unwrap();
 
-            let err = deposit_collateral(deps.as_mut(), &bob(), "uusd", Uint128::new(100))
-                .unwrap_err();
+            let err =
+                deposit_collateral(deps.as_mut(), &bob(), "uusd", Uint128::new(100)).unwrap_err();
             assert_eq!(err, ContractError::CollateralTokenNotAllowed);
 
             assert_eq!(

@@ -1,4 +1,9 @@
 [toolchain]
-channel = "stable"
+# Pinned exact version — the single source of truth for every local and CI
+# build. Floating channels (`stable`, `beta`, `nightly`) are rejected by
+# `scripts/check-toolchain.sh` because they make builds irreproducible across
+# machines and over time. Bump this value deliberately and in the same commit
+# as any toolchain-behavior-sensitive baseline (e.g. WASM size budgets).
+channel = "1.98.0"
 targets = ["wasm32-unknown-unknown"]
 components = ["rustfmt", "clippy"]

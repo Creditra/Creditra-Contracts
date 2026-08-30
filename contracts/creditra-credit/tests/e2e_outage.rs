@@ -19,7 +19,9 @@
 //! 10. **Recovery Route C (Stale Price Refresh)**: Fresh price submission clears staleness state.
 //! 11. **Edge Cases**: Unconfigured quorum config, boundary feed counts, and invalid config parameters.
 
-use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
+use cosmwasm_std::testing::{
+    message_info, mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage,
+};
 use cosmwasm_std::{from_json, Addr, OwnedDeps, Uint128};
 
 use creditra_credit::contract;
@@ -29,7 +31,8 @@ use creditra_credit::msg::{
 };
 use creditra_credit::oracles::is_price_stale;
 use creditra_credit::state::{
-    OraclePriceRecord, OracleQuorumConfig, MAX_ORACLE_FEEDS, ORACLE_PRICE_RECORD, ORACLE_QUORUM_CONFIG,
+    OraclePriceRecord, OracleQuorumConfig, MAX_ORACLE_FEEDS, ORACLE_PRICE_RECORD,
+    ORACLE_QUORUM_CONFIG,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,9 +81,9 @@ fn submit_prices(
     env.block.time = cosmwasm_std::Timestamp::from_seconds(timestamp_sec);
     let info = message_info(sender, &[]);
     let msg = ExecuteMsg::SubmitOraclePrices { prices };
-    
+
     let res = contract::execute(deps.as_mut(), env, info, msg)?;
-    
+
     // Extract canonical price attribute
     let canonical = res
         .attributes
@@ -88,7 +91,7 @@ fn submit_prices(
         .find(|attr| attr.key == "canonical_price")
         .map(|attr| attr.value.parse::<i128>().unwrap())
         .unwrap();
-        
+
     Ok(canonical)
 }
 
@@ -105,7 +108,12 @@ fn e2e_oracle_healthy_baseline() {
     set_quorum_config(&mut deps, &owner, 3, 500, 3600).expect("quorum config failed");
 
     // Query configuration to verify
-    let q_res = contract::query(deps.as_ref(), mock_env(), QueryMsg::GetOracleQuorumConfig {}).unwrap();
+    let q_res = contract::query(
+        deps.as_ref(),
+        mock_env(),
+        QueryMsg::GetOracleQuorumConfig {},
+    )
+    .unwrap();
     let cfg_resp: OracleQuorumConfigResponse = from_json(&q_res).unwrap();
     let cfg = cfg_resp.config.expect("config should exist");
     assert_eq!(cfg.min_quorum_k, 3);
@@ -116,8 +124,13 @@ fn e2e_oracle_healthy_baseline() {
     // Sorted: 1000, 1005, 1010, 1020, 2000
     // Window [1000, 1005, 1010]: spread = (1010 - 1000) / 1000 = 100 bps <= 500 bps -> qualifies!
     // Lower-median index = 0 + (3-1)/2 = 1 -> 1005
-    let canonical = submit_prices(&mut deps, &owner, vec![1000, 1010, 1005, 1020, 2000], 10_000)
-        .expect("price submission failed");
+    let canonical = submit_prices(
+        &mut deps,
+        &owner,
+        vec![1000, 1010, 1005, 1020, 2000],
+        10_000,
+    )
+    .expect("price submission failed");
     assert_eq!(canonical, 1005);
 
     // 3. Query price record
@@ -259,7 +272,12 @@ fn e2e_oracle_outage_state_isolation() {
     assert_eq!(outage_err, ContractError::OracleQuorumNotMet);
 
     // Verify existing credit line state, proof of reserves, and health factor remain completely intact
-    let por_binary = contract::query(deps.as_ref(), mock_env(), QueryMsg::ProofOfReserve { denom: None }).unwrap();
+    let por_binary = contract::query(
+        deps.as_ref(),
+        mock_env(),
+        QueryMsg::ProofOfReserve { denom: None },
+    )
+    .unwrap();
     let por: creditra_credit::msg::ProofOfReserveResponse = from_json(&por_binary).unwrap();
     assert_eq!(por.total_credit_lines, 1);
     assert_eq!(por.total_drawn, Uint128::new(300));
@@ -270,7 +288,8 @@ fn e2e_oracle_outage_state_isolation() {
         QueryMsg::BorrowerHealthFactor {
             borrower: borrower.to_string(),
         },
-    ).unwrap();
+    )
+    .unwrap();
     let hf: creditra_credit::msg::BorrowerHealthFactorResponse = from_json(&hf_binary).unwrap();
     assert_eq!(hf.credit_lines.len(), 1);
     assert_eq!(hf.credit_lines[0].utilized_amount, Uint128::new(300));

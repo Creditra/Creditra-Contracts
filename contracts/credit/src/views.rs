@@ -9,7 +9,8 @@ use crate::storage::{
     is_paused, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, CreditLineSnapshot, CreditLinesPage, ProofOfReserve, ProtocolSummaryView,
+    BorrowCapabilities, BorrowStateSnapshot, CreditLineSnapshot, CreditLinesPage, ProofOfReserve,
+    ProtocolSummaryView,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -218,5 +219,47 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         lines: credit_lines,
         next_cursor,
         has_more,
+    }
+}
+
+// ── Borrow state snapshot view ───────────────────────────────────────────────
+
+/// Return a full state snapshot for a borrower's credit line.
+///
+/// This is a read-only, no-auth view that returns a comprehensive snapshot
+/// of the borrower's current state including credit line data, collateral
+/// balance, and borrow capabilities. This is useful for off-chain monitoring,
+/// risk dashboards, and debugging.
+///
+/// # Parameters
+///
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+///
+/// A [`BorrowStateSnapshot`] struct containing:
+/// - `credit_line`: The full [`CreditLineData`] if it exists, or `None`.
+/// - `collateral_balance`: The borrower's collateral balance.
+/// - `capabilities`: The borrower's current [`BorrowCapabilities`].
+///
+/// # Security
+///
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state. TTL may be bumped if the borrower's
+/// persistent entry is near expiry, but this does not change logical state.
+pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
+    let credit_line_opt = get_credit_line(&env, &borrower);
+    let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
+    let capabilities = borrow_capabilities(env.clone(), borrower.clone());
+
+    let mut credit_line_vec = soroban_sdk::Vec::new(&env);
+    if let Some(line) = credit_line_opt {
+        credit_line_vec.push_back(line);
+    }
+
+    BorrowStateSnapshot {
+        credit_line: credit_line_vec,
+        collateral_balance,
+        capabilities,
     }
 }

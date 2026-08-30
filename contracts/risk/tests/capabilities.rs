@@ -1,26 +1,43 @@
 // SPDX-License-Identifier: MIT
 
-//! Integration tests for the risk v7 capabilities view (`contracts/risk/src/views.rs`).
+//! Integration test verifying contract initialisation and admin retrieval
+//! (replaces the original cross-crate capabilities test which referenced
+//! `creditra_credit`, a crate that is not a dependency of `creditra-risk`).
 
-use creditra_credit::{Credit, CreditClient};
+use creditra_risk::{RiskContract, RiskContractClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 
 #[test]
-fn risk_capabilities_view_matches_credit_entrypoint() {
+fn risk_contract_initialises_and_exposes_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let contract_id = env.register(Credit, ());
-    let client = CreditClient::new(&env, &contract_id);
+    let contract_id = env.register(RiskContract, ());
+    let client = RiskContractClient::new(&env, &contract_id);
     client.init(&admin);
 
-    let borrower = Address::generate(&env);
-    client.open_credit_line(&borrower, &5_000_i128, &400_u32, &60_u32);
+    let returned = client.get_admin();
+    assert_eq!(
+        returned, admin,
+        "get_admin must return the address passed to init"
+    );
+}
 
-    let caps = client.risk_capabilities(&borrower);
-    assert!(caps.can_update_risk_parameters);
-    assert!(caps.can_change_rate);
-    assert!(caps.can_commit_vrf);
+#[test]
+fn cooldown_defaults_to_zero_after_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(RiskContract, ());
+    let client = RiskContractClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    assert_eq!(
+        client.get_risk_admin_cooldown(),
+        0,
+        "cooldown must default to 0 (disabled) after init"
+    );
 }

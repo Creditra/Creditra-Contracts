@@ -29,6 +29,11 @@ proptest! {
         let contract_id = env.register_contract(None, Auction);
         let client = AuctionClient::new(&env, &contract_id);
 
+        // `init_auction` is a factory-gated mutation: register the factory so
+        // the create call is authorized.
+        let factory = Address::generate(&env);
+        client.set_factory_contract(&factory);
+
         let auction_id = Symbol::new(&env, "prop_auc");
         let end_time = start_time + duration;
 
@@ -84,7 +89,7 @@ proptest! {
             let fp = state.config.dutch_floor_price.unwrap();
             assert!(sp >= fp);
             assert!(sp >= state.config.min_bid);
-            
+
             if state.config.dutch_decay == DutchAuctionDecay::Stepped {
                 assert!(state.config.dutch_step_count.unwrap() > 0);
             }

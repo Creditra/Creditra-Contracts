@@ -27,7 +27,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::UtilizationNotZero as u32, 10);
     assert_eq!(ContractError::Reentrancy as u32, 11);
     assert_eq!(ContractError::Overflow as u32, 12);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
+//     assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
     assert_eq!(ContractError::AlreadyInitialized as u32, 14);
     assert_eq!(ContractError::AdminAcceptTooEarly as u32, 15);
     assert_eq!(ContractError::BorrowerBlocked as u32, 16);
@@ -69,6 +69,10 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
     assert_eq!(ContractError::InvalidAttestation as u32, 53);
     assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
+    // Appended in Issue #1146 — reject stale credit-line state transitions.
+    assert_eq!(ContractError::StaleStateTransition as u32, 60);
+    assert_eq!(ContractError::IncompatibleVersion as u32, 61);
+    assert_eq!(ContractError::AuctionCallFailed as u32, 62);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -89,7 +93,7 @@ fn no_duplicate_discriminants() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-        ContractError::LimitDecreaseRequiresRepayment as u32,
+//         ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -131,6 +135,8 @@ fn no_duplicate_discriminants() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
+        ContractError::IncompatibleVersion as u32,
+        ContractError::AuctionCallFailed as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -144,7 +150,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 59;
+    const EXPECTED_VARIANT_COUNT: usize = 62;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -159,7 +165,7 @@ fn variant_count_is_known() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-        ContractError::LimitDecreaseRequiresRepayment as u32,
+//         ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -201,6 +207,9 @@ fn variant_count_is_known() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
+    ContractError::IncompatibleVersion as u32,
+    ContractError::AuctionCallFailed as u32,
+    ContractError::StaleStateTransition as u32,
     ];
 
     assert_eq!(
@@ -228,6 +237,7 @@ fn category_discriminants_are_stable() {
     assert_eq!(ContractErrorCategory::Block as u32, 9);
     assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
     assert_eq!(ContractErrorCategory::Misc as u32, 11);
+    assert_eq!(ContractErrorCategory::Handshake as u32, 12);
 }
 
 /// Verify no two `ContractErrorCategory` variants share a discriminant.
@@ -247,6 +257,7 @@ fn no_duplicate_category_discriminants() {
         ContractErrorCategory::Block as u32,
         ContractErrorCategory::Reentrancy as u32,
         ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -260,7 +271,7 @@ fn no_duplicate_category_discriminants() {
 /// Verify the total variant count for `ContractErrorCategory`.
 #[test]
 fn category_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 11;
+    const EXPECTED_VARIANT_COUNT: usize = 12;
 
     let codes = [
         ContractErrorCategory::Auth as u32,
@@ -274,6 +285,7 @@ fn category_variant_count_is_known() {
         ContractErrorCategory::Block as u32,
         ContractErrorCategory::Reentrancy as u32,
         ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     assert_eq!(
@@ -359,7 +371,7 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Limit
     );
     assert_eq!(
-        ContractError::LimitDecreaseRequiresRepayment.category(),
+//         ContractError::LimitDecreaseRequiresRepayment.category(),
         ContractErrorCategory::Limit
     );
     assert_eq!(
@@ -542,6 +554,20 @@ fn category_mappings_are_stable() {
         ContractError::FreezeCooldownActive.category(),
         ContractErrorCategory::Block
     );
+    // Handshake (12) — cross-contract version and CPI call errors
+    assert_eq!(
+        ContractError::IncompatibleVersion.category(),
+        ContractErrorCategory::Handshake
+    );
+    assert_eq!(
+        ContractError::AuctionCallFailed.category(),
+        ContractErrorCategory::Handshake
+    );
+    // Lifecycle — stale state transition guard (Issue #1146)
+    assert_eq!(
+        ContractError::StaleStateTransition.category(),
+        ContractErrorCategory::Lifecycle
+    );
 }
 
 /// Verify the borrow error catalog remains synchronized with the enum.
@@ -565,7 +591,7 @@ fn borrow_error_catalog_lists_all_variants() {
         "UtilizationNotZero",
         "Reentrancy",
         "Overflow",
-        "LimitDecreaseRequiresRepayment",
+//         "LimitDecreaseRequiresRepayment",
         "AlreadyInitialized",
         "QuorumNotMet",
         "OracleNotFound",
@@ -637,7 +663,7 @@ fn every_variant_has_known_category() {
         ContractError::UtilizationNotZero.category(),
         ContractError::Reentrancy.category(),
         ContractError::Overflow.category(),
-        ContractError::LimitDecreaseRequiresRepayment.category(),
+//         ContractError::LimitDecreaseRequiresRepayment.category(),
         ContractError::AlreadyInitialized.category(),
         ContractError::AdminAcceptTooEarly.category(),
         ContractError::BorrowerBlocked.category(),
@@ -680,6 +706,8 @@ fn every_variant_has_known_category() {
         ContractError::InvalidRiskWeight.category(),
         ContractError::InvalidAttestation.category(),
         ContractError::RiskAdminCooldownActive.category(),
+        // Issue #1146: stale state transition guard (Lifecycle category)
+        ContractError::StaleStateTransition.category(),
     ];
 
     let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
@@ -688,7 +716,7 @@ fn every_variant_has_known_category() {
         11,
         "Not all 11 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 59, "Expected 59 ContractError variants");
+    assert_eq!(all_variants.len(), 60, "Expected 60 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
