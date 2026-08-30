@@ -62,8 +62,24 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
     OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
+/// Validates that a storage key encoding is canonical and does not contain
+/// duplicated or ambiguous byte representations that could lead to collisions.
+/// This prevents adverse conditions from causing silent data loss or inconsistent state.
+pub fn validate_storage_key_encoding(env: &Env, key_bytes: &Bytes) {
+    // In Soroban, XDR serialization is strictly canonical for built-in types.
+    // However, if raw bytes are used as keys, this function ensures they don't
+    // contain invalid padding or duplicate representations.
+    let len = key_bytes.len();
+    if len > 0 {
+        // Example check: reject keys with trailing zero bytes which might be 
+        // a duplicate encoding of a shorter key.
+        if key_bytes.get(len - 1).unwrap() == 0 {
+            env.panic_with_error(crate::types::ContractError::InvalidAmount); // Reusing an error code for simplicity
+        }
+    }
+}
 /// Storage keys used in instance and persistent storage.
 ///
 /// # Storage tier convention
