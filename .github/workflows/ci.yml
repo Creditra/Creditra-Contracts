@@ -93,7 +93,11 @@ jobs:
         working-directory: contracts/creditra-credit
         env:
           RUSTFLAGS: -C link-arg=--allow-undefined
-        run: cargo build $CARGOFLAGS --release --target wasm32-unknown-unknown
+        # Build only the library for the wasm target so host-side binaries
+        # (e.g. the `schema` generator) are not compiled for wasm. This
+        # prevents host-only macros and traits from being evaluated for the
+        # wasm build and avoids CI failures when building the artifact.
+        run: cargo build $CARGOFLAGS --release --lib --target wasm32-unknown-unknown
 
       # Enforce the artifact size budget with the same scanner the guard tests
       # exercise (scripts/check-wasm-size.sh), so CI and local policy checks

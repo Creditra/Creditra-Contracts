@@ -440,8 +440,8 @@ mod tests {
         setup_oracle_config(&env, 500, 3600);
         setup_oracle_quorum_config(&env, 2, 500, 3600);
 
-        // Store quorum price
-        crate::storage::set_oracle_quorum_price(&env, 2_000i128);
+        // Store quorum price with a timestamp so the value is considered fresh.
+        crate::storage::set_oracle_quorum_price(&env, 2_000i128, env.ledger().timestamp());
 
         // Supply single-oracle price (should be ignored)
         let result = validate_settlement_oracle_price(&env, Some(1_000i128));
@@ -458,7 +458,7 @@ mod tests {
         setup_oracle_quorum_config(&env, 2, 500, 3600);
 
         env.ledger().with_mut(|l| l.timestamp = 1_000);
-        crate::storage::set_oracle_quorum_price(&env, 1_000i128);
+        crate::storage::set_oracle_quorum_price(&env, 1_000i128, 1_000u64);
 
         env.ledger().with_mut(|l| l.timestamp = 2_000);
         let result = validate_settlement_oracle_price(&env, None);
@@ -475,7 +475,7 @@ mod tests {
         setup_oracle_quorum_config(&env, 2, 500, 3600);
 
         env.ledger().with_mut(|l| l.timestamp = 1_000);
-        crate::storage::set_oracle_quorum_price(&env, 1_000i128);
+        crate::storage::set_oracle_quorum_price(&env, 1_000i128, 1_000u64);
 
         // Advance exactly max_age_seconds
         env.ledger().with_mut(|l| l.timestamp = 1_000 + 3600);
@@ -504,7 +504,7 @@ mod tests {
         setup_oracle_quorum_config(&env, 2, 500, 3600);
 
         env.ledger().with_mut(|l| l.timestamp = 1_000);
-        crate::storage::set_oracle_quorum_price(&env, 1_000i128);
+        crate::storage::set_oracle_quorum_price(&env, 1_000i128, 1_000u64);
 
         // Advance beyond max_age_seconds
         env.ledger().with_mut(|l| l.timestamp = 1_000 + 3601);
