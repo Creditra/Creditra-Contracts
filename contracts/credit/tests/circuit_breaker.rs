@@ -454,6 +454,118 @@ fn unpause_when_already_unpaused_is_idempotent() {
     assert!(!client.is_protocol_paused());
 }
 
+// ── transition observability & idempotency ─────────────────────────────────
+
+#[test]
+fn pause_noop_emits_no_event() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.set_protocol_paused(&true);
+    assert!(client.is_protocol_paused());
+    let _ = env.events().all(); // clear
+
+    // Redundant pause while already paused — must be a no-op with no event.
+    client.set_protocol_paused(&true);
+    assert!(
+        env.events().all().is_empty(),
+        "no-op pause must not emit a duplicate paused event"
+    );
+    assert!(client.is_protocol_paused());
+}
+
+#[test]
+fn unpause_noop_emits_no_event() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    assert!(!client.is_protocol_paused());
+    let _ = env.events().all(); // clear
+
+    // Redundant unpause while already unpaused — must be a no-op with no event.
+    client.set_protocol_paused(&false);
+    assert!(
+        env.events().all().is_empty(),
+        "no-op unpause must not emit a duplicate unpaused event"
+    );
+    assert!(!client.is_protocol_paused());
+}
+
+#[test]
+fn real_transition_after_noop_reemits_event() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // Genuine transition: unpaused -> paused
+    client.set_protocol_paused(&true);
+    assert_eq!(env.events().all().len(), 1, "pause must emit one event");
+    let _ = env.events().all();
+
+    // No-op pause: no event
+    client.set_protocol_paused(&true);
+    assert!(env.events().all().is_empty());
+    let _ = env.events().all();
+
+    // Genuine transition: unpause -> emits
+    client.set_protocol_paused(&false);
+    assert_eq!(env.events().all().len(), 1, "unpause must emit one event");
+    let _ = env.events().all();
+
+    // Genuine transition again: pause -> emits
+    client.set_protocol_paused(&true);
+    assert_eq!(env.events().all().len(), 1, "re-pause must emit one event");
+}
+
+#[test]
+fn reasonless_repause_clears_stale_reason_without_event() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    let reason = soroban_sdk::Symbol::new(&env, "oracle-outage");
+    client.set_protocol_paused_with_reason(&true, &reason);
+    assert!(client.get_protocol_pause_reason().is_some());
+    let _ = env.events().all();
+
+    // Reason-less pause while already paused: clear stale reason, no event.
+    client.set_protocol_paused(&true);
+    assert!(
+        client.get_protocol_pause_reason().is_none(),
+        "reason-less re-pause must clear the stale reason"
+    );
+    assert!(
+        env.events().all().is_empty(),
+        "reason-less re-pause must not emit a duplicate event"
+    );
+}
+
+#[test]
+fn repeated_pause_with_reason_refreshes_reason_but_not_event() {
+    let (env, admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.set_protocol_paused_with_reason(&true, &soroban_sdk::Symbol::new(&env, "first"));
+    let original = client.get_protocol_pause_reason().unwrap();
+    assert_eq!(original.actor, admin);
+    let _ = env.events().all();
+
+    // Advance the ledger timestamp so a refresh is observable.
+    env.ledger().with_mut(|l| l.timestamp += 100);
+
+    // Repeated pause-with-reason: reason is refreshed, no duplicate event.
+    client.set_protocol_paused_with_reason(&true, &soroban_sdk::Symbol::new(&env, "second"));
+    assert!(
+        env.events().all().is_empty(),
+        "repeated pause-with-reason must not emit a duplicate event"
+    );
+
+    let refreshed = client.get_protocol_pause_reason().unwrap();
+    assert_eq!(refreshed.reason, soroban_sdk::Symbol::new(&env, "second"));
+    assert!(
+        refreshed.timestamp > original.timestamp,
+        "reason timestamp must refresh to the latest pause invocation"
+    );
+}
+
 // ── operations resume after unpause ──────────────────────────────────────────
 
 #[test]

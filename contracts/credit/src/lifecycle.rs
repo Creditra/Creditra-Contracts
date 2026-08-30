@@ -1975,6 +1975,7 @@ mod installment {
             &50_000,
             &settlement_id,
             &5_000,
+            &None,
         );
 
         // Second settlement with same (borrower, settlement_id) should fail
@@ -1983,6 +1984,7 @@ mod installment {
             &25_000,
             &settlement_id, // Same ID
             &5_000,
+            &None,
         );
     }
 
@@ -2013,6 +2015,7 @@ mod installment {
             &recovery_1,
             &settlement_id_1,
             &3_333, // ~33%
+            &None,
         );
 
         let after_round_1 = client.get_credit_line(&borrower).unwrap();
@@ -2027,6 +2030,7 @@ mod installment {
             &recovery_2,
             &settlement_id_2,
             &5_000, // 50%
+            &None,
         );
 
         let after_round_2 = client.get_credit_line(&borrower).unwrap();
@@ -2044,6 +2048,7 @@ mod installment {
             &recovery_3,
             &settlement_id_3,
             &10_000, // 100%
+            &None,
         );
 
         let after_round_3 = client.get_credit_line(&borrower).unwrap();
@@ -2074,6 +2079,7 @@ mod installment {
             &0, // Invalid: zero recovered amount
             &settlement_id,
             &5_000,
+            &None,
         );
     }
 
@@ -2100,6 +2106,7 @@ mod installment {
             &50_000,
             &settlement_id,
             &5_000,
+            &None,
         );
     }
 }

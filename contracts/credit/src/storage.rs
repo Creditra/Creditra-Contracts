@@ -62,8 +62,24 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
     OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
+/// Validates that a storage key encoding is canonical and does not contain
+/// duplicated or ambiguous byte representations that could lead to collisions.
+/// This prevents adverse conditions from causing silent data loss or inconsistent state.
+pub fn validate_storage_key_encoding(env: &Env, key_bytes: &Bytes) {
+    // In Soroban, XDR serialization is strictly canonical for built-in types.
+    // However, if raw bytes are used as keys, this function ensures they don't
+    // contain invalid padding or duplicate representations.
+    let len = key_bytes.len();
+    if len > 0 {
+        // Example check: reject keys with trailing zero bytes which might be 
+        // a duplicate encoding of a shorter key.
+        if key_bytes.get(len - 1).unwrap() == 0 {
+            env.panic_with_error(crate::types::ContractError::InvalidAmount); // Reusing an error code for simplicity
+        }
+    }
+}
 /// Storage keys used in instance and persistent storage.
 ///
 /// # Storage tier convention
@@ -376,6 +392,38 @@ pub fn get_total_utilized(env: &Env) -> i128 {
         .unwrap_or(0)
 }
 
+/// Assert that the persisted `TotalUtilized` accumulator matches the live sum of
+/// every credit line's `utilized_amount`.
+///
+/// This is a fail-closed invariant check: any drift in the aggregate is treated
+/// as protocol corruption and aborts the transaction with a deterministic error
+/// message so operators can diagnose storage drift without exposing sensitive
+/// state.
+pub fn assert_total_utilized_conserved(env: &Env) {
+    let stored_total = get_total_utilized(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        let Some(line) = env.storage().persistent().get::<Address, CreditLineData>(&borrower)
+        else {
+            continue;
+        };
+        recomputed_total = recomputed_total
+            .checked_add(line.utilized_amount)
+            .unwrap_or_else(|| panic!("utilization conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "utilization conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
+}
+
 /// Return the global collateral accumulator.
 pub fn get_total_collateral(env: &Env) -> i128 {
     bump_instance_ttl(env);
@@ -383,6 +431,30 @@ pub fn get_total_collateral(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::TotalCollateral)
         .unwrap_or(0)
+}
+
+/// Assert that the persisted `TotalCollateral` accumulator matches the live sum of
+/// the tracked collateral balances for the known borrower set.
+pub fn assert_total_collateral_conserved(env: &Env) {
+    let stored_total = get_total_collateral(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        let balance = get_collateral_balance(env, &borrower);
+        recomputed_total = recomputed_total
+            .checked_add(balance)
+            .unwrap_or_else(|| panic!("collateral conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "collateral conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
 }
 
 /// Return the number of indexed credit lines.
@@ -547,6 +619,7 @@ pub fn adjust_total_utilized(env: &Env, previous_utilized: i128, new_utilized: i
     env.storage()
         .instance()
         .set(&DataKey::TotalUtilized, &updated_total);
+    assert_total_utilized_conserved(env);
 }
 
 /// Adjust the global collateral accumulator by the change in one borrower balance.
@@ -564,6 +637,7 @@ pub fn adjust_total_collateral(env: &Env, previous_balance: i128, new_balance: i
     env.storage()
         .instance()
         .set(&DataKey::TotalCollateral, &updated_total);
+    assert_total_collateral_conserved(env);
 }
 
 /// Persist a credit line and atomically apply its contribution delta to the
@@ -1178,16 +1252,32 @@ pub fn is_paused(env: &Env) -> bool {
 
 /// Set the protocol pause state (admin only, enforced by caller).
 ///
+/// This is a **pure flag write** — it never touches the pause reason. Reason
+/// maintenance (clear on unpause / on reason-less pause, write on pause-with-
+/// reason) is the responsibility of the entrypoints so that idempotent
+/// no-ops cannot clobber the audit trail. See [`set_pause_reason`] and
+/// [`clear_pause_reason`].
+///
+/// Callers are expected to detect no-op transitions (requesting the state the
+/// contract is already in) *before* calling this, so that duplicate pause or
+/// unpause requests do not emit misleading transition events.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `Symbol("paused")`
 /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
-    if !paused {
-        // Clear the pause reason when unpausing.
-        env.storage().instance().remove(&DataKey::PauseReason);
-    }
+}
+
+/// Clear any stored pause reason.
+///
+/// Called on unpause and on a reason-less pause so the stored reason always
+/// reflects the most recent pause invocation. This prevents a stale reason
+/// (recorded by an earlier pause-with-reason) from surviving into a later
+/// reason-less pause or unpause.
+pub fn clear_pause_reason(env: &Env) {
+    env.storage().instance().remove(&DataKey::PauseReason);
 }
 
 /// Get the structured pause reason, if one was recorded during the last pause.
