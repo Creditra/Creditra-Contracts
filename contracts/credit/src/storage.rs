@@ -59,8 +59,8 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
-    OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, ErrorMappingVersion,
+    GracePeriodConfig, OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
@@ -146,6 +146,8 @@ pub enum DataKey {
     DrawsFrozen,
     /// Storage schema version for migration and compatibility checks.
     SchemaVersion,
+    /// Error-code mapping version for cross-contract version compatibility.
+    ErrorMappingVersion,
     /// Monotonic count of unique borrowers that have had a credit line recorded.
     CreditLineCount,
     /// Count of currently Active credit lines.
@@ -382,6 +384,19 @@ pub fn set_schema_version(env: &Env, version: u32) {
     env.storage()
         .instance()
         .set(&DataKey::SchemaVersion, &version);
+}
+
+/// Return the configured error-code mapping version, if any.
+pub fn get_error_mapping_version(env: &Env) -> Option<ErrorMappingVersion> {
+    env.storage().instance().get(&DataKey::ErrorMappingVersion)
+}
+
+/// Persist the error-code mapping version.
+#[allow(dead_code)]
+pub fn set_error_mapping_version(env: &Env, version: ErrorMappingVersion) {
+    env.storage()
+        .instance()
+        .set(&DataKey::ErrorMappingVersion, &version);
 }
 
 /// Return the global total utilized accumulator.

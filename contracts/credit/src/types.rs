@@ -870,3 +870,20 @@ pub struct PauseReason {
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
 }
+
+/// Error-code mapping version for cross-contract version compatibility.
+///
+/// This structure tracks the error-code mapping version to ensure that
+/// error discriminants remain stable across contract upgrades. When the
+/// contract is upgraded, the error-code mapping version must either remain
+/// the same (no breaking changes) or increment with a documented migration path.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ErrorMappingVersion {
+    /// The error-code mapping version (monotonically increasing).
+    pub version: u32,
+    /// The contract API version this error mapping is compatible with.
+    pub contract_version: (u32, u32, u32),
+    /// Ledger timestamp when this error mapping was set.
+    pub set_at: u64,
+}
