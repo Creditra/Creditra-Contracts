@@ -291,6 +291,8 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Per-borrower archived flag.
+    ArchivedCreditLine(Address),
 }
 
 /// Maximum number of credit lines returned per page.
@@ -1554,6 +1556,30 @@ pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
             .is_some_and(|expiry: u64| now < expiry)
     } else {
         false
+    }
+}
+
+pub fn is_credit_line_archived(env: &Env, borrower: &Address) -> bool {
+    let key = DataKey::ArchivedCreditLine(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+pub fn set_credit_line_archived(env: &Env, borrower: &Address, archived: bool) {
+    let key = DataKey::ArchivedCreditLine(borrower.clone());
+    if archived {
+        env.storage().persistent().set(&key, &true);
+        bump_persistent_ttl(env, &key);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+}
+
+pub fn assert_not_archived(env: &Env, borrower: &Address) {
+    if is_credit_line_archived(env, borrower) {
+        env.panic_with_error(ContractError::CreditLineArchived);
     }
 }
 

@@ -260,6 +260,7 @@ pub fn validate_credit_limit_bounds(env: &Env, credit_limit: i128) {
 /// `persist_credit_line` with `previous_utilized` for `TotalUtilized`
 /// conservation, and sets `suspension_ts` monotonically.
 fn suspend_credit_line_internal(env: &Env, borrower: Address, target: CreditStatus) {
+    crate::storage::assert_not_archived(env, &borrower);
     debug_assert!(
         target == CreditStatus::Suspended || target == CreditStatus::SelfSuspended,
         "suspend target must be Suspended or SelfSuspended"
@@ -419,6 +420,7 @@ pub fn open_credit_line(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
 
     if credit_limit <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -567,6 +569,7 @@ pub fn self_suspend_credit_line(env: Env, borrower: Address) {
 /// `StaleStateTransition` deterministically, not silently succeeding.
 pub fn unsuspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
     // Admin auth enforced by lib.rs wrapper.
     let stored_line: CreditLineData = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
@@ -651,6 +654,7 @@ pub fn unsuspend_credit_line(env: Env, borrower: Address) {
 /// - `Active → Active` (duplicate) reverts `StaleStateTransition`.
 pub fn self_unsuspend_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
     borrower.require_auth();
 
     let stored_line: CreditLineData = get_credit_line(&env, &borrower)
@@ -742,6 +746,7 @@ pub fn self_unsuspend_credit_line(env: Env, borrower: Address) {
 ///   non-closed status. This is intentional for operational efficiency.
 pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
     // `closer` auth is enforced by the `lib.rs` `close_credit_line` entrypoint
     // wrapper before this is called; not re-checked here (see the comment on
     // `suspend_credit_line` above for why).
@@ -853,6 +858,7 @@ pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
 /// on to mutate and persist the line.
 pub fn default_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
     // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
     let stored_line: CreditLineData = env
         .storage()
@@ -946,6 +952,7 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     assert_not_paused(&env);
     require_admin_auth(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
 
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -1050,6 +1057,7 @@ pub fn settle_default_liquidation(
     // for why this is not re-checked here): a second `require_auth` for the
     // already-authorized admin address within one invocation is rejected by the
     // Soroban auth frame as `Error(Auth, ExistingValue)`.
+    crate::storage::assert_not_archived(&env, &borrower);
 
     // Step 2: Numeric validation (cheap checks before any storage reads)
     if recovered_amount <= 0 {
@@ -1198,6 +1206,7 @@ pub fn settle_default_liquidation(
 /// on to mutate and persist the line.
 pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditStatus) {
     assert_not_paused(&env);
+    crate::storage::assert_not_archived(&env, &borrower);
     // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
 
     // Only Active and Restricted are valid reinstate targets per the state-machine spec.

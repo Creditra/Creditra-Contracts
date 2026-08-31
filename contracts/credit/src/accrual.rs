@@ -411,6 +411,9 @@ pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
 
     for borrower in borrowers.iter() {
         if let Some(stored_line) = get_credit_line(env, &borrower) {
+            if crate::storage::is_credit_line_archived(env, &borrower) {
+                continue;
+            }
             if stored_line.status == CreditStatus::Active && stored_line.utilized_amount > 0 {
                 let previous_utilized = stored_line.utilized_amount;
                 let previous_ts = stored_line.last_accrual_ts;
