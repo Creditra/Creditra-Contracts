@@ -267,6 +267,8 @@ pub enum ContractError {
     /// deterministic. The block lifts when the last active auction exits the
     /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// The credit line has been archived and cannot be mutated.
+    CreditLineArchived = 64,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -369,7 +371,8 @@ impl ContractError {
             | Self::BorrowerFrozen
             | Self::BorrowerBlocked
             | Self::CreditLineFrozen
-            | Self::FreezeCooldownActive => Block,
+            | Self::FreezeCooldownActive
+            | Self::CreditLineArchived => Block,
 
             Self::Reentrancy => Reentrancy,
 

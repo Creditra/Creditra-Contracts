@@ -419,6 +419,11 @@ impl Credit {
 
         borrower.require_auth();
 
+        if crate::storage::is_credit_line_archived(&env, &borrower) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::CreditLineArchived);
+        }
+
         if amount <= 0 {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InvalidAmount);
@@ -626,6 +631,11 @@ impl Credit {
         // --- Reentrancy guard (defense-in-depth) ---
         set_reentrancy_guard(&env);
         borrower.require_auth();
+
+        if crate::storage::is_credit_line_archived(&env, &borrower) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::CreditLineArchived);
+        }
 
         if amount <= 0 {
             clear_reentrancy_guard(&env);
@@ -2387,6 +2397,7 @@ impl Credit {
     ) {
         assert_not_paused(&env);
         let admin = require_admin_auth(&env);
+        crate::storage::assert_not_archived(&env, &borrower);
 
         if amount <= 0 {
             env.panic_with_error(ContractError::InvalidAmount);
@@ -2454,7 +2465,29 @@ impl Credit {
         );
     }
 
-    /// Emergency pause the protocol (admin only).
+    /// Archives a credit line, preventing any further mutations.
+    pub fn archive_credit_line(env: Env, borrower: Address) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        
+        let _ = storage_get_credit_line(&env, &borrower)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+        crate::storage::set_credit_line_archived(&env, &borrower, true);
+    }
+
+    /// Unarchives a credit line, allowing mutations again.
+    pub fn unarchive_credit_line(env: Env, borrower: Address) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+        
+        let _ = storage_get_credit_line(&env, &borrower)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+
+        crate::storage::set_credit_line_archived(&env, &borrower, false);
+    }
+
+    /// Pause or unpause the contract (admin only).
     ///
     /// When paused, all mutating entrypoints except `repay_credit` are blocked
     /// with [`ContractError::Paused`] (code 18). Repayments are always allowed
