@@ -38,4 +38,12 @@ pub enum AuctionError {
     AlreadySettled = 13,
     /// The liquidation grace window has not yet elapsed; bidding is blocked.
     GracePeriodActive = 14,
+    /// `set_factory_contract` was called after factory initialization had
+    /// already completed (Issue #1141).
+    ///
+    /// Factory initialization is one-shot. The registered factory is
+    /// unchanged and no state was mutated by the rejected call. A deliberate
+    /// hand-over uses `rotate_factory_contract`, which requires both the
+    /// outgoing and incoming factory to authorize.
+    FactoryAlreadyInitialized = 15,
 }

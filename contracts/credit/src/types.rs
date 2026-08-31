@@ -167,6 +167,9 @@ pub enum CreditStatus {
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 /// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
+/// | 64   | `UpgradeVerificationPending`   | Lifecycle     | Upgrade attempted while a prior migration checkpoint is unverified |
+/// | 65   | `UpgradeStateMismatch`         | Lifecycle     | Credit-line state did not survive the upgrade unchanged |
+/// | 66   | `NoUpgradeCheckpoint`          | Lifecycle     | Verify or rollback requested with no checkpoint recorded |
 // `export = false`: `ContractError` has grown past the 50-case limit the
 // Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
@@ -267,6 +270,25 @@ pub enum ContractError {
     /// deterministic. The block lifts when the last active auction exits the
     /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// A second upgrade was attempted while the previous one still had an
+    /// unverified migration checkpoint (Issue #1149).
+    ///
+    /// No state was mutated. Resolve the outstanding checkpoint first with
+    /// `verify_upgrade_migration` (accept) or `rollback_upgrade` (revert), so
+    /// a failed migration cannot be compounded by stacking another upgrade on
+    /// top of it.
+    UpgradeVerificationPending = 64,
+    /// Post-upgrade verification found credit-line state that does not match
+    /// the pre-upgrade checkpoint (Issue #1149).
+    ///
+    /// The credit-line count or aggregate utilization changed across the WASM
+    /// swap, which means records were lost or silently re-interpreted. The
+    /// checkpoint is retained so `rollback_upgrade` can restore the previous
+    /// schema version.
+    UpgradeStateMismatch = 65,
+    /// An upgrade verification or rollback was requested with no checkpoint
+    /// recorded (Issue #1149).
+    NoUpgradeCheckpoint = 66,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -323,7 +345,12 @@ impl ContractError {
             | Self::AlreadySettled
             | Self::LiquidationGraceActive
             | Self::StaleStateTransition
-            | Self::AuctionActive => Lifecycle,
+            | Self::AuctionActive
+            // Upgrade-migration failures are state-transition failures of the
+            // contract itself, the same family as a stale transition (#1149).
+            | Self::UpgradeVerificationPending
+            | Self::UpgradeStateMismatch
+            | Self::NoUpgradeCheckpoint => Lifecycle,
 
             Self::InvalidAmount
             | Self::NegativeLimit

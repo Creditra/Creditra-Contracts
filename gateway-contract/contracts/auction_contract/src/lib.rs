@@ -367,19 +367,87 @@ impl Auction {
         bump_auction_state_ttl(&env, &auction_id);
     }
 
-    /// Sets the factory contract address.
+    /// Registers the factory contract exactly once (Issue #1141).
+    ///
+    /// # Replay safety
+    ///
+    /// Factory registration is **one-shot**. The first successful call sets a
+    /// persistent `FactoryInitialized` marker; every later call reverts with
+    /// [`AuctionError::FactoryAlreadyInitialized`] and mutates nothing. This
+    /// closes two distinct replay paths that the previous unbounded setter
+    /// left open:
+    ///
+    /// 1. **Re-initialization.** The old setter was a plain setter, so the
+    ///    same initialization call could be submitted repeatedly, and a stale
+    ///    but still-valid authorization could re-point the factory long after
+    ///    deployment.
+    /// 2. **Marker survives rotation.** The barrier is the marker, not the
+    ///    presence of an address. A rotation that cleared the address slot
+    ///    could otherwise reopen the initialization window, letting an
+    ///    unprivileged address claim the factory role a second time.
     ///
     /// # Authorization
-    /// Requires the proposed factory's auth during initial registration and
-    /// the currently registered factory's auth when replacing it.
+    ///
+    /// Requires the proposed factory's own auth, matching the pre-existing
+    /// bootstrap model: the deploying operator registers the factory it
+    /// controls in the same deployment sequence. Because registration is now
+    /// one-shot, this authority is spent exactly once and cannot be replayed.
+    ///
+    /// # Compatibility
+    ///
+    /// The signature is unchanged and first-time registration behaves exactly
+    /// as before. The behavioural change is that *replacement* through this
+    /// entrypoint is no longer permitted — that case now has a dedicated,
+    /// two-sided entrypoint, [`Self::rotate_factory_contract`].
+    ///
+    /// # Errors
+    /// * [`AuctionError::FactoryAlreadyInitialized`] — initialization already
+    ///   completed.
     pub fn set_factory_contract(env: Env, factory: Address) {
         bump_instance_ttl(&env);
-        if let Some(current_factory) = get_factory_contract(&env) {
-            current_factory.require_auth();
-        } else {
-            factory.require_auth();
+        // Barrier first: a replayed call must not reach the auth check or any
+        // write, so a rejected call leaves storage byte-identical.
+        if storage::is_factory_initialized(&env) {
+            env.panic_with_error(AuctionError::FactoryAlreadyInitialized);
         }
+        factory.require_auth();
         storage::set_factory_contract(&env, &factory);
+        storage::mark_factory_initialized(&env);
+    }
+
+    /// Hands the factory role to a new contract (Issue #1141).
+    ///
+    /// This is the deliberate replacement path that `set_factory_contract`
+    /// used to serve implicitly. It requires **both** the outgoing factory
+    /// (authorizing the hand-over) and the incoming factory (accepting it),
+    /// so a rotation can neither be forced on an unwilling successor nor
+    /// performed unilaterally by the successor.
+    ///
+    /// The `FactoryInitialized` marker is intentionally left set, so a
+    /// rotation can never reopen the one-shot initialization window.
+    ///
+    /// # Errors
+    /// * [`AuctionError::NoFactoryContract`] — no factory registered yet;
+    ///   there is nothing to rotate. Use [`Self::set_factory_contract`].
+    pub fn rotate_factory_contract(env: Env, new_factory: Address) {
+        bump_instance_ttl(&env);
+        let current_factory = match get_factory_contract(&env) {
+            Some(current) => current,
+            None => env.panic_with_error(AuctionError::NoFactoryContract),
+        };
+        current_factory.require_auth();
+        new_factory.require_auth();
+        storage::set_factory_contract(&env, &new_factory);
+        // Marker deliberately not cleared - see the doc comment above.
+    }
+
+    /// Whether factory initialization has completed (Issue #1141).
+    ///
+    /// Lets an operator confirm a deployment is sealed, and lets a client
+    /// distinguish "not yet initialized" from "initialized" without having to
+    /// provoke a rejection.
+    pub fn is_factory_initialized(env: Env) -> bool {
+        storage::is_factory_initialized(&env)
     }
 
     /// Places a bid on an open auction.

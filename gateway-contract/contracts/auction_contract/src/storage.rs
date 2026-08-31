@@ -127,6 +127,25 @@ pub fn set_factory_contract(env: &Env, factory: &Address) {
         .set(&DataKey::FactoryContract, factory);
 }
 
+/// Whether factory initialization has already completed (Issue #1141).
+///
+/// This is the replay barrier consulted by
+/// [`crate::AuctionContract::set_factory_contract`].
+pub fn is_factory_initialized(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::FactoryInitialized)
+        .unwrap_or(false)
+}
+
+/// Mark factory initialization complete. Never cleared: the marker outlives
+/// any later rotation so the one-shot window cannot be reopened.
+pub fn mark_factory_initialized(env: &Env) {
+    env.storage()
+        .instance()
+        .set(&DataKey::FactoryInitialized, &true);
+}
+
 // ── Reentrancy guard ──────────────────────────────────────────────────────────
 
 /// Returns the instance-storage key used for the reentrancy flag.

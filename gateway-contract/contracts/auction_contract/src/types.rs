@@ -85,6 +85,13 @@ pub enum DataKey {
     /// Contract-level grace window (in seconds) that must elapse after
     /// auction creation before the first bid can be placed.
     LiquidationGraceWindow,
+    /// One-shot marker recording that factory initialization has completed
+    /// (Issue #1141).
+    ///
+    /// Presence — not the factory address itself — is the replay barrier.
+    /// Keying off the address alone would let a `rotate_factory_contract`
+    /// that clears and re-sets the slot reopen the initialization window.
+    FactoryInitialized,
 }
 
 #[contracttype]
