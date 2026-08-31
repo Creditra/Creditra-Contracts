@@ -167,6 +167,7 @@ pub enum CreditStatus {
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 /// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
+/// | 64   | `DuplicateOperationId`         | Lifecycle     | Draw or repayment replayed an already-consumed operation id |
 // `export = false`: `ContractError` has grown past the 50-case limit the
 // Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
@@ -267,6 +268,17 @@ pub enum ContractError {
     /// deterministic. The block lifts when the last active auction exits the
     /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// A draw or repayment carried an operation id that was already consumed
+    /// (Issue #1153).
+    ///
+    /// The original operation stands; **no** state was mutated by the rejected
+    /// call. This is the replay barrier for `draw_credit_with_op_id` and
+    /// `repay_credit_with_op_id`: a client retrying a timed-out submission
+    /// reuses its id and receives this error instead of double-applying the
+    /// movement. The committed record is retrievable via `get_draw_record` /
+    /// `get_repayment_record`, so the retry can confirm the original outcome
+    /// without issuing another state-changing call.
+    DuplicateOperationId = 64,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -323,7 +335,10 @@ impl ContractError {
             | Self::AlreadySettled
             | Self::LiquidationGraceActive
             | Self::StaleStateTransition
-            | Self::AuctionActive => Lifecycle,
+            | Self::AuctionActive
+            // A replayed operation id is a "this already happened" rejection,
+            // the same family as AlreadySettled (Issue #1153).
+            | Self::DuplicateOperationId => Lifecycle,
 
             Self::InvalidAmount
             | Self::NegativeLimit

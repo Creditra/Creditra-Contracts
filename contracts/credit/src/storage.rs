@@ -62,7 +62,7 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
     OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol};
 
 /// Validates that a storage key encoding is canonical and does not contain
 /// duplicated or ambiguous byte representations that could lead to collisions.
@@ -291,6 +291,24 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+
+    // --- Replay-safe operation identifiers (Issue #1153) -----------------
+    /// Consumed operation-id marker: `(kind, op_id)` -> `bool`.
+    ///
+    /// Presence means the id has been used and any further operation carrying
+    /// it is rejected with [`crate::types::ContractError::DuplicateOperationId`].
+    /// The kind is part of the key so a draw id and a repayment id cannot
+    /// collide (invariant OP-2 in [`crate::operation_id`]).
+    OperationSeen(crate::operation_id::OperationKind, BytesN<32>),
+    /// Per-borrower, per-kind monotonic operation counter -> `u64`.
+    ///
+    /// Consumed by every successful draw or repayment; the value doubles as
+    /// the number of recorded operations of that kind for the borrower.
+    OperationSeq(crate::operation_id::OperationKind, Address),
+    /// Committed draw record, addressed by its operation id.
+    DrawRecordById(BytesN<32>),
+    /// Committed repayment record, addressed by its operation id.
+    RepaymentRecordById(BytesN<32>),
 }
 
 /// Maximum number of credit lines returned per page.

@@ -115,6 +115,11 @@ mod handshake;
 pub mod instrument;
 mod lifecycle;
 mod oracle_validation;
+/// Replay-safe identifiers for draw and repayment records (Issue #1153).
+///
+/// See the module docs for the id derivation, the replay barrier, the
+/// invariants (OP-1..OP-5), and the storage layout.
+pub mod operation_id;
 mod oracles;
 
 #[path = "../../lifecycle/src/views.rs"]
@@ -287,10 +292,6 @@ impl Credit {
         (1, 0, 0)
     }
 
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
-    }
-
     pub fn get_contract_version() -> (u32, u32, u32) {
         CONTRACT_API_VERSION
     }
@@ -414,6 +415,46 @@ impl Credit {
     /// @notice Draws credit by transferring liquidity tokens to the borrower.
     /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
+        // Issue #1153: unchanged signature and behaviour. The draw is now
+        // recorded with a derived identifier so the movement is reconcilable;
+        // callers that need replay protection use `draw_credit_with_op_id`.
+        Self::draw_credit_inner(env, borrower, amount, None);
+    }
+
+    /// Draw against a credit line under a caller-supplied operation id
+    /// (Issue #1153).
+    ///
+    /// Identical to [`Self::draw_credit`] except that `op_id` is claimed
+    /// before any funds move. Re-submitting a previously consumed `op_id`
+    /// reverts [`ContractError::DuplicateOperationId`] and mutates no state,
+    /// which makes a retry after an ambiguous timeout safe: the caller reuses
+    /// its id and either the draw lands once, or it learns the original
+    /// already did. [`Self::get_draw_record`] returns the committed record.
+    ///
+    /// # Errors
+    /// - [`ContractError::DuplicateOperationId`] — `op_id` already consumed.
+    /// - every error [`Self::draw_credit`] can raise.
+    pub fn draw_credit_with_op_id(
+        env: Env,
+        borrower: Address,
+        amount: i128,
+        op_id: BytesN<32>,
+    ) {
+        Self::draw_credit_inner(env, borrower, amount, Some(op_id));
+    }
+
+    /// Shared draw implementation.
+    ///
+    /// `supplied_op_id` is `None` for the legacy entrypoint (id derived, no
+    /// replay barrier) and `Some` for the idempotent entrypoint (id claimed,
+    /// replay rejected). Keeping one body means the two entrypoints can never
+    /// drift in their validation or state transitions.
+    fn draw_credit_inner(
+        env: Env,
+        borrower: Address,
+        amount: i128,
+        supplied_op_id: Option<BytesN<32>>,
+    ) {
         assert_not_paused(&env);
         set_reentrancy_guard(&env);
 
@@ -574,6 +615,18 @@ impl Credit {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InsufficientLiquidityReserve);
         }
+
+        // Issue #1153, invariant OP-4: claim the operation id *before* funds
+        // move. Claiming afterwards would leave a window in which a duplicate
+        // submission passes the barrier check while the first transfer is
+        // still in flight, double-drawing the reserve.
+        let (operation_id, draw_sequence, id_source) = operation_id::resolve_operation_id(
+            &env,
+            operation_id::OperationKind::Draw,
+            &borrower,
+            supplied_op_id,
+        );
+
         token_client.transfer(&reserve_address, &borrower, &amount);
 
         let previous_status = credit_line.status;
@@ -588,6 +641,25 @@ impl Credit {
 
         let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
+
+        // Issue #1153, invariant OP-5: the record is written only on the
+        // success path. Any earlier rejection panics, reverting the sequence
+        // bump and the marker along with it, so a failed attempt consumes
+        // neither an id nor a sequence.
+        operation_id::put_draw_record(
+            &env,
+            &operation_id::DrawRecord {
+                id: operation_id.clone(),
+                borrower: borrower.clone(),
+                amount,
+                utilized_after: updated_utilized,
+                sequence: draw_sequence,
+                timestamp,
+                ledger_sequence: env.ledger().sequence(),
+                id_source,
+            },
+        );
+
         publish_drawn_event(
             &env,
             DrawnEvent {
@@ -623,6 +695,42 @@ impl Credit {
     /// - [`ContractError::CreditLineClosed`] — credit line is closed.
     /// - [`ContractError::RepayExceedsMaxAmount`] — amount exceeds per-tx repay cap.
     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
+        // Issue #1153: unchanged signature and behaviour; the repayment is
+        // recorded with a derived identifier. Use `repay_credit_with_op_id`
+        // for replay protection.
+        Self::repay_credit_inner(env, borrower, amount, None);
+    }
+
+    /// Repay under a caller-supplied operation id (Issue #1153).
+    ///
+    /// Identical to [`Self::repay_credit`] except that `op_id` is claimed
+    /// before any funds move. A replayed id reverts
+    /// [`ContractError::DuplicateOperationId`] without mutating state, so a
+    /// retried repayment cannot debit the borrower twice.
+    /// [`Self::get_repayment_record`] returns the committed record, including
+    /// the interest/principal split that cannot be reconstructed from
+    /// aggregates once further interest has accrued.
+    ///
+    /// # Errors
+    /// - [`ContractError::DuplicateOperationId`] — `op_id` already consumed.
+    /// - every error [`Self::repay_credit`] can raise.
+    pub fn repay_credit_with_op_id(
+        env: Env,
+        borrower: Address,
+        amount: i128,
+        op_id: BytesN<32>,
+    ) {
+        Self::repay_credit_inner(env, borrower, amount, Some(op_id));
+    }
+
+    /// Shared repayment implementation; see [`Self::draw_credit_inner`] for
+    /// why both entrypoints share one body.
+    fn repay_credit_inner(
+        env: Env,
+        borrower: Address,
+        amount: i128,
+        supplied_op_id: Option<BytesN<32>>,
+    ) {
         // --- Reentrancy guard (defense-in-depth) ---
         set_reentrancy_guard(&env);
         borrower.require_auth();
@@ -665,8 +773,17 @@ impl Credit {
         let total_debt = credit_line.utilized_amount.max(0);
         credit_line.accrued_interest = credit_line.accrued_interest.min(total_debt).max(0);
 
-        let (effective_repay, interest_repaid, _principal_repaid) =
+        let (effective_repay, interest_repaid, principal_repaid) =
             lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
+
+        // Issue #1153, invariant OP-4: claim before the transfer_from calls
+        // below, so a duplicate submission cannot debit the borrower twice.
+        let (operation_id, repay_sequence, id_source) = operation_id::resolve_operation_id(
+            &env,
+            operation_id::OperationKind::Repayment,
+            &borrower,
+            supplied_op_id,
+        );
 
         if effective_repay > 0 {
             let maybe_token: Option<Address> =
@@ -738,6 +855,28 @@ impl Credit {
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
 
         let _timestamp = env.ledger().timestamp();
+
+        // Issue #1153, invariant OP-5: recorded only on the success path.
+        // The interest/principal split is captured here because repayment
+        // allocation is order-dependent and cannot be reconstructed from
+        // aggregates once further interest accrues.
+        operation_id::put_repayment_record(
+            &env,
+            &operation_id::RepaymentRecord {
+                id: operation_id.clone(),
+                borrower: borrower.clone(),
+                amount_submitted: amount,
+                amount_applied: effective_repay,
+                interest_repaid,
+                principal_repaid,
+                utilized_after: new_utilized,
+                sequence: repay_sequence,
+                timestamp: _timestamp,
+                ledger_sequence: env.ledger().sequence(),
+                id_source,
+            },
+        );
+
         publish_interest_accrued_event(
             &env,
             InterestAccruedEvent {
@@ -768,6 +907,61 @@ impl Credit {
         );
 
         clear_reentrancy_guard(&env);
+    }
+
+    /// Fetch a committed draw record by operation id (Issue #1153).
+    ///
+    /// Returns `None` when the id was never used for a draw. This is the
+    /// query a client makes after an ambiguous timeout to learn whether its
+    /// draw landed, without issuing a second state-changing call.
+    pub fn get_draw_record(env: Env, op_id: BytesN<32>) -> Option<operation_id::DrawRecord> {
+        operation_id::get_draw_record(&env, &op_id)
+    }
+
+    /// Fetch a committed repayment record by operation id (Issue #1153).
+    pub fn get_repayment_record(
+        env: Env,
+        op_id: BytesN<32>,
+    ) -> Option<operation_id::RepaymentRecord> {
+        operation_id::get_repayment_record(&env, &op_id)
+    }
+
+    /// Whether `op_id` has already been consumed for `kind` (Issue #1153).
+    ///
+    /// Lets a client check an id before submitting, turning a would-be
+    /// rejection into a cheap pre-flight query.
+    pub fn is_operation_id_consumed(
+        env: Env,
+        kind: operation_id::OperationKind,
+        op_id: BytesN<32>,
+    ) -> bool {
+        operation_id::is_operation_consumed(&env, kind, &op_id)
+    }
+
+    /// Next unconsumed operation sequence for `(kind, borrower)` (Issue #1153).
+    ///
+    /// Doubles as the number of recorded operations of that kind, and lets an
+    /// indexer recompute historical derived ids via the documented
+    /// `(kind, borrower, sequence)` derivation.
+    pub fn get_operation_sequence(
+        env: Env,
+        kind: operation_id::OperationKind,
+        borrower: Address,
+    ) -> u64 {
+        operation_id::next_sequence(&env, kind, &borrower)
+    }
+
+    /// Deterministic id for a given `(kind, borrower, sequence)` (Issue #1153).
+    ///
+    /// Exposed so off-chain reconcilers reproduce the contract's derivation
+    /// exactly rather than reimplementing it and drifting.
+    pub fn derive_operation_id(
+        env: Env,
+        kind: operation_id::OperationKind,
+        borrower: Address,
+        sequence: u64,
+    ) -> BytesN<32> {
+        operation_id::derive_operation_id(&env, kind, &borrower, sequence)
     }
 
     pub fn update_risk_parameters(
