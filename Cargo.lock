@@ -373,20 +373,15 @@ name = "creditra-borrow"
 version = "0.1.0"
 dependencies = [
  "creditra-credit",
- "proptest",
  "soroban-sdk",
 ]
 
 [[package]]
-name = "creditra-credit"
+name = "creditra-collateral"
 version = "0.1.0"
 dependencies = [
- "gateway-auction",
- "insta",
- "primitive-types",
+ "creditra-credit",
  "proptest",
- "serde",
- "serde_json",
  "soroban-sdk",
 ]
 

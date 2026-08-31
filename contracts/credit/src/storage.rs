@@ -291,6 +291,12 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Pre-upgrade migration checkpoint (Issue #1149).
+    ///
+    /// Present only between an `upgrade` and its `verify_upgrade_migration`
+    /// or `rollback_upgrade`. Presence is what blocks a second upgrade, so a
+    /// failed migration cannot be compounded.
+    UpgradeCheckpoint,
 }
 
 /// Maximum number of credit lines returned per page.

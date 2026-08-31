@@ -115,6 +115,11 @@ mod handshake;
 pub mod instrument;
 mod lifecycle;
 mod oracle_validation;
+/// Upgrade-migration state preservation (Issue #1149).
+///
+/// See the module docs for the checkpoint model, the verification and
+/// rollback paths, and the invariants (UP-1..UP-5).
+pub mod upgrade_migration;
 mod oracles;
 
 #[path = "../../lifecycle/src/views.rs"]
@@ -285,10 +290,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -768,6 +769,63 @@ impl Credit {
         );
 
         clear_reentrancy_guard(&env);
+    }
+
+    /// Confirm credit-line state survived the last upgrade (Issue #1149).
+    ///
+    /// Compares `CreditLineCount` and `TotalUtilized` against the checkpoint
+    /// taken before the WASM swap. On success the checkpoint is cleared and
+    /// further upgrades are unblocked.
+    ///
+    /// On mismatch the checkpoint is **retained** (invariant UP-4) so
+    /// [`Self::rollback_upgrade`] still has a target, and the call reverts
+    /// with [`ContractError::UpgradeStateMismatch`] — the migration is
+    /// reported, never silently repaired, because repairing it would destroy
+    /// the evidence that records were lost.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Errors
+    /// - [`ContractError::NoUpgradeCheckpoint`] — no upgrade is pending.
+    /// - [`ContractError::UpgradeStateMismatch`] — state did not survive.
+    pub fn verify_upgrade_migration(env: Env) -> upgrade_migration::UpgradeCheckpoint {
+        require_admin_auth(&env);
+        upgrade_migration::verify(&env).unwrap_or_else(|e| env.panic_with_error(e))
+    }
+
+    /// Restore the pre-upgrade schema version after a failed migration
+    /// (Issue #1149).
+    ///
+    /// Clears the checkpoint and restores `from_version`. It deliberately
+    /// does **not** re-swap the WASM: a binary that just failed its own
+    /// migration cannot be trusted to deploy its replacement, and Soroban has
+    /// no atomic revert-to-previous-hash primitive. The returned checkpoint
+    /// carries `previous_wasm_hash` so an operator can redeploy the
+    /// known-good binary explicitly.
+    ///
+    /// # Authorization
+    /// Admin only.
+    ///
+    /// # Errors
+    /// - [`ContractError::NoUpgradeCheckpoint`] — nothing to roll back.
+    pub fn rollback_upgrade(env: Env) -> upgrade_migration::UpgradeCheckpoint {
+        require_admin_auth(&env);
+        upgrade_migration::rollback(&env)
+    }
+
+    /// The outstanding upgrade checkpoint, if any (Issue #1149).
+    ///
+    /// Read-only and unauthenticated: it exposes only aggregate counters and
+    /// WASM hashes, never per-borrower data, so operators and indexers can
+    /// observe migration status without special privilege.
+    pub fn get_upgrade_checkpoint(env: Env) -> Option<upgrade_migration::UpgradeCheckpoint> {
+        upgrade_migration::get_checkpoint(&env)
+    }
+
+    /// Whether an upgrade is awaiting verification or rollback (Issue #1149).
+    pub fn is_upgrade_verification_pending(env: Env) -> bool {
+        upgrade_migration::is_verification_pending(&env)
     }
 
     pub fn update_risk_parameters(
@@ -2812,6 +2870,12 @@ impl Credit {
         // Enforce admin authentication: only the configured admin can upgrade.
         require_admin_auth(&env);
 
+        // Issue #1149, invariant UP-2: refuse to stack an upgrade on top of a
+        // migration whose state has not been verified or rolled back.
+        // Otherwise a bad migration's checkpoint - the only evidence that
+        // state was lost, and the only rollback target - would be overwritten.
+        upgrade_migration::require_no_pending_verification(&env);
+
         // Retrieve the current WASM hash before upgrade for event emission.
         // NOTE: get_current_contract_wasm is not available in this SDK version;
         // use a zero-filled hash as a sentinel. The upgrade event still records the
@@ -2820,7 +2884,20 @@ impl Credit {
 
         // Bump schema version to track upgrade history.
         let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);
-        crate::storage::set_schema_version(&env, current_version.saturating_add(1));
+        let next_version = current_version.saturating_add(1);
+
+        // Issue #1149, invariant UP-1: snapshot the pre-upgrade aggregates
+        // *before* the schema bump and the WASM swap. Capturing them after the
+        // swap would compare the new binary against itself and prove nothing.
+        upgrade_migration::record_checkpoint(
+            &env,
+            current_version,
+            next_version,
+            &new_wasm_hash,
+            &old_wasm_hash,
+        );
+
+        crate::storage::set_schema_version(&env, next_version);
 
         // Perform the atomic WASM upgrade.
         env.deployer()
