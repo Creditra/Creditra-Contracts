@@ -183,15 +183,23 @@ use crate::storage::{
 };
 use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    CreditStatus, ErrorMappingVersion, GracePeriodConfig, GraceWaiverMode,
+    LifecycleCapabilities, OracleConfig, OracleQuorumConfig, ProofOfReserve, ProtocolConfig,
+    ProtocolSummary, ProtocolSummaryView, QueryCapabilities, RateChangeConfig,
+    RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{
     contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
 };
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
+
+/// Error-code mapping version for cross-contract version compatibility.
+///
+/// This version tracks the stability of error discriminants across contract upgrades.
+/// When error codes are added or changed, this version must be incremented with a
+/// documented migration path for off-chain clients.
+pub const ERROR_MAPPING_VERSION: u32 = 1;
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
@@ -1409,6 +1417,25 @@ impl Credit {
     /// Get the current storage schema version.
     pub fn get_schema_version(env: Env) -> Option<u32> {
         crate::storage::get_schema_version(&env)
+    }
+
+    /// Get the current error-code mapping version.
+    ///
+    /// Returns the error-code mapping version if set, otherwise initializes
+    /// it with the current contract's ERROR_MAPPING_VERSION and CONTRACT_API_VERSION.
+    pub fn get_error_mapping_version(env: Env) -> crate::types::ErrorMappingVersion {
+        if let Some(existing) = crate::storage::get_error_mapping_version(&env) {
+            existing
+        } else {
+            // Initialize error mapping version on first call
+            let version = crate::types::ErrorMappingVersion {
+                version: ERROR_MAPPING_VERSION,
+                contract_version: CONTRACT_API_VERSION,
+                set_at: env.ledger().timestamp(),
+            };
+            crate::storage::set_error_mapping_version(&env, version.clone());
+            version
+        }
     }
 
     /// Get the global total utilized accumulator.
@@ -2821,6 +2848,28 @@ impl Credit {
         // Bump schema version to track upgrade history.
         let current_version = crate::storage::get_schema_version(&env).unwrap_or(SCHEMA_VERSION);
         crate::storage::set_schema_version(&env, current_version.saturating_add(1));
+
+        // Preserve error-code mapping version across upgrades.
+        // If the error mapping version changes, it indicates a breaking change
+        // in error discriminants that requires client-side migration.
+        let current_error_mapping = crate::storage::get_error_mapping_version(&env);
+        if current_error_mapping.is_none() {
+            // Initialize error mapping version if not set (backward compatibility)
+            let error_version = crate::types::ErrorMappingVersion {
+                version: ERROR_MAPPING_VERSION,
+                contract_version: CONTRACT_API_VERSION,
+                set_at: env.ledger().timestamp(),
+            };
+            crate::storage::set_error_mapping_version(&env, error_version);
+        } else {
+            // Verify that the error mapping version is compatible with the new contract
+            let existing = current_error_mapping.unwrap();
+            if existing.version != ERROR_MAPPING_VERSION {
+                // Error mapping version mismatch - this is a breaking change
+                // The upgrade should be rejected unless explicitly allowed
+                env.panic_with_error(crate::types::ContractError::IncompatibleVersion);
+            }
+        }
 
         // Perform the atomic WASM upgrade.
         env.deployer()
