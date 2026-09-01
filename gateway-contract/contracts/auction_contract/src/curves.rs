@@ -103,6 +103,7 @@ pub fn calculate_price(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     // ── Linear decay tests ──
 
@@ -374,6 +375,70 @@ mod tests {
             let p0 = calculate_price(1000, 0, curve).unwrap();
             let p5 = calculate_price(1000, 5, curve).unwrap();
             assert!(p5 <= p0, "curve {:?} increased", curve);
+        }
+    }
+
+    #[test]
+    fn stepped_price_never_increases() {
+        let curve = DecayCurve::Stepped {
+            step_size: 7,
+            interval: 5,
+        };
+        let mut prev = calculate_price(1000, 0, &curve).unwrap();
+        for t in 1..=100 {
+            let curr = calculate_price(1000, t, &curve).unwrap();
+            assert!(
+                curr <= prev,
+                "stepped price increased at t={}: {} > {}",
+                t,
+                curr,
+                prev
+            );
+            prev = curr;
+        }
+    }
+
+    #[test]
+    fn stepped_price_never_increases_various_intervals() {
+        let intervals = [1, 3, 5, 10, 20, 50];
+        for &interval in &intervals {
+            let curve = DecayCurve::Stepped {
+                step_size: 5,
+                interval,
+            };
+            let mut prev = calculate_price(500, 0, &curve).unwrap();
+            for t in 1..=100 {
+                let curr = calculate_price(500, t, &curve).unwrap();
+                assert!(
+                    curr <= prev,
+                    "stepped price increased at t={} with interval={}: {} > {}",
+                    t,
+                    interval,
+                    curr,
+                    prev
+                );
+                prev = curr;
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        #[test]
+        fn stepped_monotonic_proptest(
+            start_price in 1000u128..1_000_000,
+            step_size in 1u128..10_000,
+            interval in 1u64..50,
+            t in 0u64..100
+        ) {
+            let curve = DecayCurve::Stepped { step_size, interval };
+            let p1 = calculate_price(start_price, t, &curve).unwrap();
+            let p2 = calculate_price(start_price, t + 1, &curve).unwrap();
+            prop_assert!(
+                p2 <= p1,
+                "stepped price increased: p1={} at t={}, p2={} at t+1={}",
+                p1, t, p2, t + 1
+            );
         }
     }
 }
