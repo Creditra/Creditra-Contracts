@@ -742,9 +742,14 @@ pub fn self_unsuspend_credit_line(env: Env, borrower: Address) {
 ///   non-closed status. This is intentional for operational efficiency.
 pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
     assert_not_paused(&env);
-    // `closer` auth is enforced by the `lib.rs` `close_credit_line` entrypoint
-    // wrapper before this is called; not re-checked here (see the comment on
-    // `suspend_credit_line` above for why).
+    // Require explicit authorization from the `closer` before any storage
+    // reads or state mutation. This is enforced here (not only in the `lib.rs`
+    // entrypoint wrapper) so that every call path — including internal callers
+    // such as `close_credit_lines_batch` — is subject to the same
+    // authorization boundary. `require_auth` is idempotent within a single
+    // invocation, so a caller that already authorized the same address is not
+    // penalized.
+    closer.require_auth();
 
     // Resolve the current admin address.
     let admin: Address = require_admin(&env);
