@@ -59,6 +59,42 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
+    #[test]
+    fn price_never_increases_stepped(
+        start_price in 1000i128..1_000_000,
+        floor_price in 0i128..1000,
+        step_count in 1u32..50,
+        t in 0u64..100
+    ) {
+        let duration = 100u64;
+        let p1 = compute_dutch_price(
+            start_price,
+            floor_price,
+            t,
+            duration,
+            &DutchAuctionDecay::Stepped,
+            Some(step_count)
+        );
+
+        let p2 = compute_dutch_price(
+            start_price,
+            floor_price,
+            t + 1,
+            duration,
+            &DutchAuctionDecay::Stepped,
+            Some(step_count)
+        );
+
+        prop_assert!(
+            p2 <= p1,
+            "stepped price increased: p1={} at t={}, p2={} at t+1={}",
+            p1, t, p2, t + 1
+        );
+    }
+}
+
 #[test]
 fn test_linear_hits_floor() {
     let price = compute_dutch_price(1000, 100, 100, 100, &DutchAuctionDecay::Linear, None);
