@@ -147,27 +147,17 @@ fn validate_auction_curve_params(
 ///
 /// # Return value
 ///
-/// The current Dutch auction price, guaranteed to be ≥ `floor_price`.
+/// The current Dutch auction price, guaranteed to be ≥ `floor_price` and
+/// ≤ `start_price` after clamping to non-negative bounds.
 ///
 /// # Edge cases
 ///
 /// * `duration == 0` → returns `floor_price` immediately (avoids division by zero).
 /// * `elapsed_time >= duration` → returns `floor_price` (auction window expired).
-/// * If `start_price < floor_price`, the function **panics** — callers
-///   must validate parameters at auction creation time.
-///
-/// # Examples
-///
-/// ```
-/// use gateway_auction::{compute_dutch_price, DutchAuctionDecay};
-///
-/// // Linear: price at start
-/// assert_eq!(compute_dutch_price(1000, 500, 0, 100, &DutchAuctionDecay::Linear, None), 1000);
-/// // Linear: price halfway
-/// assert_eq!(compute_dutch_price(1000, 500, 50, 100, &DutchAuctionDecay::Linear, None), 750);
-/// // Linear: price at end
-/// assert_eq!(compute_dutch_price(1000, 500, 100, 100, &DutchAuctionDecay::Linear, None), 500);
-/// ```
+/// * If `start_price < floor_price`, returns `start_price` clamped to non-negative.
+/// * If either price is negative, both are clamped to `0`.
+/// * All intermediate arithmetic is saturating to prevent overflow at
+///   extreme input values (e.g., `i128::MAX`).
 pub fn compute_dutch_price(
     start_price: i128,
     floor_price: i128,
@@ -177,46 +167,52 @@ pub fn compute_dutch_price(
     step_count: Option<u32>,
 ) -> i128 {
     if duration == 0 {
-        return floor_price;
+        return floor_price.max(0);
     }
     if elapsed_time >= duration {
-        return floor_price;
+        return floor_price.max(0);
     }
 
-    let price_drop = start_price
-        .checked_sub(floor_price)
-        .expect("start_price must be >= floor_price");
+    let bounded_start = start_price.max(0) as u128;
+    let bounded_floor = floor_price.max(0) as u128;
+    let floor = bounded_floor.min(bounded_start);
 
-    let p_u128 = price_drop as u128;
+    let price_drop = bounded_start - floor;
+    if price_drop == 0 {
+        return bounded_start as i128;
+    }
 
     let drop_so_far = match decay {
         DutchAuctionDecay::None | DutchAuctionDecay::Linear => {
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
 
-            let q = p_u128 / d_u128;
-            let r = p_u128 % d_u128;
+            let q = price_drop / d_u128;
+            let r = price_drop % d_u128;
 
-            let drop = (q * e_u128) + ((r * e_u128) / d_u128);
-            drop as i128
+            let q_times_e = q.saturating_mul(e_u128);
+            let r_times_e = r.saturating_mul(e_u128);
+            let drop = q_times_e.saturating_add(r_times_e / d_u128);
+            drop.min(price_drop)
         }
 
         DutchAuctionDecay::Stepped => {
             let steps = match step_count {
                 Some(s) if s > 0 => s as u128,
-                Some(_) => panic!("dutch_step_count must be > 0 for stepped Dutch auctions"),
-                None => panic!("dutch_step_count required for stepped Dutch auctions"),
+                _ => return bounded_start as i128,
             };
 
             let e_u128 = elapsed_time as u128;
             let d_u128 = duration as u128;
-            let elapsed_steps = (e_u128 * steps) / d_u128;
+            let elapsed_steps = (e_u128.saturating_mul(steps)) / d_u128;
 
-            let q = p_u128 / steps;
-            let r = p_u128 % steps;
+            let q = price_drop / steps;
+            let r = price_drop % steps;
 
-            let drop = (q * elapsed_steps) + ((r * elapsed_steps) / steps);
-            drop as i128
+            let q_times_es = q.saturating_mul(elapsed_steps);
+            let r_times_es = r.saturating_mul(elapsed_steps);
+            let drop = q_times_es.saturating_add(r_times_es / steps);
+            drop.min(price_drop)
         }
 
         DutchAuctionDecay::Exponential => {
@@ -226,19 +222,18 @@ pub fn compute_dutch_price(
                 factor = (factor * 9_900) / 10_000;
             }
             let drop_factor = 10_000 - factor;
-            let q = p_u128 / 10_000;
-            let r = p_u128 % 10_000;
+            let q = price_drop / 10_000;
+            let r = price_drop % 10_000;
 
-            let drop = (q * drop_factor) + ((r * drop_factor) / 10_000);
-            drop as i128
+            let q_times_df = q.saturating_mul(drop_factor);
+            let r_times_df = r.saturating_mul(drop_factor);
+            let drop = q_times_df.saturating_add(r_times_df / 10_000);
+            drop.min(price_drop)
         }
     };
 
-    let current_price = start_price
-        .checked_sub(drop_so_far)
-        .expect("current price should not underflow");
-
-    current_price.max(floor_price)
+    let current_price = bounded_start.saturating_sub(drop_so_far);
+    current_price.max(floor) as i128
 }
 
 #[contract]

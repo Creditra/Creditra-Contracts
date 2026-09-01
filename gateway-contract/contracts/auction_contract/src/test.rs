@@ -1592,52 +1592,58 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_dutch_price_invalid_inputs_panic() {
-        // start_price = i128::MIN, floor_price = 1 causes
-        // start_price.checked_sub(floor_price) to overflow (i128 underflow).
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(
-                i128::MIN,
-                1,
-                50,
-                100,
-                &DutchAuctionDecay::Linear,
-                None,
-            );
-        }));
-        assert!(result.is_err());
+    fn test_compute_dutch_price_invalid_inputs_deterministic() {
+        // start_price = i128::MIN is negative → clamped to 0; floor_price = 1
+        // becomes bounded_floor = 1, bounded_start = 0, floor = 0.
+        // price_drop = 0, so returns bounded_start (0).
+        let price = super::super::compute_dutch_price(
+            i128::MIN,
+            1,
+            50,
+            100,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert_eq!(price, 0);
     }
 
     #[test]
-    fn test_compute_dutch_price_missing_step_count_panics() {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(
-                1000,
-                500,
-                50,
-                100,
-                &DutchAuctionDecay::Stepped,
-                None,
-            );
-        }));
-        assert!(result.is_err());
+    fn test_compute_dutch_price_missing_step_count_returns_start() {
+        // Stepped decay with None step_count → returns start_price deterministically.
+        let price = super::super::compute_dutch_price(
+            1000,
+            500,
+            50,
+            100,
+            &DutchAuctionDecay::Stepped,
+            None,
+        );
+        assert_eq!(price, 1000);
     }
 
     #[test]
-    fn test_compute_dutch_price_overflow_panics() {
-        // start_price = i128::MIN with floor_price > 0 causes
-        // start_price.checked_sub(floor_price) to overflow (i128 underflow).
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            super::super::compute_dutch_price(
-                i128::MIN,
-                1,
-                2,
-                100,
-                &DutchAuctionDecay::Linear,
-                None,
-            );
-        }));
-        assert!(result.is_err());
+    fn test_compute_dutch_price_negative_inputs_clamped() {
+        // Both negative → clamped to 0.
+        let price = super::super::compute_dutch_price(
+            i128::MIN,
+            1,
+            2,
+            100,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert_eq!(price, 0);
+
+        // start_price negative, floor_price positive → both clamped.
+        let price2 = super::super::compute_dutch_price(
+            -500,
+            100,
+            25,
+            100,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert_eq!(price2, 0);
     }
 
     #[test]
@@ -2877,5 +2883,254 @@ mod liquidation_grace_window {
             result.is_err(),
             "closing a nonexistent auction id must fail deterministically"
         );
+    }
+
+    // ── Dutch auction price bounding at both extremes ──────────────────
+
+    #[test]
+    fn dutch_price_extreme_start_price_i128_max() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            i128::MAX / 2,
+            0,
+            100,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert_eq!(p, i128::MAX);
+    }
+
+    #[test]
+    fn dutch_price_extreme_start_price_i128_max_elapsed_mid() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            i128::MAX / 2,
+            50,
+            100,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert!(p <= i128::MAX);
+        assert!(p >= i128::MAX / 2);
+    }
+
+    #[test]
+    fn dutch_price_extreme_start_price_i128_max_exponential() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            i128::MAX / 2,
+            50,
+            100,
+            &DutchAuctionDecay::Exponential,
+            None,
+        );
+        assert!(p <= i128::MAX);
+        assert!(p >= i128::MAX / 2);
+    }
+
+    #[test]
+    fn dutch_price_extreme_start_price_i128_max_stepped() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            i128::MAX / 2,
+            50,
+            100,
+            &DutchAuctionDecay::Stepped,
+            Some(10),
+        );
+        assert!(p <= i128::MAX);
+        assert!(p >= i128::MAX / 2);
+    }
+
+    #[test]
+    fn dutch_price_floor_equals_start_returns_start() {
+        // When floor == start, price_drop = 0 → returns start_price.
+        assert_eq!(
+            super::super::compute_dutch_price(500, 500, 50, 100, &DutchAuctionDecay::Linear, None),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(
+                500,
+                500,
+                50,
+                100,
+                &DutchAuctionDecay::Stepped,
+                Some(5)
+            ),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(
+                500,
+                500,
+                50,
+                100,
+                &DutchAuctionDecay::Exponential,
+                None
+            ),
+            500
+        );
+    }
+
+    #[test]
+    fn dutch_price_both_zero_returns_zero() {
+        assert_eq!(
+            super::super::compute_dutch_price(0, 0, 0, 100, &DutchAuctionDecay::Linear, None),
+            0
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(0, 0, 50, 100, &DutchAuctionDecay::Linear, None),
+            0
+        );
+    }
+
+    #[test]
+    fn dutch_price_negative_inputs_clamped_to_zero() {
+        // start_price = -100, floor_price = -200 → both clamped to 0 → returns 0
+        assert_eq!(
+            super::super::compute_dutch_price(-100, -200, 50, 100, &DutchAuctionDecay::Linear, None),
+            0
+        );
+        // start_price = 0, floor_price = -50 → floor clamped to 0, start = 0 → returns 0
+        assert_eq!(
+            super::super::compute_dutch_price(0, -50, 50, 100, &DutchAuctionDecay::Linear, None),
+            0
+        );
+    }
+
+    #[test]
+    fn dutch_price_floor_exceeds_start_returns_floor() {
+        // start_price < floor_price → start clamped to bounded_start, floor to bounded_floor.
+        // bounded_start = 100, bounded_floor = 200, floor = min(200, 100) = 100.
+        // price_drop = 0, returns bounded_start = 100.
+        assert_eq!(
+            super::super::compute_dutch_price(100, 200, 50, 100, &DutchAuctionDecay::Linear, None),
+            100
+        );
+    }
+
+    #[test]
+    fn dutch_price_zero_duration_returns_floor() {
+        assert_eq!(
+            super::super::compute_dutch_price(1000, 500, 0, 0, &DutchAuctionDecay::Linear, None),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(1000, 500, 50, 0, &DutchAuctionDecay::Linear, None),
+            500
+        );
+    }
+
+    #[test]
+    fn dutch_price_elapsed_exceeds_duration_returns_floor() {
+        assert_eq!(
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                100,
+                100,
+                &DutchAuctionDecay::Linear,
+                None
+            ),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                200,
+                100,
+                &DutchAuctionDecay::Linear,
+                None
+            ),
+            500
+        );
+        assert_eq!(
+            super::super::compute_dutch_price(
+                1000,
+                500,
+                u64::MAX,
+                100,
+                &DutchAuctionDecay::Linear,
+                None
+            ),
+            500
+        );
+    }
+
+    #[test]
+    fn dutch_price_large_price_drop_no_overflow_linear() {
+        // price_drop = i128::MAX → as u128 is valid. Use extreme duration to
+        // keep division small, then verify saturating arithmetic doesn't panic.
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            0,
+            1,
+            2,
+            &DutchAuctionDecay::Linear,
+            None,
+        );
+        assert!(p >= 0);
+        assert!(p <= i128::MAX);
+    }
+
+    #[test]
+    fn dutch_price_large_price_drop_no_overflow_stepped() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            0,
+            50,
+            100,
+            &DutchAuctionDecay::Stepped,
+            Some(10),
+        );
+        assert!(p >= 0);
+        assert!(p <= i128::MAX);
+    }
+
+    #[test]
+    fn dutch_price_large_price_drop_no_overflow_exponential() {
+        let p = super::super::compute_dutch_price(
+            i128::MAX,
+            0,
+            100,
+            200,
+            &DutchAuctionDecay::Exponential,
+            None,
+        );
+        assert!(p >= 0);
+        assert!(p <= i128::MAX);
+    }
+
+    #[test]
+    fn dutch_price_regression_monotonic_across_all_decay_modes() {
+        // Regression: price must be non-increasing over time for all decay modes.
+        let start = 1_000_000i128;
+        let floor = 100_000i128;
+        let duration = 1000u64;
+
+        let decays: Vec<(&DutchAuctionDecay, Option<u32>)> = vec![
+            (&DutchAuctionDecay::Linear, None),
+            (&DutchAuctionDecay::Stepped, Some(20)),
+            (&DutchAuctionDecay::Exponential, None),
+        ];
+
+        for (decay, steps) in decays {
+            let mut prev = super::super::compute_dutch_price(start, floor, 0, duration, decay, steps);
+            for t in 1..duration {
+                let curr = super::super::compute_dutch_price(start, floor, t, duration, decay, steps);
+                assert!(
+                    curr <= prev,
+                    "price increased at t={}: {} > {} for decay {:?}",
+                    t,
+                    curr,
+                    prev,
+                    decay
+                );
+                assert!(curr >= floor, "price below floor for decay {:?}", decay);
+                prev = curr;
+            }
+        }
     }
 }
