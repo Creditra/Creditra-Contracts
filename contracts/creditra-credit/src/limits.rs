@@ -134,11 +134,81 @@ pub fn max_interest_for_principal(
     let scaled = principal
         .checked_mul(Uint128::from(ceiling_bps))
         .map_err(|_| ContractError::InvalidAmount)?;
-    // BPS_DENOMINATOR is a non-zero constant, so division cannot fail; the
-    // checked form is used to keep the code free of production unwraps.
     scaled
         .checked_div(Uint128::from(BPS_DENOMINATOR))
         .map_err(|_| ContractError::InvalidAmount)
+}
+
+/// Validate a draw request against current outstanding utilization and the configured credit limit.
+///
+/// Returns the projected utilization if the draw is within bounds.
+///
+/// # Errors
+///
+/// - [`ContractError::InvalidAmount`] when `draw_amount` is zero.
+/// - [`ContractError::Overflow`] when `outstanding + draw_amount` overflows [`Uint128`].
+/// - [`ContractError::OverLimit`] when `outstanding + draw_amount > credit_limit`.
+pub fn check_draw_limit(
+    outstanding: Uint128,
+    draw_amount: Uint128,
+    credit_limit: Uint128,
+) -> Result<Uint128, ContractError> {
+    if draw_amount.is_zero() {
+        return Err(ContractError::InvalidAmount);
+    }
+    let projected = outstanding
+        .checked_add(draw_amount)
+        .map_err(|_| ContractError::Overflow)?;
+    if projected > credit_limit {
+        return Err(ContractError::OverLimit);
+    }
+    Ok(projected)
+}
+
+/// Assert that the current utilization of a credit line does not exceed its configured credit limit.
+///
+/// # Errors
+///
+/// - [`ContractError::OverLimit`] when `utilization > credit_limit`.
+pub fn assert_utilization_within_limit(
+    utilization: Uint128,
+    credit_limit: Uint128,
+) -> Result<(), ContractError> {
+    if utilization > credit_limit {
+        return Err(ContractError::OverLimit);
+    }
+    Ok(())
+}
+
+/// Assert that the stored outstanding utilization for a credit line does not exceed its credit limit.
+///
+/// # Errors
+///
+/// - [`ContractError::OverLimit`] when storage utilization exceeds `credit_limit`.
+/// - [`ContractError::Overflow`] or [`ContractError::Std`] if loading utilization fails.
+pub fn assert_storage_utilization_invariant(
+    storage: &dyn cosmwasm_std::Storage,
+    credit_line_id: u64,
+    credit_limit: Uint128,
+) -> Result<(), ContractError> {
+    let utilization = crate::state::outstanding_utilization(storage, credit_line_id)?;
+    assert_utilization_within_limit(utilization, credit_limit)
+}
+
+/// Compute the remaining borrowable headroom under a credit limit.
+///
+/// Returns zero when outstanding utilization has reached or exceeded the credit limit.
+pub fn remaining_headroom(credit_limit: Uint128, outstanding: Uint128) -> Uint128 {
+    credit_limit.saturating_sub(outstanding)
+}
+
+/// Determine whether a proposed draw amount can be executed without exceeding the credit limit.
+pub fn can_draw(outstanding: Uint128, draw_amount: Uint128, credit_limit: Uint128) -> bool {
+    !draw_amount.is_zero()
+        && outstanding
+            .checked_add(draw_amount)
+            .map(|projected| projected <= credit_limit)
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -321,5 +391,84 @@ mod tests {
             max_interest_for_principal(Uint128::MAX, MAX_RATE_BPS),
             Err(ContractError::InvalidAmount)
         );
+    }
+
+    #[test]
+    fn check_draw_limit_zero_amount_returns_invalid_amount() {
+        let err =
+            check_draw_limit(Uint128::zero(), Uint128::zero(), Uint128::new(100)).unwrap_err();
+        assert_eq!(err, ContractError::InvalidAmount);
+    }
+
+    #[test]
+    fn check_draw_limit_within_bounds_succeeds() {
+        let projected =
+            check_draw_limit(Uint128::new(40), Uint128::new(60), Uint128::new(100)).unwrap();
+        assert_eq!(projected, Uint128::new(100));
+    }
+
+    #[test]
+    fn check_draw_limit_exceeding_limit_returns_over_limit() {
+        let err =
+            check_draw_limit(Uint128::new(50), Uint128::new(51), Uint128::new(100)).unwrap_err();
+        assert_eq!(err, ContractError::OverLimit);
+    }
+
+    #[test]
+    fn check_draw_limit_overflow_returns_overflow() {
+        let err = check_draw_limit(Uint128::MAX, Uint128::new(1), Uint128::MAX).unwrap_err();
+        assert_eq!(err, ContractError::Overflow);
+    }
+
+    #[test]
+    fn assert_utilization_within_limit_boundary_checks() {
+        assert_eq!(
+            assert_utilization_within_limit(Uint128::new(100), Uint128::new(100)),
+            Ok(())
+        );
+        assert_eq!(
+            assert_utilization_within_limit(Uint128::new(0), Uint128::new(100)),
+            Ok(())
+        );
+        assert_eq!(
+            assert_utilization_within_limit(Uint128::new(101), Uint128::new(100)),
+            Err(ContractError::OverLimit)
+        );
+    }
+
+    #[test]
+    fn remaining_headroom_saturates_at_zero() {
+        assert_eq!(
+            remaining_headroom(Uint128::new(100), Uint128::new(40)),
+            Uint128::new(60)
+        );
+        assert_eq!(
+            remaining_headroom(Uint128::new(100), Uint128::new(100)),
+            Uint128::zero()
+        );
+        assert_eq!(
+            remaining_headroom(Uint128::new(100), Uint128::new(120)),
+            Uint128::zero()
+        );
+    }
+
+    #[test]
+    fn can_draw_truth_table() {
+        assert!(can_draw(
+            Uint128::new(30),
+            Uint128::new(70),
+            Uint128::new(100)
+        ));
+        assert!(!can_draw(
+            Uint128::new(30),
+            Uint128::new(71),
+            Uint128::new(100)
+        ));
+        assert!(!can_draw(
+            Uint128::new(30),
+            Uint128::zero(),
+            Uint128::new(100)
+        ));
+        assert!(!can_draw(Uint128::MAX, Uint128::new(1), Uint128::MAX));
     }
 }

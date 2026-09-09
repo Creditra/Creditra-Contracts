@@ -379,17 +379,9 @@ pub fn execute_create_draw(
         .parse()
         .map_err(|_| ContractError::Std(cosmwasm_std::StdError::parse_err("Uint128", &amount)))?;
 
-    if draw_amount.is_zero() {
-        return Err(ContractError::InvalidAmount);
-    }
-
     let outstanding = crate::state::outstanding_utilization(deps.storage, credit_line_id)?;
-    let projected = outstanding
-        .checked_add(draw_amount)
-        .map_err(|_| ContractError::Overflow)?;
-    if projected > credit_line.credit_amount {
-        return Err(ContractError::OverLimit);
-    }
+    let projected =
+        crate::limits::check_draw_limit(outstanding, draw_amount, credit_line.credit_amount)?;
 
     let draw = Draw {
         id: draw_count,
@@ -421,6 +413,8 @@ pub fn execute_create_draw(
         &audit_entry,
     )?;
     DRAW_AUDIT_COUNT.save(deps.storage, (credit_line_id, draw_count), &1)?;
+
+    crate::limits::assert_utilization_within_limit(projected, credit_line.credit_amount)?;
 
     Ok(Response::default()
         .add_attribute("action", "create_draw")
