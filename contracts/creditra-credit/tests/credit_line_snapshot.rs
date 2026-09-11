@@ -675,3 +675,399 @@ mod isolation {
         assert_eq!(snapshot(&deps, 1).unwrap().credit_amount, Uint128::new(900));
     }
 }
+
+mod consistency {
+    use super::*;
+
+    fn add_collateral_token(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        denom: &str,
+        risk_weight_bps: u32,
+    ) {
+        let env = mock_env();
+        let creator_addr = creator(deps);
+        let info = message_info(&creator_addr, &[]);
+        let msg = ExecuteMsg::AddCollateralToken {
+            denom: denom.to_string(),
+            risk_weight_bps,
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn deposit_collateral_for(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        borrower_str: &str,
+        denom: &str,
+        amount: &str,
+    ) {
+        let env = mock_env();
+        let creator_addr = creator(deps);
+        let info = message_info(&creator_addr, &[]);
+        let msg = ExecuteMsg::DepositCollateral {
+            borrower: borrower_str.to_string(),
+            denom: denom.to_string(),
+            amount: amount.to_string(),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn create_credit_line_for_borrower(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        borrower_addr: &Addr,
+        collateral_denom: &str,
+        collateral_amount: &str,
+        credit_denom: &str,
+        credit_amount: &str,
+    ) {
+        let env = mock_env();
+        let creator_addr = creator(deps);
+        let info = message_info(&creator_addr, &[]);
+        let msg = ExecuteMsg::CreateCreditLine {
+            borrower: borrower_addr.to_string(),
+            collateral_denom: collateral_denom.to_string(),
+            collateral_amount: collateral_amount.to_string(),
+            credit_denom: credit_denom.to_string(),
+            credit_amount: credit_amount.to_string(),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn create_draw_for_borrower(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        borrower_addr: &Addr,
+        credit_line_id: u64,
+        amount: &str,
+        denom: &str,
+    ) {
+        let env = mock_env();
+        let info = message_info(borrower_addr, &[]);
+        let msg = ExecuteMsg::CreateDraw {
+            credit_line_id,
+            amount: amount.to_string(),
+            denom: denom.to_string(),
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn repay_draw_for_borrower(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        borrower_addr: &Addr,
+        credit_line_id: u64,
+        draw_id: u64,
+    ) {
+        let env = mock_env();
+        let info = message_info(borrower_addr, &[]);
+        let msg = ExecuteMsg::RepayDraw {
+            credit_line_id,
+            draw_id,
+        };
+        execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+
+    fn deactivate_credit_line(
+        deps: &mut OwnedDeps<MockStorage, MockApi, MockQuerier>,
+        credit_line_id: u64,
+    ) {
+        let mut cl = CREDIT_LINES
+            .load(deps.as_ref().storage, credit_line_id)
+            .unwrap();
+        cl.active = false;
+        CREDIT_LINES
+            .save(deps.as_mut().storage, credit_line_id, &cl)
+            .unwrap();
+    }
+
+    fn assert_snapshot_internally_consistent(snap: &CreditLineSnapshotResponse) {
+        assert!(snap.is_internally_consistent());
+
+        let expected_utilized: Uint128 = snap
+            .draws
+            .iter()
+            .filter(|d| !d.repaid)
+            .map(|d| d.amount)
+            .fold(Uint128::zero(), |acc, x| acc + x);
+        assert_eq!(snap.total_utilized, expected_utilized);
+
+        let expected_weighted: Uint128 = snap
+            .multi_collateral
+            .iter()
+            .map(|e| e.amount * Uint128::from(e.risk_weight_bps) / Uint128::from(10_000u32))
+            .fold(Uint128::zero(), |acc, x| acc + x);
+        assert_eq!(snap.weighted_collateral_total, expected_weighted);
+
+        let total_drawn = snap.total_drawn().unwrap();
+        let total_repaid = snap.total_repaid().unwrap();
+        assert_eq!(total_drawn, snap.total_utilized + total_repaid);
+
+        let effective_collateral = snap.collateral_amount + snap.weighted_collateral_total;
+        let expected_hf = creditra_credit::math_utils::compute_health_factor_bps(
+            effective_collateral,
+            snap.total_utilized,
+        );
+        assert_eq!(snap.health_factor_bps, expected_hf);
+    }
+
+    #[test]
+    fn totals_equal_sum_of_included_draw_and_collateral_records() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "1000", "ucredit", "1000");
+
+        create_draw_for_borrower(&mut deps, &b, 0, "150", "ucredit");
+        create_draw_for_borrower(&mut deps, &b, 0, "250", "ucredit");
+        create_draw_for_borrower(&mut deps, &b, 0, "300", "ucredit");
+
+        add_collateral_token(&mut deps, "ubtc", 8_000);
+        add_collateral_token(&mut deps, "ueth", 5_000);
+        deposit_collateral_for(&mut deps, b.as_ref(), "ubtc", "100");
+        deposit_collateral_for(&mut deps, b.as_ref(), "ueth", "200");
+
+        let snap = snapshot(&deps, 0).unwrap();
+        assert_eq!(snap.draws.len(), 3);
+        assert_eq!(snap.multi_collateral.len(), 2);
+        assert_snapshot_internally_consistent(&snap);
+        assert_eq!(snap.total_utilized, Uint128::new(700));
+        assert_eq!(snap.weighted_collateral_total, Uint128::new(180));
+
+        repay_draw_for_borrower(&mut deps, &b, 0, 1);
+        let snap_after = snapshot(&deps, 0).unwrap();
+        assert_eq!(snap_after.draws.len(), 3);
+        assert_snapshot_internally_consistent(&snap_after);
+        assert_eq!(snap_after.total_utilized, Uint128::new(450));
+        assert_eq!(snap_after.total_repaid().unwrap(), Uint128::new(250));
+        assert_eq!(snap_after.total_drawn().unwrap(), Uint128::new(700));
+    }
+
+    #[test]
+    fn repaid_draws_represented_consistently_with_flags_and_totals() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "2000", "ucredit", "1000");
+
+        create_draw_for_borrower(&mut deps, &b, 0, "200", "ucredit");
+        create_draw_for_borrower(&mut deps, &b, 0, "300", "ucredit");
+
+        let snap0 = snapshot(&deps, 0).unwrap();
+        assert!(!snap0.draws[0].repaid);
+        assert!(!snap0.draws[1].repaid);
+        assert_eq!(snap0.total_utilized, Uint128::new(500));
+        assert_snapshot_internally_consistent(&snap0);
+
+        repay_draw_for_borrower(&mut deps, &b, 0, 0);
+        let snap1 = snapshot(&deps, 0).unwrap();
+        assert!(snap1.draws[0].repaid);
+        assert!(!snap1.draws[1].repaid);
+        assert_eq!(snap1.total_utilized, Uint128::new(300));
+        assert_eq!(snap1.total_repaid().unwrap(), Uint128::new(200));
+        assert_snapshot_internally_consistent(&snap1);
+
+        repay_draw_for_borrower(&mut deps, &b, 0, 1);
+        let snap2 = snapshot(&deps, 0).unwrap();
+        assert!(snap2.draws[0].repaid);
+        assert!(snap2.draws[1].repaid);
+        assert_eq!(snap2.total_utilized, Uint128::zero());
+        assert_eq!(snap2.total_repaid().unwrap(), Uint128::new(500));
+        assert_eq!(snap2.health_factor_bps, u32::MAX);
+        assert_snapshot_internally_consistent(&snap2);
+    }
+
+    #[test]
+    fn health_factor_boundaries_are_deterministic() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "0", "ucredit", "1000");
+        let snap_zero_debt_zero_collateral = snapshot(&deps, 0).unwrap();
+        assert_eq!(snap_zero_debt_zero_collateral.health_factor_bps, u32::MAX);
+        assert_snapshot_internally_consistent(&snap_zero_debt_zero_collateral);
+
+        create_draw_for_borrower(&mut deps, &b, 0, "500", "ucredit");
+        let snap_zero_collateral_with_debt = snapshot(&deps, 0).unwrap();
+        assert_eq!(snap_zero_collateral_with_debt.health_factor_bps, 0);
+        assert_snapshot_internally_consistent(&snap_zero_collateral_with_debt);
+
+        repay_draw_for_borrower(&mut deps, &b, 0, 0);
+
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "1000", "ucredit", "1000");
+        create_draw_for_borrower(&mut deps, &b, 1, "1000", "ucredit");
+        let snap_par = snapshot(&deps, 1).unwrap();
+        assert_eq!(snap_par.health_factor_bps, 10_000);
+        assert_snapshot_internally_consistent(&snap_par);
+
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "999", "ucredit", "1000");
+        create_draw_for_borrower(&mut deps, &b, 2, "1000", "ucredit");
+        let snap_under = snapshot(&deps, 2).unwrap();
+        assert_eq!(snap_under.health_factor_bps, 9_990);
+        assert_snapshot_internally_consistent(&snap_under);
+
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "1001", "ucredit", "1000");
+        create_draw_for_borrower(&mut deps, &b, 3, "1000", "ucredit");
+        let snap_over = snapshot(&deps, 3).unwrap();
+        assert_eq!(snap_over.health_factor_bps, 10_010);
+        assert_snapshot_internally_consistent(&snap_over);
+
+        create_credit_line_for_borrower(
+            &mut deps,
+            &b,
+            "ucollateral",
+            "1000000000000000",
+            "ucredit",
+            "1000",
+        );
+        create_draw_for_borrower(&mut deps, &b, 4, "1", "ucredit");
+        let snap_huge = snapshot(&deps, 4).unwrap();
+        assert_eq!(snap_huge.health_factor_bps, u32::MAX);
+        assert_snapshot_internally_consistent(&snap_huge);
+    }
+
+    #[test]
+    fn empty_credit_line_cases() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+
+        assert!(snapshot(&deps, 0).is_none());
+        assert!(snapshot(&deps, 42).is_none());
+
+        create_credit_line(&mut deps, "0", "0");
+        let snap = snapshot(&deps, 0).unwrap();
+        assert_eq!(snap.credit_line_id, 0);
+        assert_eq!(snap.collateral_amount, Uint128::zero());
+        assert_eq!(snap.credit_amount, Uint128::zero());
+        assert_eq!(snap.total_utilized, Uint128::zero());
+        assert!(snap.draws.is_empty());
+        assert!(snap.multi_collateral.is_empty());
+        assert_eq!(snap.weighted_collateral_total, Uint128::zero());
+        assert_eq!(snap.health_factor_bps, u32::MAX);
+        assert_snapshot_internally_consistent(&snap);
+    }
+
+    #[test]
+    fn active_credit_line_lifecycle() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "1000", "ucredit", "800");
+
+        create_draw_for_borrower(&mut deps, &b, 0, "200", "ucredit");
+        let snap1 = snapshot(&deps, 0).unwrap();
+        assert!(snap1.active);
+        assert_eq!(snap1.total_utilized, Uint128::new(200));
+        assert_snapshot_internally_consistent(&snap1);
+
+        create_draw_for_borrower(&mut deps, &b, 0, "300", "ucredit");
+        let snap2 = snapshot(&deps, 0).unwrap();
+        assert!(snap2.active);
+        assert_eq!(snap2.total_utilized, Uint128::new(500));
+        assert_snapshot_internally_consistent(&snap2);
+    }
+
+    #[test]
+    fn inactive_credit_line_retains_internal_consistency() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "1000", "ucredit", "500");
+        create_draw_for_borrower(&mut deps, &b, 0, "250", "ucredit");
+
+        deactivate_credit_line(&mut deps, 0);
+
+        let snap_inactive_debt = snapshot(&deps, 0).unwrap();
+        assert!(!snap_inactive_debt.active);
+        assert_eq!(snap_inactive_debt.draws.len(), 1);
+        assert_eq!(snap_inactive_debt.total_utilized, Uint128::new(250));
+        assert_snapshot_internally_consistent(&snap_inactive_debt);
+
+        repay_draw_for_borrower(&mut deps, &b, 0, 0);
+        let snap_inactive_repaid = snapshot(&deps, 0).unwrap();
+        assert!(!snap_inactive_repaid.active);
+        assert_eq!(snap_inactive_repaid.total_utilized, Uint128::zero());
+        assert_eq!(snap_inactive_repaid.health_factor_bps, u32::MAX);
+        assert_snapshot_internally_consistent(&snap_inactive_repaid);
+    }
+
+    #[test]
+    fn concurrent_updates_and_interleaved_operations() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+        let b = borrower(&deps);
+        create_credit_line_for_borrower(&mut deps, &b, "ucollateral", "2000", "ucredit", "1000");
+
+        add_collateral_token(&mut deps, "ubtc", 7_500);
+
+        let steps = [
+            ("draw", "100"),
+            ("deposit", "50"),
+            ("draw", "200"),
+            ("repay", "0"),
+            ("draw", "150"),
+            ("deposit", "50"),
+            ("repay", "1"),
+        ];
+
+        for (action, arg) in steps {
+            match action {
+                "draw" => create_draw_for_borrower(&mut deps, &b, 0, arg, "ucredit"),
+                "deposit" => deposit_collateral_for(&mut deps, b.as_ref(), "ubtc", arg),
+                "repay" => {
+                    let did: u64 = arg.parse().unwrap();
+                    repay_draw_for_borrower(&mut deps, &b, 0, did);
+                }
+                _ => unreachable!(),
+            }
+
+            let snap = snapshot(&deps, 0).unwrap();
+            assert_snapshot_internally_consistent(&snap);
+        }
+
+        deactivate_credit_line(&mut deps, 0);
+        let snap_final = snapshot(&deps, 0).unwrap();
+        assert!(!snap_final.active);
+        assert_snapshot_internally_consistent(&snap_final);
+    }
+
+    #[test]
+    fn multi_borrower_concurrent_isolation() {
+        let mut deps = mock_dependencies();
+        setup(&mut deps);
+
+        let b1 = deps.api.addr_make("borrower_alpha");
+        let b2 = deps.api.addr_make("borrower_beta");
+
+        create_credit_line_for_borrower(&mut deps, &b1, "ucollateral", "1000", "ucredit", "500");
+        create_credit_line_for_borrower(&mut deps, &b2, "ucollateral", "2000", "ucredit", "1000");
+
+        create_draw_for_borrower(&mut deps, &b1, 0, "100", "ucredit");
+        create_draw_for_borrower(&mut deps, &b2, 1, "400", "ucredit");
+        create_draw_for_borrower(&mut deps, &b1, 0, "200", "ucredit");
+
+        let snap1 = snapshot(&deps, 0).unwrap();
+        let snap2 = snapshot(&deps, 1).unwrap();
+
+        assert_snapshot_internally_consistent(&snap1);
+        assert_snapshot_internally_consistent(&snap2);
+
+        assert_eq!(snap1.credit_line_id, 0);
+        assert_eq!(snap1.borrower, b1);
+        assert_eq!(snap1.draws.len(), 2);
+        assert_eq!(snap1.total_utilized, Uint128::new(300));
+
+        assert_eq!(snap2.credit_line_id, 1);
+        assert_eq!(snap2.borrower, b2);
+        assert_eq!(snap2.draws.len(), 1);
+        assert_eq!(snap2.total_utilized, Uint128::new(400));
+
+        repay_draw_for_borrower(&mut deps, &b1, 0, 0);
+
+        let snap1_after = snapshot(&deps, 0).unwrap();
+        let snap2_after = snapshot(&deps, 1).unwrap();
+
+        assert_snapshot_internally_consistent(&snap1_after);
+        assert_snapshot_internally_consistent(&snap2_after);
+
+        assert_eq!(snap1_after.total_utilized, Uint128::new(200));
+        assert_eq!(snap2_after.total_utilized, Uint128::new(400));
+    }
+}

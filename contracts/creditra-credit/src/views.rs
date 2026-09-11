@@ -248,26 +248,21 @@ pub fn query_borrower_health_factor(
             if cl.active && cl.borrower == borrower_addr {
                 let utilized_amount = crate::state::outstanding_utilization(deps.storage, id)?;
 
-                // Aggregate credit-line collateral + multi-collateral (risk-weighted).
                 let multi_total = collateral::weighted_collateral_total(deps, &cl.borrower)?;
                 let effective_collateral = cl
                     .collateral_amount
                     .checked_add(multi_total)
                     .map_err(StdError::from)?;
 
-                // Compute health factor based on effective collateral.
                 let health_factor_bps = if utilized_amount.is_zero() {
                     u32::MAX
                 } else if effective_collateral.is_zero() || cl.credit_amount.is_zero() {
                     0
                 } else {
-                    let numerator = effective_collateral
-                        .checked_mul(Uint128::from(10_000u32))
-                        .map_err(StdError::from)?;
-                    let result = numerator
-                        .checked_div(utilized_amount)
-                        .map_err(StdError::from)?;
-                    u32::try_from(result.u128()).unwrap_or(u32::MAX)
+                    crate::math_utils::compute_health_factor_bps(
+                        effective_collateral,
+                        utilized_amount,
+                    )
                 };
 
                 credit_lines.push(CreditLineHealthResponse {
@@ -316,13 +311,11 @@ pub fn query_credit_line_snapshot(
     deps: Deps,
     credit_line_id: u64,
 ) -> Result<Option<CreditLineSnapshotResponse>, ContractError> {
-    // Return None cleanly when the credit line does not exist.
     let cl = match CREDIT_LINES.may_load(deps.storage, credit_line_id)? {
         Some(cl) => cl,
         None => return Ok(None),
     };
 
-    // ── Draws ────────────────────────────────────────────────────────────────
     let draw_count = DRAW_COUNT
         .may_load(deps.storage, credit_line_id)?
         .unwrap_or(0);
@@ -342,9 +335,15 @@ pub fn query_credit_line_snapshot(
         }
     }
 
-    let total_utilized = crate::state::outstanding_utilization(deps.storage, credit_line_id)?;
+    let mut total_utilized = Uint128::zero();
+    for draw in &draws {
+        if !draw.repaid {
+            total_utilized = total_utilized
+                .checked_add(draw.amount)
+                .map_err(|_| ContractError::Overflow)?;
+        }
+    }
 
-    // ── Multi-collateral breakdown ────────────────────────────────────────────
     let raw_multi = collateral::query_borrower_collateral(deps, &cl.borrower);
     let multi_collateral: Vec<CollateralEntryResponse> = raw_multi
         .iter()
@@ -355,36 +354,26 @@ pub fn query_credit_line_snapshot(
         })
         .collect();
 
-    let weighted_collateral_total = collateral::weighted_collateral_total(deps, &cl.borrower)
-        .map_err(|e| ContractError::Std(cosmwasm_std::StdError::generic_err(e.to_string())))?;
+    let mut weighted_collateral_total = Uint128::zero();
+    for entry in &multi_collateral {
+        let weighted = entry
+            .amount
+            .checked_mul(Uint128::from(entry.risk_weight_bps))
+            .map_err(|_| ContractError::Overflow)?
+            .checked_div(Uint128::from(10_000u32))
+            .map_err(|_| ContractError::Overflow)?;
+        weighted_collateral_total = weighted_collateral_total
+            .checked_add(weighted)
+            .map_err(|_| ContractError::Overflow)?;
+    }
 
-    // ── Health factor ─────────────────────────────────────────────────────────
-    //
-    // Aggregate effective collateral: primary collateral_amount + risk-weighted
-    // multi-token total.  Then:
-    //
-    //   health_factor_bps = effective_collateral * 10_000 / total_utilized
-    //
-    // Returns u32::MAX when total_utilized == 0 (no outstanding debt — infinitely
-    // healthy).  Returns 0 when effective_collateral == 0 and total_utilized > 0.
     let effective_collateral = cl
         .collateral_amount
         .checked_add(weighted_collateral_total)
         .map_err(StdError::from)?;
 
-    let health_factor_bps = if total_utilized.is_zero() {
-        u32::MAX
-    } else if effective_collateral.is_zero() {
-        0u32
-    } else {
-        let numerator = effective_collateral
-            .checked_mul(Uint128::from(10_000u32))
-            .map_err(StdError::from)?;
-        let result = numerator
-            .checked_div(total_utilized)
-            .map_err(StdError::from)?;
-        u32::try_from(result.u128()).unwrap_or(u32::MAX)
-    };
+    let health_factor_bps =
+        crate::math_utils::compute_health_factor_bps(effective_collateral, total_utilized);
 
     Ok(Some(CreditLineSnapshotResponse {
         credit_line_id,

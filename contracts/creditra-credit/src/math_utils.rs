@@ -6,7 +6,7 @@
 //! These mirror the Soroban `math_utils` module to ensure consistent behavior
 //! across both runtimes.
 
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Uint128, Uint256};
 
 /// Rounding direction for fixed-point division.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +73,30 @@ pub fn mul_div(
                 Some(quotient)
             }
         }
+    }
+}
+
+/// Compute collateral-aware health factor in basis points.
+///
+/// Returns `u32::MAX` when `total_utilized == 0` (no outstanding debt).
+/// Returns `0` when `effective_collateral == 0` and `total_utilized > 0`.
+/// Otherwise evaluates `(effective_collateral * 10_000) / total_utilized` with 256-bit
+/// precision and saturates at `u32::MAX`.
+pub fn compute_health_factor_bps(effective_collateral: Uint128, total_utilized: Uint128) -> u32 {
+    if total_utilized.is_zero() {
+        u32::MAX
+    } else if effective_collateral.is_zero() {
+        0u32
+    } else {
+        let col_256 = Uint256::from(effective_collateral);
+        let bps_256 = Uint256::from(10_000u32);
+        let ut_256 = Uint256::from(total_utilized);
+        let numerator = col_256 * bps_256;
+        let quotient = numerator / ut_256;
+        Uint128::try_from(quotient)
+            .ok()
+            .and_then(|v| u32::try_from(v.u128()).ok())
+            .unwrap_or(u32::MAX)
     }
 }
 
@@ -210,7 +234,54 @@ mod tests {
 
     #[test]
     fn mul_div_overflow_returns_none() {
-        // Uint128::MAX × 2 overflows
         assert_eq!(mul_div(Uint128::MAX, 2, 1, Rounding::Floor), None);
+    }
+
+    #[test]
+    fn health_factor_zero_utilized_returns_u32_max() {
+        assert_eq!(
+            compute_health_factor_bps(Uint128::new(1000), Uint128::zero()),
+            u32::MAX
+        );
+        assert_eq!(
+            compute_health_factor_bps(Uint128::zero(), Uint128::zero()),
+            u32::MAX
+        );
+    }
+
+    #[test]
+    fn health_factor_zero_collateral_with_debt_returns_zero() {
+        assert_eq!(
+            compute_health_factor_bps(Uint128::zero(), Uint128::new(500)),
+            0
+        );
+    }
+
+    #[test]
+    fn health_factor_par_collateralization() {
+        assert_eq!(
+            compute_health_factor_bps(Uint128::new(1000), Uint128::new(1000)),
+            10_000
+        );
+    }
+
+    #[test]
+    fn health_factor_over_and_under_collateralized() {
+        assert_eq!(
+            compute_health_factor_bps(Uint128::new(2000), Uint128::new(1000)),
+            20_000
+        );
+        assert_eq!(
+            compute_health_factor_bps(Uint128::new(500), Uint128::new(1000)),
+            5_000
+        );
+    }
+
+    #[test]
+    fn health_factor_large_collateral_saturates_without_overflow() {
+        assert_eq!(
+            compute_health_factor_bps(Uint128::MAX, Uint128::new(1)),
+            u32::MAX
+        );
     }
 }

@@ -298,3 +298,75 @@ pub struct CreditLineSnapshotResponse {
     /// All draws associated with this credit line (active and repaid).
     pub draws: Vec<DrawSnapshotEntry>,
 }
+
+impl CreditLineSnapshotResponse {
+    /// Compute total principal drawn across all recorded draws.
+    pub fn total_drawn(&self) -> Option<Uint128> {
+        let mut total = Uint128::zero();
+        for draw in &self.draws {
+            total = total.checked_add(draw.amount).ok()?;
+        }
+        Some(total)
+    }
+
+    /// Compute total principal repaid across all repaid draws.
+    pub fn total_repaid(&self) -> Option<Uint128> {
+        let mut total = Uint128::zero();
+        for draw in &self.draws {
+            if draw.repaid {
+                total = total.checked_add(draw.amount).ok()?;
+            }
+        }
+        Some(total)
+    }
+
+    /// Verify that snapshot totals strictly equal the sum of included records,
+    /// repaid draws are partitioned consistently, and the health factor is deterministic.
+    pub fn is_internally_consistent(&self) -> bool {
+        let mut sum_utilized = Uint128::zero();
+        for draw in &self.draws {
+            if !draw.repaid {
+                match sum_utilized.checked_add(draw.amount) {
+                    Ok(val) => sum_utilized = val,
+                    Err(_) => return false,
+                }
+            }
+        }
+        if self.total_utilized != sum_utilized {
+            return false;
+        }
+
+        let mut sum_weighted = Uint128::zero();
+        for entry in &self.multi_collateral {
+            let weighted = match entry
+                .amount
+                .checked_mul(Uint128::from(entry.risk_weight_bps))
+                .ok()
+                .and_then(|w| w.checked_div(Uint128::from(10_000u32)).ok())
+            {
+                Some(w) => w,
+                None => return false,
+            };
+            match sum_weighted.checked_add(weighted) {
+                Ok(val) => sum_weighted = val,
+                Err(_) => return false,
+            }
+        }
+        if self.weighted_collateral_total != sum_weighted {
+            return false;
+        }
+
+        let effective_collateral = match self
+            .collateral_amount
+            .checked_add(self.weighted_collateral_total)
+        {
+            Ok(val) => val,
+            Err(_) => return false,
+        };
+
+        let expected_hf =
+            crate::math_utils::compute_health_factor_bps(effective_collateral, self.total_utilized);
+
+        self.health_factor_bps == expected_hf
+    }
+}
