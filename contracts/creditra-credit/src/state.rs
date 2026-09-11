@@ -80,15 +80,65 @@ impl DrawAuditEntry {
     }
 }
 
+pub use crate::key::{
+    check_new_namespace_collision, validate_storage_key_catalog, StorageKeyFamily, StorageType,
+    ALL_STORAGE_KEY_FAMILIES,
+};
+
+/// Singleton contract configuration containing administrative owner address.
+///
+/// - Namespace: `"config"`
+/// - Key type: `()` (raw key: `b"config"`)
+/// - Value type: [`Config`]
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const CONFIG: Item<Config> = Item::new("config");
 
+/// Monotonically increasing counter of all credit lines ever created.
+///
+/// - Namespace: `"clc"`
+/// - Key type: `()` (raw key: `b"clc"`)
+/// - Value type: `u64`
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const CREDIT_LINE_COUNT: Item<u64> = Item::new("clc");
+
+/// Credit line records keyed by stable numeric identifier.
+///
+/// - Namespace: `"cl"`
+/// - Key type: `u64`
+/// - Value type: [`CreditLine`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const CREDIT_LINES: Map<u64, CreditLine> = Map::new("cl");
 
+/// Per-credit-line draw counter tracking total draws created on that line.
+///
+/// - Namespace: `"dcnt"`
+/// - Key type: `u64`
+/// - Value type: `u64`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const DRAW_COUNT: Map<u64, u64> = Map::new("dcnt");
+
+/// Draw records keyed by composite credit line and draw identifiers.
+///
+/// - Namespace: `"dr"`
+/// - Key type: `(u64, u64)`
+/// - Value type: [`Draw`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const DRAWS: Map<(u64, u64), Draw> = Map::new("dr");
 
+/// Per-draw audit sequence counter.
+///
+/// - Namespace: `"dacnt"`
+/// - Key type: `(u64, u64)`
+/// - Value type: `u64`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const DRAW_AUDIT_COUNT: Map<(u64, u64), u64> = Map::new("dacnt");
+
+/// Immutable append-only audit trail entries for draw actions.
+///
+/// - Namespace: `"da"`
+/// - Key type: `(u64, u64, u64)`
+/// - Value type: [`DrawAuditEntry`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
 
 /// Sum of unrepaid draw amounts on a credit line.
@@ -165,53 +215,122 @@ pub const MAX_ORACLE_FEEDS: usize = 20;
 /// protocol lists more assets.
 pub const MAX_COLLATERAL_TOKENS: usize = 50;
 
-/// Storage key for the oracle quorum configuration.
+/// Multi-oracle quorum configuration for redundancy median resolution.
+///
+/// - Namespace: `"orc_qcfg"`
+/// - Key type: `()` (raw key: `b"orc_qcfg"`)
+/// - Value type: [`OracleQuorumConfig`]
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg");
 
-/// Storage key for the last resolved oracle price record.
+/// Stored quorum-resolved canonical price record.
+///
+/// - Namespace: `"orc_prc"`
+/// - Key type: `()` (raw key: `b"orc_prc"`)
+/// - Value type: [`OraclePriceRecord`]
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
 
+/// Authorized oracle feed provider addresses.
+///
+/// - Namespace: `"orc_lst"`
+/// - Key type: `()` (raw key: `b"orc_lst"`)
+/// - Value type: `Vec<Addr>`
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const ORACLE_LIST: Item<Vec<Addr>> = Item::new("orc_lst");
+
+/// Individual oracle voting weight in basis points.
+///
+/// - Namespace: `"orc_w"`
+/// - Key type: `Addr`
+/// - Value type: `u32`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const ORACLE_WEIGHT: Map<Addr, u32> = Map::new("orc_w");
+
+/// Latest submitted price report data per oracle address.
+///
+/// - Namespace: `"orc_rpt"`
+/// - Key type: `Addr`
+/// - Value type: [`OracleReportData`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const ORACLE_REPORT: Map<Addr, OracleReportData> = Map::new("orc_rpt");
 
-/// Storage key for the structured late-fee configuration.
+/// Structured late-fee configuration.
 ///
-/// When absent the contract has no late-fee penalty configured.
+/// - Namespace: `"lfc"`
+/// - Key type: `()` (raw key: `b"lfc"`)
+/// - Value type: [`LateFeeConfig`]
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
 
-// ── Multi-collateral storage ────────────────────────────────────────────────
-
 /// Tokens currently posted by each borrower.
+///
+/// - Namespace: `"bct"`
+/// - Key type: `&Addr`
+/// - Value type: `Vec<String>`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const BORROWER_COLLATERAL_TOKENS: Map<&Addr, Vec<String>> = Map::new("bct");
 
-/// Raw collateral balance keyed by borrower and denomination.
+/// Raw collateral balance keyed by borrower and token denomination.
+///
+/// - Namespace: `"cb"`
+/// - Key type: `(&Addr, &str)`
+/// - Value type: [`Uint128`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const COLLATERAL_BALANCES: Map<(&Addr, &str), Uint128> = Map::new("cb");
 
-/// Optional risk-weight overrides, in basis points.
+/// Optional risk-weight overrides in basis points keyed by token denomination.
+///
+/// - Namespace: `"crw"`
+/// - Key type: `&str`
+/// - Value type: `u32`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const COLLATERAL_RISK_WEIGHTS: Map<&str, u32> = Map::new("crw");
 
-/// Admin-managed list of accepted collateral denominations.
+/// Admin-managed allowlist of accepted collateral token denominations.
+///
+/// - Namespace: `"cta"`
+/// - Key type: `()` (raw key: `b"cta"`)
+/// - Value type: `Vec<String>`
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const COLLATERAL_TOKEN_ALLOWLIST: Item<Vec<String>> = Item::new("cta");
 
 /// Default collateral risk weight: 100%.
 pub const DEFAULT_COLLATERAL_RISK_WEIGHT_BPS: u32 = 10_000;
 
-// ── Per-market fee split storage ─────────────────────────────────────────────
-
 /// Default treasury fee share in basis points (0..=10_000).
 /// When unset, defaults to 10_000 (100% treasury, backward compatible).
+///
+/// - Namespace: `"default_fee_share"`
+/// - Key type: `()` (raw key: `b"default_fee_share"`)
+/// - Value type: `u32`
+/// - Storage kind: [`cw_storage_plus::Item`]
 pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("default_fee_share");
 
 /// Per-market treasury fee share override in basis points (0..=10_000).
 /// Keyed by market denomination (the `credit_denom` of a credit line).
 /// When absent for a market, the [`DEFAULT_FEE_SHARE_BPS`] applies.
+///
+/// - Namespace: `"mkt_fee_share"`
+/// - Key type: `&str`
+/// - Value type: `u32`
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mkt_fee_share");
 
 /// Per-market accumulated treasury balance held in contract (fees collected).
 /// Keyed by market denomination.
+///
+/// - Namespace: `"treasury_bal"`
+/// - Key type: `&str`
+/// - Value type: [`Uint128`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("treasury_bal");
 
 /// Per-market accumulated bounty pool balance held in contract (fee share).
 /// Keyed by market denomination.
+///
+/// - Namespace: `"bounty_bal"`
+/// - Key type: `&str`
+/// - Value type: [`Uint128`]
+/// - Storage kind: [`cw_storage_plus::Map`]
 pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bounty_bal");
