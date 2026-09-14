@@ -12,11 +12,25 @@
 //!   the periodic interest rate, applied when the line is delinquent.  The
 //!   surcharge is stored in an [`AprFeeConfig`] wrapper struct.
 //!
-//! # Calculation
+//! # Calculation and Overflow Safety
 //!
 //! [`compute_late_fee`] is a pure, deterministic function with no
-//! floating-point arithmetic, no `unwrap`, and no side effects.  It is
-//! called by the contract after each overdue installment is detected.
+//! floating-point arithmetic, no `unwrap`, and no side effects.  All
+//! arithmetic uses checked operations; any overflow returns
+//! [`ContractError::Overflow`] before any state mutation can occur.
+//!
+//! # Rounding Policy
+//!
+//! - **Flat mode**: Discrete token amounts multiplied by whole installment
+//!   counts yield exact integer values without fractional remainders.
+//! - **APR-based mode**: Delinquency surcharges follow the protocol interest
+//!   accrual policy using floor rounding (truncation toward zero), favoring
+//!   the borrower.
+//!
+//! # Cleared Configuration
+//!
+//! When configuration is cleared (`None`), late fees evaluate to zero via
+//! [`compute_late_fee_optional`], preserving neutral protocol behavior.
 //!
 //! # API change summary
 //!
@@ -161,6 +175,43 @@ pub fn compute_late_fee(
     }
 }
 
+/// Compute late fee for an optional configuration (such as when loaded from storage).
+///
+/// When `config` is `None` (cleared or unconfigured), returns `Ok(Uint128::zero())`.
+/// When `config` is `Some(cfg)`, delegates to [`compute_late_fee`].
+///
+/// # Examples
+///
+/// ```ignore
+/// let fee = compute_late_fee_optional(None, 5)?;
+/// assert_eq!(fee, Uint128::zero());
+/// ```
+pub fn compute_late_fee_optional(
+    config: Option<LateFeeConfig>,
+    missed_installments: u64,
+) -> Result<Uint128, ContractError> {
+    match config {
+        Some(cfg) => compute_late_fee(cfg, missed_installments),
+        None => Ok(Uint128::zero()),
+    }
+}
+
+/// Compute the APR-based late fee for delinquent principal over an elapsed duration.
+///
+/// Applies floor rounding in accordance with the protocol interest accrual policy:
+/// `fee = floor(principal * surcharge_bps * elapsed_seconds / (10_000 * SECONDS_PER_YEAR))`.
+///
+/// # Errors
+///
+/// Returns [`ContractError::Overflow`] if the intermediate multiplication overflows `Uint128`.
+pub fn compute_apr_late_fee(
+    principal: Uint128,
+    config: &AprFeeConfig,
+    elapsed_seconds: u64,
+) -> Result<Uint128, ContractError> {
+    crate::accrual::accrued_interest(principal, config.surcharge_bps, elapsed_seconds)
+}
+
 /// Validate a late-fee configuration.
 ///
 /// Ensures:
@@ -271,6 +322,135 @@ mod tests {
         let amount = Uint128::new(u128::MAX / 2);
         let fee = compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount }), 2).unwrap();
         assert_eq!(fee, amount.checked_mul(Uint128::new(2)).unwrap());
+    }
+
+    #[test]
+    fn flat_max_uint128_zero_installments_returns_zero() {
+        let fee = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::MAX,
+            }),
+            0,
+        )
+        .unwrap();
+        assert_eq!(fee, Uint128::zero());
+    }
+
+    #[test]
+    fn flat_max_uint128_single_installment_succeeds() {
+        let fee = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::MAX,
+            }),
+            1,
+        )
+        .unwrap();
+        assert_eq!(fee, Uint128::MAX);
+    }
+
+    #[test]
+    fn flat_max_uint128_overflow_returns_overflow() {
+        let err = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::MAX,
+            }),
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::Overflow);
+    }
+
+    #[test]
+    fn flat_max_installments_at_unit_amount() {
+        let fee = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(1),
+            }),
+            u64::MAX,
+        )
+        .unwrap();
+        assert_eq!(fee, Uint128::from(u64::MAX));
+    }
+
+    #[test]
+    fn flat_max_installments_overflow_with_large_amount() {
+        let err = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::MAX,
+            }),
+            u64::MAX,
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::Overflow);
+    }
+
+    #[test]
+    fn flat_overflow_boundary_at_max() {
+        let half = Uint128::MAX / Uint128::new(2);
+        let fee = compute_late_fee(LateFeeConfig::Flat(FlatFeeConfig { amount: half }), 2).unwrap();
+        assert_eq!(fee, half.checked_mul(Uint128::new(2)).unwrap());
+    }
+
+    #[test]
+    fn flat_overflow_boundary_just_above_max() {
+        let half_plus_one = (Uint128::MAX / Uint128::new(2)) + Uint128::new(1);
+        let err = compute_late_fee(
+            LateFeeConfig::Flat(FlatFeeConfig {
+                amount: half_plus_one,
+            }),
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::Overflow);
+    }
+
+    #[test]
+    fn optional_config_none_returns_zero() {
+        let fee = compute_late_fee_optional(None, 10).unwrap();
+        assert_eq!(fee, Uint128::zero());
+    }
+
+    #[test]
+    fn optional_config_some_computes_fee() {
+        let fee = compute_late_fee_optional(
+            Some(LateFeeConfig::Flat(FlatFeeConfig {
+                amount: Uint128::new(50),
+            })),
+            3,
+        )
+        .unwrap();
+        assert_eq!(fee, Uint128::new(150));
+    }
+
+    #[test]
+    fn apr_late_fee_floor_rounding() {
+        let config = AprFeeConfig { surcharge_bps: 500 };
+        let fee = compute_apr_late_fee(
+            Uint128::new(10_000),
+            &config,
+            crate::accrual::SECONDS_PER_YEAR,
+        )
+        .unwrap();
+        assert_eq!(fee, Uint128::new(500));
+    }
+
+    #[test]
+    fn apr_late_fee_overflow_returns_overflow() {
+        let config = AprFeeConfig {
+            surcharge_bps: MAX_SURCHARGE_BPS,
+        };
+        let err = compute_apr_late_fee(Uint128::MAX, &config, crate::accrual::SECONDS_PER_YEAR)
+            .unwrap_err();
+        assert_eq!(err, ContractError::Overflow);
+    }
+
+    #[test]
+    fn apr_late_fee_zero_principal_or_duration_returns_zero() {
+        let config = AprFeeConfig { surcharge_bps: 500 };
+        let fee1 = compute_apr_late_fee(Uint128::zero(), &config, 1000).unwrap();
+        let fee2 = compute_apr_late_fee(Uint128::new(10_000), &config, 0).unwrap();
+        assert_eq!(fee1, Uint128::zero());
+        assert_eq!(fee2, Uint128::zero());
     }
 
     // ── APR-based mode (existing behaviour preserved) ────────────────────────
