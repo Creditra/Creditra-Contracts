@@ -50,6 +50,11 @@ fn open_and_default(
 
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
     if utilized > 0 {
+        // `draw_credit` enforces the collateral ratio, so the borrower needs a
+        // collateral position before drawing; 3x covers the default 15_000 bps
+        // floor. Without this the draw reverts with #35 and no settlement test
+        // can reach its oracle assertions.
+        client.deposit_collateral(&borrower, &utilized.saturating_mul(3));
         client.draw_credit(&borrower, &utilized);
     }
     client.default_credit_line(&borrower);
@@ -161,7 +166,7 @@ fn settlement_single_oracle_second_price_within_deviation() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceDeviation")]
+#[should_panic(expected = "Error(Contract, #38)")] // OraclePriceDeviation
 fn settlement_single_oracle_over_deviation_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -190,7 +195,7 @@ fn settlement_single_oracle_over_deviation_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceStale")]
+#[should_panic(expected = "Error(Contract, #37)")] // OraclePriceStale
 fn settlement_single_oracle_stale_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -219,7 +224,7 @@ fn settlement_single_oracle_stale_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceInvalid")]
+#[should_panic(expected = "Error(Contract, #36)")] // OraclePriceInvalid
 fn settlement_single_oracle_missing_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -232,7 +237,7 @@ fn settlement_single_oracle_missing_price_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceInvalid")]
+#[should_panic(expected = "Error(Contract, #36)")] // OraclePriceInvalid
 fn settlement_single_oracle_zero_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -309,7 +314,7 @@ fn settlement_quorum_fresh_price_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "OracleQuorumNotMet")]
+#[should_panic(expected = "Error(Contract, #50)")] // OracleQuorumNotMet
 fn settlement_quorum_missing_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -321,7 +326,7 @@ fn settlement_quorum_missing_price_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceStale")]
+#[should_panic(expected = "Error(Contract, #37)")] // OraclePriceStale
 fn settlement_quorum_stale_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -340,7 +345,7 @@ fn settlement_quorum_stale_price_fails() {
 // ── replay protection ────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "AlreadyInitialized")]
+#[should_panic(expected = "Error(Contract, #14)")] // AlreadyInitialized
 fn settlement_replay_attempt_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -357,8 +362,10 @@ fn settlement_replay_attempt_fails() {
         &None,
     );
 
-    // Line is now closed, but even if we re-open, same settlement_id is blocked
-    // (In practice, line would be closed, so this is more of a contract invariant check)
+    // Line is now closed, but the replay gate is keyed on
+    // (borrower, settlement_id) and is checked before the credit-line read and
+    // the status check, so re-submitting the same id must revert.
+    client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
 }
 
 #[test]
@@ -434,12 +441,15 @@ fn settlement_multiple_close_factors() {
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 700);
 
-    // Second settlement: recover 400 more (close_factor ~57% of remaining)
+    // Second settlement: recover 400 more. `max_recoverable` is
+    // `700 * close_factor_bps / 10_000`, so 5_700 bps only allows 399 and 400
+    // would revert with OverLimit; 5_715 bps is the smallest factor that admits
+    // the full 400 (close_factor ~57.15% of remaining).
     client.settle_default_liquidation(
         &borrower,
         &400_i128,
         &sid(&env, "s2"),
-        &5_700_u32,
+        &5_715_u32,
         &None,
     );
     let line = client.get_credit_line(&borrower).unwrap();
@@ -479,7 +489,7 @@ fn settlement_recovered_amount_equals_max_recoverable() {
 }
 
 #[test]
-#[should_panic(expected = "OverLimit")]
+#[should_panic(expected = "Error(Contract, #6)")] // OverLimit
 fn settlement_recovered_amount_exceeds_max_recoverable() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -496,7 +506,7 @@ fn settlement_recovered_amount_exceeds_max_recoverable() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #5)")] // InvalidAmount
 fn settlement_zero_recovered_amount_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -512,7 +522,7 @@ fn settlement_zero_recovered_amount_fails() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #5)")] // InvalidAmount
 fn settlement_negative_recovered_amount_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);

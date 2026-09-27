@@ -177,9 +177,9 @@ use crate::storage::{
     proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
-    MAX_ENUMERATION_LIMIT,
+    set_oracle_quorum_config, set_oracle_quorum_price, set_pending_treasury_withdrawal,
+    set_reentrancy_guard, set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey,
+    DrawAuditKey, MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
     BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
@@ -1945,7 +1945,14 @@ impl Credit {
         set_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.
-        if let Some(cfg) = crate::storage::get_oracle_config(&env) {
+        //
+        // Skipped in quorum mode. Quorum takes precedence (see
+        // `set_oracle_quorum_config`) and the caller-supplied `oracle_price` is
+        // documented to be ignored there, so the single-oracle deviation band
+        // must not gate settlement while a quorum config is present.
+        if let Some(cfg) = crate::storage::get_oracle_config(&env)
+            .filter(|_| crate::storage::get_oracle_quorum_config(&env).is_none())
+        {
             let price = oracle_price.unwrap_or_else(|| {
                 clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid)
@@ -2221,7 +2228,8 @@ impl Credit {
     /// 2. Finds the first K-wide window whose spread is within
     ///    `max_deviation_bps` of the lowest price in that window.
     /// 3. Returns the lower-median of that window as the canonical price.
-    /// 4. Stores the canonical price and the current ledger timestamp.
+    /// 4. Stores the canonical price and the current ledger timestamp in the
+    ///    quorum price slot that `settle_default_liquidation` reads.
     ///
     /// The stored price is subsequently used by `settle_default_liquidation`
     /// (staleness is re-checked there against `max_age_seconds`).
@@ -2251,6 +2259,16 @@ impl Credit {
 
         let canonical_price = oracles::resolve_quorum_price(&env, &prices, &qcfg);
         let now = env.ledger().timestamp();
+        // The quorum slot is the one `validate_quorum_mode` reads when
+        // `settle_default_liquidation` gates on oracle freshness, so the
+        // resolved median has to land there. Writing only `OracleLastPrice`
+        // left the quorum slot permanently empty and made every settlement in
+        // quorum mode revert with `OracleQuorumNotMet`.
+        set_oracle_quorum_price(&env, canonical_price, now);
+        // Keep the single-oracle bookkeeping slot in sync too: it is what
+        // `forgive_debt` and the single-oracle circuit breaker read as the
+        // "last accepted price", and this write is what `submit_oracle_prices`
+        // has always done.
         crate::storage::set_oracle_last_price(&env, canonical_price, now);
         publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
