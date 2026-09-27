@@ -391,19 +391,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "creditra-credit"
-version = "0.1.0"
-dependencies = [
- "gateway-auction",
- "insta",
- "primitive-types",
- "proptest",
- "serde",
- "serde_json",
- "soroban-sdk",
-]
-
-[[package]]
 name = "creditra-freeze"
 version = "0.1.0"
 dependencies = [

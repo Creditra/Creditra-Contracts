@@ -231,3 +231,78 @@ fn test_claim_settled_liquidation_is_prevented() {
     });
     assert!(res.is_err());
 }
+
+#[test]
+fn test_multiple_partial_settlements_funds_conserved() {
+    let env = Env::default();
+    let draw_amount = 2_000;
+    let deployment = setup_test(&env, draw_amount);
+
+    let bidder = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &deployment.token_id).mint(&bidder, &1_000);
+
+    let initial_total = get_total_balance(&env, &deployment.token_id, &deployment, &bidder);
+
+    // First settlement
+    let settlement_id_1 = Symbol::new(&env, "multi_1");
+    let auction = AuctionClient::new(&env, &deployment.auction_id);
+    let start_time_1 = env.ledger().timestamp();
+    let end_time_1 = start_time_1 + AUCTION_DURATION;
+
+    auction.init_auction(
+        &settlement_id_1,
+        &AuctionMode::English,
+        &start_time_1,
+        &end_time_1,
+        &MIN_BID,
+        &0_u32,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    auction.place_bid(&settlement_id_1, &bidder, &400);
+    env.ledger().set_timestamp(end_time_1);
+    auction.close_auction(&settlement_id_1);
+
+    let credit = CreditClient::new(&env, &deployment.credit_id);
+    credit.settle_default_liquidation(
+        &deployment.borrower,
+        &400,
+        &settlement_id_1,
+        &None,
+    );
+
+    // Second settlement
+    let settlement_id_2 = Symbol::new(&env, "multi_2");
+    let start_time_2 = env.ledger().timestamp();
+    let end_time_2 = start_time_2 + AUCTION_DURATION;
+
+    auction.init_auction(
+        &settlement_id_2,
+        &AuctionMode::English,
+        &start_time_2,
+        &end_time_2,
+        &MIN_BID,
+        &0_u32,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    auction.place_bid(&settlement_id_2, &bidder, &500);
+    env.ledger().set_timestamp(end_time_2);
+    auction.close_auction(&settlement_id_2);
+
+    credit.settle_default_liquidation(
+        &deployment.borrower,
+        &500,
+        &settlement_id_2,
+        &None,
+    );
+
+    let final_total = get_total_balance(&env, &deployment.token_id, &deployment, &bidder);
+    assert_eq!(initial_total, final_total, "Balances not conserved after multiple partial liquidations");
+}
