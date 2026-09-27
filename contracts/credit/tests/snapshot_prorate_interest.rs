@@ -39,7 +39,9 @@ use serde::{Deserialize, Serialize};
 /// two levels up in `test_snapshots/` inside that same directory.
 fn snapshot_path() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("test_snapshots").join("prorate_interest.json")
+    manifest
+        .join("test_snapshots")
+        .join("prorate_interest.json")
 }
 
 // ─── Snapshot schema ──────────────────────────────────────────────────────────
@@ -175,8 +177,7 @@ fn build_snapshot() -> Vec<SnapshotEntry> {
     generate_inputs()
         .into_iter()
         .map(|(principal, rate_bps, seconds)| {
-            let floor =
-                prorate_interest(principal, rate_bps, seconds as u64, Rounding::Floor);
+            let floor = prorate_interest(principal, rate_bps, seconds as u64, Rounding::Floor);
             SnapshotEntry {
                 principal: principal.to_string(),
                 rate_bps,
@@ -237,18 +238,15 @@ fn verify_prorate_interest_snapshot() {
         let time_delta = entry.seconds as u64;
 
         // ── Primary assertion: exact match ────────────────────────────────
-        let live_floor =
-            prorate_interest(principal, entry.rate_bps, time_delta, Rounding::Floor);
+        let live_floor = prorate_interest(principal, entry.rate_bps, time_delta, Rounding::Floor);
         assert_eq!(
-            live_floor,
-            expected_floor,
+            live_floor, expected_floor,
             "SNAPSHOT MISMATCH at entry {i} (principal={principal}, \
              rate_bps={}, seconds={}): live={live_floor}, pinned={expected_floor}\n\
              If this change is intentional, regenerate the snapshot:\n\
              cargo test -p creditra-credit --test snapshot_prorate_interest \
              -- --nocapture regenerate",
-            entry.rate_bps,
-            entry.seconds,
+            entry.rate_bps, entry.seconds,
         );
 
         // ── Secondary: zero-input short-circuit ───────────────────────────
@@ -260,8 +258,7 @@ fn verify_prorate_interest_snapshot() {
         }
 
         // ── Secondary: floor ≤ ceil ───────────────────────────────────────
-        let live_ceil =
-            prorate_interest(principal, entry.rate_bps, time_delta, Rounding::Ceil);
+        let live_ceil = prorate_interest(principal, entry.rate_bps, time_delta, Rounding::Ceil);
         assert!(
             live_floor <= live_ceil,
             "entry {i}: floor ({live_floor}) > ceil ({live_ceil})"
@@ -295,24 +292,23 @@ fn regenerate_prorate_interest_snapshot() {
         fs::create_dir_all(parent).expect("could not create test_snapshots dir");
     }
 
-    let json = serde_json::to_string_pretty(&entries)
-        .expect("failed to serialise snapshot");
-    fs::write(&path, json).unwrap_or_else(|e| {
-        panic!("failed to write snapshot to '{}': {e}", path.display())
-    });
+    let json = serde_json::to_string_pretty(&entries).expect("failed to serialise snapshot");
+    fs::write(&path, json)
+        .unwrap_or_else(|e| panic!("failed to write snapshot to '{}': {e}", path.display()));
 
-    println!(
-        "✓ Wrote {} entries to '{}'",
-        entries.len(),
-        path.display()
-    );
+    println!("✓ Wrote {} entries to '{}'", entries.len(), path.display());
 
     // Self-verify immediately after writing.
     assert_eq!(entries.len(), 4096);
     for (i, entry) in entries.iter().enumerate() {
         let principal: u128 = entry.principal.parse().unwrap();
         let expected_floor: u128 = entry.expected_floor.parse().unwrap();
-        let live = prorate_interest(principal, entry.rate_bps, entry.seconds as u64, Rounding::Floor);
+        let live = prorate_interest(
+            principal,
+            entry.rate_bps,
+            entry.seconds as u64,
+            Rounding::Floor,
+        );
         assert_eq!(
             live, expected_floor,
             "self-check failed at entry {i} immediately after regeneration"

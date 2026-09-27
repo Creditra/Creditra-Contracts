@@ -1,0 +1,18 @@
+{
+  "AdminCooldownActive": 54,
+  "AdminNotInitialized": 32,
+  "CreditLineClosed": 4,
+  "CreditLineDefaulted": 21,
+  "CreditLineNotFound": 3,
+  "CreditLineSuspended": 20,
+  "InvalidAmount": 5,
+  "LimitOutOfBounds": 34,
+  "NegativeLimit": 7,
+  "NotAdmin": 2,
+  "Overflow": 12,
+  "Paused": 18,
+  "RateTooHigh": 8,
+  "ScoreTooHigh": 9,
+  "TimestampRegression": 33,
+  "Unauthorized": 1
+}

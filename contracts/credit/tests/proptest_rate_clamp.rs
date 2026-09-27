@@ -234,11 +234,7 @@ fn clamp_zero_bounds() {
     for r in [0_u32, 1, 500, 10_000] {
         client.update_risk_parameters(&borrower, &10_000_i128, &r, &50_u32);
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(
-            line.interest_rate_bps, 0,
-            "rate clamped to 0: rate={}",
-            r
-        );
+        assert_eq!(line.interest_rate_bps, 0, "rate clamped to 0: rate={}", r);
     }
 }
 
@@ -356,17 +352,17 @@ fn clamp_modularity_deterministic() {
     // r < f (below floor), r in [f, c] (within range), r > c (above ceiling),
     // and edge cases at the boundaries.
     let cases: [(u32, u32, u32); 12] = [
-        (0, 0, 0),           // all zero
-        (0, 0, 10_000),      // zero floor, max ceiling
-        (5_000, 0, 10_000),  // mid rate, no constraints
-        (10_000, 0, 10_000), // max rate
-        (100, 500, 1_000),   // r < f: below floor
-        (500, 500, 1_000),   // r == f: at floor
-        (750, 500, 1_000),   // r in [f, c]: within range
-        (1_000, 500, 1_000), // r == c: at ceiling
-        (2_000, 500, 1_000), // r > c: above ceiling
-        (0, 5_000, 5_000),   // r < f == c: below degenerate
-        (5_000, 5_000, 5_000), // r == f == c: at degenerate
+        (0, 0, 0),              // all zero
+        (0, 0, 10_000),         // zero floor, max ceiling
+        (5_000, 0, 10_000),     // mid rate, no constraints
+        (10_000, 0, 10_000),    // max rate
+        (100, 500, 1_000),      // r < f: below floor
+        (500, 500, 1_000),      // r == f: at floor
+        (750, 500, 1_000),      // r in [f, c]: within range
+        (1_000, 500, 1_000),    // r == c: at ceiling
+        (2_000, 500, 1_000),    // r > c: above ceiling
+        (0, 5_000, 5_000),      // r < f == c: below degenerate
+        (5_000, 5_000, 5_000),  // r == f == c: at degenerate
         (10_000, 5_000, 5_000), // r > f == c: above degenerate
     ];
 

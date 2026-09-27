@@ -10,7 +10,7 @@ fn entrypoint_registry_is_unique_and_complete() {
     for name in entrypoint::ALL {
         assert!(seen.insert(*name), "duplicate entrypoint id: {name}");
     }
-    assert_eq!(entrypoint::ALL.len(), 15);
+    assert_eq!(entrypoint::ALL.len(), 16);
 }
 
 #[test]

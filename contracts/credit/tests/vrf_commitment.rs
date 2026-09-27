@@ -8,19 +8,18 @@
 #![cfg(test)]
 
 use creditra_credit::scoring::VrfCommitment;
-use creditra_credit::ContractError;
+use creditra_credit::types::ContractError;
 use soroban_sdk::testutils::{Address as _, BytesN as _};
 use soroban_sdk::{Address, BytesN, Env};
 
 fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
-    creditra_credit::ContractClient::new(env, &env.register_contract(None, creditra_credit::Contract))
     creditra_credit::ContractClient::new(
         env,
-        &env.register_contract(None, creditra_credit::Contract),
+        &env.register(creditra_credit::Credit, ()),
     )
 }
 
-fn setup_contract(env: &Env, admin: &Address) -> creditra_credit::ContractClient {
+fn setup_contract<'a>(env: &'a Env, admin: &Address) -> creditra_credit::CreditClient<'a> {
     let contract = create_test_contract(env);
     contract.init(&admin);
     contract
@@ -303,7 +302,7 @@ fn test_commit_when_paused_fails() {
     let contract = setup_contract(&env, &admin);
 
     // Pause the contract
-    contract.pause();
+    contract.set_protocol_paused(&true);
 
     let commitment_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
 

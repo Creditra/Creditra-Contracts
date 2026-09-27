@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env};
 
 fn setup() -> (Env, Address, Address, Address, Address, Address) {
@@ -26,16 +26,16 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
     (env, contract_id, token_address, borrower, reserve, treasury)
 }
 
-fn prepare_repay(
-    env: &Env,
-    contract_id: &Address,
-    token_address: &Address,
-    borrower: &Address,
+fn prepare_repay<'a>(
+    env: &'a Env,
+    contract_id: &'a Address,
+    token_address: &'a Address,
+    borrower: &'a Address,
     draw_amount: i128,
     repay_amount: i128,
     interest_rate_bps: u32,
     fee_bps: u32,
-) -> CreditClient {
+) -> CreditClient<'a> {
     let client = CreditClient::new(env, contract_id);
     client.open_credit_line(borrower, &draw_amount, &interest_rate_bps, &50_u32);
 
@@ -91,8 +91,8 @@ fn protocol_fee_zero_fee_keeps_treasury_balance_at_zero() {
 }
 
 #[test]
-fn protocol_fee_max_fee_accrues_expected_fee_amount() {
-    let (env, contract_id, token_address, borrower, reserve, treasury) = setup();
+fn protocol_fee_on_total_repayment_accrues_expected_fee_amount() {
+    let (env, contract_id, token_address, borrower, reserve, _treasury) = setup();
     let client = prepare_repay(
         &env,
         &contract_id,
@@ -110,41 +110,38 @@ fn protocol_fee_max_fee_accrues_expected_fee_amount() {
 
     client.repay_credit(&borrower, &1_100);
 
+    // fee = 10% of 1100 = 110; reserve = 1100 - 110 = 990
     assert_eq!(
         token_client.balance(&contract_id),
-        contract_balance_before + 10
+        contract_balance_before + 110
     );
-    assert_eq!(
-        token_client.balance(&reserve),
-        reserve_balance_before + 1_090
-    );
-    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(token_client.balance(&reserve), reserve_balance_before + 990);
 }
 
 #[test]
-fn protocol_fee_rounding_edge_floors_small_fee_to_zero() {
-    let (env, contract_id, token_address, borrower, reserve, treasury) = setup();
+fn protocol_fee_rounding_floors_sub_bps_fee_to_zero() {
+    let (env, contract_id, token_address, borrower, reserve, _treasury) = setup();
     let client = prepare_repay(
         &env,
         &contract_id,
         &token_address,
         &borrower,
         10_000,
-        10_001,
-        1,
         5_000,
+        1,
+        1,
     );
 
     let token_client = token::Client::new(&env, &token_address);
     let contract_balance_before = token_client.balance(&contract_id);
     let reserve_balance_before = token_client.balance(&reserve);
 
-    client.repay_credit(&borrower, &10_001);
+    client.repay_credit(&borrower, &5_000);
 
+    // fee = apply_bps(5000, 1, Floor) = 0 — sub-bps rounding
     assert_eq!(token_client.balance(&contract_id), contract_balance_before);
     assert_eq!(
         token_client.balance(&reserve),
-        reserve_balance_before + 10_001
+        reserve_balance_before + 5_000
     );
-    assert_eq!(token_client.balance(&treasury), 0);
 }

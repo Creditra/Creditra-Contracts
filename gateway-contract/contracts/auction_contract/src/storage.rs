@@ -14,12 +14,18 @@
 //!
 //! # How
 //!
-//! Both instance and persistent reads/writes go through helpers that bump
+//! **Persistent storage** — both reads and writes go through helpers that bump
 //! TTL when remaining lifetime drops below
 //! [`PERSISTENT_LIFETIME_THRESHOLD`] (~7 days), extending the entry by
 //! [`PERSISTENT_BUMP_AMOUNT`] (~30 days). Auction state is short-lived by
 //! nature, so the cadence is more aggressive than the credit contract's
 //! ~3 / ~6 month cycle.
+//!
+//! **Instance storage** — every hot entrypoint calls [`bump_instance_ttl`]
+//! at the top of its body, extending the contract instance ledger entry by
+//! [`INSTANCE_BUMP_AMOUNT`] (~30 days) whenever the remaining TTL drops below
+//! [`INSTANCE_LIFETIME_THRESHOLD`] (~7 days). This prevents the instance from
+//! being archived mid-auction.
 //!
 //! # Why
 //!
@@ -39,10 +45,31 @@ use crate::types::{AuctionStatus, DataKey};
 use soroban_sdk::{Address, Env, Symbol};
 
 /// TTL constants for persistent storage entries.
-/// Bump amount: ~30 days (at ~5s per ledger close).
+/// Bump amount: ~30 days (at ~5 s per ledger close).
 pub(crate) const PERSISTENT_BUMP_AMOUNT: u32 = 518_400;
 /// Lifetime threshold: ~7 days — entries are extended when remaining TTL drops below this.
 pub(crate) const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
+
+/// TTL constants for the contract instance storage entry.
+/// Bump amount: ~30 days (at ~5 s per ledger close).
+pub(crate) const INSTANCE_BUMP_AMOUNT: u32 = 518_400;
+/// Lifetime threshold: ~7 days — instance is extended when remaining TTL drops below this.
+pub(crate) const INSTANCE_LIFETIME_THRESHOLD: u32 = 120_960;
+
+/// Extend the contract instance TTL on every hot read path.
+///
+/// Called at the top of every [`#[contractimpl]`] entrypoint body so that the
+/// instance ledger entry is never archived while an auction is in flight.
+///
+/// # Storage
+/// - **Type**: Instance storage (the contract's own instance entry)
+/// - **TTL extended when**: remaining lifetime < [`INSTANCE_LIFETIME_THRESHOLD`]
+/// - **Extended to**: [`INSTANCE_BUMP_AMOUNT`] ledgers from the current ledger
+pub(crate) fn bump_instance_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
 
 /// Extend TTL for an `AuctionState` entry stored under `auction_id`.
 ///
@@ -184,15 +211,53 @@ pub fn set_highest_bid(env: &Env, bid: u128) {
 // --- id-scoped auction storage ---
 use crate::types::AuctionKey;
 
+/// Check whether an auction with the given `id` exists in persistent storage.
+///
+/// Bumps the TTL of `AuctionKey::Status(id)` when the key is present, so
+/// a bare existence probe does not let live auctions drift toward expiry.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::Status(id)`
+/// - **TTL bumped when**: key exists and remaining lifetime < [`PERSISTENT_LIFETIME_THRESHOLD`]
 pub fn auction_exists(env: &Env, id: u32) -> bool {
-    env.storage().persistent().has(&AuctionKey::Status(id))
+    let key = AuctionKey::Status(id);
+    let exists = env.storage().persistent().has(&key);
+    if exists {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    exists
 }
 
+/// Get the [`AuctionStatus`] for the auction identified by `id`.
+///
+/// Returns [`AuctionStatus::Open`] when the key is absent (consistent with
+/// the write-path default). Bumps persistent TTL on every successful read so
+/// the entry is not archived between status transitions.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::Status(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_status(env: &Env, id: u32) -> crate::types::AuctionStatus {
-    env.storage()
+    let key = AuctionKey::Status(id);
+    let value = env
+        .storage()
         .persistent()
-        .get(&AuctionKey::Status(id))
-        .unwrap_or(crate::types::AuctionStatus::Open)
+        .get(&key)
+        .unwrap_or(crate::types::AuctionStatus::Open);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatus) {
@@ -205,8 +270,26 @@ pub fn auction_set_status(env: &Env, id: u32, status: crate::types::AuctionStatu
     );
 }
 
+/// Get the seller [`Address`] for the auction identified by `id`.
+///
+/// Returns `None` when no seller has been written. Bumps persistent TTL on
+/// every read where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::Seller(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_seller(env: &Env, id: u32) -> Option<Address> {
-    env.storage().persistent().get(&AuctionKey::Seller(id))
+    let key = AuctionKey::Seller(id);
+    let value = env.storage().persistent().get(&key);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
@@ -219,8 +302,26 @@ pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
     );
 }
 
+/// Get the asset [`Address`] for the auction identified by `id`.
+///
+/// Returns `None` when no asset has been written. Bumps persistent TTL on
+/// every read where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::Asset(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_asset(env: &Env, id: u32) -> Option<Address> {
-    env.storage().persistent().get(&AuctionKey::Asset(id))
+    let key = AuctionKey::Asset(id);
+    let value = env.storage().persistent().get(&key);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
@@ -233,11 +334,26 @@ pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
     );
 }
 
+/// Get the minimum bid amount for the auction identified by `id`.
+///
+/// Returns `0` when the key is absent. Bumps persistent TTL on every read
+/// where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::MinBid(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_min_bid(env: &Env, id: u32) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::MinBid(id))
-        .unwrap_or(0)
+    let key = AuctionKey::MinBid(id);
+    let value = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_min_bid(env: &Env, id: u32, min_bid: i128) {
@@ -250,11 +366,26 @@ pub fn auction_set_min_bid(env: &Env, id: u32, min_bid: i128) {
     );
 }
 
+/// Get the end timestamp for the auction identified by `id`.
+///
+/// Returns `0` when the key is absent. Bumps persistent TTL on every read
+/// where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::EndTime(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_end_time(env: &Env, id: u32) -> u64 {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::EndTime(id))
-        .unwrap_or(0)
+    let key = AuctionKey::EndTime(id);
+    let value = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_end_time(env: &Env, id: u32, end_time: u64) {
@@ -267,10 +398,26 @@ pub fn auction_set_end_time(env: &Env, id: u32, end_time: u64) {
     );
 }
 
+/// Get the current highest bidder [`Address`] for the auction identified by `id`.
+///
+/// Returns `None` when no bid has been placed. Bumps persistent TTL on every
+/// read where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::HighestBidder(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_highest_bidder(env: &Env, id: u32) -> Option<Address> {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::HighestBidder(id))
+    let key = AuctionKey::HighestBidder(id);
+    let value = env.storage().persistent().get(&key);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_highest_bidder(env: &Env, id: u32, bidder: &Address) {
@@ -283,11 +430,26 @@ pub fn auction_set_highest_bidder(env: &Env, id: u32, bidder: &Address) {
     );
 }
 
+/// Get the current highest bid amount for the auction identified by `id`.
+///
+/// Returns `0` when no bid has been placed. Bumps persistent TTL on every
+/// read where the key exists.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::HighestBid(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_get_highest_bid(env: &Env, id: u32) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&AuctionKey::HighestBid(id))
-        .unwrap_or(0)
+    let key = AuctionKey::HighestBid(id);
+    let value = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_highest_bid(env: &Env, id: u32, bid: i128) {
@@ -300,11 +462,31 @@ pub fn auction_set_highest_bid(env: &Env, id: u32, bid: i128) {
     );
 }
 
+/// Check whether the auction identified by `id` has already been claimed.
+///
+/// Returns `false` when the key is absent (default: not claimed). Bumps
+/// persistent TTL on every read where the key exists so the claimed marker
+/// is not archived before settlement replay-protection is no longer needed.
+///
+/// # Storage
+/// - **Type**: Persistent
+/// - **Key**: `AuctionKey::Claimed(id)`
+/// - **TTL bumped when**: key exists
 pub fn auction_is_claimed(env: &Env, id: u32) -> bool {
-    env.storage()
+    let key = AuctionKey::Claimed(id);
+    let value = env
+        .storage()
         .persistent()
-        .get(&AuctionKey::Claimed(id))
-        .unwrap_or(false)
+        .get(&key)
+        .unwrap_or(false);
+    if env.storage().persistent().has(&key) {
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+    }
+    value
 }
 
 pub fn auction_set_claimed(env: &Env, id: u32) {

@@ -47,7 +47,6 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `17` | `DrawExceedsMaxAmount`           | The requested draw amount exceeds the per-transaction cap set via `set_max_draw_amount`. | Split the draw into smaller transactions or request a cap increase from the admin. |
 | `18` | `Paused`                         | The protocol is paused via the emergency circuit breaker; operation is blocked. | Wait for the admin to unpause the protocol via `set_protocol_paused(false)`. `repay_credit` remains active during a pause. |
 | `19` | `DrawsFrozen`                    | Draws are globally frozen during liquidity reserve operations. | Wait for the admin to call `unfreeze_draws`. Repayments remain available. |
-| `41` | `CreditLineFrozen`               | The credit line has an admin freeze with structured reason; draws are blocked. | Wait for admin `unfreeze_credit_line` or resolve the underlying hold. Repayments remain available. |
 | `20` | `CreditLineSuspended`            | A draw was attempted while the credit line status is `Suspended`. | Reinstate the line or resolve the suspension before drawing. |
 | `21` | `CreditLineDefaulted`            | A draw was attempted while the credit line status is `Defaulted`. | Defaulted lines cannot draw; use repayment or liquidation workflows. |
 | `22` | `MissingLiquidityToken`          | `draw_credit` or `repay_credit` requires a liquidity token, but none is configured. | Admin must call `set_liquidity_token` before liquidity-moving operations. |
@@ -56,6 +55,33 @@ Rules enforced by CI (`tests/error_discriminants.rs`):
 | `25` | `LiquidityTokenCallFailed`       | A liquidity token interaction failed where the contract can expose a canonical token-call failure. | Inspect the configured token contract and retry only after the token issue is resolved. |
 | `26` | `InsufficientRepaymentAllowance` | The borrower has not approved enough liquidity token allowance for `repay_credit`. | Approve at least the effective repayment amount for the credit contract. |
 | `27` | `InsufficientRepaymentBalance`   | The borrower's liquidity token balance is below the effective repayment amount. | Transfer or mint enough tokens to the borrower before retrying repayment. |
+| `28` | `RepayExceedsMaxAmount`          | The requested repay exceeds the per-transaction cap. | Split into smaller transactions. |
+| `29` | `DrawCooldownActive`             | Borrower attempted to draw before cooldown elapsed. | Wait for the cooldown interval. |
+| `30` | `TreasuryNotSet`                 | Treasury address is not configured. | Admin must call `set_treasury`. |
+| `31` | `ExposureCapExceeded`            | Draw would exceed the global protocol exposure cap. | Reduce draw amount or wait for repayments. |
+| `32` | `AdminNotInitialized`            | Admin address has not been initialized. | Deployer must call `init()` first. |
+| `33` | `TimestampRegression`            | Timestamp regression detected. | Re-sync ledger view and retry. |
+| `34` | `LimitOutOfBounds`               | Credit limit outside configured min/max bounds. | Adjust limit to `[min, max]` range. |
+| `35` | `CollateralRatioBelowMinimum`    | Collateral ratio is below the minimum required. | Reduce withdrawal or add collateral. |
+| `36` | `OraclePriceInvalid`             | Oracle price is zero, negative, or malformed. | Ensure oracle returns a valid positive price. |
+| `37` | `OraclePriceStale`               | Oracle price exceeds `max_age_seconds`. | Wait for oracle price update. |
+| `38` | `OraclePriceDeviation`           | Oracle price deviation exceeds configured maximum. | Do not retry with same price; await new price. |
+| `39` | `InsufficientCollateralBalance`  | Borrower's collateral balance is below the withdrawal amount. | Reduce withdrawal amount. |
+| `40` | `BorrowerFrozen`                 | Borrower's draws are temporarily frozen until expiry. | Wait for freeze expiry or contact admin. |
+| `41` | `BountyNotSet`                   | Bounty pool address is not configured. | Admin must call `set_bounty`. |
+| `42` | `NoPendingTreasuryWithdrawal`    | No pending treasury withdrawal proposal exists. | Create a proposal first via `propose_treasury_withdrawal`. |
+| `43` | `TreasuryTimelockActive`         | The 24-hour treasury timelock has not elapsed. | Wait for timelock. |
+| `44` | `TreasuryProposalExists`         | A treasury withdrawal proposal already exists. | Execute or cancel the existing proposal. |
+| `45` | `CloseFactorAboveMax`            | The supplied close_factor_bps exceeds the protocol maximum. | Reduce close_factor_bps. |
+| `46` | `CreditLineFrozen`               | Credit line draws are frozen by admin (compliance hold). | Wait for admin `unfreeze_credit_line`. |
+| `47` | `DrawReversalWindowExpired`      | Draw reversal attempted after the allowed window expired. | Reversal no longer possible. |
+| `48` | `OriginalDrawNotFound`           | Original draw record not found for reversal. | No matching draw record. |
+| `49` | `AttestationBatchNotFound`       | No attestation batch has been committed. | Admin must commit a batch first. |
+| `50` | `OracleQuorumNotMet`             | Oracle quorum condition not satisfied. | Submit prices from more feeds. |
+| `51` | `AlreadySettled`                 | Liquidation for this (borrower, id) already processed. | No action needed — already settled. |
+| `52` | `InvalidRiskWeight`              | Collateral risk weight exceeds 10 000 bps. | Ensure risk weight is in `0..=10_000`. |
+| `53` | `InvalidAttestation`             | Attestation proof is invalid or no batch committed. | Commit a valid batch and retry. |
+| `54` | `AdminCollateralCooldownActive`  | Critical collateral admin action before cool-off elapsed. | Wait for `admin_collateral_cooldown_seconds` or set interval to `0`. |
 
 ---
 

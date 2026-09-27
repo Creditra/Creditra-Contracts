@@ -206,6 +206,34 @@ fn removing_cap_re_enables_large_draws() {
     assert_eq!(client.get_total_utilized(), 700);
 }
 
+#[test]
+fn borrower_exposure_cap_blocks_draws_above_per_borrower_limit() {
+    let env = Env::default();
+    let (client, _admin, borrower, _cid) = setup(&env);
+
+    client.set_borrower_exposure_cap(&borrower, &3_000_i128);
+
+    client.draw_credit(&borrower, &3_000_i128);
+    assert_eq!(client.get_total_utilized(), 3_000);
+
+    let result = client.try_draw_credit(&borrower, &1_i128);
+    assert!(result.is_err());
+}
+
+#[test]
+fn borrower_exposure_cap_can_be_cleared() {
+    let env = Env::default();
+    let (client, _admin, borrower, _cid) = setup(&env);
+
+    client.set_borrower_exposure_cap(&borrower, &2_000_i128);
+    client.draw_credit(&borrower, &2_000_i128);
+
+    client.set_borrower_exposure_cap(&borrower, &0_i128);
+    client.draw_credit(&borrower, &1_000_i128);
+
+    assert_eq!(client.get_total_utilized(), 3_000);
+}
+
 // ── Accumulator consistency after repay/forgive ───────────────────────────────
 
 #[test]

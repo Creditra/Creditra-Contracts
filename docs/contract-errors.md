@@ -62,6 +62,25 @@ See the [category enum reference](#contracterrorcategory) below.
 | 38 | `OraclePriceDeviation` | Oracle | Oracle price deviation exceeds configured maximum. |
 | 39 | `InsufficientCollateralBalance` | Collateral | Borrower collateral balance below withdrawal amount. |
 | 40 | `BorrowerFrozen` | Block | Borrower's draws are temporarily frozen until expiry. |
+| 41 | `BountyNotSet` | Liquidity | Bounty pool address is not configured. |
+| 42 | `NoPendingTreasuryWithdrawal` | Misc | No pending treasury withdrawal proposal exists. |
+| 43 | `TreasuryTimelockActive` | Misc | The 24-hour treasury withdrawal timelock has not elapsed. |
+| 44 | `TreasuryProposalExists` | Misc | A treasury withdrawal proposal already exists. |
+| 45 | `CloseFactorAboveMax` | Limit | The supplied close_factor_bps exceeds the protocol maximum. |
+| 46 | `CreditLineFrozen` | Block | Credit line draws are frozen by admin (compliance hold). |
+| 47 | `DrawReversalWindowExpired` | Limit | Draw reversal attempted after the allowed window expired. |
+| 48 | `OriginalDrawNotFound` | Misc | Original draw record not found for reversal. |
+| 49 | `AttestationBatchNotFound` | Misc | No attestation batch has been committed. |
+| 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied. |
+| 51 | `AlreadySettled` | Lifecycle | Liquidation for this (borrower, id) already processed. |
+| 52 | `InvalidRiskWeight` | Numeric | Collateral risk weight exceeds 10 000 bps. |
+| 53 | `AdminQueryCooldownActive` | Risk | Admin attempted a query-critical action before the cooldown elapsed. |
+| 54 | `OracleNotFound` | Oracle | Oracle address not found in the oracle registry. |
+| 55 | `BorrowerMismatch` | Auth | Stored borrower address does not match the load key. |
+| 56 | `InsufficientReserve` | Liquidity | Liquidity reserve balance below the requested draw amount. |
+| 57 | `InsufficientAllowance` | Liquidity | Borrower token allowance is insufficient for the transfer. |
+| 58 | `InsufficientBalance` | Liquidity | Borrower token balance is insufficient for the transfer. |
+| 59 | `UtilizedNotZero` | Limit | Credit line utilization must be zero before this action. |
 
 ## `ContractErrorCategory`
 
@@ -71,21 +90,21 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 
 | Code | Category | Variants |
 | ---: | -------- | -------- |
-| 1  | Auth | `Unauthorized`, `NotAdmin`, `AdminNotInitialized` |
-| 2  | Lifecycle | `CreditLineClosed`, `AlreadyInitialized`, `CreditLineSuspended`, `CreditLineDefaulted` |
-| 3  | Numeric | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds` |
-| 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount` |
-| 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded` |
-| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive` |
-| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation` |
+| 1  | Auth | `Unauthorized`, `NotAdmin`, `AdminNotInitialized`, `BorrowerMismatch` |
+| 2  | Lifecycle | `CreditLineClosed`, `AlreadyInitialized`, `CreditLineSuspended`, `CreditLineDefaulted`, `AlreadySettled` |
+| 3  | Numeric | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds`, `InvalidRiskWeight` |
+| 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired`, `UtilizedNotZero` |
+| 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet`, `InsufficientReserve`, `InsufficientAllowance`, `InsufficientBalance` |
+| 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `AdminQueryCooldownActive` |
+| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound` |
 | 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance` |
-| 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen` |
+| 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen` |
 | 10 | Reentrancy | `Reentrancy` |
-| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly` |
+| 11 | Misc | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation` |
 
 ## Taxonomy
 
-See [`docs/error-taxonomy.md`](./error-taxonomy.md) for the authoritative
-grouping of all 40 variants into **named categories** (Auth, Lifecycle,
+See [`docs/ERROR_CODES.md`](./ERROR_CODES.md) for the authoritative
+grouping of all 59 variants into **named categories** (Auth, Lifecycle,
 Numeric, Limit, Liquidity, Risk, Oracle, Collateral, Block, Reentrancy, Misc)
 with **SDK-side recovery actions** per category.

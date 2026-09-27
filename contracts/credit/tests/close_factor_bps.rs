@@ -121,7 +121,10 @@ fn settle_exceeding_capped_close_factor_fails() {
             &None,
         );
     }));
-    assert!(result.is_err(), "settlement with over-cap close_factor should panic");
+    assert!(
+        result.is_err(),
+        "settlement with over-cap close_factor should panic"
+    );
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.status, CreditStatus::Defaulted);
@@ -238,4 +241,28 @@ fn capped_settlement_still_emits_liquidation_event() {
     );
 
     assert!(has_event_topic(&env, "liq_setl"));
+}
+
+#[test]
+fn settle_exceeding_target_recovery_caps_to_close_factor() {
+    let (env, contract_id, borrower) = setup_defaulted_line(1_000);
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.set_close_factor_bps(&5_000_u32); // 50% close factor
+
+    // target_recovery is 50% of 1,000 = 500.
+    // We pass recovered_amount = 600, which exceeds 500.
+    // Instead of panicking, it should succeed, capping the recovery to 500
+    // and reducing utilized_amount to 500.
+    client.settle_default_liquidation(
+        &borrower,
+        &600_i128,
+        &Symbol::new(&env, "s_cap"),
+        &5_000_u32,
+        &None,
+    );
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 500);
 }

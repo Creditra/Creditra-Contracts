@@ -89,7 +89,10 @@ fn setup(env: &Env) -> (CreditClient<'_>, std::vec::Vec<Address>) {
 
 fn assert_total_utilized(client: &CreditClient<'_>, expected: i128, label: &str) {
     let actual = client.get_total_utilized();
-    assert!(actual >= 0, "{label}: total_utilized is negative ({actual})");
+    assert!(
+        actual >= 0,
+        "{label}: total_utilized is negative ({actual})"
+    );
     assert_eq!(
         actual, expected,
         "{label}: total_utilized mismatch (expected={expected}, actual={actual})"
@@ -187,7 +190,10 @@ fn post_mass_default_recovery_preserves_invariant() {
     }
 
     let total_after_default = client.get_total_utilized();
-    assert!(total_after_default >= 0, "total_utilized negative after mass default");
+    assert!(
+        total_after_default >= 0,
+        "total_utilized negative after mass default"
+    );
 
     // Reinstate borrowers[0] → Active; total_utilized must be unchanged because
     // reinstate only changes status, it does not alter the utilized amount.

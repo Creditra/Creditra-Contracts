@@ -420,6 +420,30 @@ This error protects the protocol from extreme concentration risk by enforcing ad
 
 ---
 
+### 45. AlreadySettled (Code: 45)
+**Description:** The liquidation for this (borrower, settlement_id) pair has already been settled.
+
+**Trigger Conditions:**
+- Calling `settle_default_liquidation` with a `settlement_id` that has already been used
+- Replay attack protection triggered
+
+**Recovery:** No action needed — the settlement has already been processed. Use a unique `settlement_id` per liquidation event.
+
+---
+
+### 50. CollateralInsufficient (Code: 50)
+**Description:** Collateral is insufficient for the requested operation.
+
+**Trigger Conditions:**
+- An operation requires more collateral than is available or posted
+- A general collateral shortfall where a more specific code
+  (`CollateralRatioBelowMinimum` / `InsufficientCollateralBalance`) does not apply
+
+**Recovery:** Deposit additional collateral or reduce the size of the requested
+operation until collateral coverage is adequate.
+
+---
+
 ## Error Handling Best Practices
 
 ### For SDK Clients
@@ -462,6 +486,6 @@ Error discriminants are **permanent** and form part of the contract's public API
 
 ---
 
-**Last Updated:** 2026-05-29  
+**Last Updated:** 2026-06-29  
 **Contract Version:** 1.0.0  
-**Total Error Variants:** 34
+**Total Error Variants:** 45

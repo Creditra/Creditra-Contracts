@@ -163,6 +163,22 @@ fn main() {
         );
     }
 
+    // ── partial_release_collateral ────────────────────────────────────────────
+    {
+        let (env, credit, _token, _adm, borrower) = setup_credit_harness();
+        credit.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &100_u32);
+        credit.deposit_collateral(&borrower, &200_000_i128);
+        let sample = BudgetSample::measure(&env, || {
+            credit.partial_release_collateral(&borrower, &50_000_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::PARTIAL_RELEASE_COLLATERAL,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
     // ── withdraw_collateral ──────────────────────────────────────────────────
     {
         let (env, credit, _token, _adm, borrower) = setup_credit_harness();
@@ -205,8 +221,8 @@ fn main() {
 
     // ── freeze_draws ──────────────────────────────────────────────────────
     {
-        let (env, credit, ..) = setup();
-        let (cpu, mem) = measure(&env, || {
+        let (env, credit, ..) = setup_credit_harness();
+        let sample = BudgetSample::measure(&env, || {
             credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
         });
         push(
@@ -219,9 +235,9 @@ fn main() {
 
     // ── unfreeze_draws ────────────────────────────────────────────────────
     {
-        let (env, credit, ..) = setup();
+        let (env, credit, ..) = setup_credit_harness();
         credit.freeze_draws(&creditra_credit::FreezeReason::LiquidityReserve);
-        let (cpu, mem) = measure(&env, || {
+        let sample = BudgetSample::measure(&env, || {
             credit.unfreeze_draws();
         });
         push(
@@ -260,6 +276,92 @@ fn main() {
         push(
             &mut results,
             entrypoint::CLOSE_CREDIT_LINE,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
+    // ── place_bid ─────────────────────────────────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_bid");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        let sample = BudgetSample::measure(&env, || {
+            auction.place_bid(&auction_id, &bidder1, &100_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::PLACE_BID,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
+    // ── bid_refunded ──────────────────────────────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, bidder2) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_refund");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        auction.place_bid(&auction_id, &bidder1, &100_i128);
+        let sample = BudgetSample::measure(&env, || {
+            auction.place_bid(&auction_id, &bidder2, &200_i128);
+        });
+        push(
+            &mut results,
+            entrypoint::BID_REFUNDED,
+            sample,
+            DEFAULT_TOLERANCE_PCT,
+        );
+    }
+
+    // ── settle_default_liquidation (auction) ──────────────────────────────────
+    {
+        let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
+        let auction_id = soroban_sdk::Symbol::new(&env, "auc_settle");
+        auction.init_auction(
+            &auction_id,
+            &gateway_auction::AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &100_i128,
+            &0_u32,
+            &None,
+            &None,
+            &gateway_auction::DutchAuctionDecay::None,
+            &None,
+        );
+        auction.place_bid(&auction_id, &bidder1, &100_i128);
+        auction.close_auction(&auction_id);
+        
+        let borrower = Address::generate(&env);
+        let sample = BudgetSample::measure(&env, || {
+            auction.settle_default_liquidation(&auction_id, &admin, &borrower);
+        });
+        push(
+            &mut results,
+            entrypoint::SETTLE_DEFAULT_LIQUIDATION,
             sample,
             DEFAULT_TOLERANCE_PCT,
         );

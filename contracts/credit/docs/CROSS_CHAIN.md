@@ -19,4 +19,4 @@ This module enables liquidation triggered from bridge attestations.
 ## Future Improvements
 - Replace stub signature check with Ed25519 or Secp256k1
 - Add Merkle proof verification for bridge messages
-- Gas optimization for nonce storage
+- Gas optimization for nonce storages

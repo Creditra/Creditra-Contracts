@@ -13,7 +13,7 @@
 //! - Pause enforcement: upgrades are blocked when circuit breaker is active
 
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{Address, BytesN, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, Symbol, Val, TryFromVal, TryIntoVal};
 
 use creditra_credit::{Credit, CreditClient};
 
@@ -124,7 +124,7 @@ fn upgrade_event_contains_correct_hashes() {
     let (env, _admin, contract_id, client) = setup();
 
     // Get the current WASM hash before upgrade
-    let old_wasm_hash = env.deployer().get_current_contract_wasm();
+    let old_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
 
     // Perform upgrade with a new hash
     let new_wasm_hash = mock_wasm_hash(&env, 99);

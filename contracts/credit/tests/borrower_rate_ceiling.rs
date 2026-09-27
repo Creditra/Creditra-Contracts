@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env};
 
 fn setup(env: &Env) -> (CreditClient, Address, Address) {
@@ -81,6 +81,22 @@ fn test_ceiling_below_floor_reverts() {
     }));
 
     assert!(result.is_err(), "Setting ceiling below floor should revert");
+}
+
+#[test]
+fn test_floor_above_ceiling_reverts() {
+    let env = Env::default();
+    let (client, _admin, borrower) = setup(&env);
+
+    // Set ceiling to 400 bps
+    client.set_borrower_rate_ceiling(&borrower, &Some(400_u32));
+
+    // Try to set floor to 500 bps (above ceiling) - should revert
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_borrower_rate_floor(&borrower, &Some(500_u32));
+    }));
+
+    assert!(result.is_err(), "Setting floor above ceiling should revert");
 }
 
 #[test]

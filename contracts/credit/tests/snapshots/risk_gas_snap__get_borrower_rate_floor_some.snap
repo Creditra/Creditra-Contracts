@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "get_borrower_rate_floor_some",
+    cpu_instructions: 35328,
+    memory_bytes: 6007,
+}

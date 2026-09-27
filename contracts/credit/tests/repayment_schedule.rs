@@ -2,7 +2,7 @@
 
 use creditra_credit::types::GraceWaiverMode;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token, Address, Env};
 
 fn setup_env() -> (Env, Address, Address, Address) {
