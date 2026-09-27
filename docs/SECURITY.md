@@ -72,9 +72,10 @@ Items a reviewer should walk before signing off on the contract.
 
 ### 3.1 Authorization coverage
 
-- [ ] Every `set_*` and `*_credit_line` admin entrypoint begins with
-  `require_admin_auth` (`auth.rs:40`) and / or an `admin: Address` argument
-  followed by `admin.require_auth()`.
+- [ ] Every `set_*` and `*_credit_line` admin entrypoint uses
+  `require_admin_auth` or `require_admin_auth_with_argument` (`auth.rs`).
+  The latter must compare the supplied address to the stored admin before
+  issuing exactly one `require_auth()` call.
 - [ ] Every borrower entrypoint begins with `borrower.require_auth()`.
 - [ ] `tests/unauthorized_matrix.rs` covers every privileged entrypoint
   with a negative test.

@@ -319,11 +319,13 @@ emits `("credit","rate_form")` with `true`.
 | `set_protocol_fee_bps(bps)`       | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded.                                                       |
 | `set_treasury_fee_share_bps(bps)` | Admin; treasury share of skimmed fees in `0..=10_000`. Bounty pool receives the remainder. Default unset = 10_000 (100 % treasury). |
 | `get_treasury_fee_share_bps()`    | Returns configured share or `None` when unset.                                                                                      |
-| `set_treasury(admin, treasury)`   | Double-auth (admin arg + `require_admin_auth`).                                                                                     |
-| `withdraw_treasury(admin)`        | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`.  |
-| `set_bounty(admin, bounty)`       | Double-auth; configures bounty pool withdrawal address.                                                                             |
-| `get_bounty()`                    | Returns configured bounty address, if any.                                                                                          |
-| `withdraw_bounty(admin)`          | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`.                      |
+| `set_treasury(admin, treasury)` | Supplied `admin` must match the stored admin and is authorized once; configures the treasury address. |
+| `propose_treasury_withdrawal(admin)` | Supplied `admin` must match the stored admin and is authorized once; creates a 24-hour timelocked withdrawal proposal. |
+| `execute_treasury_withdrawal(admin)` | Supplied `admin` must match the stored admin and is authorized once; executes an elapsed proposal and clears the balance. |
+| `withdraw_treasury(admin)` | Supplied `admin` must match the stored admin and is authorized once; transfers `TreasuryBalance` to `TreasuryAddress`. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
+| `set_bounty(admin, bounty)` | Supplied `admin` must match the stored admin and is authorized once; configures the bounty pool withdrawal address. |
+| `get_bounty()` | Returns configured bounty address, if any. |
+| `withdraw_bounty(admin)` | Supplied `admin` must match the stored admin and is authorized once; transfers `BountyBalance` to `BountyAddress`. Errors: `BountyNotSet`, `MissingLiquidityToken`. |
 
 On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
 `TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
@@ -373,7 +375,8 @@ See `contracts/credit/src/fees.rs`.
 | `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
 | `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
 | `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
-| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Supplied `admin` must equal the stored admin and is authorized once; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `freeze_borrower_until(admin, borrower, expiry_ts)` / `unfreeze_borrower(admin, borrower)` | Supplied `admin` must equal the stored admin and is authorized once; freeze operations enforce the borrow-admin cooldown. |
 | `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
 | `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
 | Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
