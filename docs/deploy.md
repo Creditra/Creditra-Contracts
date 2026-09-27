@@ -125,6 +125,27 @@ key with a hardware wallet or multisig.
 
 ---
 
+## Upgrading a deployed contract
+
+Once the contract is live, WASM upgrades are applied through the admin-gated
+`upgrade` entrypoint. Upgrades preserve all storage (credit lines, config,
+borrower data) and keep the contract address unchanged.
+
+Before upgrading, operators must:
+1. Verify storage layout compatibility against `contracts/credit/src/types.rs`
+   (no struct fields removed or reordered; no enum discriminants changed).
+2. Pass the stability test guards:
+   `cargo test -p creditra-credit error_discriminants_are_stable`
+   `cargo test -p creditra-credit test_event_topics_stability`
+3. Complete a full testnet rehearsal.
+4. Confirm `get_schema_version` increments after the upgrade commits.
+
+Full pre-upgrade checklist, schema version semantics, zero `old_wasm_hash`
+explanation, testnet rehearsal steps, and rollback procedure:
+**[`docs/upgrade-policy.md`](./upgrade-policy.md)**
+
+---
+
 ## Related files
 
 | File | Role |
@@ -133,3 +154,4 @@ key with a hardware wallet or multisig.
 | `contracts/credit/src/storage.rs` | `admin_key`, `DataKey` |
 | `contracts/credit/src/types.rs` | `ContractError::AlreadyInitialized` |
 | `contracts/credit/tests/init_idempotency.rs` | Tests for init guard |
+| `docs/upgrade-policy.md` | WASM upgrade runbook: pre-checks, execution, verification, rollback |
