@@ -203,7 +203,25 @@ fn single_init_succeeds() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. Re-init with same admin also reverts
+// 8. Init applies the unconditional default minimum collateral ratio
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `init` must set the 150 % (15 000 bps) collateral floor regardless of how
+/// the crate was compiled. Before this was unconditional, in-crate unit tests
+/// ran with the key unset while integration tests observed 150 %, so the same
+/// scenario behaved differently depending on where the test lived.
+#[test]
+fn init_sets_default_min_collateral_ratio() {
+    let env = Env::default();
+
+    let (client, admin) = deploy(&env);
+    client.init(&admin);
+
+    assert_eq!(client.get_min_collateral_ratio_bps(), Some(15_000));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Re-init with same admin also reverts
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Even re-init with the original admin address must revert — init is strictly
