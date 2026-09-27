@@ -197,7 +197,7 @@ pub fn commit_attestation_batch(env: Env, borrower: Address, merkle_root: BytesN
 /// `true` if the recomputed root matches the stored root; `false` otherwise.
 ///
 /// # Errors
-/// - `ContractError::InvalidAttestation` if no batch has been committed
+/// - `ContractError::AttestationBatchNotFound` if no batch has been committed
 ///   for this borrower.
 pub fn verify_attestation_proof(
     env: Env,
@@ -210,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
 
     // Bump TTL on read.
     env.storage()
@@ -273,7 +273,7 @@ mod tests {
     fn leaf(env: &Env, pattern: u8) -> BytesN<32> {
         let mut data = Bytes::new(env);
         data.push_back(pattern);
-        env.crypto().sha256(&data)
+        BytesN::from_array(env, &env.crypto().sha256(&data).to_array())
     }
 
     /// Merkle root of two leaves via `hash_pair` (which sorts internally).

@@ -153,13 +153,14 @@ where the contract can observe it. |
 
 ---
 
-## Oracle (codes 36, 37, 38)
+## Oracle (codes 36, 37, 38, 51)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
 | 36   | `OraclePriceInvalid` | Oracle price is zero, negative, or malformed. |
 | 37   | `OraclePriceStale` | Oracle price exceeds `max_age_seconds` since last update. |
 | 38   | `OraclePriceDeviation` | Oracle price deviation exceeds `max_deviation_bps` relative to prior. |
+| 51   | `OracleQuorumNotMet` | The weighted-median registry is active but cannot reach its configured quorum. |
 
 **Recovery action:**
 - `OraclePriceInvalid`: Ensure the oracle is returning a valid positive price.
@@ -169,6 +170,11 @@ where the contract can observe it. |
 - `OraclePriceDeviation`: A market-moving event or oracle fault. The
   circuit-breaker has tripped; await a new price within the deviation bound.
   Do **not** retry with the same price.
+- `OracleQuorumNotMet`: The weighted-median registry is active but fewer than
+  the configured quorum weight of oracles have fresh reports. Wait for more
+  oracle reports (or explicitly accept the risk by clearing the registry
+  quorum threshold). Registry mode deliberately ignores the caller-supplied
+  `oracle_price`, so there is no fallback to an admin-chosen price.
 
 ---
 

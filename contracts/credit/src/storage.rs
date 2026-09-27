@@ -205,16 +205,29 @@ pub enum DataKey {
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
-    /// Per-borrower aggregated attestation batch committed as a Merkle root.
-    /// Stores an [`crate::attestation::AttestationBatch`] whose `merkle_root`
-    /// is the SHA-256 root of all leaf hashes in the batch.
-    AttestationBatch(Address),
+}
+
+/// Auxiliary storage keys for state whose keys would otherwise push [`DataKey`]
+/// past the 50-variant limit imposed on `#[contracttype]` unions by the XDR spec.
+///
+/// `DataKey` already uses all 50 allowed variants, so multi-collateral and
+/// per-borrower exposure-cap state live under this separate key namespace.
+/// Values stored here are never keyed by `DataKey`, and vice versa, so the two
+/// namespaces cannot collide.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AuxDataKey {
+    /// Per-borrower exposure cap in token units (admin-configurable).
+    /// When set, a borrower's aggregate exposure may not exceed this cap.
+    BorrowerExposureCap(Address),
+    /// Per-(borrower, token) collateral balance for the multi-collateral model.
+    /// Supersedes the single-token [`DataKey::CollateralBalance`].
+    CollateralBalanceV2(Address, Address),
+    /// Allowlisted collateral token addresses; when empty, any token is accepted.
+    CollateralTokenAllowlist,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -241,14 +254,6 @@ pub const MAX_ENUMERATION_LIMIT: u32 = 100;
 // number of TTL writes per active key is at most one per three months.
 pub const LEDGER_BUMP_AMOUNT: u32 = 3_110_400; // ~6 months
 pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
@@ -368,7 +373,7 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
 pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
     env.storage()
         .persistent()
-        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
+        .get(&AuxDataKey::BorrowerExposureCap(borrower.clone()))
 }
 
 /// Set the per-borrower exposure cap. Passing `0` removes the cap.
@@ -376,11 +381,11 @@ pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128
     if let Some(cap) = cap {
         env.storage()
             .persistent()
-            .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
+            .set(&AuxDataKey::BorrowerExposureCap(borrower.clone()), &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::BorrowerExposureCap(borrower.clone()));
+            .remove(&AuxDataKey::BorrowerExposureCap(borrower.clone()));
     }
 }
 
@@ -656,15 +661,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
@@ -1196,7 +1192,7 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+pub fn get_late_fee_config(env: &Env) -> Option<crate::penalties::LateFeeConfig> {
     env.storage().instance().get(&DataKey::LateFeeConfig)
 }
 
@@ -1208,7 +1204,7 @@ pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+pub fn set_late_fee_config(env: &Env, config: Option<crate::penalties::LateFeeConfig>) {
     match config {
         Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
         None => env.storage().instance().remove(&DataKey::LateFeeConfig),
@@ -1292,7 +1288,7 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 
 /// Return a borrower's balance for a specific collateral token.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let key = AuxDataKey::CollateralBalanceV2(borrower.clone(), token.clone());
     env.storage()
         .persistent()
         .get(&key)
@@ -1301,7 +1297,7 @@ pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
 pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address, balance: i128) {
-    let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
+    let key = AuxDataKey::CollateralBalanceV2(borrower.clone(), token.clone());
     let previous = get_collateral_balance_for_token(env, borrower, token);
     env.storage().persistent().set(&key, &balance);
     bump_persistent_ttl(env, &key);
@@ -1312,7 +1308,7 @@ pub fn set_collateral_balance_for_token(env: &Env, borrower: &Address, token: &A
 pub fn get_collateral_token_allowlist(env: &Env) -> soroban_sdk::Vec<Address> {
     env.storage()
         .instance()
-        .get(&DataKey::CollateralTokenAllowlist)
+        .get(&AuxDataKey::CollateralTokenAllowlist)
         .unwrap_or_else(|| soroban_sdk::Vec::new(env))
 }
 
@@ -1320,7 +1316,7 @@ pub fn get_collateral_token_allowlist(env: &Env) -> soroban_sdk::Vec<Address> {
 pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Address>) {
     env.storage()
         .instance()
-        .set(&DataKey::CollateralTokenAllowlist, tokens);
+        .set(&AuxDataKey::CollateralTokenAllowlist, tokens);
 }
 
 /// Return `true` when `token` is in the collateral allowlist.

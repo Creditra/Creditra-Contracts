@@ -191,12 +191,6 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    /// Quorum threshold was not met for oracle median calculation.
-    QuorumNotMet = 15,
-    /// The oracle is not approved or was not found in the registry.
-    OracleNotFound = 16,
-    /// The oracle is already approved in the registry.
-    OracleAlreadyExists = 17,
     /// Admin acceptance attempted before the delay window has elapsed.
     AdminAcceptTooEarly = 15,
     /// Borrower is blocked from drawing credit.
@@ -217,8 +211,6 @@ pub enum ContractError {
     MissingLiquiditySource = 23,
     /// Liquidity reserve balance is below the requested draw amount.
     InsufficientLiquidityReserve = 24,
-    /// Liquidity token call failed where the contract can observe it.
-    LiquidityTokenCallFailed = 25,
     /// Borrower's token allowance is below the effective repayment amount.
     InsufficientRepaymentAllowance = 26,
     /// Borrower's token balance is below the effective repayment amount.
@@ -257,8 +249,6 @@ pub enum ContractError {
     TreasuryTimelockActive = 43,
     /// A treasury withdrawal proposal already exists; cancel or execute it first.
     TreasuryProposalExists = 44,
-    /// The supplied close_factor_bps exceeds the protocol-configured maximum.
-    CloseFactorAboveMax = 45,
     /// Credit line draws are frozen by admin (compliance or investigation hold).
     CreditLineFrozen = 46,
     /// Draw reversal attempted after the allowed reversal window has expired.
@@ -274,6 +264,124 @@ pub enum ContractError {
     /// Use when an operation requires more collateral than is available or posted
     /// without needing a more specific failure mode.
     CollateralInsufficient = 50,
+    /// The weighted-median oracle registry could not reach its configured
+    /// quorum while a settlement price was being validated.
+    ///
+    /// Raised by [`crate::oracle_validation::validate_settlement_oracle_price`]
+    /// when the registry is active but [`Self::QuorumNotMet`] would be returned
+    /// by `get_median_value`. Settlement fails closed: a registry that cannot
+    /// produce a trustworthy median must not let a liquidation proceed on an
+    /// admin-chosen price. Distinct from [`Self::QuorumNotMet`], which is the
+    /// raw registry read error.
+    OracleQuorumNotMet = 51,
+    /// The liquidation for this `(borrower, settlement_id)` pair was already
+    /// settled; settlement is replay-protected.
+    AlreadySettled = 52,
+}
+
+/// Stable grouping of [`ContractError`] variants for client-side handling.
+///
+/// Mirrors the four documented families in `docs/ERROR_CODES.md`, expanded to
+/// the full eleven categories used by the SDK error taxonomy. Categories are
+/// **not** ABI-stable; consumers should branch on the error discriminant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[repr(u32)]
+pub enum ContractErrorCategory {
+    /// Caller authentication / authorization failures.
+    Auth = 1,
+    /// Credit-line lifecycle / state-machine violations.
+    Lifecycle = 2,
+    /// Arithmetic, bounds and timestamp failures.
+    Numeric = 3,
+    /// Per-transaction and utilization limits.
+    Limit = 4,
+    /// Liquidity token / reserve / treasury availability failures.
+    Liquidity = 5,
+    /// Risk-parameter and protocol-control failures.
+    Risk = 6,
+    /// Oracle price-feed failures.
+    Oracle = 7,
+    /// Collateral ratio / balance failures.
+    Collateral = 8,
+    /// Borrower or protocol freeze/block failures.
+    Block = 9,
+    /// Reentrancy guard trips.
+    Reentrancy = 10,
+    /// Everything else.
+    Misc = 11,
+}
+
+impl ContractError {
+    /// Return the stable [`ContractErrorCategory`] for this error variant.
+    pub fn category(&self) -> ContractErrorCategory {
+        use ContractErrorCategory::*;
+        match self {
+            ContractError::Unauthorized
+            | ContractError::NotAdmin
+            | ContractError::AdminNotInitialized => Auth,
+            ContractError::CreditLineClosed
+            | ContractError::AlreadyInitialized
+            | ContractError::CreditLineSuspended
+            | ContractError::CreditLineDefaulted
+            | ContractError::AlreadySettled => Lifecycle,
+            ContractError::InvalidAmount
+            | ContractError::NegativeLimit
+            | ContractError::Overflow
+            | ContractError::TimestampRegression
+            | ContractError::LimitOutOfBounds => Numeric,
+            ContractError::OverLimit
+            | ContractError::UtilizationNotZero
+            | ContractError::LimitDecreaseRequiresRepayment
+            | ContractError::DrawExceedsMaxAmount
+            | ContractError::RepayExceedsMaxAmount => Limit,
+            ContractError::MissingLiquidityToken
+            | ContractError::MissingLiquiditySource
+            | ContractError::InsufficientLiquidityReserve
+            | ContractError::InsufficientRepaymentAllowance
+            | ContractError::InsufficientRepaymentBalance
+            | ContractError::TreasuryNotSet
+            | ContractError::ExposureCapExceeded
+            | ContractError::BountyNotSet => Liquidity,
+            ContractError::RateTooHigh
+            | ContractError::ScoreTooHigh
+            | ContractError::Paused
+            | ContractError::DrawCooldownActive => Risk,
+            ContractError::OraclePriceInvalid
+            | ContractError::OraclePriceStale
+            | ContractError::OraclePriceDeviation
+            | ContractError::OracleQuorumNotMet => Oracle,
+            ContractError::CollateralRatioBelowMinimum
+            | ContractError::InsufficientCollateralBalance
+            | ContractError::CollateralInsufficient => Collateral,
+            ContractError::BorrowerBlocked
+            | ContractError::DrawsFrozen
+            | ContractError::BorrowerFrozen
+            | ContractError::CreditLineFrozen => Block,
+            ContractError::Reentrancy => Reentrancy,
+            ContractError::CreditLineNotFound
+            | ContractError::AdminAcceptTooEarly
+            | ContractError::NoPendingTreasuryWithdrawal
+            | ContractError::TreasuryTimelockActive
+            | ContractError::TreasuryProposalExists
+            | ContractError::DrawReversalWindowExpired
+            | ContractError::OriginalDrawNotFound
+            | ContractError::AttestationBatchNotFound => Misc,
+        }
+    }
+}
+
+/// A single page of credit lines returned by
+/// [`crate::views::get_credit_lines_paginated`].
+///
+/// Cursor-based: `next_cursor` is the stable credit-line id to resume from, or
+/// `None` when the enumeration is exhausted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLinesPage {
+    /// Credit lines in this page, in ascending id order.
+    pub credit_lines: soroban_sdk::Vec<CreditLineData>,
+    /// Cursor to pass as `cursor` for the next page, or `None` at the end.
+    pub next_cursor: Option<u32>,
 }
 
 /// Stored credit line data for a borrower.
@@ -552,4 +660,35 @@ pub struct DrawsFreezeState {
     pub frozen: bool,
     /// Structured reason recorded when the freeze was last activated.
     pub reason: FreezeReason,
+}
+
+/// A single full snapshot of a borrower's credit line.
+///
+/// Returned by [`crate::views::get_credit_line_snapshot`] and surfaced through
+/// the `get_credit_line_snapshot` entrypoint. Assembles all per-borrower state
+/// in one read-only call so callers avoid multiple round-trips.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineSnapshot {
+    /// Core per-borrower credit line record.
+    pub line: CreditLineData,
+    /// Tokens deposited as collateral against this credit line.
+    pub collateral_balance: i128,
+    /// Collateral health factor in basis points. `u32::MAX` = no debt.
+    pub health_factor_bps: u32,
+    /// `true` when an installment repayment schedule is configured.
+    ///
+    /// The schedule itself is flattened into the fields below rather than
+    /// stored as `Option<RepaymentSchedule>`: the Soroban `#[contracttype]`
+    /// macro emits `TryFrom<Struct> for ScVal` (not `From`), which cannot
+    /// satisfy `Option<T>`'s `ScVal` bound on a nested custom struct.
+    pub has_repayment_schedule: bool,
+    /// Required repayment amount per installment period (0 when unset).
+    pub repayment_amount_per_period: i128,
+    /// Duration of one installment period in seconds (0 when unset).
+    pub repayment_period_seconds: u64,
+    /// Timestamp at which the next installment is due (0 when unset).
+    pub repayment_next_due_ts: u64,
+    /// `true` if the borrower has missed an installment past the grace window.
+    pub is_delinquent: bool,
 }

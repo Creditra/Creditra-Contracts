@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-//! Oracle redundancy module: handles approved oracle signers, weights, reports,
-//! and calculating the weighted median value subject to a quorum threshold.
+//! Oracle redundancy module.
+//!
+//! Hosts two independent price-aggregation mechanisms:
+//!
+//! 1. The **weighted-median registry** — approved oracle signers, weights,
+//!    reports, and the quorum-gated weighted median (`add_oracle`,
+//!    `report_value`, `get_median_value`). Settlement reads this registry when
+//!    a quorum threshold is configured (see [`crate::oracle_validation`]).
+//! 2. The **quorum-of-K price resolver** — `resolve_quorum_price` over an
+//!    admin-submitted price vector, used by `submit_oracle_prices`.
 
 use crate::auth::require_admin_auth;
 use crate::types::ContractError;
@@ -83,6 +91,26 @@ pub fn set_quorum_threshold(env: Env, threshold: u32) {
     env.storage().instance().set(&OracleDataKey::QuorumThreshold, &threshold);
 }
 
+/// Returns the configured registry quorum threshold, if any.
+///
+/// The threshold is the minimum total weight of *fresh* reports that
+/// [`get_median_value`] requires before it will return a value. When it is not
+/// set the registry is considered inactive and settlement falls back to the
+/// quorum-of-K price feed or the single-oracle circuit breaker.
+pub fn get_registry_quorum_threshold(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&OracleDataKey::QuorumThreshold)
+}
+
+/// Whether the weighted-median oracle registry is active.
+///
+/// Registry mode is active once an admin has configured a quorum threshold via
+/// [`set_quorum_threshold`]. It takes precedence over both the quorum-of-K
+/// price feed and the single-oracle circuit breaker during settlement — see
+/// [`crate::oracle_validation`] for the full precedence rules.
+pub fn is_registry_configured(env: &Env) -> bool {
+    get_registry_quorum_threshold(env).is_some()
+}
+
 /// Sets the reporting window.
 /// Admin only.
 pub fn set_reporting_window(env: Env, window_seconds: u64) {
@@ -162,11 +190,11 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     }
 
     if total_weight < quorum {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     if valid_reports.is_empty() {
-        return Err(ContractError::QuorumNotMet);
+        return Err(ContractError::OracleQuorumNotMet);
     }
 
     // Sort valid reports by value ascending using a simple insertion sort
@@ -409,39 +437,39 @@ mod test {
         // Median should be 150.
         let val = client.get_median_value();
         assert_eq!(val, 150);
-//! # Multi-oracle quorum price resolution
-//!
-//! Implements the quorum-of-K algorithm for combining multiple independent
-//! oracle price feeds into a single canonical price used by
-//! [`crate::lib::settle_default_liquidation`].
-//!
-//! ## Algorithm
-//!
-//! Given N submitted prices and a quorum threshold K:
-//!
-//! 1. Validate every price is strictly positive and N ≤ [`MAX_ORACLE_FEEDS`].
-//! 2. Sort prices ascending (selection sort; O(n²) but bounded by
-//!    [`MAX_ORACLE_FEEDS`] ≤ 20 to keep gas predictable).
-//! 3. Slide a window of K consecutive prices over the sorted array.
-//! 4. For each window, check whether the highest price deviates from the
-//!    lowest by no more than `max_deviation_bps` of the lowest.
-//! 5. Return the **lower-median** of the first qualifying window.
-//! 6. Panic with [`crate::types::ContractError::OracleQuorumNotMet`] if no
-//!    window qualifies.
-//!
-//! ## Security properties
-//!
-//! - An outlier feed cannot influence the result unless it falls inside a
-//!   qualifying K-wide window alongside K−1 honest feeds.
-//! - Requires at least K feeds to agree, so an attacker must corrupt K
-//!   independent feeds simultaneously to manipulate the canonical price.
-//! - The stack buffer is bounded at compile time; gas consumption is O(n²)
-//!   for sorting and O(n) for window scanning.
+    }
+}
 
-use soroban_sdk::{Env, Vec};
+// ── Multi-oracle quorum price resolution ─────────────────────────────────────
+//
+// Implements the quorum-of-K algorithm for combining multiple independent
+// oracle price feeds into a single canonical price used by
+// `Credit::settle_default_liquidation`.
+//
+// ## Algorithm
+//
+// Given N submitted prices and a quorum threshold K:
+//
+// 1. Validate every price is strictly positive and N ≤ `MAX_ORACLE_FEEDS`.
+// 2. Sort prices ascending (selection sort; O(n²) but bounded by
+//    `MAX_ORACLE_FEEDS` ≤ 20 to keep gas predictable).
+// 3. Slide a window of K consecutive prices over the sorted array.
+// 4. For each window, check whether the highest price deviates from the
+//    lowest by no more than `max_deviation_bps` of the lowest.
+// 5. Return the **lower-median** of the first qualifying window.
+// 6. Panic with `ContractError::OracleQuorumNotMet` if no window qualifies.
+//
+// ## Security properties
+//
+// - An outlier feed cannot influence the result unless it falls inside a
+//   qualifying K-wide window alongside K−1 honest feeds.
+// - Requires at least K feeds to agree, so an attacker must corrupt K
+//   independent feeds simultaneously to manipulate the canonical price.
+// - The stack buffer is bounded at compile time; gas consumption is O(n²)
+//   for sorting and O(n) for window scanning.
 
 use crate::math_utils::compute_deviation_bps;
-use crate::types::{ContractError, OracleQuorumConfig};
+use crate::types::OracleQuorumConfig;
 
 /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
 ///

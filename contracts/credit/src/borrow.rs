@@ -153,7 +153,7 @@ pub(crate) fn repay_credit_internal(
         previous_utilized,
         Some(previous_status),
     );
-    lifecycle::advance_repayment_schedule_after_repay(
+    crate::lifecycle::advance_repayment_schedule_after_repay(
         env,
         borrower,
         effective_repay,

@@ -68,6 +68,7 @@ See the [category enum reference](#contracterrorcategory) below.
 | 44 | `TreasuryProposalExists` | Misc | A treasury withdrawal proposal already exists. |
 | 45 | `AlreadySettled` | Lifecycle | The liquidation for this (borrower, settlement_id) pair has already been settled. |
 | 50 | `CollateralInsufficient` | Collateral | Collateral is insufficient for the requested operation. |
+| 51 | `OracleQuorumNotMet` | Oracle | Weighted-median registry is active but quorum was not met during settlement. |
 
 ## `ContractErrorCategory`
 
@@ -83,7 +84,7 @@ categories. Access it at runtime via [`ContractError::category()`](../contracts/
 | 4  | Limit | `OverLimit`, `UtilizationNotZero`, `LimitDecreaseRequiresRepayment`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount` |
 | 5  | Liquidity | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
 | 6  | Risk | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive` |
-| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation` |
+| 7  | Oracle | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet` |
 | 8  | Collateral | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance`, `CollateralInsufficient` |
 | 9  | Block | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen` |
 | 10 | Reentrancy | `Reentrancy` |

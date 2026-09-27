@@ -476,6 +476,15 @@ pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnE
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
 }
+
+/// Publish a collateral partial-release event (topic `"col_prel"`).
+pub fn publish_collateral_partial_released_event(
+    env: &Env,
+    event: CollateralPartialReleasedEvent,
+) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("col_prel")), event);
+}
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TokenRescuedEvent {
@@ -581,23 +590,6 @@ pub fn publish_grace_waiver_receipt_event(
             waived_amount,
             mode,
         },
-    );
-}
-
-/// Emitted when an attestation batch is committed for a borrower.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AttestationBatchCommittedEvent {
-    pub borrower: soroban_sdk::Address,
-    pub merkle_root: soroban_sdk::BytesN<32>,
-    pub count: u32,
-}
-
-/// Publish an attestation batch committed event.
-pub fn publish_attestation_batch_committed(env: &Env, event: AttestationBatchCommittedEvent) {
-    env.events().publish(
-        (symbol_short!("credit"), Symbol::new(env, "att_batch")),
-        event,
     );
 }
 

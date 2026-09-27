@@ -316,13 +316,31 @@ See `contracts/credit/src/fees.rs`.
 `lib.rs:953`. Admin + pause + reentrancy guard.
 
 1. `set_reentrancy_guard`
-2. If `OracleConfig` is set:
-   - `oracle_price.is_some()` and value > 0 (else `OraclePriceInvalid`)
-   - `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`)
-   - `compute_deviation_bps(new, last) <= max_deviation_bps`
-     (else `OraclePriceDeviation`)
-   - Atomically write `OracleLastPrice`, `OracleLastPriceTs`; emit
-     `("credit","orc_price")`
+2. Validate the settlement price via
+   `oracle_validation::validate_settlement_oracle_price`. The authoritative
+   price source is selected by the following precedence (highest first):
+
+   1. **Registry median.** If the weighted-median oracle registry has a quorum
+      threshold configured (`set_quorum_threshold`), the canonical price is the
+      weighted median of the fresh reports from the approved oracles
+      (`get_median_value`). The caller-supplied `oracle_price` is **ignored**.
+      If quorum is not met the call reverts `OracleQuorumNotMet = 51`.
+   2. **Quorum-of-K price.** Otherwise, if `OracleQuorumConfig` is set, the
+      price stored by `submit_oracle_prices` is authoritative and the
+      caller-supplied `oracle_price` is ignored. Only freshness is re-checked:
+      `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`).
+   3. **Single-oracle circuit breaker.** Otherwise, if `OracleConfig` is set:
+      - `oracle_price.is_some()` and value > 0 (else `OraclePriceInvalid`)
+      - `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`)
+      - `compute_deviation_bps(new, last) <= max_deviation_bps`
+        (else `OraclePriceDeviation`)
+   4. **Unconfigured.** With no oracle configuration, no validation runs and
+      the caller-supplied price is ignored (legacy behaviour).
+
+   In cases 1–3 the accepted price is written atomically to `OracleLastPrice`
+   / `OracleLastPriceTs` and `("credit","orc_price")` is emitted. Registry
+   mode short-circuits the chain, so an operator can upgrade a live deployment
+   to an independent multi-source price with no migration.
 
    During an oracle outage, callers may resubmit the last accepted price to
    continue settlement operations as long as the stored price remains within the
@@ -343,6 +361,24 @@ See `contracts/credit/src/fees.rs`.
 #### `set_oracle_config(env, max_deviation_bps, max_age_seconds)`
 `lib.rs:1055`. Admin + pause. Validates `deviation in 1..=10_000` (else
 `InvalidAmount`), `max_age_seconds > 0`. Emits `("credit","orc_cfg")`.
+
+#### Multi-oracle quorum price feed (precedence 2)
+
+| Entrypoint | Effect |
+|---|---|
+| `set_oracle_quorum_config(min_quorum_k, max_deviation_bps, max_age_seconds)` | Admin + pause. Validates `min_quorum_k >= 2`, `max_deviation_bps <= 10_000`, `max_age_seconds > 0` (else `InvalidAmount`). Emits `("credit","orc_qcfg")`. |
+| `get_oracle_quorum_config()` | `Option<OracleQuorumConfig>`. |
+| `submit_oracle_prices(prices)` | Admin + pause. Runs the quorum-of-K algorithm, stores the resolved price via `OracleLastPrice`/`OracleLastPriceTs`. Reverts `OracleQuorumNotMet` when no qualifying window exists, `OraclePriceInvalid` on an empty/oversized/≤ 0 price list. Emits `("credit","orc_qprc")`. |
+
+#### Weighted-median oracle registry (precedence 1)
+
+| Entrypoint | Effect |
+|---|---|
+| `add_oracle(oracle, weight)` / `remove_oracle(oracle)` | Admin only. Register/unregister an oracle and its weight (weight must be > 0). |
+| `set_quorum_threshold(threshold)` | Admin only. Setting the threshold **activates registry mode** for `settle_default_liquidation`. |
+| `set_reporting_window(window_seconds)` | Admin only. Freshness window for oracle reports. |
+| `report_value(oracle, value)` | Requires the reporting oracle's auth; the oracle must be registered. |
+| `get_median_value() -> Result<u128, ContractError>` | Read-only. Weighted median of the fresh reports; `Err(QuorumNotMet)` when the total fresh weight is below the threshold or there are no fresh reports. |
 
 ### 2.9 Operational controls
 
@@ -370,6 +406,8 @@ See `contracts/credit/src/fees.rs`.
 | `get_protocol_config()` | `ProtocolConfig { liquidity_token, liquidity_source }` |
 | `get_liquidity_source()` | `Address` |
 | `get_oracle_config()` | `Option<OracleConfig>` |
+| `get_oracle_quorum_config()` | `Option<OracleQuorumConfig>` |
+| `get_median_value()` | `Result<u128, ContractError>` (registry weighted median) |
 | `get_rate_formula_config()` | `Option<RateFormulaConfig>` |
 | `get_rate_change_limits()` | `Option<RateChangeConfig>` |
 | `get_borrower_rate_floor(borrower)` | `Option<u32>` |
@@ -462,8 +500,14 @@ table is also reflected in `docs/storage-layout.md`.)
 | `DrawAudit(Address, u64)` | Persistent | `(borrower, ts) → original draw amount` |
 | `DrawReversedAmount(Address, u64)` | Persistent | Reversed total so far |
 | `OracleConfig` | Instance | `(max_deviation_bps, max_age_seconds)` |
+| `OracleQuorumConfig` | Instance | `(min_quorum_k, max_deviation_bps, max_age_seconds)` |
 | `OracleLastPrice` | Instance | Last accepted price |
 | `OracleLastPriceTs` | Instance | Last accepted ts |
+| `OracleDataKey::OracleList` | Instance | Registered oracle addresses |
+| `OracleDataKey::OracleWeight(Address)` | Instance | Per-oracle weight |
+| `OracleDataKey::OracleReport(Address)` | Instance | `(value, timestamp)` of the last report |
+| `OracleDataKey::QuorumThreshold` | Instance | Registry quorum (activates registry mode) |
+| `OracleDataKey::ReportingWindow` | Instance | Registry report freshness window |
 
 **Instance Symbol keys** (small, hot, low-allocation; see
 `storage.rs:269-302`):
@@ -625,9 +669,9 @@ for off-chain decoders.
 | 33 | `TimestampRegression` | Timestamp moved backwards |
 | 34 | `LimitOutOfBounds` | Outside min/max credit-limit bounds |
 | 35 | `CollateralRatioBelowMinimum` | Under-collateralized |
-| 36 | `OraclePriceInvalid` | Oracle price ≤ 0 or malformed |
-| 37 | `OraclePriceStale` | Exceeds `max_age_seconds` |
-| 38 | `OraclePriceDeviation` | Exceeds `max_deviation_bps` |
+| 36 | `OraclePriceInvalid` | Oracle price ≤ 0 or malformed || 37   | `OraclePriceStale` | Exceeds `max_age_seconds` |
+| 38   | `OraclePriceDeviation` | Exceeds `max_deviation_bps` |
+| 51   | `OracleQuorumNotMet` | Registry active but quorum not met during settlement |
 
 Auction errors (`AuctionError`, 12 variants, see
 `gateway-contract/contracts/auction_contract/src/errors.rs`):

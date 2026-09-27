@@ -122,10 +122,15 @@ Oracle price-feed failures — the price data cannot be trusted.
 | 36   | `OraclePriceInvalid`  | Price is zero, negative, or malformed    | `settle_default_liquidation` oracle validation |
 | 37   | `OraclePriceStale`    | Price exceeds max_age_seconds            | `settle_default_liquidation` staleness check |
 | 38   | `OraclePriceDeviation`| Price deviation exceeds max allowed      | `settle_default_liquidation` deviation check |
+| 51   | `OracleQuorumNotMet`  | Weighted-median registry active but quorum not met | `settle_default_liquidation` when the registry cannot produce a median |
 
 ### Compatibility
 
 - Codes 36, 37, 38 unchanged from previous releases.
+- `OracleQuorumNotMet` is a new code, added when the weighted-median oracle
+  registry was wired into `settle_default_liquidation`. It is distinct from
+  `QuorumNotMet` (15), the raw registry read error returned by
+  `get_median_value`.
 
 ---
 
