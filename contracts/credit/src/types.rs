@@ -870,3 +870,38 @@ pub struct PauseReason {
     /// Admin address that invoked the pause.
     pub actor: soroban_sdk::Address,
 }
+
+/// Full collateral state snapshot for a borrower, returned by `get_collateral_state`.
+///
+/// All fields are read-only; no authentication is required to call the view.
+///
+/// # `health_factor_bps` vs [`CreditLineSnapshot::health_factor_bps`]
+///
+/// This field reports the **raw** collateral-to-debt ratio
+/// (`balance * 10_000 / utilized_amount`), i.e. the amount of collateral
+/// backing each unit of debt. The protocol-wide floor `min_ratio_bps` is
+/// reported next to it rather than folded into it, because `0` there means
+/// "no floor configured" and folding a disabled floor into the factor would
+/// misreport a perfectly healthy zero-collateral line as liquidatable.
+///
+/// The **min-ratio-aware** factor used by keepers — the one that reads
+/// `10_000` exactly at the liquidation threshold — is exposed by
+/// `get_health_factor` and mirrored in
+/// [`CreditLineSnapshot::health_factor_bps`].
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralState {
+    /// Borrower whose collateral is described.
+    pub borrower: soroban_sdk::Address,
+    /// Current collateral balance held by the contract for this borrower.
+    pub balance: i128,
+    /// Protocol-wide minimum collateral ratio in basis points (default 15 000 = 150 %).
+    /// Zero means the ratio check is disabled.
+    pub min_ratio_bps: u32,
+    /// Configured collateral token address, or `None` when not yet set.
+    pub collateral_token: Option<soroban_sdk::Address>,
+    /// Health factor expressed in basis points: `balance * 10_000 / utilized_amount`.
+    /// A value at or above `min_ratio_bps` indicates adequate collateralization.
+    /// `u32::MAX` when `utilized_amount == 0` (no outstanding debt).
+    pub health_factor_bps: u32,
+}

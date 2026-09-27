@@ -1545,6 +1545,20 @@ impl Credit {
         crate::collateral::get_collateral(&env, &borrower)
     }
 
+    /// Return a full collateral state snapshot for `borrower`.
+    ///
+    /// Reads balance, minimum collateral ratio, collateral token, and computed
+    /// health factor in a single read-only call. No authentication required.
+    ///
+    /// # Returns
+    /// [`crate::types::CollateralState`] — see field docs for semantics.
+    pub fn get_collateral_state(
+        env: Env,
+        borrower: Address,
+    ) -> crate::types::CollateralState {
+        crate::collateral::get_collateral_state(&env, &borrower)
+    }
+
     /// Set the risk weight for a collateral asset, in basis points (admin only).
     ///
     /// Risk weight scales how much a unit of this asset counts toward the
