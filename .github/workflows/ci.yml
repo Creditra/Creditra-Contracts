@@ -71,11 +71,14 @@ jobs:
         run: |
           rustc --version
           cargo --version
-          rustup target list --installed
-
-      - name: Check formatting
+          rustup target list --installed      - name: Check formatting
         working-directory: contracts/creditra-credit
         run: cargo fmt -- --check
+
+      - name: Verify error codes documentation
+        run: |
+          python3 scripts/list_contract_errors.py > generated_table.md
+          diff -u docs/ERROR_CODES.md generated_table.md
 
       - name: Run clippy
         working-directory: contracts/creditra-credit
@@ -84,6 +87,9 @@ jobs:
       - name: Run tests
         working-directory: contracts/creditra-credit
         run: cargo test $CARGOFLAGS --no-fail-fast
+
+      - name: Run gas regression
+        run: scripts/gas-regression.sh
 
       - name: Build native release
         working-directory: contracts/creditra-credit
@@ -114,3 +120,4 @@ jobs:
           name: creditra-credit-wasm
           path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
+
