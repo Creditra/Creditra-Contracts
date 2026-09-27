@@ -119,53 +119,81 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 
 ---
 
-## Document inventory
+---
 
-### Long-form references (this directory)
+## Complete document inventory
 
-| File | Pages | Purpose |
-|---|---|---|
-| `INDEX.md` | 1 | This page |
-| `PROTOCOL_SPEC.md` | ~12 | Per-module contract surface |
-| `ARCHITECTURE.md` | ~10 | Sequence + state + topology diagrams |
-| `RISK_PRICING.md` | ~12 | Pricing algorithm + worked examples |
-| `SECURITY.md` | ~8 | Threat model + auditor checklist |
-| `EXECUTION_QUALITY.md` | ~10 | Tests + CI + deployment + PR cadence |
-| `state-machine.md` | ~4 | Normative state-transition table |
-| `interest-accrual.md` | ~3 | Accrual normative reference |
-| `interest-accrual-design.md` | ~6 | Accrual design spec |
-| `risk-based-rate-formula.md` | ~3 | Rate formula normative reference |
-| `contract-errors.md`, `errors.md` | ~4 each | Error code tables |
-| `storage-layout.md` | ~4 | Storage tier reference |
-| `threat-model.md` | ~4 | Authorization matrix |
-| `default-liquidation-auction-hook.md` | ~3 | Cross-contract handoff |
-| `default-oracle.md` | ~5 | Staged default-signal oracle |
-| `credit.md` | ~15 | Master credit-contract reference |
-| `upgrade-policy.md` | ~3 | Upgrade procedure |
-| `utilization-cap.md` | ~3 | Per-borrower utilization cap |
-| `indexer-integration.md` | ~4 | Off-chain event decoding |
-| `EVENTS_CATALOG.md` | ~6 | **Authoritative event catalog and versioning policy** |
-| `events-schema.md` | ~4 | Legacy event schema reference (superseded by `EVENTS_CATALOG.md`) |
-| `deploy.md` | ~2 | Deploy quickstart |
-| `contributing-tests.md` | ~3 | Test helper conventions |
-| `scripts.md` | ~2 | Helper script reference |
+Every `docs/*.md` file is linked below, routed by audience. Nothing in this
+directory should be reachable only by guessing its filename.
+
+`scripts/check_docs_index.sh` enforces this: it fails when a `docs/*.md` file
+exists but is not referenced from this page (and is run in CI).
+
+| Audience | File | Purpose |
+| --- | --- | --- |
+| Auditors / integrators | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Creditra System Architecture |
+| Grant reviewers / contributors | [`COVERAGE.md`](./COVERAGE.md) | Coverage Guide |
+| Auditors / integrators | [`CROSS_CONTRACT_HANDSHAKE.md`](./CROSS_CONTRACT_HANDSHAKE.md) | Cross-Contract Handshake Protocol |
+| Integrators | [`ERROR_CODES.md`](./ERROR_CODES.md) | ContractError Codes — Categorized Reference |
+| Integrators | [`ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) | V1 to V2 `ContractError` encoding migration |
+| Integrators | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | Events Catalog |
+| Integrators | [`EVENT_SCHEMA.md`](./EVENT_SCHEMA.md) | Event Schema Documentation |
+| Grant reviewers / contributors | [`EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) | Creditra Execution Quality — The Receipts |
+| Everyone | [`GLOSSARY.md`](./GLOSSARY.md) | Creditra Glossary |
+| Everyone | [`INDEX.md`](./INDEX.md) | Creditra Documentation Index |
+| Operators / auditors | [`ORACLE_OUTAGE_SIMULATION.md`](./ORACLE_OUTAGE_SIMULATION.md) | Multi-Oracle Outage Simulation & Recovery Guidelines (`creditra-credit`) |
+| Auditors / integrators | [`PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) | Creditra Protocol Specification |
+| Grant reviewers / integrators | [`RISK_PRICING.md`](./RISK_PRICING.md) | Creditra Risk-Pricing Algorithm — In Depth |
+| Auditors / integrators | [`SCORING.md`](./SCORING.md) | Credit Score VRF Commitment |
+| Auditors / operators | [`SECURITY.md`](./SECURITY.md) | Creditra Security & Threat Model |
+| Integrators | [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) | Storage Layout — Creditra Contracts |
+| Integrators | [`contract-errors.md`](./contract-errors.md) | `ContractError` reference |
+| Contributors | [`contributing-tests.md`](./contributing-tests.md) | Contributing Tests |
+| Everyone | [`credit.md`](./credit.md) | Generate a new keypair and store it locally under an alias |
+| Operators / auditors | [`default-liquidation-auction-hook.md`](./default-liquidation-auction-hook.md) | Default Liquidation Auction Hook |
+| Operators / auditors | [`default-oracle.md`](./default-oracle.md) | Default Oracle Design (Stellar/Soroban) |
+| Operators | [`deploy.md`](./deploy.md) | Deployment Guide |
+| Auditors / integrators | [`error-taxonomy.md`](./error-taxonomy.md) | `ContractError` Taxonomy — Recovery Actions by Category |
+| Integrators | [`errors.md`](./errors.md) | ContractError Reference |
+| Integrators | [`events-schema.md`](./events-schema.md) | Creditra Event Schema Reference |
+| Integrators | [`indexer-integration.md`](./indexer-integration.md) | Indexer Integration Guide (Soroban Events) |
+| Auditors / contributors | [`interest-accrual-design.md`](./interest-accrual-design.md) | Interest Accrual Design Specification |
+| Integrators | [`interest-accrual.md`](./interest-accrual.md) | See file |
+| Integrators | [`risk-based-rate-formula.md`](./risk-based-rate-formula.md) | Risk-Score Based Dynamic Interest Rate Formula |
+| Operators / contributors | [`scripts.md`](./scripts.md) | Helper scripts |
+| Integrators / auditors | [`state-machine.md`](./state-machine.md) | Repayment Schedule State Machine |
+| Integrators | [`storage-layout.md`](./storage-layout.md) | Storage layout reference |
+| Integrators | [`storage-tiers.md`](./storage-tiers.md) | Storage Tiers — Complete TTL Bump Audit |
+| Auditors | [`threat-model.md`](./threat-model.md) | Threat Model — Authorization Matrix |
+| Operators | [`upgrade-policy.md`](./upgrade-policy.md) | Upgrade Policy: Native WASM Upgrade Path |
+| Operators / integrators | [`utilization-cap.md`](./utilization-cap.md) | Per-Borrower Utilization Ratio Cap |
+
+### Superseded duplicates
+
+These files are kept only so old links keep resolving. Treat the canonical
+column as the single source of truth and do not extend the duplicates.
+
+| Superseded | Canonical | Reason |
+| --- | --- | --- |
+| [`errors.md`](./errors.md) | [`contract-errors.md`](./contract-errors.md) | legacy copy of the error-code table |
+| [`ERROR_CODES.md`](./ERROR_CODES.md) | [`contract-errors.md`](./contract-errors.md) | upper-case duplicate of the error-code table |
+| [`EVENT_SCHEMA.md`](./EVENT_SCHEMA.md) | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | legacy event schema (catalogue is authoritative) |
+| [`events-schema.md`](./events-schema.md) | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | legacy event schema (catalogue is authoritative) |
+| [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) | [`storage-layout.md`](./storage-layout.md) | upper-case duplicate of the storage layout reference |
+| [`interest-accrual-design.md`](./interest-accrual-design.md) | [`interest-accrual.md`](./interest-accrual.md) | design history for the normative accrual reference |
+| [`ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) | [`error-taxonomy.md`](./error-taxonomy.md) | error taxonomy migration note |
 
 ### Top-level companions
 
 | File | Purpose |
-|---|---|
-| `WHITEPAPER.md` | Protocol-level design (the centerpiece) |
-| `README.md` | Repo entry point |
-| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design rationale |
-| `AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history |
-| `SELF_SUSPEND_ARCHITECTURE.md` | Borrower self-suspend design |
-| `STORAGE_KEY_ENCODING_DIAGRAMS.md`, `STORAGE_KEY_ENCODING_SUMMARY.md` | Storage key safety |
-| `UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
-| `POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
-| `AUDIT_SUMMARY.md`, `IMPLEMENTATION_STATUS.md` | Status snapshots |
-| `INTEREST_ACCRUAL_SPIKE_RESULTS.md` | Accrual model spike |
-| `TEST_COVERAGE_REPORT.md`, `COVERAGE_REPORT.md`, `TEST_COVERAGE.md`, `TEST_VALIDATION.md` | Coverage snapshots |
+| --- | --- |
+| [`WHITEPAPER.md`](../WHITEPAPER.md) | Protocol-level design (the centerpiece) |
+| [`README.md`](../README.md) | Repo entry point |
+| [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](../CIRCUIT_BREAKER_IMPLEMENTATION.md) | Pause design rationale |
+| [`SELF_SUSPEND_ARCHITECTURE.md`](../SELF_SUSPEND_ARCHITECTURE.md) | Borrower self-suspend design |
+| [`STORAGE_KEY_ENCODING_DIAGRAMS.md`](../STORAGE_KEY_ENCODING_DIAGRAMS.md) | Storage key safety diagrams |
+| [`STORAGE_KEY_ENCODING_SUMMARY.md`](../STORAGE_KEY_ENCODING_SUMMARY.md) | Storage key safety summary |
 
 ---
 
-*Last updated alongside the documentation pass in June 2026.*
+*Documentation index is checked by `scripts/check_docs_index.sh`.*
