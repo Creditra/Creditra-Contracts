@@ -735,7 +735,21 @@ impl Credit {
             previous_utilized,
             Some(previous_status),
         );
-        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
+        let late_fee_total = lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
+        if late_fee_total > 0 {
+            let maybe_token: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
+            if let Some(token_address) = maybe_token {
+                let token_client = token::Client::new(&env, &token_address);
+                let contract_address = env.current_contract_address();
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &contract_address,
+                    &late_fee_total,
+                );
+                crate::fees::accrue_protocol_fee(&env, &borrower, late_fee_total);
+            }
+        }
 
         let _timestamp = env.ledger().timestamp();
         publish_interest_accrued_event(

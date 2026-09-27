@@ -1354,24 +1354,26 @@ pub fn advance_repayment_schedule_after_repay(
     borrower: &Address,
     effective_repay: i128,
     interest_repaid: i128,
-) {
+) -> i128 {
     let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
         Some(principal) if principal > 0 => principal,
-        _ => return,
+        _ => return 0,
     };
 
     let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
-        return;
+        return 0;
     };
 
     if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
-        return;
+        return 0;
     }
 
     let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
     if installments_paid == 0 {
-        return;
+        return 0;
     }
+
+    let mut total_late_fee = 0;
 
     // ── Late-fee surcharge ──────────────────────────────────────────────────
     let late_fee = crate::storage::get_late_fee_flat(env);
@@ -1382,7 +1384,7 @@ pub fn advance_repayment_schedule_after_repay(
                 .next_due_ts
                 .saturating_add(i.saturating_mul(schedule.period_seconds));
             if now > due_ts {
-                crate::storage::add_treasury_balance(env, late_fee);
+                total_late_fee = total_late_fee.saturating_add(late_fee);
                 crate::events::publish_late_fee_charged_event(
                     env,
                     crate::events::LateFeeChargedEvent {
@@ -1398,6 +1400,8 @@ pub fn advance_repayment_schedule_after_repay(
     let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
     schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
     storage_set_repayment_schedule(env, borrower, &schedule);
+
+    total_late_fee
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
