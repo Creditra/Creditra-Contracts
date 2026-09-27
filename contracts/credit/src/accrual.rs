@@ -236,7 +236,15 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
     }
 
     // Compute accrued interest using the audited prorate helper with floor rounding.
-    let accrued_u: u128 = if line.status == CreditStatus::Suspended {
+    // Both admin `Suspended` and borrower `SelfSuspended` share the same grace
+    // semantics: the suspension timestamp marks the start of the waiver window.
+    // Treating them together keeps the rate economics identical while the
+    // status remains distinct for authorization and audit.
+    let is_suspended = matches!(
+        line.status,
+        CreditStatus::Suspended | CreditStatus::SelfSuspended
+    );
+    let accrued_u: u128 = if is_suspended {
         let grace_cfg: Option<GracePeriodConfig> = env
             .storage()
             .instance()

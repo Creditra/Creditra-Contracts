@@ -12,7 +12,7 @@
 //! The treasury share is computed with floor rounding; the bounty pool receives
 //! the remainder so no tokens are lost to integer division.
 
-use crate::math_utils::{apply_bps, Rounding};
+use crate::math_utils::split_conserving;
 use soroban_sdk::{Address, Env};
 
 /// Maximum basis points for a fee-share ratio (100 %).
@@ -32,8 +32,14 @@ pub struct FeeSplitAmounts {
 
 /// Split `total_fee` by `treasury_share_bps` in the range `0..=10_000`.
 ///
-/// Treasury receives `floor(total_fee * treasury_share_bps / 10_000)`; the
-/// bounty pool receives the remainder.
+/// The split is **value-conserving and deterministic**: the two recipients'
+/// shares always sum exactly to `total_fee` (no dust is created or lost), and
+/// the leftover base unit — when `total_fee × treasury_share_bps` is not
+/// divisible by `10_000` — is allocated via the largest-remainder method to the
+/// recipient with the larger fractional claim, with ties broken by bucket order.
+/// This replaces the previous ad-hoc "remainder always to bounty" rule, which
+/// was still value-conserving but biased the rounding error non-deterministically
+/// across fee-share configurations and could misallocate the final unit.
 pub fn split_protocol_fee(total_fee: i128, treasury_share_bps: u32) -> FeeSplitAmounts {
     if total_fee <= 0 {
         return FeeSplitAmounts {
@@ -56,12 +62,12 @@ pub fn split_protocol_fee(total_fee: i128, treasury_share_bps: u32) -> FeeSplitA
         };
     }
 
-    let treasury_amount = apply_bps(total_fee as u128, treasury_share_bps, Rounding::Floor) as i128;
-    let bounty_amount = total_fee - treasury_amount;
+    let total = total_fee as u128;
+    let parts = split_conserving(total, &[treasury_share_bps, MAX_FEE_SHARE_BPS - treasury_share_bps]);
 
     FeeSplitAmounts {
-        treasury_amount,
-        bounty_amount,
+        treasury_amount: parts[0] as i128,
+        bounty_amount: parts[1] as i128,
     }
 }
 
