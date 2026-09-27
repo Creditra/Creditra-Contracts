@@ -435,6 +435,12 @@ pub fn open_credit_line(
 
     let existing_line = get_credit_line(&env, &borrower);
 
+    let mut previous_utilized = 0;
+    let mut previous_status = None;
+    let mut utilized_amount = 0;
+    let mut accrued_interest = 0;
+    let mut last_accrual_ts = env.ledger().timestamp();
+
     if let Some(existing) = existing_line.as_ref() {
         if existing.status == CreditStatus::Active {
             env.panic_with_error(ContractError::AlreadyInitialized);
@@ -448,6 +454,15 @@ pub fn open_credit_line(
         if existing.status == CreditStatus::Defaulted {
             crate::storage::decrement_pending_auction_count(&env);
         }
+
+        previous_status = Some(existing.status);
+        previous_utilized = existing.utilized_amount;
+
+        if existing.status != CreditStatus::Closed {
+            utilized_amount = existing.utilized_amount;
+            accrued_interest = existing.accrued_interest;
+            last_accrual_ts = existing.last_accrual_ts;
+        }
     }
     // Re-opening any existing non-Active line is admin-gated: auth is enforced
     // by the `lib.rs` wrapper (`require_admin_auth`), not re-checked here — a
@@ -455,23 +470,19 @@ pub fn open_credit_line(
     // invocation is rejected by the Soroban auth frame as
     // `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
 
-    let previous_utilized = existing_line
-        .map(|existing| existing.utilized_amount)
-        .unwrap_or(0);
-
     let credit_line = CreditLineData {
         borrower: borrower.clone(),
         credit_limit,
-        utilized_amount: 0,
+        utilized_amount,
         interest_rate_bps,
         risk_score,
         status: CreditStatus::Active,
         last_rate_update_ts: 0,
-        accrued_interest: 0,
-        last_accrual_ts: env.ledger().timestamp(),
+        accrued_interest,
+        last_accrual_ts,
         suspension_ts: 0,
     };
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, previous_status);
     clear_repayment_schedule(&env, &borrower);
 
     publish_credit_line_event(
