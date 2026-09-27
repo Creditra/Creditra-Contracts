@@ -1312,22 +1312,6 @@ pub fn set_repayment_schedule(
     bump_credit_line_ttl(env, &borrower);
 }
 
-/// Advance a borrower's installment schedule after a repayment.
-///
-/// `effective_repay` is the amount actually applied to the debt after capping
-/// an overpayment to the outstanding balance. `interest_repaid` is the portion
-/// of that amount that was allocated to accrued interest. Only the principal
-/// portion of a repayment can satisfy installment obligations:
-///
-/// ```text
-/// principal_repaid  = effective_repay - interest_repaid
-/// installments_paid = floor(principal_repaid / amount_per_period)
-/// next_due_ts       = next_due_ts + installments_paid * period_seconds
-/// ```
-///
-/// Interest-only repayments and partial principal installments do not move the
-/// due date. Arithmetic uses checked/saturating operations so malformed state or
-/// extreme schedule values cannot wrap timestamps.
 /// Deterministically allocate a repayment across the debt components.
 ///
 /// `utilized_amount` is treated as the total debt bucket and `accrued_interest`
@@ -1349,6 +1333,67 @@ pub fn allocate_repayment(
     (effective_repay, interest_repaid, principal_repaid)
 }
 
+/// Number of already-due installments covered by a repayment that settles
+/// `installments_paid` whole installments.
+///
+/// This reproduces exactly the set the previous per-installment loop walked:
+///
+/// ```text
+/// count = #{ i in 0..installments_paid : now > next_due_ts + i * period_seconds }
+/// ```
+///
+/// Since `period_seconds > 0`, that condition is equivalent to
+/// `i * period_seconds < now - next_due_ts`, so the count is
+/// `ceil((now - next_due_ts) / period_seconds)`, clamped to `installments_paid`
+/// — the old loop's natural upper bound and its defensive cap.
+///
+/// The strict `>` comparison matters: a due date exactly equal to `now` is *not*
+/// overdue, so `elapsed / period_seconds + 1` would over-count at exact period
+/// boundaries. The ceiling is computed as `((elapsed - 1) / period_seconds) + 1`
+/// to avoid the `elapsed + period_seconds - 1` form, whose addition could
+/// overflow `u64`.
+///
+/// Returns `0` when nothing is due or the schedule is degenerate.
+fn overdue_installment_count(
+    now: u64,
+    next_due_ts: u64,
+    period_seconds: u64,
+    installments_paid: u64,
+) -> u64 {
+    if installments_paid == 0 || period_seconds == 0 || now <= next_due_ts {
+        return 0;
+    }
+    let elapsed = now - next_due_ts; // > 0
+    let overdue = ((elapsed - 1) / period_seconds) + 1;
+    overdue.min(installments_paid)
+}
+
+/// Advance a borrower's installment schedule after a repayment.
+///
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
+///
+/// ```text
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
+/// ```
+///
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
+///
+/// # Late-fee surcharge
+///
+/// When a flat late fee is configured, the number of overdue installments
+/// covered by the repayment is derived **arithmetically** (see
+/// [`overdue_installment_count`]) rather than by iterating once per
+/// installment. The fee for every overdue installment is charged to the
+/// treasury in a single write and reported in a single
+/// [`crate::events::LateFeeChargedEvent`], so the work done here is O(1)
+/// regardless of `installments_paid`.
 pub fn advance_repayment_schedule_after_repay(
     env: &Env,
     borrower: &Address,
@@ -1373,25 +1418,44 @@ pub fn advance_repayment_schedule_after_repay(
         return;
     }
 
-    // ── Late-fee surcharge ──────────────────────────────────────────────────
+    // ── Late-fee surcharge (O(1), aggregated) ───────────────────────────────
+    //
+    // The overdue count is computed arithmetically. The previous implementation
+    // looped `0..installments_paid`, performing a treasury write and emitting a
+    // `LateFeeChargedEvent` for every overdue installment; a large repayment
+    // against a tiny `amount_per_period` (e.g. 10^12 installments) therefore
+    // did millions of storage writes and event publishes and could exceed the
+    // CPU budget. Charging the aggregate once performs a single write and emits
+    // a single event while accruing the same total fee.
     let late_fee = crate::storage::get_late_fee_flat(env);
     if late_fee > 0 {
         let now = env.ledger().timestamp();
-        for i in 0_u64..installments_paid {
-            let due_ts = schedule
-                .next_due_ts
-                .saturating_add(i.saturating_mul(schedule.period_seconds));
-            if now > due_ts {
-                crate::storage::add_treasury_balance(env, late_fee);
-                crate::events::publish_late_fee_charged_event(
-                    env,
-                    crate::events::LateFeeChargedEvent {
-                        borrower: borrower.clone(),
-                        fee: late_fee,
-                        installment_index: i.saturating_add(1),
-                    },
-                );
-            }
+        let overdue = overdue_installment_count(
+            now,
+            schedule.next_due_ts,
+            schedule.period_seconds,
+            installments_paid,
+        );
+        if overdue > 0 {
+            // `checked_mul` preserves the old loop's overflow behaviour: the
+            // repeated `add_treasury_balance` reverted with `Overflow` once the
+            // running total (or an individual product) exceeded `i128`.
+            let aggregate_fee = late_fee
+                .checked_mul(overdue as i128)
+                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+            crate::storage::add_treasury_balance(env, aggregate_fee);
+            // One event per repayment: `fee` is the aggregate for every overdue
+            // installment and `installment_index` is the highest (most recent)
+            // installment charged, preserving the 1-based index space the old
+            // per-installment events used.
+            crate::events::publish_late_fee_charged_event(
+                env,
+                crate::events::LateFeeChargedEvent {
+                    borrower: borrower.clone(),
+                    fee: aggregate_fee,
+                    installment_index: overdue,
+                },
+            );
         }
     }
 
