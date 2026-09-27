@@ -134,6 +134,36 @@ Items a reviewer should walk before signing off on the contract.
 
 ---
 
+
+### 3.8 Custody & reserve integrity
+
+The security review must be able to answer "which balances back which
+obligations". See `docs/ARCHITECTURE.md` §11 *Custody Model — Collateral,
+Reserves and Fees* for the full flow diagram and configuration guidance.
+
+Checks to perform on every review of token-touching code:
+
+- **Same-asset custody.** `storage::get_collateral_token()` returns
+  `DataKey::LiquidityToken`, so canonical collateral and the lending reserve are
+  the *same* asset. Any change here changes the custody model and must be called
+  out explicitly.
+- **Fee accumulation.** `TreasuryBalance` and `BountyBalance` are accounting
+  accumulators, not separate accounts. `withdraw_treasury` /
+  `withdraw_bounty` / `execute_treasury_withdrawal` must transfer exactly the
+  accumulated amount and clear the accumulator afterwards, so fees can never be
+  paid out of collateral or principal.
+- **Reserve sourcing.** `LiquiditySource` defaults to the credit contract
+  itself. Confirm that deployments intended for production set an external
+  reserve with `set_liquidity_source`, so a collateral shortfall cannot be
+  silently absorbed by reserve funds.
+- **Proof of reserve.** `get_proof_of_reserve()` is a pure storage read of the
+  fee accumulators; it does not consult token balances. Reconciliation against
+  the contract's real balance (including `total_collateral` and, when
+  self-sourced, undisbursed principal) is the caller's responsibility.
+- **Collateral token allowlist.** Non-canonical collateral is tracked per
+  `(borrower, token)` via `CollateralBalanceV2` and must stay gated by
+  `CollateralTokenAllowlist`.
+
 ## 4. Trust Roots & Assumptions
 
 The contract's correctness is conditional on the following assumptions.
