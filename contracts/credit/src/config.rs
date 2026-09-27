@@ -69,8 +69,16 @@ pub fn init(env: Env, admin: Address) {
     crate::storage::set_min_collateral_ratio_bps(&env, 15000);
 }
 
-/// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
-/// @dev Admin-only.
+/// Sets the token contract used for reserve/liquidity checks and draw transfers.
+///
+/// # Authorization
+/// Requires the configured admin to authorize this call. This setter does not
+/// gate on the global pause flag; pause enforcement happens in the draw/repay
+/// entrypoints that consume the configured token.
+///
+/// # Storage
+/// Writes `token_address` to instance storage under [`DataKey::LiquidityToken`].
+/// Repeated calls overwrite the previous address.
 #[allow(dead_code)]
 pub fn set_liquidity_token(env: Env, token_address: Address) {
     require_admin_auth(&env);
@@ -79,8 +87,14 @@ pub fn set_liquidity_token(env: Env, token_address: Address) {
         .set(&DataKey::LiquidityToken, &token_address);
 }
 
-/// @notice Sets the address that provides liquidity for draw operations.
-/// @dev Admin-only. If unset, init config uses the contract address.
+/// Sets the address that provides liquidity for draw operations.
+///
+/// # Authorization
+/// Requires the configured admin to authorize this call.
+///
+/// # Behavior
+/// If unset, the contract falls back to its own address as configured during
+/// [`init`]. Repeated calls overwrite the prior reserve address.
 #[allow(dead_code)]
 pub fn set_liquidity_source(env: Env, reserve_address: Address) {
     require_admin_auth(&env);

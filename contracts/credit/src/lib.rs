@@ -399,20 +399,21 @@ impl Credit {
 
     /// Draws credit by transferring liquidity tokens to the borrower.
     ///
-    /// Enforces status, limit, and liquidity checks before executing the transfer.
-    /// A reentrancy guard is set on entry and cleared on every exit path (success
-    /// and failure). If this function is re-entered while the guard is active,
-    /// the call reverts with [`ContractError::Reentrancy`].
+    /// This entrypoint authenticates the borrower, rejects zero or negative
+    /// amounts, applies pause/freeze status checks, accrues any outstanding
+    /// interest, verifies the draw fits within the active limits and token
+    /// liquidity, and then settles the transfer with a reentrancy guard.
     ///
     /// # Parameters
-    /// - `borrower`: The address drawing credit; must authorize this call.
-    /// - `amount`: The amount to draw; must be positive and within available limit.
+    /// - `borrower`: The address drawing credit; it must authorize this call.
+    /// - `amount`: The draw amount in the configured liquidity token units;
+    ///   it must be positive and remain within the credit line's available limit.
     ///
-    /// # Note
-    /// Not yet implemented. Planned logic: load existing record, update fields,
-    /// persist updated [`CreditLineData`].
-    /// @notice Draws credit by transferring liquidity tokens to the borrower.
-    /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
+    /// # Errors
+    /// Reverts with the relevant protocol error for invalid amounts, paused
+    /// state, frozen lines, over-limit draws, or reentrancy attempts. On a
+    /// successful execution, the credit line is updated in-place and the draw is
+    /// emitted in the protocol event stream.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         assert_not_paused(&env);
         set_reentrancy_guard(&env);

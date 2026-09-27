@@ -67,6 +67,16 @@ jobs:
           scripts/test_check_toolchain.sh
           scripts/test_check_wasm_size.sh
 
+      - name: Prevent stale rustdoc placeholders
+        run: |
+          set -euo pipefail
+          stale="$(find contracts \( -path '*/tests/*' -o -name '*_tests.rs' -o -name 'test_*.rs' \) -prune -o -type f -name '*.rs' -exec grep -nH 'Not yet implemented' {} + || true)"
+          if [[ -n "$stale" ]]; then
+            echo "$stale"
+            echo "::error::Found stale 'Not yet implemented' placeholder in non-test Rust code"
+            exit 1
+          fi
+
       - name: Print toolchain versions
         run: |
           rustc --version
