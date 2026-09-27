@@ -283,14 +283,20 @@ impl Credit {
         config::init(env, admin)
     }
 
+    /// Return the contract API version as `(major, minor, patch)`.
+    ///
+    /// Backward-compatible alias of [`Credit::get_contract_version`]. Both
+    /// entrypoints report the single [`CONTRACT_API_VERSION`] constant, so a
+    /// version bump cannot leave the two names disagreeing.
     pub fn get_version() -> (u32, u32, u32) {
-        (1, 0, 0)
+        CONTRACT_API_VERSION
     }
 
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
-    }
-
+    /// Return the contract API version as `(major, minor, patch)`.
+    ///
+    /// Canonical entrypoint. [`Credit::get_version`] is retained as an alias for
+    /// clients and the auction handshake that were written against the original
+    /// name; see also [`crate::handshake::ProtocolVersion`].
     pub fn get_contract_version() -> (u32, u32, u32) {
         CONTRACT_API_VERSION
     }
