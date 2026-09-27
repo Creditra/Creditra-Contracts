@@ -129,13 +129,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install nightly Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Pinned toolchain channel: $channel"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: llvm-tools-preview
 
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --locked
+        run: cargo install cargo-fuzz --locked
 
       - name: Build all fuzz targets
         shell: bash
@@ -150,7 +163,7 @@ jobs:
             contracts/risk/fuzz/Cargo.toml
           do
             echo "::group::Building $(dirname "$manifest")"
-            cargo +nightly fuzz build --manifest-path "$manifest"
+            cargo fuzz build --manifest-path "$manifest"
             echo "::endgroup::"
           done
 
@@ -166,7 +179,7 @@ jobs:
             local dir
             dir="$(dirname "$manifest")"
             echo "::group::Running $dir::$target"
-            if ! cargo +nightly fuzz run --manifest-path "$manifest" "$target" -- -max_total_time=60; then
+            if ! cargo fuzz run --manifest-path "$manifest" "$target" -- -max_total_time=60; then
               echo "::error::Fuzz target $dir::$target failed or produced a crash."
               failed=1
             fi
