@@ -178,6 +178,7 @@ use crate::storage::{
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
     set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_max_borrower_exposure as storage_set_max_borrower_exposure,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
     MAX_ENUMERATION_LIMIT,
 };
@@ -535,6 +536,14 @@ impl Credit {
                 clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OverLimit);
             }
+        }
+
+        // Per-borrower absolute exposure cap: block draws that would push this
+        // borrower's utilization above their configured cap, independent of the
+        // credit limit and the global protocol cap.
+        if let Err(e) = crate::limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(e);
         }
 
         // Global protocol exposure cap: block draws that would push total
@@ -1757,6 +1766,33 @@ impl Credit {
     /// Get the configured global exposure cap, or `None` if uncapped.
     pub fn get_max_total_exposure(env: Env) -> Option<i128> {
         crate::storage::get_max_total_exposure(&env)
+    }
+
+    /// Set the per-borrower absolute exposure cap (admin only).
+    ///
+    /// Once set, every `draw_credit` call for `borrower` enforces:
+    /// `utilized_amount + draw_amount <= cap`.
+    ///
+    /// Pass `0` to remove the cap; the borrower becomes uncapped again.
+    /// Pass any positive value to install or update the cap.
+    ///
+    /// # Authorization
+    /// Requires admin authorization.
+    ///
+    /// # Errors
+    /// - [`ContractError::InvalidAmount`] if `cap` is negative.
+    /// - Panics with auth error if caller is not the configured admin.
+    pub fn set_borrower_exposure_cap(env: Env, borrower: Address, cap: i128) {
+        require_admin_auth(&env);
+        if cap < 0 {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        storage_set_max_borrower_exposure(&env, &borrower, cap);
+    }
+
+    /// Get the per-borrower exposure cap, or `None` if uncapped.
+    pub fn get_borrower_exposure_cap(env: Env, borrower: Address) -> Option<i128> {
+        crate::storage::get_max_borrower_exposure(&env, &borrower)
     }
 
     /// Set global credit limit bounds (admin only).

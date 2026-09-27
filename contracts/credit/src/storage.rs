@@ -1788,8 +1788,32 @@ pub fn clear_pending_treasury_withdrawal(env: &Env) {
 
 // ── Max borrower exposure (persistent) ────────────────────────────────────────
 
+/// Get the per-borrower absolute exposure cap, if set.
+///
+/// Bumps the persistent TTL on every read so an active borrower's cap is not
+/// silently archived by the Soroban network between interactions.
 pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
+    let key = DataKey::MaxBorrowerExposure(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
+}
+
+/// Set (or clear) the per-borrower absolute exposure cap.
+///
+/// - `cap > 0` — writes the cap to persistent storage and bumps TTL.
+/// - `cap == 0` — removes the entry, making the borrower uncapped again.
+///
+/// Callers are responsible for validating `cap >= 0` before calling this
+/// function; passing a negative value will store it as-is and every draw
+/// will be blocked for that borrower.
+pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
+    let key = DataKey::MaxBorrowerExposure(borrower.clone());
+    if cap == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &cap);
+        bump_persistent_ttl(env, &key);
+    }
 }

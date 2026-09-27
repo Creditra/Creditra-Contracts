@@ -167,6 +167,7 @@ pub enum CreditStatus {
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 /// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
+/// | 64   | `BorrowerExposureCapExceeded`  | Limit         | Draw would exceed the per-borrower absolute exposure cap |
 // `export = false`: `ContractError` has grown past the 50-case limit the
 // Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
@@ -267,6 +268,13 @@ pub enum ContractError {
     /// deterministic. The block lifts when the last active auction exits the
     /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// Draw would exceed the per-borrower absolute exposure cap.
+    ///
+    /// Triggered when `utilized_amount + draw_amount > max_borrower_exposure` for
+    /// the given borrower. Distinct from [`ExposureCapExceeded`] (31), which guards
+    /// the global protocol-wide cap. The cap is cleared by passing `0` to
+    /// `set_borrower_exposure_cap`; when absent the check is skipped entirely.
+    BorrowerExposureCapExceeded = 64,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -337,7 +345,8 @@ impl ContractError {
             | Self::DrawExceedsMaxAmount
             | Self::RepayExceedsMaxAmount
             | Self::DrawReversalWindowExpired
-            | Self::CloseFactorAboveMax => Limit,
+            | Self::CloseFactorAboveMax
+            | Self::BorrowerExposureCapExceeded => Limit,
 
             Self::MissingLiquidityToken
             | Self::MissingLiquiditySource
