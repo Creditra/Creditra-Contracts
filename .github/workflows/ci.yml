@@ -67,6 +67,10 @@ jobs:
           scripts/test_check_toolchain.sh
           scripts/test_check_wasm_size.sh
 
+      # Every document must stay discoverable from docs/INDEX.md.
+      - name: Check documentation index
+        run: scripts/check_docs_index.sh
+
       - name: Print toolchain versions
         run: |
           rustc --version
