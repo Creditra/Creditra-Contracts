@@ -3075,6 +3075,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3099,6 +3101,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3117,6 +3121,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3190,6 +3196,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3208,6 +3216,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // set_liquidity_source works -> init stored admin correctly
         let new_source = Address::generate(&env);
         client.set_liquidity_source(&new_source);
@@ -3221,6 +3231,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token.address());
     }
@@ -3234,6 +3246,8 @@ pub mod test_coverage {
         let client = CreditClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // drop auths
         let env2 = Env::default();
         let client2 = CreditClient::new(&env2, &contract_id);
@@ -3251,6 +3265,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         // Set an initial token address.
         let token_a = env
@@ -3283,6 +3299,8 @@ pub mod test_coverage {
         let client = CreditClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let env2 = Env::default();
         let client2 = CreditClient::new(&env2, &contract_id);
         client2.set_liquidity_source(&Address::generate(&env));
@@ -3311,6 +3329,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // Intentionally do NOT configure liquidity token.
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         client.draw_credit(&borrower, &200_i128);
@@ -3413,6 +3433,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token_id.address());
         // mint nothing -> reserve = 0
@@ -3460,6 +3482,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &0_i128, &300_u32, &70_u32);
     }
 
@@ -3472,6 +3496,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1_000_i128, &10_001_u32, &70_u32);
     }
 
@@ -3484,6 +3510,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1_000_i128, &300_u32, &101_u32);
     }
 
@@ -3510,6 +3538,8 @@ mod test_smoke_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let borrower = Address::generate(env);
         (client, admin, borrower)
     }
@@ -3526,6 +3556,8 @@ mod test_smoke_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3577,6 +3609,8 @@ mod test_smoke_coverage {
         let borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
     }
@@ -3590,6 +3624,8 @@ mod test_smoke_coverage {
         let _borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.suspend_credit_line(&Address::generate(&env));
     }
 
@@ -3600,6 +3636,8 @@ mod test_smoke_coverage {
         let admin = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1000_i128, &500_u32, &101_u32);
     }
 
@@ -3613,6 +3651,8 @@ mod test_smoke_coverage {
         let impostor = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token_id.address());
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
@@ -3628,6 +3668,8 @@ mod test_smoke_coverage {
         let _borrower_two = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.default_credit_line(&borrower);
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
@@ -4047,6 +4089,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let liquidity = MockLiquidityToken::deploy(env);
         client.set_liquidity_token(&liquidity.address());
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
@@ -4068,6 +4112,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         (client, admin, borrower)
     }
@@ -4213,6 +4259,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -4502,6 +4550,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let liquidity = MockLiquidityToken::deploy(env);
         client.set_liquidity_token(&liquidity.address());
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
@@ -4521,6 +4571,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(borrower, &credit_limit, &interest_rate_bps, &70_u32);
         (client, admin)
     }
@@ -4537,6 +4589,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
         if utilized_amount > 0 {
             client.draw_credit(borrower, &utilized_amount);
@@ -4551,6 +4605,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         (client, admin, borrower)
     }
@@ -4568,6 +4624,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token_address = token_id.address();
         client.set_liquidity_token(&token_address);
@@ -4742,6 +4800,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -4784,6 +4844,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_rate_change_limits(&250_u32, &3600_u64);
 
         let cfg = client.get_rate_change_limits().unwrap();
@@ -4806,6 +4868,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &1000_i128, &10001_u32, &70_u32);
     }
@@ -4823,6 +4887,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &101_u32);
     }
@@ -4837,6 +4903,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.draw_credit(&borrower, &0);
     }
@@ -4879,6 +4947,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
         client.suspend_credit_line(&borrower);
 
@@ -4895,6 +4965,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
 
         client.draw_credit(&borrower, &1001);
@@ -4910,6 +4982,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
 
         client.draw_credit(&borrower, &-100);
@@ -4928,6 +5002,8 @@ mod test_mock_liquidity_token_extended {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_liquidity_token(&token_id.address());
         StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
@@ -4948,6 +5024,8 @@ mod test_mock_liquidity_token_extended {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_liquidity_token(&token_id.address());
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.close_credit_line(&borrower, &admin);
@@ -5126,6 +5204,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
         let token_admin = Address::generate(&env);
@@ -5157,6 +5237,8 @@ mod test_mock_liquidity_token_extended {
         let _token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
         let token = env.register_stellar_asset_contract_v2(token_admin);
@@ -5201,6 +5283,8 @@ mod test_mock_liquidity_token_extended {
 
         // Open with i128::MAX credit limit so the limit check won't fire first.
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &i128::MAX, &300_u32, &70_u32);
 
         // Manually set utilized_amount to i128::MAX so the next draw overflows.
@@ -5231,6 +5315,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5250,6 +5336,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -5283,6 +5371,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.close_credit_line(&borrower, &admin);
 
@@ -5305,6 +5395,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5327,6 +5419,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5348,6 +5442,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
 
@@ -5369,6 +5465,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
 
@@ -5477,6 +5575,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         client.set_rate_change_limits(&200_u32, &7200_u64);
         let cfg = client.get_rate_change_limits().unwrap();
@@ -5535,6 +5635,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         client.set_rate_change_limits(&100_u32, &0_u64);
     }
@@ -5559,6 +5661,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -5609,6 +5713,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // Set up token so draw works before freeze
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
@@ -5673,6 +5779,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // No auth mocked → should panic
         client.freeze_draws(&FreezeReason::LiquidityReserve);
     }
@@ -5686,6 +5794,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.unfreeze_draws();
     }
 
@@ -5744,6 +5854,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &70_u32);
         client.open_credit_line(&borrower_b, &2_000_i128, &300_u32, &70_u32);
         client.freeze_draws(&FreezeReason::LiquidityReserve);
@@ -5766,7 +5878,11 @@ mod test_draw_freeze {
         let client_b = CreditClient::new(&env, &contract_b);
 
         client_a.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client_a.set_min_collateral_ratio_bps(&0);
         client_b.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client_b.set_min_collateral_ratio_bps(&0);
         client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         client_b.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
@@ -5793,6 +5909,8 @@ mod test_borrower_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         (client, admin, borrower, contract_id)
     }
@@ -5971,6 +6089,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token_address = token_id.address();
@@ -6108,6 +6228,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token_address = token_id.address();
@@ -6131,6 +6253,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
             client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
 
             client.draw_credit(&borrower, &100);
@@ -6192,6 +6316,8 @@ mod test_max_draw_amount {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
         // Per behavior notes: draw_credit reverts when status is Defaulted.
@@ -6211,6 +6337,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token = token_id.address();
