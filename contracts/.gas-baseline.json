@@ -94,5 +94,23 @@
     "cpu_instructions": 189764,
     "memory_bytes": 32696,
     "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "place_bid",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "bid_refunded",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "settle_default_liquidation",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
   }
 ]
