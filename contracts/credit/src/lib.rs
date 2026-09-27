@@ -442,6 +442,18 @@ impl Credit {
             env.panic_with_error(ContractError::CreditLineFrozen);
         }
 
+        // Compliance blocklist: the flag is a hard stop for outbound funds.
+        // `views::borrow_capabilities` already reports `can_draw == false`
+        // for a blocked borrower, so the draw path has to agree with it.
+        // Repayment (see `repay_credit`) stays allowed so a blocked borrower
+        // can still deleverage; the check is ordered with the other
+        // pre-flight blockers, before any amount-dependent limit, so the
+        // error surfaced here is deterministic (#1215).
+        if storage_is_borrower_blocked(&env, &borrower) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::BorrowerBlocked);
+        }
+
         // Enforce per-transaction draw cap when configured.
         if let Some(max_draw) = env
             .storage()
@@ -6482,5 +6494,133 @@ mod test_max_draw_amount {
             assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
             assert_eq!(hf, 66_666);
         }
+    }
+}
+
+
+/// Regression coverage for the draw-side blocklist enforcement (#1215).
+///
+/// `views::borrow_capabilities` already reported `can_draw == false` for a
+/// blocked borrower while `draw_credit` happily moved funds; these tests pin
+/// the two together and cover the unaffected-borrower and repay paths.
+///
+/// `unblock_borrower` is deliberately not exercised: on this revision it
+/// panics with `Storage, MissingValue` because it bumps the persistent TTL of
+/// the entry it has just removed (`storage::set_borrower_blocked(.., false)`
+/// then `bump_persistent_ttl`). That is a separate pre-existing bug.
+#[cfg(test)]
+mod test_issue_1215_blocklist_draw {
+    use super::*;
+    use crate::types::ContractError;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env};
+
+    /// Contract, liquidity token with a funded reserve, and an open credit
+    /// line for `borrower`. Returns `(client, contract_id, admin, borrower, token)`.
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(env, &token).mint(&contract_id, &10_000_i128);
+        StellarAssetClient::new(env, &token).mint(&borrower, &10_000_i128);
+        TokenClient::new(env, &token).approve(
+            &borrower,
+            &contract_id,
+            &10_000_i128,
+            &1_000_000_u32,
+        );
+
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // These cases are about the blocklist gate, not about collateral, so
+        // remove the collateral requirement instead of funding a position.
+        client.set_min_collateral_ratio_bps(&0_u32);
+        (client, contract_id, admin, borrower, token)
+    }
+
+    /// A blocked borrower cannot draw, and no state or funds move.
+    #[test]
+    fn blocked_borrower_draw_reverts_with_borrower_blocked() {
+        let env = Env::default();
+        let (client, contract_id, admin, borrower, token) = setup(&env);
+
+        client.block_borrower(&admin, &borrower);
+        assert!(client.is_borrower_blocked(&borrower));
+
+        let outcome = client.try_draw_credit(&borrower, &100_i128);
+        assert_eq!(outcome, Err(Ok(ContractError::BorrowerBlocked.into())));
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 0);
+        assert_eq!(TokenClient::new(&env, &token).balance(&borrower), 10_000);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contract_id), 10_000);
+    }
+
+    /// A borrower who is not on the blocklist is unaffected: the new gate must
+    /// not turn into a blanket freeze, and blocking one borrower must not
+    /// block another.
+    #[test]
+    fn borrower_off_the_blocklist_still_draws() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+        assert!(!client.is_borrower_blocked(&borrower));
+
+        client.draw_credit(&borrower, &100_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            100
+        );
+
+        let other = Address::generate(&env);
+        client.open_credit_line(&other, &1_000_i128, &300_u32, &70_u32);
+        client.block_borrower(&admin, &borrower);
+
+        assert!(client.try_draw_credit(&borrower, &100_i128).is_err());
+        client.draw_credit(&other, &100_i128);
+        assert_eq!(client.get_credit_line(&other).unwrap().utilized_amount, 100);
+    }
+
+    /// Repayment stays allowed so a blocked borrower can deleverage.
+    #[test]
+    fn blocked_borrower_can_still_repay() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+
+        client.draw_credit(&borrower, &400_i128);
+        client.block_borrower(&admin, &borrower);
+
+        client.repay_credit(&borrower, &200_i128);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            200
+        );
+    }
+
+    /// The `can_draw` capability bit and the real draw outcome agree for both
+    /// blocked and unblocked borrowers.
+    #[test]
+    fn borrow_capabilities_can_draw_matches_the_draw_outcome() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+
+        assert!(client.borrow_capabilities(&borrower).can_draw);
+        client.draw_credit(&borrower, &10_i128);
+
+        client.block_borrower(&admin, &borrower);
+        let blocked = client.borrow_capabilities(&borrower);
+        assert!(!blocked.can_draw);
+        assert!(blocked.can_repay);
+        assert_eq!(
+            client.try_draw_credit(&borrower, &10_i128),
+            Err(Ok(ContractError::BorrowerBlocked.into()))
+        );
     }
 }
