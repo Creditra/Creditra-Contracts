@@ -99,10 +99,15 @@ cargo build --release --target wasm32-unknown-unknown -p creditra-credit
 # Output: target/wasm32-unknown-unknown/release/creditra_credit.wasm (< 50 KB)
 ```
 
-The release profile (`Cargo.toml`) is tuned for contract size:
-`opt-level = "z"`, `lto = true`, `strip = "symbols"`, `codegen-units = 1`,
-`panic = "abort"`, and — unusually — `overflow-checks = true` even in release,
-so the entire `i128` accounting layer reverts on overflow instead of wrapping.
+The release profile (`Cargo.toml` for workspace members and
+`contracts/creditra-credit/Cargo.toml` for the standalone credit crate) is
+tuned for contract size: `opt-level = "z"`, `lto = true`,
+`strip = "symbols"`, `codegen-units = 1`, `panic = "abort"`, and — unusually —
+`overflow-checks = true` even in release, so the entire `i128` accounting
+layer reverts on overflow instead of wrapping. `scripts/check-overflow-checks.sh`
+fails the build if either release profile loses that setting, and both
+`scripts/check_workspace.sh` and `scripts/build_wasm.sh` run it before
+compiling.
 
 #### Reproducible builds
 
@@ -310,7 +315,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 | Script | Use |
 |---|---|
 | `scripts/build_wasm.sh [all\|credit\|auction]` | Build release-mode WASM artifacts (toolchain-pin asserted, `--locked`) |
-| `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper |
+| `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper; asserts the release overflow policy first |
+| `scripts/check-overflow-checks.sh` | Fail when a release profile drops `overflow-checks = true` |
 | `scripts/check-toolchain.sh [--verify-active]` | Enforce the reproducible-build policy (exact toolchain pin, committed locks, CI workflow consumes the pin) |
 | `scripts/clean_profraw.sh [--dry-run]` | Remove stray `*.profraw` coverage profiles outside `target/` |
 | `scripts/list_contract_errors.py [--json]` | Print every `ContractError` variant with its discriminant |

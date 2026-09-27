@@ -6,6 +6,10 @@
 # silently produce different artifacts, and compiles `--locked` so dependency
 # resolution is pinned by the committed Cargo.lock.
 #
+# Safety: it also enforces the release overflow policy
+# (scripts/check-overflow-checks.sh) so a release build can never silently
+# disable overflow checks and ship wrapping `i128` arithmetic.
+#
 # Usage:
 #   scripts/build_wasm.sh            # builds all workspace contracts
 #   scripts/build_wasm.sh credit     # builds only creditra-credit
@@ -21,6 +25,7 @@ PROFILE="release"
 SELECTOR="${1:-all}"
 
 scripts/check-toolchain.sh --verify-active
+scripts/check-overflow-checks.sh
 
 case "$SELECTOR" in
     all)
