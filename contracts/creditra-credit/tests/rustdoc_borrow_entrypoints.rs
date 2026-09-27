@@ -265,7 +265,7 @@ mod create_draw_tests {
             "ucredit".to_string(),
         )
         .unwrap_err();
-        assert_eq!(err, ContractError::Unauthorized);
+        assert_eq!(err, ContractError::CrossTenantIdentifier);
     }
 
     #[test]
@@ -347,7 +347,7 @@ mod repay_draw_tests {
         let env = mock_env();
         let info = message_info(&stranger(&deps), &[]);
         let err = execute_repay_draw(deps.as_mut(), env, info, cl_id, draw_id).unwrap_err();
-        assert_eq!(err, ContractError::Unauthorized);
+        assert_eq!(err, ContractError::CrossTenantIdentifier);
     }
 
     #[test]

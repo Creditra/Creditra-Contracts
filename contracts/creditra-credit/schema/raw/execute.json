@@ -1,0 +1,535 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecuteMsg",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "create_credit_line"
+      ],
+      "properties": {
+        "create_credit_line": {
+          "type": "object",
+          "required": [
+            "borrower",
+            "collateral_amount",
+            "collateral_denom",
+            "credit_amount",
+            "credit_denom"
+          ],
+          "properties": {
+            "borrower": {
+              "type": "string"
+            },
+            "collateral_amount": {
+              "type": "string"
+            },
+            "collateral_denom": {
+              "type": "string"
+            },
+            "credit_amount": {
+              "type": "string"
+            },
+            "credit_denom": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "create_draw"
+      ],
+      "properties": {
+        "create_draw": {
+          "type": "object",
+          "required": [
+            "amount",
+            "credit_line_id",
+            "denom"
+          ],
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "denom": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "repay_draw"
+      ],
+      "properties": {
+        "repay_draw": {
+          "type": "object",
+          "required": [
+            "credit_line_id",
+            "draw_id"
+          ],
+          "properties": {
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "draw_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "add_audit_memo"
+      ],
+      "properties": {
+        "add_audit_memo": {
+          "type": "object",
+          "required": [
+            "credit_line_id",
+            "draw_id",
+            "memo"
+          ],
+          "properties": {
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "draw_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "memo": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "update_protocol_version"
+      ],
+      "properties": {
+        "update_protocol_version": {
+          "type": "object",
+          "required": [
+            "major",
+            "minor"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "minor": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Configure the multi-oracle quorum parameters (admin only).",
+      "type": "object",
+      "required": [
+        "set_oracle_quorum_config"
+      ],
+      "properties": {
+        "set_oracle_quorum_config": {
+          "type": "object",
+          "required": [
+            "max_age_seconds",
+            "max_deviation_bps",
+            "min_quorum_k"
+          ],
+          "properties": {
+            "max_age_seconds": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "max_deviation_bps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "min_quorum_k": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Add an authorized oracle and its weight (admin only).",
+      "type": "object",
+      "required": [
+        "add_oracle"
+      ],
+      "properties": {
+        "add_oracle": {
+          "type": "object",
+          "required": [
+            "oracle",
+            "weight"
+          ],
+          "properties": {
+            "oracle": {
+              "type": "string"
+            },
+            "weight": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Remove an authorized oracle (admin only).",
+      "type": "object",
+      "required": [
+        "remove_oracle"
+      ],
+      "properties": {
+        "remove_oracle": {
+          "type": "object",
+          "required": [
+            "oracle"
+          ],
+          "properties": {
+            "oracle": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Submit an oracle report value.",
+      "type": "object",
+      "required": [
+        "report_value"
+      ],
+      "properties": {
+        "report_value": {
+          "type": "object",
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "type": "integer",
+              "format": "int128"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Submit N oracle prices and resolve a quorum canonical price (admin only).",
+      "type": "object",
+      "required": [
+        "submit_oracle_prices"
+      ],
+      "properties": {
+        "submit_oracle_prices": {
+          "type": "object",
+          "required": [
+            "prices"
+          ],
+          "properties": {
+            "prices": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "int128"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Set or update the structured late-fee configuration (admin only).\n\nPass `Some(LateFeeConfig::Flat(…))` for a fixed token amount per missed installment, or `Some(LateFeeConfig::AprBased(…))` for an additive basis-point surcharge.  Pass `None` to remove the config.",
+      "type": "object",
+      "required": [
+        "set_late_fee_config"
+      ],
+      "properties": {
+        "set_late_fee_config": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/LateFeeConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Deposit a collateral token on behalf of a borrower (admin only).",
+      "type": "object",
+      "required": [
+        "deposit_collateral"
+      ],
+      "properties": {
+        "deposit_collateral": {
+          "type": "object",
+          "required": [
+            "amount",
+            "borrower",
+            "denom"
+          ],
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "borrower": {
+              "type": "string"
+            },
+            "denom": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Withdraw a collateral token for a borrower (admin only).",
+      "type": "object",
+      "required": [
+        "withdraw_collateral"
+      ],
+      "properties": {
+        "withdraw_collateral": {
+          "type": "object",
+          "required": [
+            "amount",
+            "borrower",
+            "denom"
+          ],
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "borrower": {
+              "type": "string"
+            },
+            "denom": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Add a denomination to the collateral allowlist (admin only).\n\nRejected with `TooManyCollateralTokens` when the allowlist is already at [`crate::state::MAX_COLLATERAL_TOKENS`] entries.",
+      "type": "object",
+      "required": [
+        "add_collateral_token"
+      ],
+      "properties": {
+        "add_collateral_token": {
+          "type": "object",
+          "required": [
+            "denom",
+            "risk_weight_bps"
+          ],
+          "properties": {
+            "denom": {
+              "type": "string"
+            },
+            "risk_weight_bps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Remove a denomination from the collateral allowlist (admin only).",
+      "type": "object",
+      "required": [
+        "remove_collateral_token"
+      ],
+      "properties": {
+        "remove_collateral_token": {
+          "type": "object",
+          "required": [
+            "denom"
+          ],
+          "properties": {
+            "denom": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Update the risk weight for an allowed collateral token (admin only).",
+      "type": "object",
+      "required": [
+        "set_collateral_risk_weight"
+      ],
+      "properties": {
+        "set_collateral_risk_weight": {
+          "type": "object",
+          "required": [
+            "denom",
+            "risk_weight_bps"
+          ],
+          "properties": {
+            "denom": {
+              "type": "string"
+            },
+            "risk_weight_bps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "AprFeeConfig": {
+      "description": "Payload for the [`LateFeeConfig::AprBased`] variant.\n\nWraps the APR surcharge in basis points.",
+      "type": "object",
+      "required": [
+        "surcharge_bps"
+      ],
+      "properties": {
+        "surcharge_bps": {
+          "description": "Extra basis points added to the base interest rate while delinquent.\n\nMust be in `0..=10_000`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "FlatFeeConfig": {
+      "description": "Payload for the [`LateFeeConfig::Flat`] variant.\n\nWraps the flat surcharge amount so the enum can serialise as a tagged union in JSON and Binary.",
+      "type": "object",
+      "required": [
+        "amount"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Token units charged once per overdue installment.\n\nMust be `>= 0`. Zero disables the fee (no-op).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LateFeeConfig": {
+      "description": "Configuration for the late-fee penalty applied to overdue installments.\n\n# Variants\n\n| Variant    | Behaviour | |------------|-----------| | `Flat`     | A fixed `amount` in token units is applied once per missed installment. | | `AprBased` | An additive basis-point surcharge on the periodic interest rate while the line is delinquent. |\n\n# Storage\n\nStored in instance storage under `LATE_FEE_CONFIG`.  Admin-configurable via `SetLateFeeConfig` / `GetLateFeeConfig` on the contract.\n\n# Examples\n\n```ignore // Flat: charge 50 tokens per missed installment let cfg = LateFeeConfig::Flat(FlatFeeConfig { amount: Uint128::new(50) });\n\n// APR-based: add 200 bps to the interest rate when delinquent let cfg = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 }); ```",
+      "oneOf": [
+        {
+          "description": "Fixed flat amount charged once per overdue installment.\n\nUse [`FlatFeeConfig`] to supply the `amount`.  Zero disables the fee.",
+          "type": "object",
+          "required": [
+            "flat"
+          ],
+          "properties": {
+            "flat": {
+              "$ref": "#/definitions/FlatFeeConfig"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Additive APR surcharge applied to delinquent lines during accrual.\n\n`surcharge_bps` must be in `0..=10_000`.",
+          "type": "object",
+          "required": [
+            "apr_based"
+          ],
+          "properties": {
+            "apr_based": {
+              "$ref": "#/definitions/AprFeeConfig"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Uint128": {
+      "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+      "type": "string"
+    }
+  }
+}

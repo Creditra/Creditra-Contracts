@@ -338,7 +338,7 @@ pub fn execute_create_credit_line(
 /// | Variant | When |
 /// |---|---|
 /// | [`ContractError::CreditLineNotFound`] | `credit_line_id` has no stored [`CreditLine`] |
-/// | [`ContractError::Unauthorized`] | `info.sender != credit_line.borrower` |
+/// | [`ContractError::CrossTenantIdentifier`] | `info.sender != credit_line.borrower` |
 /// | [`ContractError::InvalidAmount`] | `amount` parses to zero |
 /// | [`ContractError::Overflow`] | summing outstanding draws or adding `amount` overflows `Uint128` |
 /// | [`ContractError::OverLimit`] | `outstanding + amount` would exceed `credit_line.credit_amount` |
@@ -368,7 +368,7 @@ pub fn execute_create_draw(
         .ok_or(ContractError::CreditLineNotFound(credit_line_id))?;
 
     if info.sender != credit_line.borrower {
-        return Err(ContractError::Unauthorized);
+        return Err(ContractError::CrossTenantIdentifier);
     }
 
     let draw_count = DRAW_COUNT
@@ -466,6 +466,8 @@ pub fn execute_create_draw(
 ///
 /// | Variant | When |
 /// |---|---|
+/// | [`ContractError::CreditLineNotFound`] | `credit_line_id` has no stored [`CreditLine`] |
+/// | [`ContractError::CrossTenantIdentifier`] | `info.sender != credit_line.borrower` |
 /// | [`ContractError::DrawNotFound`] | no [`Draw`] exists for the `(credit_line_id, draw_id)` pair |
 /// | [`ContractError::Unauthorized`] | `info.sender != draw.drawn_by` |
 ///
@@ -494,6 +496,14 @@ pub fn execute_repay_draw(
     credit_line_id: u64,
     draw_id: u64,
 ) -> Result<Response, ContractError> {
+    let credit_line = CREDIT_LINES
+        .may_load(deps.storage, credit_line_id)?
+        .ok_or(ContractError::CreditLineNotFound(credit_line_id))?;
+
+    if info.sender != credit_line.borrower {
+        return Err(ContractError::CrossTenantIdentifier);
+    }
+
     let mut draw = DRAWS
         .may_load(deps.storage, (credit_line_id, draw_id))?
         .ok_or(ContractError::DrawNotFound(draw_id, credit_line_id))?;

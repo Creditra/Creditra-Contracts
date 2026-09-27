@@ -28,7 +28,8 @@
 //! ```
 
 use gateway_auction::{
-    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent, DutchAuctionDecay,
+    Auction, AuctionClient, AuctionMode, AuctionState, AuctionStatus, BidRefundedEvent,
+    DutchAuctionDecay,
 };
 use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::token::StellarAssetClient;
@@ -78,8 +79,14 @@ fn open_english(client: &AuctionClient<'_>, id: &Symbol) {
 
 /// Register a Stellar asset contract and set it as the `bid_token` so that
 /// `place_bid` emits refund events. Mint `contract_balance` to the auction
-/// contract to cover refunds.
-fn enable_refunds(env: &Env, contract_id: &Address, contract_balance: i128) {
+/// contract to cover refunds. Returns the `StellarAssetClient` so callers can
+/// mint bidder balances (each bidder must hold tokens to place a bid, since
+/// `place_bid` pulls the bid amount from the bidder).
+fn enable_refunds<'a>(
+    env: &'a Env,
+    contract_id: &Address,
+    contract_balance: i128,
+) -> StellarAssetClient<'a> {
     let token_admin = Address::generate(env);
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
     let bid_token = token_id.address();
@@ -90,6 +97,7 @@ fn enable_refunds(env: &Env, contract_id: &Address, contract_balance: i128) {
             .instance()
             .set(&Symbol::new(env, "bid_token"), &bid_token);
     });
+    sac
 }
 
 /// Count events whose first topic matches `topic` in the most-recent call.
@@ -177,7 +185,7 @@ fn each_outbid_emits_exactly_one_refund_event() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_peroutbid");
     open_english(&client, &aid);
-    enable_refunds(&env, &id, 100_000);
+    let sac = enable_refunds(&env, &id, 100_000);
 
     let bidders: [Address; 5] = [
         Address::generate(&env),
@@ -187,6 +195,9 @@ fn each_outbid_emits_exactly_one_refund_event() {
         Address::generate(&env),
     ];
     let amounts: [i128; 5] = [100, 200, 400, 700, 1_100];
+    for b in &bidders {
+        sac.mint(b, &10_000_i128);
+    }
 
     for (i, (bidder, &amount)) in bidders.iter().zip(amounts.iter()).enumerate() {
         client.place_bid(&aid, bidder, &amount);
@@ -251,10 +262,12 @@ fn refund_event_names_correct_prev_bidder_and_amount() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_evtcorrect");
     open_english(&client, &aid);
-    enable_refunds(&env, &id, 100_000);
+    let sac = enable_refunds(&env, &id, 100_000);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
+    sac.mint(&alice, &10_000_i128);
+    sac.mint(&bob, &10_000_i128);
 
     client.place_bid(&aid, &alice, &300_i128);
     client.place_bid(&aid, &bob, &700_i128);
@@ -319,12 +332,15 @@ fn round_robin_refund_per_outbid_step() {
     let client = AuctionClient::new(&env, &id);
     let aid = Symbol::new(&env, "ra_roundrbn");
     open_english(&client, &aid);
-    enable_refunds(&env, &id, 100_000);
+    let sac = enable_refunds(&env, &id, 100_000);
 
     let a = Address::generate(&env);
     let b = Address::generate(&env);
     let c = Address::generate(&env);
     let bidders: [Address; 3] = [a, b, c];
+    for bd in &bidders {
+        sac.mint(bd, &10_000_i128);
+    }
 
     // (bidder_index, amount) — each step strictly outbids the previous holder.
     let steps: [(usize, i128); 6] = [(0, 50), (1, 100), (2, 200), (0, 350), (1, 600), (2, 900)];

@@ -109,6 +109,76 @@ fn set_factory_contract_succeeds_with_claimed_auth() {
     );
 }
 
+#[test]
+fn set_factory_contract_rejects_unauthorized_replacement() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let contract_id = env.register(Auction, ());
+    let client = AuctionClient::new(&env, &contract_id);
+
+    let factory = Address::generate(&env);
+    let intruder = Address::generate(&env);
+    client.set_factory_contract(&factory);
+
+    let result = client
+        .mock_auths(&[MockAuth {
+            address: &intruder,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_factory_contract",
+                args: (intruder.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_set_factory_contract(&intruder);
+
+    assert!(
+        result.is_err(),
+        "only the registered factory may replace factory administration"
+    );
+
+    let auction_id = Symbol::new(&env, "factory_still_authorized");
+    let result = client
+        .mock_auths(&[MockAuth {
+            address: &factory,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "init_auction",
+                args: (
+                    auction_id.clone(),
+                    AuctionMode::English,
+                    0_u64,
+                    u64::MAX,
+                    50_i128,
+                    0_u32,
+                    None::<i128>,
+                    None::<i128>,
+                    Some(DutchAuctionDecay::None),
+                    None::<u32>,
+                )
+                    .into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0_u64,
+            &u64::MAX,
+            &50_i128,
+            &0_u32,
+            &None,
+            &None,
+            &Some(DutchAuctionDecay::None),
+            &None,
+        );
+
+    assert!(
+        result.is_ok(),
+        "an unauthorized replacement must not displace the registered factory"
+    );
+}
+
 // ── init_auction ─────────────────────────────────────────────────────────────
 
 #[test]
