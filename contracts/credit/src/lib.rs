@@ -1350,7 +1350,19 @@ impl Credit {
         crate::storage::get_bounty_address(&env)
     }
 
-    /// Withdraw accumulated bounty pool balance to configured bounty address (admin only).
+    /// Withdraw accumulated bounty pool balance to the configured bounty
+    /// address (admin only).
+    ///
+    /// # Withdrawal policy: direct sweep, explicitly exempt from the treasury
+    /// timelock
+    ///
+    /// Unlike `withdraw_treasury`, which requires a matured 24-hour proposal,
+    /// this sweep is immediate. The exemption is deliberate and documented in
+    /// `docs/SECURITY.md` §2.1: the call can only move the already-accrued
+    /// `BountyBalance` accumulator, to the address chosen by
+    /// `set_bounty(admin, bounty)`, and it can never reach the liquidity
+    /// reserve or borrower collateral. Admin-gated via `require_admin_auth`;
+    /// `set_bounty` is the privileged operation to monitor.
     pub fn withdraw_bounty(env: Env, admin: Address) {
         admin.require_auth();
         require_admin_auth(&env);
@@ -1378,32 +1390,27 @@ impl Credit {
         crate::storage::clear_bounty_balance(&env);
     }
 
-    /// Withdraw accumulated treasury balance to configured treasury address (admin only).
+    /// Withdraw accumulated treasury balance to the configured treasury address
+    /// (admin only) -- timelocked.
+    ///
+    /// The 24-hour propose/execute timelock is the only path that can move
+    /// treasury funds. This entrypoint is kept for backward compatibility with
+    /// existing SDK callers but no longer performs an instant sweep: it reverts
+    /// unless a matured proposal is pending, in which case it simply delegates
+    /// to [`Self::execute_treasury_withdrawal`].
     pub fn withdraw_treasury(env: Env, admin: Address) {
         admin.require_auth();
         require_admin_auth(&env);
 
-        let treasury_addr = crate::storage::get_treasury_address(&env)
-            .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::TreasuryNotSet));
-
-        let amount = crate::storage::get_treasury_balance(&env);
-        if amount == 0 {
-            return;
+        // Require a pending proposal that has passed its unlock timestamp.
+        let proposal = get_pending_treasury_withdrawal(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::NoPendingTreasuryWithdrawal));
+        if env.ledger().timestamp() < proposal.execute_after {
+            env.panic_with_error(ContractError::TreasuryTimelockActive);
         }
 
-        let token_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::LiquidityToken)
-            .unwrap_or_else(|| {
-                env.panic_with_error(crate::types::ContractError::MissingLiquidityToken)
-            });
-
-        let token_client = token::Client::new(&env, &token_address);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &treasury_addr, &amount);
-
-        crate::storage::clear_treasury_balance(&env);
+        // Delegate so there is exactly one implementation that transfers funds.
+        Self::execute_treasury_withdrawal(env, admin);
     }
 
     /// Get the current storage schema version.
