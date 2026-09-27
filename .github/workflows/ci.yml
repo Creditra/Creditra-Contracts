@@ -54,6 +54,11 @@ jobs:
       - name: Verify reproducible-build policy
         run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
 
+      # Ensure the root lockfile resolves cleanly without package collisions
+      # (e.g. duplicate workspace paths causing duplicate package entries).
+      - name: Validate root lockfile metadata
+        run: cargo metadata --locked --format-version 1
+
       - name: Print toolchain versions
         run: |
           rustc --version
