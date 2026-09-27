@@ -166,6 +166,21 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `INTEREST_ACCRUAL_SPIKE_RESULTS.md` | Accrual model spike |
 | `TEST_COVERAGE_REPORT.md`, `COVERAGE_REPORT.md`, `TEST_COVERAGE.md`, `TEST_VALIDATION.md` | Coverage snapshots |
 
+### Contract-local READMEs
+
+Per-crate references that sit next to the code they describe. These are the
+READMEs published with each crate, so they are versioned with the contract they
+document rather than with this index.
+
+| Crate | README | Purpose |
+|---|---|---|
+| `creditra-risk` | [`contracts/risk/README.md`](../contracts/risk/README.md) | Standalone risk-admin cooldown contract: entrypoints, error codes, storage keys and TTL policy, and — importantly — how it relates to the credit contract's *separate, duplicated* cooldown (`set_risk_admin_cooldown`) and who calls `record_risk_admin_action` |
+| `creditra-borrow` | [`contracts/borrow/README.md`](../contracts/borrow/README.md) | Borrow module reference |
+| `creditra-collateral` | [`contracts/collateral/README.md`](../contracts/collateral/README.md) | Collateral module reference |
+| `creditra-freeze` | [`contracts/freeze/README.md`](../contracts/freeze/README.md) | Global draws-frozen toggle reference |
+| `creditra-lifecycle` | [`contracts/lifecycle/README.md`](../contracts/lifecycle/README.md) | State-transition reference |
+| `creditra-query` | [`contracts/query/README.md`](../contracts/query/README.md) | Read-only query reference |
+
 ---
 
 *Last updated alongside the documentation pass in June 2026.*

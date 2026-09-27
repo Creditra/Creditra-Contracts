@@ -408,7 +408,7 @@ See `contracts/credit/src/fees.rs`.
 | `get_collateral(borrower)`                                       | `i128`                                                                                                   |
 | `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
 | `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
-| `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
+| —                                                               | **Not implemented.** The `risk_capabilities` / `RiskCapabilities` surface has no entrypoint on this contract. `contracts/risk/src/views.rs` is not declared as a module of `creditra-risk` and imports `creditra-credit` internals, so it is not built or callable; see [`contracts/risk/README.md`](../contracts/risk/README.md) §8. |
 | `query_capabilities(borrower)`                                   | `QueryCapabilities { has_credit_line, has_repayment_schedule, health_factor_applicable, delinquency_applicable, is_delinquent }` — read-only query availability bitmap; see `contracts/query/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
