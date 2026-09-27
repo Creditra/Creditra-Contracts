@@ -8,8 +8,10 @@
 #![cfg(test)]
 
 use creditra_credit::scoring::VrfCommitment;
+use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
 use creditra_credit::types::ContractError;
-use soroban_sdk::testutils::{Address as _, BytesN as _};
+use soroban_sdk::testutils::storage::Persistent as _;
+use soroban_sdk::testutils::{Address as _, BytesN as _, Ledger};
 use soroban_sdk::{Address, BytesN, Env};
 
 fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
@@ -23,6 +25,16 @@ fn setup_contract<'a>(env: &'a Env, admin: &Address) -> creditra_credit::CreditC
     let contract = create_test_contract(env);
     contract.init(&admin);
     contract
+}
+
+fn advance_ledgers(env: &Env, delta: u32) {
+    env.ledger().with_mut(|li| {
+        li.sequence_number = li.sequence_number.saturating_add(delta);
+    });
+}
+
+fn ttl_for_key(env: &Env, contract_id: &Address, key: &DataKey) -> u32 {
+    env.as_contract(contract_id, || env.storage().persistent().get_ttl(key))
 }
 
 #[test]
@@ -44,6 +56,68 @@ fn test_commit_vrf_output() {
     let commitment = commitment.unwrap();
     assert_eq!(commitment.commitment_hash, commitment_hash);
     assert!(commitment.committed_at > 0);
+}
+
+#[test]
+fn test_vrf_commitment_ttl_is_bumped_on_write_and_verify() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let contract = creditra_credit::CreditClient::new(&env, &contract_id);
+    contract.init(&admin);
+
+    let commitment_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+    contract.commit_vrf_output(&borrower, &commitment_hash);
+
+    let key = DataKey::VrfCommitment(borrower.clone());
+    let ttl_after_write = ttl_for_key(&env, &contract_id, &key);
+    assert!(
+        ttl_after_write >= LEDGER_BUMP_AMOUNT,
+        "expected commitment TTL to be extended on write; got {ttl_after_write}"
+    );
+
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, ttl_after_write.saturating_sub(target_remaining));
+
+    assert!(env.as_contract(&contract_id, || {
+        creditra_credit::scoring::verify_vrf_commitment(&env, &borrower, 32)
+    }));
+    let ttl_after_verify = ttl_for_key(&env, &contract_id, &key);
+    assert!(
+        ttl_after_verify >= LEDGER_BUMP_AMOUNT,
+        "expected commitment TTL to be extended on verify; got {ttl_after_verify}"
+    );
+}
+
+#[test]
+fn test_verify_missing_vrf_commitment_returns_dedicated_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let contract = creditra_credit::CreditClient::new(&env, &contract_id);
+    contract.init(&admin);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        env.as_contract(&contract_id, || {
+            creditra_credit::scoring::verify_vrf_commitment(&env, &borrower, 32)
+        });
+    }));
+    let error = result.expect_err("expected missing commitment to revert");
+    let error_message = if let Some(message) = error.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = error.downcast_ref::<&str>() {
+        message.to_string()
+    } else {
+        String::new()
+    };
+    assert!(
+        error_message.contains("#64"),
+        "expected MissingVrfCommitment (#64), got: {error_message}"
+    );
 }
 
 #[test]

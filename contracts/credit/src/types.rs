@@ -167,6 +167,7 @@ pub enum CreditStatus {
 /// | 61   | `IncompatibleVersion`          | Handshake     | Auction contract protocol version is incompatible with credit contract |
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 /// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
+/// | 64   | `MissingVrfCommitment`          | Misc          | No VRF commitment exists for the borrower |
 // `export = false`: `ContractError` has grown past the 50-case limit the
 // Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
@@ -267,6 +268,8 @@ pub enum ContractError {
     /// deterministic. The block lifts when the last active auction exits the
     /// `Defaulted` pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// No VRF commitment exists for the borrower whose score is being verified.
+    MissingVrfCommitment = 64,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -380,7 +383,8 @@ impl ContractError {
             | Self::TreasuryProposalExists
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound
-            | Self::InvalidAttestation => Misc,
+            | Self::InvalidAttestation
+            | Self::MissingVrfCommitment => Misc,
 
             // Cross-contract handshake errors — guard is always cleared before
             // these are emitted so the settlement path is safe to retry.

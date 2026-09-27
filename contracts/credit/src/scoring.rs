@@ -29,7 +29,7 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused, bump_credit_line_ttl, DataKey};
+use crate::storage::{assert_not_paused, bump_vrf_commitment_ttl, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, BytesN, Env};
 
@@ -83,8 +83,7 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     };
 
     env.storage().persistent().set(&key, &commitment);
-    env.storage().persistent().set(&key, &commitment);
-    bump_credit_line_ttl(&env, &borrower);
+    bump_vrf_commitment_ttl(&env, &borrower);
 }
 
 /// Verify that a risk score matches the committed VRF output.
@@ -102,7 +101,7 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
 /// `true` if the score matches the committed VRF output, `false` otherwise.
 ///
 /// # Errors
-/// - Panics with [`ContractError::CreditLineNotFound`] if no commitment exists.
+/// - Panics with [`ContractError::MissingVrfCommitment`] if no commitment exists.
 ///
 /// # Score derivation
 /// The score is derived from the commitment hash using a deterministic formula:
@@ -117,9 +116,9 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingVrfCommitment));
 
-    bump_credit_line_ttl(env, borrower);
+    bump_vrf_commitment_ttl(env, borrower);
 
     // Derive expected score from commitment hash
     let expected_score = derive_score_from_hash(&commitment.commitment_hash);
@@ -203,7 +202,7 @@ pub fn clear_vrf_commitment(env: Env, borrower: Address) {
 pub fn get_vrf_commitment(env: &Env, borrower: &Address) -> Option<VrfCommitment> {
     let key = DataKey::VrfCommitment(borrower.clone());
     if env.storage().persistent().has(&key) {
-        bump_credit_line_ttl(env, borrower);
+        bump_vrf_commitment_ttl(env, borrower);
         env.storage().persistent().get(&key)
     } else {
         None

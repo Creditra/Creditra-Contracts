@@ -349,6 +349,12 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
         .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
 }
 
+/// Refresh the persistent TTL for a borrower's VRF commitment.
+pub fn bump_vrf_commitment_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::VrfCommitment(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
 /// Refresh the persistent TTL for an active credit-line freeze record.
 pub fn bump_credit_line_freeze_ttl(env: &Env, borrower: &Address) {
     let key = DataKey::CreditLineFreeze(borrower.clone());
