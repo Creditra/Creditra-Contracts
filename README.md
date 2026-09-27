@@ -278,10 +278,10 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   (signed attestation, signer set, nonce replay protection).
 - **Build-clean main** — resolve the merge-artifact duplicates in
   `lifecycle.rs` and `risk.rs` that produce the current `cargo check`
-  errors (tracked in `IMPLEMENTATION_STATUS.md`).
+  errors.
 - **Property-fuzz harness** (`cargo fuzz`) over `apply_accrual` and
   `compute_rate_from_score`.
-- **External audit** (see `AUDIT_SUMMARY.md`).
+- **External audit** (see `contracts/credit/AUDIT_SUMMARY.md`).
 - **Decentralized scorer pipeline** — move the off-chain scoring function
   to a stake-weighted committee or zk-attested compute.
 
@@ -302,6 +302,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `chore:`, `test:`).
 - Branching: feature branches off `main`, PRs reviewed and merged via
   GitHub.
+- Contributing: See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for contribution
+  guidelines. PR descriptions, checklists, and temporary write-ups belong in GitHub PRs,
+  not committed to the repository root.
 
 ---
 

@@ -88,7 +88,7 @@ Read in this order:
 3. [`docs/upgrade-policy.md`](./upgrade-policy.md) — admin-gated WASM upgrade
    procedure.
 4. [`docs/scripts.md`](./scripts.md) — helper scripts.
-5. [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](../CIRCUIT_BREAKER_IMPLEMENTATION.md)
+5. [`docs/CIRCUIT_BREAKER_IMPLEMENTATION.md`](./CIRCUIT_BREAKER_IMPLEMENTATION.md)
    — pause / unpause semantics.
 
 For the off-chain orchestrator that handles default auctions:
@@ -105,13 +105,15 @@ For the off-chain orchestrator that handles default auctions:
 Read in this order:
 
 1. [`README.md`](../README.md) — repo map and conventions.
-2. [`docs/contributing-tests.md`](./contributing-tests.md) — test helper
+2. [`docs/CONTRIBUTING.md`](./CONTRIBUTING.md) — contributing standards and
+   PR write-up guidelines.
+3. [`docs/contributing-tests.md`](./contributing-tests.md) — test helper
    conventions.
-3. [`docs/EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) §1 — existing test
+4. [`docs/EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) §1 — existing test
    catalog (find the file analogous to your change).
-4. [`docs/PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) — confirm your change fits
+5. [`docs/PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) — confirm your change fits
    the existing entrypoint surface.
-5. The relevant source file's `//!` doc block — every module documents its
+6. The relevant source file's `//!` doc block — every module documents its
    WHAT / HOW / WHY before the code starts.
 
 Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
@@ -126,11 +128,18 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | File | Pages | Purpose |
 |---|---|---|
 | `INDEX.md` | 1 | This page |
+| `CONTRIBUTING.md` | ~2 | Contributing guidelines and PR workflow conventions |
 | `PROTOCOL_SPEC.md` | ~12 | Per-module contract surface |
 | `ARCHITECTURE.md` | ~10 | Sequence + state + topology diagrams |
 | `RISK_PRICING.md` | ~12 | Pricing algorithm + worked examples |
 | `SECURITY.md` | ~8 | Threat model + auditor checklist |
 | `EXECUTION_QUALITY.md` | ~10 | Tests + CI + deployment + PR cadence |
+| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | ~3 | Pause / unpause design rationale |
+| `ORACLE_VALIDATION_DESIGN.md` | ~4 | Oracle input validation before price-dependent settlement |
+| `VALIDATION_LAYER_DESIGN.md` | ~5 | Oracle validation layer architecture & interfaces |
+| `SELF_SUSPEND_ARCHITECTURE.md` | ~10 | Borrower self-suspend architecture & sequence diagrams |
+| `STORAGE_KEY_ENCODING_DIAGRAMS.md` | ~10 | Soroban storage key encoding & collision resistance diagrams |
+| `AUCTION_CLOSE_TIME_FIX.md` | ~3 | Auction close-time hardening specification |
 | `state-machine.md` | ~4 | Normative state-transition table |
 | `interest-accrual.md` | ~3 | Accrual normative reference |
 | `interest-accrual-design.md` | ~6 | Accrual design spec |
@@ -156,15 +165,6 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 |---|---|
 | `WHITEPAPER.md` | Protocol-level design (the centerpiece) |
 | `README.md` | Repo entry point |
-| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design rationale |
-| `AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history |
-| `SELF_SUSPEND_ARCHITECTURE.md` | Borrower self-suspend design |
-| `STORAGE_KEY_ENCODING_DIAGRAMS.md`, `STORAGE_KEY_ENCODING_SUMMARY.md` | Storage key safety |
-| `UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
-| `POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
-| `AUDIT_SUMMARY.md`, `IMPLEMENTATION_STATUS.md` | Status snapshots |
-| `INTEREST_ACCRUAL_SPIKE_RESULTS.md` | Accrual model spike |
-| `TEST_COVERAGE_REPORT.md`, `COVERAGE_REPORT.md`, `TEST_COVERAGE.md`, `TEST_VALIDATION.md` | Coverage snapshots |
 
 ---
 

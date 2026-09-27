@@ -50,7 +50,7 @@ The dominant risks and their concrete mitigations.
 | T9 | **Admin compromise → drain treasury / drain reserve.** | `withdraw_treasury` only moves the `TreasuryBalance` accumulator (fees collected from interest); cannot touch reserve or borrower funds. The liquidity reserve is an external address; the credit contract has no write capability over it beyond `transfer_from` calls authorized by the borrower. | `lib.rs:770` |
 | T10 | **Admin compromise → impostor upgrade with backdoor WASM.** | `upgrade` is admin-only, but the proposal model is the second-layer mitigation: in production deployments the admin SHOULD be a `m-of-n` multisig with diverse key custody. The contract enforces a `propose_admin` + `accept_admin` flow with a configurable delay (`AdminAcceptTooEarly = 15`), so a stolen admin key cannot rotate without a time window for response. | `lib.rs:103-157`, `lib.rs:1330` |
 | T11 | **Borrower collusion with scorer** (off-chain scorer assigns favorable risk score for a fee). | Out-of-protocol mitigation: scorer should be a stake-weighted committee in production; the on-chain `OracleConfig` + `RateChangeConfig` bound the blast radius. `MaxTotalExposure` and per-borrower limits cap absolute loss. | `lib.rs:827` (`set_max_total_exposure`) |
-| T12 | **Auction sniping at close** (bid in the last block to suppress competition). | `AUCTION_CLOSE_TIME_FIX.md` switched the comparison to `>=` to prevent off-by-one closes. The full anti-snipe extension is in PR #430's design but is *not* active in the live `place_bid` path (see `WHITEPAPER.md` §6.3); this is a known gap (see §6 below). | `gateway-contract/.../lib.rs` (place_bid) |
+| T12 | **Auction sniping at close** (bid in the last block to suppress competition). | `docs/AUCTION_CLOSE_TIME_FIX.md` switched the comparison to `>=` to prevent off-by-one closes. The full anti-snipe extension is in PR #430's design but is *not* active in the live `place_bid` path (see `WHITEPAPER.md` §6.3); this is a known gap (see §6 below). | `gateway-contract/.../lib.rs` (place_bid) |
 | T13 | **English auction grief: 1-stroop overbid spam.** | `min_increment_bps` enforces a minimum bid increment; `min_next_bid = max(highest_bid * (1 + inc/10000), highest_bid + 1)`. Each spam bid pays the refund-CPI gas and the increment-bound new bid amount. | `gateway-contract/.../lib.rs` (helper `min_next_bid`) |
 | T14 | **Dutch auction race after-close.** | First qualifying bid atomically flips status `Open → Closed` in the same transaction that records the bid. No second bid can land. | `gateway-contract/.../lib.rs` (place_bid Dutch branch) |
 | T15 | **Time-warp accrual** (ledger ts jumps forward by large delta, blowing up interest). | Lazy accrual uses `now - last_accrual_ts`; the *math* uses `prorate_interest` with checked-mul; an overflow reverts `Overflow = 12` rather than wrapping. Realistic ledger jumps are bounded by Soroban's host. | `accrual.rs:87`, `math_utils.rs:244` |
@@ -59,10 +59,10 @@ The dominant risks and their concrete mitigations.
 | T18 | **State TTL expiry on dormant borrower** (line becomes inaccessible). | `LEDGER_BUMP_THRESHOLD = 1_555_200` / `LEDGER_BUMP_AMOUNT = 3_110_400` keep an active borrower's data refreshed automatically. A dormant borrower (~6 months no activity) requires admin republish; the `accrue_batch` keeper hook lets indexers cheaply re-bump dormant lines. | `storage.rs:122-127,1133` |
 | T19 | **Storage-key collision across borrowers.** | Storage keys use the `DataKey::*(Address)` discriminator + the Address itself, plus a per-borrower id mapping. Tested in `tests/borrower_key_encoding.rs`. | `storage.rs:31-98`, `tests/borrower_key_encoding.rs` |
 | T20 | **Discriminant reorder breaks SDK ABI.** | CI test `tests/error_discriminants.rs` reverts on any reorder/renumber of `ContractError`. Same for event topic stability via `tests/event_topic_stability.rs`. | `tests/error_discriminants.rs`, `tests/event_topic_stability.rs` |
-| T21 | **Pause griefing** (admin pauses the protocol indefinitely). | `repay_credit` is the **only entrypoint excluded from the pause check** — borrowers can always reduce debt and avoid penalty accrual even during indefinite pause. | `lib.rs:437`, `CIRCUIT_BREAKER_IMPLEMENTATION.md` |
+| T21 | **Pause griefing** (admin pauses the protocol indefinitely). | `repay_credit` is the **only entrypoint excluded from the pause check** — borrowers can always reduce debt and avoid penalty accrual even during indefinite pause. | `lib.rs:437`, `docs/CIRCUIT_BREAKER_IMPLEMENTATION.md` |
 | T22 | **Token-failure mid-CPI leaves inconsistent state.** | The reentrancy guard's clear-on-exit is paired with Soroban host's panic-revert: a token CPI panic causes the whole tx to revert (state untouched), including the persist call. Tested in `tests/token_failure_rollback.rs`. | `lib.rs:261/437`, `tests/token_failure_rollback.rs` |
 | T23 | **Collateral over-withdraw racing utilization growth.** | `withdraw_collateral` re-evaluates `utilized * MinCollateralRatioBps / 10_000 <= post_balance` against the **current** utilized amount; concurrent draws raise utilized first under the same lock. | `collateral.rs:69-126` |
-| T24 | **Borrower self-suspend abused to dodge default.** | `self_suspend_credit_line` cannot transition out of `Suspended` on the borrower side; reinstatement is admin-only. A borrower cannot self-default or self-reinstate. | `lifecycle.rs:342,630`, `SELF_SUSPEND_ARCHITECTURE.md` |
+| T24 | **Borrower self-suspend abused to dodge default.** | `self_suspend_credit_line` cannot transition out of `Suspended` on the borrower side; reinstatement is admin-only. A borrower cannot self-default or self-reinstate. | `lifecycle.rs:342,630`, `docs/SELF_SUSPEND_ARCHITECTURE.md` |
 
 ---
 
@@ -273,7 +273,8 @@ addressed before mainnet.
 - `docs/upgrade-policy.md` — upgrade procedure
 - `docs/EXECUTION_QUALITY.md` — test catalog
 - `docs/error-taxonomy.md` — categorized error variants with SDK recovery hints
-- `CIRCUIT_BREAKER_IMPLEMENTATION.md` — pause design
-- `AUCTION_CLOSE_TIME_FIX.md` — close-time off-by-one fix
-- `UNWRAP_AUDIT_REPORT.md` — production-unwrap removal (PR #418)
-- `SELF_SUSPEND_ARCHITECTURE.md` — borrower self-suspend design
+- `docs/CIRCUIT_BREAKER_IMPLEMENTATION.md` — pause design
+- `docs/AUCTION_CLOSE_TIME_FIX.md` — close-time off-by-one fix
+- `contracts/credit/UNWRAP_AUDIT_REPORT.md` — production-unwrap removal (PR #418)
+- `docs/SELF_SUSPEND_ARCHITECTURE.md` — borrower self-suspend design
+- `docs/CONTRIBUTING.md` — contributor standards and workflow
