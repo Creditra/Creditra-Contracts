@@ -78,7 +78,19 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 | `lib.rs` (inline) | Contract-level integration scaffolding tests |
 | `lifecycle.rs` (inline) | State-transition unit tests |
 
-### 1.3 Auction tests — `gateway-contract/contracts/auction_contract/src/test.rs`
+### 1.3 CosmWasm tests — `contracts/creditra-credit/tests/`
+
+| File | Concern |
+|---|---|
+| `proptest_monotonic.rs` | `accrued_interest` monotone-in-time/principal/rate; zero boundary; total / panic-free; overflow upward-closed |
+| `proptest_total.rs` | `net_outstanding` conservation across random draw/repay sequences |
+| `repay_inv.rs` | Repayment invariants |
+| `borrower_key.rs` | Borrower key encoding and collision resistance |
+| `borrower_id.rs` | Borrower ID stability |
+| `e2e_outage.rs` | End-to-end oracle-outage simulation |
+| `snap_prorate.rs` | **Snapshot-fuzz for `accrued_interest`**: 4 096-entry pinned JSON; floor/overflow; monotonicity; proptest suite (see §3) |
+
+### 1.4 Auction tests — `gateway-contract/contracts/auction_contract/src/test.rs`
 
 1 934 lines of tests covering:
 
@@ -91,7 +103,7 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 - `claim_auction` (winner-only, post-settlement)
 - Reentrancy guard around refund + claim
 
-### 1.4 Total test surface
+### 1.5 Total test surface
 
 The workspace has **~817 `#[test]` annotations** across source and tests
 (reproduce with `grep -r '#\[test\]' contracts/ gateway-contract/ | wc -l`).
@@ -143,6 +155,10 @@ harness. Concrete property tests:
 - `tests/accrual_overflow_audit.rs` — sweeps `(u, r, Δt)` over wide ranges
   for overflow safety
 - `tests/borrower_key_encoding.rs` — property-style key isolation
+- `contracts/creditra-credit/tests/snap_prorate.rs` — 4 096-entry pinned
+  JSON snapshot + 8 proptest properties for `accrued_interest` (the CosmWasm
+  accrual primitive); mirrors the Soroban `snapshot_prorate_interest.rs`
+  suite. See `docs/contributing-tests.md` for the regeneration workflow.
 
 A `cargo fuzz` harness for `apply_accrual` and `compute_rate_from_score` is
 listed as a follow-up in `POST_AUDIT_CHECKLIST.md` — the targets are simple

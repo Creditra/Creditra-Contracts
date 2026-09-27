@@ -57,11 +57,14 @@ pub mod entrypoint {
     pub const ACCRUE_BATCH: &str = "accrue_batch";
     pub const FREEZE_DRAWS: &str = "freeze_draws";
     pub const UNFREEZE_DRAWS: &str = "unfreeze_draws";
-    pub const PARTIAL_RELEASE_COLLATERAL: &str = "partial_release_collateral";
     pub const DEFAULT_CREDIT_LINE: &str = "default_credit_line";
     pub const CLOSE_CREDIT_LINE: &str = "close_credit_line";
 
     /// Every entrypoint tracked by the gas-regression matrix, in stable order.
+    // New auction related entrypoints
+    pub const PLACE_BID: &str = "place_bid";
+    pub const SETTLE_DEFAULT_LIQUIDATION: &str = "settle_default_liquidation";
+    pub const BID_REFUNDED: &str = "bid_refunded";
     pub const ALL: &[&str] = &[
         INIT,
         OPEN_CREDIT_LINE,
@@ -72,13 +75,15 @@ pub mod entrypoint {
         SET_CREDIT_LIMIT_BOUNDS,
         SET_UTILIZATION_CAP,
         DEPOSIT_COLLATERAL,
-        PARTIAL_RELEASE_COLLATERAL,
         WITHDRAW_COLLATERAL,
         ACCRUE_BATCH,
         FREEZE_DRAWS,
         UNFREEZE_DRAWS,
         DEFAULT_CREDIT_LINE,
         CLOSE_CREDIT_LINE,
+        PLACE_BID,
+        SETTLE_DEFAULT_LIQUIDATION,
+        BID_REFUNDED,
     ];
 }
 
@@ -237,4 +242,49 @@ pub fn setup_credit_harness() -> (
     credit.set_liquidity_source(&admin);
 
     (env, credit, token, admin, borrower)
+}
+
+/// Shared test harness for auction contract budget tests
+pub fn setup_auction_harness() -> (
+    Env,
+    gateway_auction::AuctionClient<'static>,
+    token::StellarAssetClient<'static>,
+    Address,
+    Address,
+    Address,
+) {
+    let env = Env::default();
+    budget(&env).reset_unlimited();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let admin = Address::generate(&env);
+    let bidder1 = Address::generate(&env);
+    let bidder2 = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let token = token::StellarAssetClient::new(&env, &token_id);
+
+    token.mint(&admin, &1_000_000_000_i128);
+    token.mint(&bidder1, &500_000_000_i128);
+    token.mint(&bidder2, &500_000_000_i128);
+
+    let auction_id = env.register(gateway_auction::Auction, ());
+    let auction = gateway_auction::AuctionClient::new(&env, &auction_id);
+    
+    // Fund the auction contract for refunds
+    token.mint(&auction_id, &1_000_000_000_i128);
+
+    // Set factory to admin
+    auction.set_factory_contract(&admin);
+    
+    // Set bid_token manually since we can't call init_auction without it being set indirectly if needed
+    env.as_contract(&auction_id, || {
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::Symbol::new(&env, "bid_token"), &token_id);
+    });
+
+    (env, auction, token, admin, bidder1, bidder2)
 }

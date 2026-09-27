@@ -10,8 +10,9 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use gateway_auction::{Auction, AuctionClient, AuctionMode};
-use soroban_sdk::testutils::{Address as _, Events as _};
+use gateway_auction::{Auction, AuctionClient, AuctionMode, DutchAuctionDecay};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
+use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, TryIntoVal};
 
 const CREDIT_LIMIT: i128 = 10_000;
@@ -101,7 +102,7 @@ fn run_auction_to_settlement(
         &0_u32,
         &None,
         &None,
-        &None,
+        &DutchAuctionDecay::None,
         &None,
     );
     auction.place_bid(settlement_id, &bidder, &first_bid);
@@ -132,6 +133,7 @@ fn settle_credit_from_auction(
         &deployment.borrower,
         &recovered_amount,
         settlement_id,
+        &10_000_u32,
         &None,
     );
     assert_event_topic(env, &deployment.credit_id, "credit", "liq_setl");
@@ -234,7 +236,7 @@ fn e2e_atomic_settlement_with_configured_auction() {
         &0_u32,
         &None,
         &None,
-        &None,
+        &DutchAuctionDecay::None,
         &None,
     );
     auction.place_bid(
@@ -256,6 +258,7 @@ fn e2e_atomic_settlement_with_configured_auction() {
         &deployment.borrower,
         &recovered_amount,
         &settlement_id,
+        &10_000_u32,
         &None,
     );
 

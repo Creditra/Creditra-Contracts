@@ -147,7 +147,10 @@ proptest! {
         prop_assert_eq!(
             schedule.next_due_ts,
             expected,
-            "amount_per_period={amount_per_period}, period_seconds={period_seconds}, repay_amount={repay_amount}",
+            "amount_per_period={}, period_seconds={}, repay_amount={}",
+            amount_per_period,
+            period_seconds,
+            repay_amount,
         );
     }
 
@@ -194,7 +197,12 @@ proptest! {
             prop_assert_eq!(
                 schedule.next_due_ts,
                 expected_due,
-                "amount_per_period={amount_per_period}, period_seconds={period_seconds}, requested_repay={requested_repay}, effective_repay={effective_repay}, outstanding={outstanding}",
+                "amount_per_period={}, period_seconds={}, requested_repay={}, effective_repay={}, outstanding={}",
+                amount_per_period,
+                period_seconds,
+                requested_repay,
+                effective_repay,
+                outstanding,
             );
         }
     }

@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "draw_audit_trail"
+      ],
+      "properties": {
+        "draw_audit_trail": {
+          "type": "object",
+          "required": [
+            "credit_line_id"
+          ],
+          "properties": {
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "draw_id": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "proof_of_reserve"
+      ],
+      "properties": {
+        "proof_of_reserve": {
+          "type": "object",
+          "properties": {
+            "denom": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "borrower_health_factor"
+      ],
+      "properties": {
+        "borrower_health_factor": {
+          "type": "object",
+          "required": [
+            "borrower"
+          ],
+          "properties": {
+            "borrower": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_oracle_quorum_config"
+      ],
+      "properties": {
+        "get_oracle_quorum_config": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_oracle_price"
+      ],
+      "properties": {
+        "get_oracle_price": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_late_fee_config"
+      ],
+      "properties": {
+        "get_late_fee_config": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_collateral_balance"
+      ],
+      "properties": {
+        "get_collateral_balance": {
+          "type": "object",
+          "required": [
+            "borrower"
+          ],
+          "properties": {
+            "borrower": {
+              "type": "string"
+            },
+            "denom": {
+              "description": "When `None`, returns all tokens; when `Some`, filters to that denom.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "get_collateral_allowlist"
+      ],
+      "properties": {
+        "get_collateral_allowlist": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Full read-only snapshot of a single credit line by its stable numeric id.\n\nAggregates the core credit-line record, all active draw balances, collateral holdings (single-token + multi-token), health factor, and active status in a single round-trip, avoiding the multiple separate queries a caller would otherwise need.\n\nReturns `None` when no credit line exists for `credit_line_id`.",
+      "type": "object",
+      "required": [
+        "credit_line_snapshot"
+      ],
+      "properties": {
+        "credit_line_snapshot": {
+          "type": "object",
+          "required": [
+            "credit_line_id"
+          ],
+          "properties": {
+            "credit_line_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

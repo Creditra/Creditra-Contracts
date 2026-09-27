@@ -206,9 +206,7 @@ mod edge_cases {
         let id = env.as_contract(&contract_id, || ensure_credit_line_id(&env, &addr));
 
         // Right-inverse
-        let recovered = env.as_contract(&contract_id, || {
-            get_borrower_by_credit_line_id(&env, id)
-        });
+        let recovered = env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
         assert_eq!(recovered, Some(addr));
     }
 
@@ -262,12 +260,11 @@ mod edge_cases {
 
         // All roundtrips succeed
         for (addr, &id) in addrs.iter().zip(ids.iter()) {
-            let recovered = env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
+            let recovered =
+                env.as_contract(&contract_id, || get_borrower_by_credit_line_id(&env, id));
             assert_eq!(recovered, Some(addr.clone()));
 
-            let restored_id = env.as_contract(&contract_id, || {
-                get_credit_line_id(&env, addr)
-            });
+            let restored_id = env.as_contract(&contract_id, || get_credit_line_id(&env, addr));
             assert_eq!(restored_id, Some(id));
         }
 

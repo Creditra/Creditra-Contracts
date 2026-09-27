@@ -88,7 +88,7 @@ fn set_timestamp(env: &Env, ts: u64) {
 
 /// Return the total number of events currently recorded by the test `Env`.
 fn event_count(env: &Env) -> usize {
-    env.events().all().len()
+    env.events().all().len() as usize
 }
 
 /// Assert the event count delta across a closure is within the bound.

@@ -27,7 +27,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::UtilizationNotZero as u32, 10);
     assert_eq!(ContractError::Reentrancy as u32, 11);
     assert_eq!(ContractError::Overflow as u32, 12);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
+    // assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
     assert_eq!(ContractError::AlreadyInitialized as u32, 14);
     assert_eq!(ContractError::AdminAcceptTooEarly as u32, 15);
     assert_eq!(ContractError::BorrowerBlocked as u32, 16);
@@ -64,12 +64,20 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::DrawReversalWindowExpired as u32, 47);
     assert_eq!(ContractError::OriginalDrawNotFound as u32, 48);
     assert_eq!(ContractError::AttestationBatchNotFound as u32, 49);
-    assert_eq!(ContractError::CollateralInsufficient as u32, 50);
+    assert_eq!(ContractError::OracleQuorumNotMet as u32, 50);
+    assert_eq!(ContractError::AlreadySettled as u32, 51);
+    assert_eq!(ContractError::InvalidRiskWeight as u32, 52);
+    assert_eq!(ContractError::InvalidAttestation as u32, 53);
+    assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
+    // Appended in Issue #1146 — reject stale credit-line state transitions.
+    assert_eq!(ContractError::StaleStateTransition as u32, 60);
+    assert_eq!(ContractError::IncompatibleVersion as u32, 61);
+    assert_eq!(ContractError::AuctionCallFailed as u32, 62);
+    // Appended in Issue #1169 — fee config frozen while an auction is active.
+    assert_eq!(ContractError::AuctionActive as u32, 63);
 }
 
 /// Verify no two variants share the same discriminant.
-/// This is a compile-time guarantee via `#[repr(u32)]`, but we make it
-/// explicit here so the intent is documented and visible in test output.
 #[test]
 fn no_duplicate_discriminants() {
     use std::collections::HashSet;
@@ -87,7 +95,7 @@ fn no_duplicate_discriminants() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-        ContractError::LimitDecreaseRequiresRepayment as u32,
+        // ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -124,7 +132,14 @@ fn no_duplicate_discriminants() {
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
         ContractError::AttestationBatchNotFound as u32,
-        ContractError::CollateralInsufficient as u32,
+        ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
+        ContractError::IncompatibleVersion as u32,
+        ContractError::AuctionCallFailed as u32,
+        ContractError::AuctionActive as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -136,11 +151,9 @@ fn no_duplicate_discriminants() {
 }
 
 /// Verify the total variant count matches expectations.
-/// Update this number when adding new variants (and add the assertion above).
 #[test]
 fn variant_count_is_known() {
-    // 50 variants as of #740 (CollateralInsufficient = 50).
-    const EXPECTED_VARIANT_COUNT: usize = 50;
+    const EXPECTED_VARIANT_COUNT: usize = 61;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -155,7 +168,7 @@ fn variant_count_is_known() {
         ContractError::UtilizationNotZero as u32,
         ContractError::Reentrancy as u32,
         ContractError::Overflow as u32,
-        ContractError::LimitDecreaseRequiresRepayment as u32,
+        // ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::AlreadyInitialized as u32,
         ContractError::AdminAcceptTooEarly as u32,
         ContractError::BorrowerBlocked as u32,
@@ -192,7 +205,19 @@ fn variant_count_is_known() {
         ContractError::DrawReversalWindowExpired as u32,
         ContractError::OriginalDrawNotFound as u32,
         ContractError::AttestationBatchNotFound as u32,
-        ContractError::CollateralInsufficient as u32,
+        ContractError::OracleQuorumNotMet as u32,
+        ContractError::AlreadySettled as u32,
+        ContractError::InvalidRiskWeight as u32,
+        ContractError::InvalidAttestation as u32,
+        ContractError::RiskAdminCooldownActive as u32,
+        ContractError::OracleNotFound as u32,
+        ContractError::FreezeCooldownActive as u32,
+        ContractError::AdminCollateralCooldownActive as u32,
+        ContractError::LiquidationGraceActive as u32,
+        ContractError::IncompatibleVersion as u32,
+        ContractError::AuctionCallFailed as u32,
+        ContractError::StaleStateTransition as u32,
+        ContractError::AuctionActive as u32,
     ];
 
     assert_eq!(
@@ -210,9 +235,17 @@ fn variant_count_is_known() {
 #[test]
 fn category_discriminants_are_stable() {
     assert_eq!(ContractErrorCategory::Auth as u32, 1);
-    assert_eq!(ContractErrorCategory::Math as u32, 2);
-    assert_eq!(ContractErrorCategory::State as u32, 3);
-    assert_eq!(ContractErrorCategory::Oracle as u32, 4);
+    assert_eq!(ContractErrorCategory::Lifecycle as u32, 2);
+    assert_eq!(ContractErrorCategory::Numeric as u32, 3);
+    assert_eq!(ContractErrorCategory::Limit as u32, 4);
+    assert_eq!(ContractErrorCategory::Liquidity as u32, 5);
+    assert_eq!(ContractErrorCategory::Risk as u32, 6);
+    assert_eq!(ContractErrorCategory::Oracle as u32, 7);
+    assert_eq!(ContractErrorCategory::Collateral as u32, 8);
+    assert_eq!(ContractErrorCategory::Block as u32, 9);
+    assert_eq!(ContractErrorCategory::Reentrancy as u32, 10);
+    assert_eq!(ContractErrorCategory::Misc as u32, 11);
+    assert_eq!(ContractErrorCategory::Handshake as u32, 12);
 }
 
 /// Verify no two `ContractErrorCategory` variants share a discriminant.
@@ -222,9 +255,17 @@ fn no_duplicate_category_discriminants() {
 
     let codes: Vec<u32> = vec![
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Math as u32,
-        ContractErrorCategory::State as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
         ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -238,13 +279,21 @@ fn no_duplicate_category_discriminants() {
 /// Verify the total variant count for `ContractErrorCategory`.
 #[test]
 fn category_variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 4;
+    const EXPECTED_VARIANT_COUNT: usize = 12;
 
     let codes = [
         ContractErrorCategory::Auth as u32,
-        ContractErrorCategory::Math as u32,
-        ContractErrorCategory::State as u32,
+        ContractErrorCategory::Lifecycle as u32,
+        ContractErrorCategory::Numeric as u32,
+        ContractErrorCategory::Limit as u32,
+        ContractErrorCategory::Liquidity as u32,
+        ContractErrorCategory::Risk as u32,
         ContractErrorCategory::Oracle as u32,
+        ContractErrorCategory::Collateral as u32,
+        ContractErrorCategory::Block as u32,
+        ContractErrorCategory::Reentrancy as u32,
+        ContractErrorCategory::Misc as u32,
+        ContractErrorCategory::Handshake as u32,
     ];
 
     assert_eq!(
@@ -287,6 +336,14 @@ fn category_mappings_are_stable() {
         ContractError::CreditLineDefaulted.category(),
         ContractErrorCategory::Lifecycle
     );
+    assert_eq!(
+        ContractError::AlreadySettled.category(),
+        ContractErrorCategory::Lifecycle
+    );
+    assert_eq!(
+        ContractError::AuctionActive.category(),
+        ContractErrorCategory::Lifecycle
+    );
     // Numeric
     assert_eq!(
         ContractError::InvalidAmount.category(),
@@ -308,6 +365,10 @@ fn category_mappings_are_stable() {
         ContractError::LimitOutOfBounds.category(),
         ContractErrorCategory::Numeric
     );
+    assert_eq!(
+        ContractError::InvalidRiskWeight.category(),
+        ContractErrorCategory::Numeric
+    );
     // Limit
     assert_eq!(
         ContractError::OverLimit.category(),
@@ -318,15 +379,19 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Limit
     );
     assert_eq!(
-        ContractError::LimitDecreaseRequiresRepayment.category(),
-        ContractErrorCategory::Limit
-    );
-    assert_eq!(
         ContractError::DrawExceedsMaxAmount.category(),
         ContractErrorCategory::Limit
     );
     assert_eq!(
         ContractError::RepayExceedsMaxAmount.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::CloseFactorAboveMax.category(),
+        ContractErrorCategory::Limit
+    );
+    assert_eq!(
+        ContractError::DrawReversalWindowExpired.category(),
         ContractErrorCategory::Limit
     );
     // Liquidity
@@ -362,6 +427,10 @@ fn category_mappings_are_stable() {
         ContractError::ExposureCapExceeded.category(),
         ContractErrorCategory::Liquidity
     );
+    assert_eq!(
+        ContractError::BountyNotSet.category(),
+        ContractErrorCategory::Liquidity
+    );
     // Risk
     assert_eq!(
         ContractError::RateTooHigh.category(),
@@ -379,6 +448,10 @@ fn category_mappings_are_stable() {
         ContractError::DrawCooldownActive.category(),
         ContractErrorCategory::Risk
     );
+    assert_eq!(
+        ContractError::RiskAdminCooldownActive.category(),
+        ContractErrorCategory::Risk
+    );
     // Oracle
     assert_eq!(
         ContractError::OraclePriceInvalid.category(),
@@ -390,6 +463,14 @@ fn category_mappings_are_stable() {
     );
     assert_eq!(
         ContractError::OraclePriceDeviation.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OracleQuorumNotMet.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::OracleNotFound.category(),
         ContractErrorCategory::Oracle
     );
     // Collateral
@@ -414,6 +495,10 @@ fn category_mappings_are_stable() {
         ContractError::BorrowerFrozen.category(),
         ContractErrorCategory::Block
     );
+    assert_eq!(
+        ContractError::CreditLineFrozen.category(),
+        ContractErrorCategory::Block
+    );
     // Reentrancy
     assert_eq!(
         ContractError::Reentrancy.category(),
@@ -428,10 +513,125 @@ fn category_mappings_are_stable() {
         ContractError::AdminAcceptTooEarly.category(),
         ContractErrorCategory::Misc
     );
+    assert_eq!(
+        ContractError::NoPendingTreasuryWithdrawal.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryTimelockActive.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::TreasuryProposalExists.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::OriginalDrawNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::AttestationBatchNotFound.category(),
+        ContractErrorCategory::Misc
+    );
+    assert_eq!(
+        ContractError::InvalidAttestation.category(),
+        ContractErrorCategory::Misc
+    );
+    // Block (9)
+    assert_eq!(
+        ContractError::FreezeCooldownActive.category(),
+        ContractErrorCategory::Block
+    );
+    // Handshake (12) — cross-contract version and CPI call errors
+    assert_eq!(
+        ContractError::IncompatibleVersion.category(),
+        ContractErrorCategory::Handshake
+    );
+    assert_eq!(
+        ContractError::AuctionCallFailed.category(),
+        ContractErrorCategory::Handshake
+    );
+    // Lifecycle — stale state transition guard (Issue #1146)
+    assert_eq!(
+        ContractError::StaleStateTransition.category(),
+        ContractErrorCategory::Lifecycle
+    );
 }
 
-/// Verify every ContractError variant's category matches its discriminant table.
-/// This catches accidental miscategorization when new variants are added.
+/// Verify the borrow error catalog remains synchronized with the enum.
+#[test]
+fn borrow_error_catalog_lists_all_variants() {
+    let catalog_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors/borrow.md");
+    let catalog = std::fs::read_to_string(&catalog_path)
+        .unwrap_or_else(|_| panic!("Missing borrow error catalog at {:?}", catalog_path));
+
+    for variant in [
+        "Unauthorized",
+        "NotAdmin",
+        "CreditLineNotFound",
+        "CreditLineClosed",
+        "InvalidAmount",
+        "OverLimit",
+        "NegativeLimit",
+        "RateTooHigh",
+        "ScoreTooHigh",
+        "UtilizationNotZero",
+        "Reentrancy",
+        "Overflow",
+        // "LimitDecreaseRequiresRepayment",
+        "AlreadyInitialized",
+        "QuorumNotMet",
+        "OracleNotFound",
+        "OracleAlreadyExists",
+        "AdminAcceptTooEarly",
+        "BorrowerBlocked",
+        "DrawExceedsMaxAmount",
+        "Paused",
+        "DrawsFrozen",
+        "CreditLineSuspended",
+        "CreditLineDefaulted",
+        "MissingLiquidityToken",
+        "MissingLiquiditySource",
+        "InsufficientLiquidityReserve",
+        "LiquidityTokenCallFailed",
+        "InsufficientRepaymentAllowance",
+        "InsufficientRepaymentBalance",
+        "RepayExceedsMaxAmount",
+        "DrawCooldownActive",
+        "TreasuryNotSet",
+        "ExposureCapExceeded",
+        "AdminNotInitialized",
+        "TimestampRegression",
+        "LimitOutOfBounds",
+        "CollateralRatioBelowMinimum",
+        "OraclePriceInvalid",
+        "OraclePriceStale",
+        "OraclePriceDeviation",
+        "InsufficientCollateralBalance",
+        "BorrowerFrozen",
+        "BountyNotSet",
+        "NoPendingTreasuryWithdrawal",
+        "TreasuryTimelockActive",
+        "TreasuryProposalExists",
+        "CloseFactorAboveMax",
+        "CreditLineFrozen",
+        "DrawReversalWindowExpired",
+        "OriginalDrawNotFound",
+        "AttestationBatchNotFound",
+        "OracleQuorumNotMet",
+        "AlreadySettled",
+        "InvalidRiskWeight",
+    ] {
+        assert!(
+            catalog.contains(variant),
+            "Borrow error catalog is missing the variant {variant}"
+        );
+    }
+}
+
+/// Verify every ContractError variant has a known category and that all 11
+/// categories are covered.
 #[test]
 fn every_variant_has_known_category() {
     use std::collections::HashSet;
@@ -449,7 +649,7 @@ fn every_variant_has_known_category() {
         ContractError::UtilizationNotZero.category(),
         ContractError::Reentrancy.category(),
         ContractError::Overflow.category(),
-        ContractError::LimitDecreaseRequiresRepayment.category(),
+        // ContractError::LimitDecreaseRequiresRepayment.category(),
         ContractError::AlreadyInitialized.category(),
         ContractError::AdminAcceptTooEarly.category(),
         ContractError::BorrowerBlocked.category(),
@@ -466,6 +666,7 @@ fn every_variant_has_known_category() {
         ContractError::InsufficientRepaymentBalance.category(),
         ContractError::RepayExceedsMaxAmount.category(),
         ContractError::DrawCooldownActive.category(),
+        ContractError::AdminCollateralCooldownActive.category(),
         ContractError::TreasuryNotSet.category(),
         ContractError::ExposureCapExceeded.category(),
         ContractError::AdminNotInitialized.category(),
@@ -481,16 +682,36 @@ fn every_variant_has_known_category() {
         ContractError::NoPendingTreasuryWithdrawal.category(),
         ContractError::TreasuryTimelockActive.category(),
         ContractError::TreasuryProposalExists.category(),
+        ContractError::CloseFactorAboveMax.category(),
+        ContractError::CreditLineFrozen.category(),
+        ContractError::DrawReversalWindowExpired.category(),
+        ContractError::OriginalDrawNotFound.category(),
+        ContractError::AttestationBatchNotFound.category(),
+        ContractError::OracleQuorumNotMet.category(),
         ContractError::AlreadySettled.category(),
+        ContractError::InvalidRiskWeight.category(),
+        ContractError::InvalidAttestation.category(),
+        ContractError::RiskAdminCooldownActive.category(),
+        ContractError::OracleNotFound.category(),
+        ContractError::FreezeCooldownActive.category(),
+        ContractError::LiquidationGraceActive.category(),
+        // Issue #1146: stale state transition guard (Lifecycle category)
+        ContractError::StaleStateTransition.category(),
+        // Issue #1169: fee config frozen while an auction is active
+        ContractError::IncompatibleVersion.category(),
+        ContractError::AuctionCallFailed.category(),
+        ContractError::AuctionActive.category(),
     ];
 
-    let unique: HashSet<ContractErrorCategory> = all_variants.iter().cloned().collect();
+    let mut sorted: Vec<ContractErrorCategory> = all_variants.clone();
+    sorted.sort();
+    sorted.dedup();
     assert_eq!(
-        unique.len(),
-        11,
-        "Not all 11 categories are covered by variant mappings"
+        sorted.len(),
+        12,
+        "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 40, "Expected 40 ContractError variants");
+    assert_eq!(all_variants.len(), 61, "Expected 61 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -820,8 +1041,10 @@ mod error_path_tests {
     fn test_treasury_not_set_on_withdraw() {
         let (_env, client, _contract_id, admin, _token) = setup_with_token();
 
-        // Try to propose withdrawal without setting treasury address
-        let result = client.try_propose_treasury_withdrawal(&admin);
+        // Withdrawing to an unconfigured treasury address must revert with
+        // TreasuryNotSet (the proposal-based withdrawal entrypoint was removed
+        // upstream; the direct withdrawal path carries the same guard).
+        let result = client.try_withdraw_treasury(&admin);
 
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();
@@ -979,7 +1202,7 @@ mod error_path_tests {
         let err = result.err().unwrap();
         assert_eq!(
             err.unwrap(),
-            ContractError::AlreadySettled,
+            ContractError::AlreadySettled.into(),
             "Expected AlreadySettled error on settlement replay"
         );
 

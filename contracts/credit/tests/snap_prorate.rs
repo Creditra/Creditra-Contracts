@@ -17,6 +17,7 @@
 
 use creditra_credit::math_utils::{prorate_interest, Rounding, BPS_YEAR_DENOM, SECONDS_PER_YEAR};
 use proptest::prelude::*;
+use proptest::test_runner::TestRunner;
 use std::fmt;
 
 /// Test case structure for snapshot serialization.

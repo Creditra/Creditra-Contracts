@@ -295,6 +295,7 @@ fn settle_zero_recovered_amount_panics() {
             &borrower,
             &0_i128,
             &Symbol::new(&env, "auc_zero"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -314,6 +315,7 @@ fn settle_negative_recovered_amount_panics() {
             &borrower,
             &(-100_i128),
             &Symbol::new(&env, "auc_neg"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -333,6 +335,7 @@ fn settle_over_recovery_panics() {
             &borrower,
             &600_i128,
             &Symbol::new(&env, "auc_over"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -374,6 +377,7 @@ fn settle_on_active_line_panics() {
             &borrower,
             &500_i128,
             &Symbol::new(&env, "auc_active"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -401,6 +405,7 @@ fn settle_on_nonexistent_line_panics() {
             &borrower,
             &100_i128,
             &Symbol::new(&env, "auc_nonex"),
+            &10_000_u32,
             &None,
         );
     }));

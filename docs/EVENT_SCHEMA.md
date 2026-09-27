@@ -1,9 +1,9 @@
 # Event Schema Documentation
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Authoritative  
-**Scope:** `creditra-credit` (`contracts/credit/`) and `gateway-auction` (`gateway-contract/contracts/auction_contract/`)  
-**Last updated:** 2026-06-29
+**Scope:** `creditra-credit` (`contracts/credit/`), `gateway-auction` (`gateway-contract/contracts/auction_contract/`), `creditra-accrual` (`contracts/accrual/`), and `creditra-credit` CosmWasm (`contracts/creditra-credit/`)  
+**Last updated:** 2026-07-25
 
 ---
 
@@ -55,7 +55,7 @@ Topics are Soroban `Symbol` values chosen to use the cheap `SCV_SYMBOL` on-chain
 | `symbol_short!` macro | ≤ 9 characters |
 | `Symbol::new` | Up to 32 characters |
 
-The first topic in every published tuple is either `"credit"` (credit contract) or a short identifier such as `"blk_chg"` or `"BID_RFDN"`.
+The first topic in every published tuple is either `"credit"` (credit contract), `"accrual"` (accrual contract), or a short identifier such as `"blk_chg"` or `"BID_RFDN"`.
 
 ---
 
@@ -67,13 +67,13 @@ All credit contract events are published under the `("credit", "...")` namespace
 
 #### Event: Credit Line State Changes
 
-**Topic:** `("credit", "opened")`, `("credit", "suspend")`, `("credit", "closed")`, `("credit", "default")`, `("credit", "reinstate")`
+**Topic:** `("credit", "opened")`, `("credit", "suspend")`, `("credit", "closed")`, `("credit", "defaulted")`, `("credit", "reinstate")`
 
 **Payload Struct:** `CreditLineEvent`
 
 **Fields:**
 1. `borrower: Address` - The borrower whose credit line state changed
-2. `status: CreditStatus` - New status of the credit line (Active=0, Suspended=1, Defaulted=2, Closed=3)
+2. `status: CreditStatus` - New status of the credit line (Active=0, Suspended=1, Defaulted=2, Closed=3, Restricted=4)
 3. `credit_limit: i128` - Maximum credit limit
 4. `interest_rate_bps: u32` - Interest rate in basis points
 5. `risk_score: u32` - Risk assessment score
@@ -716,6 +716,48 @@ All credit contract events are published under the `("credit", "...")` namespace
 
 ---
 
+### 4.12 Accrual Contract Events
+
+These events are emitted by the separate `contracts/accrual/` Soroban contract under the `("accrual", ...)` namespace.
+
+#### Event: Accrual Batch Completed
+
+**Topic:** `("accrual", "batch")`
+
+**Payload Struct:** `AccrualBatchCompletedEvent`
+
+**Fields:**
+1. `borrowers_processed: u32` - Number of borrower addresses submitted in the batch
+2. `lines_accrued: u32` - Number of credit lines that actually accrued interest
+3. `total_interest_accrued: i128` - Total interest capitalized across all lines
+4. `timestamp: u64` - Ledger timestamp at execution
+
+**Version Added:** 1.0.0  
+**Stability:** Stable  
+**Publisher:** `publish_accrual_batch_completed`
+
+---
+
+#### Event: Interest Accrued (per-borrower)
+
+**Topic:** `("accrual", "accrue")`
+
+**Payload Struct:** `accrual::InterestAccruedEvent`
+
+**Fields:**
+1. `borrower: Address` - Borrower whose credit line was accrued
+2. `accrued_amount: i128` - Interest amount capitalized in this step
+3. `new_utilized_amount: i128` - `utilized_amount` after capitalizing interest
+4. `new_accrued_interest: i128` - `accrued_interest` after this step
+5. `elapsed_seconds: u64` - Seconds elapsed since last accrual
+6. `timestamp: u64` - Ledger timestamp at time of accrual
+
+**Version Added:** 1.0.0  
+**Stability:** Stable  
+**Publisher:** `publish_interest_accrued`
+
+---
+
 ## 5. Auction Contract Events
 
 All auction contract events are published under the `gateway-auction` contract. Publishers live in `gateway-contract/contracts/auction_contract/src/events.rs`.
@@ -778,7 +820,117 @@ All auction contract events are published under the `gateway-auction` contract. 
 
 ---
 
-## 6. Type Definitions
+## 6. CosmWasm Contract Events
+
+All events are emitted by the CosmWasm `creditra-credit` contract (`contracts/creditra-credit/src/contract.rs`) via the standard CosmWasm `wasm` event wrapper. Entrypoints return `Result<Response, ContractError>` with `.add_attribute("key", "value")` calls on the `Response`.
+
+### 6.1 Credit Line Created
+
+**Action:** `"create_credit_line"`  
+**Entrypoint:** `execute` via `ExecuteMsg::CreateCreditLine`  
+**Authorization:** Contract owner
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"create_credit_line"` |
+| `credit_line_id` | `u64` | Auto-incremented credit line counter |
+
+---
+
+### 6.2 Draw Created
+
+**Action:** `"create_draw"`  
+**Entrypoint:** `execute` via `ExecuteMsg::CreateDraw`  
+**Authorization:** Borrower of the credit line
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"create_draw"` |
+| `credit_line_id` | `u64` | Parent credit line ID |
+| `draw_id` | `u64` | Auto-incremented draw counter per credit line |
+
+---
+
+### 6.3 Draw Repaid
+
+**Action:** `"repay_draw"`  
+**Entrypoint:** `execute` via `ExecuteMsg::RepayDraw`  
+**Authorization:** Original drawer
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"repay_draw"` |
+| `credit_line_id` | `u64` | Parent credit line ID |
+| `draw_id` | `u64` | Draw being repaid |
+
+---
+
+### 6.4 Audit Memo Added
+
+**Action:** `"add_audit_memo"`  
+**Entrypoint:** `execute` via `ExecuteMsg::AddAuditMemo`  
+**Authorization:** Contract owner
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"add_audit_memo"` |
+| `credit_line_id` | `u64` | Parent credit line ID |
+| `draw_id` | `u64` | Draw receiving the memo |
+
+---
+
+### 6.5 Protocol Version Updated
+
+**Action:** `"update_protocol_version"`  
+**Entrypoint:** `execute` via `ExecuteMsg::UpdateProtocolVersion`  
+**Authorization:** Contract owner
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"update_protocol_version"` |
+| `major` | `u32` | New major version |
+| `minor` | `u32` | New minor version |
+
+---
+
+### 6.6 Oracle Quorum Config Set
+
+**Action:** `"set_oracle_quorum_config"`  
+**Entrypoint:** `execute` via `ExecuteMsg::SetOracleQuorumConfig`  
+**Authorization:** Contract owner
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"set_oracle_quorum_config"` |
+| `min_quorum_k` | `u32` | Minimum quorum size |
+| `max_deviation_bps` | `u32` | Maximum allowed deviation |
+| `max_age_seconds` | `u64` | Maximum oracle price age |
+
+---
+
+### 6.7 Oracle Prices Submitted
+
+**Action:** `"submit_oracle_prices"`  
+**Entrypoint:** `execute` via `ExecuteMsg::SubmitOraclePrices`  
+**Authorization:** Contract owner
+
+**Attributes:**
+| Name | Type | Description |
+|---|---|---|
+| `action` | `string` | Always `"submit_oracle_prices"` |
+| `canonical_price` | `i128` | Resolved quorum price |
+| `min_quorum_k` | `u32` | Quorum size used |
+| `timestamp` | `u64` | Block timestamp |
+
+---
+
+## 7. Type Definitions
 
 ### Shared Types
 
@@ -787,8 +939,14 @@ All auction contract events are published under the `gateway-auction` contract. 
   - `Suspended = 1`
   - `Defaulted = 2`
   - `Closed = 3`
+  - `Restricted = 4`
 
-- **FreezeReason** - Enum defined in `contracts/credit/src/types.rs` for freeze source.
+- **FreezeReason** - Enum defined in `contracts/credit/src/types.rs` for freeze source:
+  - `LiquidityReserve = 0`
+  - `Compliance = 1`
+  - `RiskInvestigation = 2`
+  - `OperationalMaintenance = 3`
+  - `BorrowerRequest = 4`
 
 - **GraceWaiverMode** - Enum defined in `contracts/credit/src/types.rs`:
   - `FullWaiver`
@@ -796,7 +954,7 @@ All auction contract events are published under the `gateway-auction` contract. 
 
 ---
 
-## 7. Stability Matrix
+## 8. Stability Matrix
 
 | Event topic | Stable since | Deprecated | Removal target | Notes |
 |---|---|---|---|---|
@@ -839,10 +997,13 @@ All auction contract events are published under the `gateway-auction` contract. 
 | `("BID_RFDN","auction")` | 1.0.0 | No | — | |
 | `("AUC_CLOSE","auction")` | 1.0.0 | No | — | |
 | `("LIQ_SETL","auction")` | 1.0.0 | No | — | |
+| `("accrual","batch")` | 1.0.0 | No | — | Accrual contract, batch-level |
+| `("accrual","accrue")` | 1.0.0 | No | — | Accrual contract, per-borrower |
+| CosmWasm `wasm` events | 1.0.0 | No | — | 7 entrypoints, see §6 |
 
 ---
 
-## 8. Publisher Reference
+## 9. Publisher Reference
 
 ### Credit Contract Publishers
 
@@ -850,7 +1011,7 @@ All credit contract publishers live in `contracts/credit/src/events.rs`:
 
 | Publisher function | Event topic |
 |---|---|
-| `publish_credit_line_event` | `("credit", "opened"\|"suspend"\|"closed"\|"default"\|"reinstate")` |
+| `publish_credit_line_event` | `("credit", "opened"\|"suspend"\|"closed"\|"defaulted"\|"reinstate")` |
 | `publish_drawn_event` | `("credit", "drawn")` |
 | `publish_drawn_event_v2` | `("credit", "drawn_v2")` |
 | `publish_repayment_event` | `("credit", "repay")` |
@@ -897,9 +1058,32 @@ All auction contract publishers live in `gateway-contract/contracts/auction_cont
 | `publish_auction_closed_event` | `("AUC_CLOSE", "auction")` |
 | `publish_default_liquidation_settlement_event` | `("LIQ_SETL", "auction")` |
 
+### Accrual Contract Publishers
+
+All accrual contract publishers live in `contracts/accrual/src/events.rs`:
+
+| Publisher function | Event topic |
+|---|---|
+| `publish_accrual_batch_completed` | `("accrual", "batch")` |
+| `publish_interest_accrued` | `("accrual", "accrue")` |
+
+### CosmWasm Credit Contract Entrypoints
+
+All CosmWasm events are emitted from `contracts/creditra-credit/src/contract.rs` via `Response::add_attribute`:
+
+| Entrypoint function | Action attribute |
+|---|---|
+| `execute_create_credit_line` | `"create_credit_line"` |
+| `execute_create_draw` | `"create_draw"` |
+| `execute_repay_draw` | `"repay_draw"` |
+| `execute_add_audit_memo` | `"add_audit_memo"` |
+| `execute_update_protocol_version` | `"update_protocol_version"` |
+| `execute_set_oracle_quorum_config` | `"set_oracle_quorum_config"` |
+| `execute_submit_oracle_prices` | `"submit_oracle_prices"` |
+
 ---
 
-## 9. Related Documentation
+## 10. Related Documentation
 
 - [`docs/EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) — Authoritative event catalog with stability status
 - [`docs/events-schema.md`](./events-schema.md) — Legacy schema reference (superseded)

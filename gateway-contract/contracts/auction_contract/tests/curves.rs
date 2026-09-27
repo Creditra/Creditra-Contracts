@@ -74,6 +74,30 @@ fn test_stepped_basic() {
 }
 
 #[test]
+fn test_stepped_boundary_prices() {
+    assert_eq!(
+        compute_dutch_price(1200, 600, 0, 3600, &DutchAuctionDecay::Stepped, Some(6)),
+        1200
+    );
+    assert_eq!(
+        compute_dutch_price(1200, 600, 599, 3600, &DutchAuctionDecay::Stepped, Some(6)),
+        1200
+    );
+    assert_eq!(
+        compute_dutch_price(1200, 600, 600, 3600, &DutchAuctionDecay::Stepped, Some(6)),
+        1100
+    );
+    assert_eq!(
+        compute_dutch_price(1200, 600, 3599, 3600, &DutchAuctionDecay::Stepped, Some(6)),
+        700
+    );
+    assert_eq!(
+        compute_dutch_price(1200, 600, 3600, 3600, &DutchAuctionDecay::Stepped, Some(6)),
+        600
+    );
+}
+
+#[test]
 fn test_exponential_basic() {
     let p1 = compute_dutch_price(1000, 0, 1, 100, &DutchAuctionDecay::Exponential, None);
 

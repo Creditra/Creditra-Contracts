@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build both Soroban contracts to wasm32-unknown-unknown release artifacts.
 #
+# Reproducibility: the script first enforces the toolchain pin policy
+# (scripts/check-toolchain.sh --verify-active) so a drifting rustc cannot
+# silently produce different artifacts, and compiles `--locked` so dependency
+# resolution is pinned by the committed Cargo.lock.
+#
 # Usage:
 #   scripts/build_wasm.sh            # builds all workspace contracts
 #   scripts/build_wasm.sh credit     # builds only creditra-credit
@@ -15,17 +20,19 @@ TARGET="wasm32-unknown-unknown"
 PROFILE="release"
 SELECTOR="${1:-all}"
 
+scripts/check-toolchain.sh --verify-active
+
 case "$SELECTOR" in
     all)
-        cargo build --target "$TARGET" --profile "$PROFILE" --workspace
+        cargo build --target "$TARGET" --profile "$PROFILE" --workspace --locked
         ;;
     credit)
         cargo build --target "$TARGET" --profile "$PROFILE" \
-            -p creditra-credit
+            --locked -p creditra-credit
         ;;
     auction)
         cargo build --target "$TARGET" --profile "$PROFILE" \
-            -p gateway-auction
+            --locked -p gateway-auction
         ;;
     *)
         echo "unknown selector: $SELECTOR" >&2

@@ -263,7 +263,6 @@ For coverage validation (minimum 95% line coverage required):
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
-
 ## Operational Checklist
 
 ### Pre-Upgrade
@@ -298,4 +297,5 @@ cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 - [Soroban Contract Deployment](https://developers.stellar.org/docs/smart-contracts/getting-started/deploy-to-testnet)
 - [Soroban Deployer Interface](https://docs.rs/soroban-sdk/latest/soroban_sdk/deploy/struct.Deployer.html)
 - [Contract Upgrade Best Practices](https://developers.stellar.org/docs/smart-contracts/guides/upgrading-contracts)
+
 

@@ -63,6 +63,7 @@ flowchart LR
 | Crate | Path | Role |
 |---|---|---|
 | `creditra-credit` | `contracts/credit/` | Credit-line core: open / draw / repay / risk update / default / settle / upgrade. `lib.rs` is 5 449 lines, 13 sub-modules. |
+| `creditra-risk` | `contracts/risk/` | Standalone risk admin cooldown contract: time-based circuit breaker for admin risk-mutation actions. |
 | `gateway-auction` | `gateway-contract/contracts/auction_contract/` | Minimal English & Dutch auction; one-shot settlement handoff back to credit. |
 
 Full module catalog and entrypoint signatures: [`docs/PROTOCOL_SPEC.md`](./docs/PROTOCOL_SPEC.md).
@@ -75,8 +76,13 @@ Sequence diagrams for draw, repay, default → auction → settle:
 
 ### Prerequisites
 
-- Rust 1.75+ (recommend latest stable)
-- `wasm32-unknown-unknown` target:
+- Rust — the exact compiler is pinned in [`rust-toolchain.toml`](./rust-toolchain.toml);
+  any `rustup`-shipped `cargo` installs and uses it automatically. Floating
+  channels (`stable`/`beta`/`nightly`) are rejected by
+  `scripts/check-toolchain.sh` so builds stay reproducible across toolchain
+  versions.
+- `wasm32-unknown-unknown` target (declared in `rust-toolchain.toml`;
+  installed automatically with the toolchain):
   ```bash
   rustup target add wasm32-unknown-unknown
   ```
@@ -97,6 +103,19 @@ The release profile (`Cargo.toml`) is tuned for contract size:
 `opt-level = "z"`, `lto = true`, `strip = "symbols"`, `codegen-units = 1`,
 `panic = "abort"`, and — unusually — `overflow-checks = true` even in release,
 so the entire `i128` accounting layer reverts on overflow instead of wrapping.
+
+#### Reproducible builds
+
+Builds are reproducible across machines and over time because the whole
+workspace compiles with one pinned toolchain against pinned dependencies:
+
+- `rust-toolchain.toml` pins `channel` to an exact `X.Y.Z` compiler version;
+  `scripts/check-toolchain.sh` fails the build on any floating channel and
+  `--verify-active` fails when the active `rustc` differs from the pin.
+- All build/test entry points compile `--locked` against committed
+  `Cargo.lock` files, so dependency resolution cannot drift.
+- CI reads the same `rust-toolchain.toml` (no floating toolchain refs), so
+  local and CI artifacts come from identical inputs.
 
 ### Test
 
@@ -150,6 +169,11 @@ Creditra-Contracts/
 │       ├── query.rs           # read-only helpers, is_delinquent
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
+├── contracts/risk/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs             # #[contract] RiskContract + entrypoints
+│       └── admin.rs           # cooldown storage helpers + guard
 ├── gateway-contract/contracts/auction_contract/
 │   ├── tests/
 │   │   ├── transition_matrix.rs  # AuctionStatus transition matrix (Issue #614)
@@ -210,7 +234,7 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 `Auction` (`#[contract]`,
 `gateway-contract/contracts/auction_contract/src/lib.rs`):
 
-- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price)`
+- `init_auction(auction_id, mode, start_time, end_time, min_bid, min_increment_bps, dutch_start_price, dutch_floor_price, dutch_decay, dutch_step_count)`
 - `set_factory_contract(factory)`
 - `place_bid(auction_id, bidder, amount)` — English ascending or Dutch
   descending mode, with anti-grief minimum increment and reentrancy-guarded
@@ -265,7 +289,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 
 ## Conventions
 
-- Edition: 2021. Toolchain: see `rust-toolchain.toml`.
+- Edition: 2021. Toolchain: pinned exactly in `rust-toolchain.toml` — never
+  build with a floating channel; see `scripts/check-toolchain.sh`.
 - Style: `cargo fmt --check` enforced in CI; `cargo clippy -- -D warnings`
   enforced in CI.
 - Errors: no production `unwrap()` / `expect()` (audited, PR #418 / #421).
@@ -284,8 +309,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 
 | Script | Use |
 |---|---|
-| `scripts/build_wasm.sh [all\|credit\|auction]` | Build release-mode WASM artifacts |
-| `scripts/check_workspace.sh [args]` | `cargo check --workspace` wrapper |
+| `scripts/build_wasm.sh [all\|credit\|auction]` | Build release-mode WASM artifacts (toolchain-pin asserted, `--locked`) |
+| `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper |
+| `scripts/check-toolchain.sh [--verify-active]` | Enforce the reproducible-build policy (exact toolchain pin, committed locks, CI workflow consumes the pin) |
 | `scripts/clean_profraw.sh [--dry-run]` | Remove stray `*.profraw` coverage profiles outside `target/` |
 | `scripts/list_contract_errors.py [--json]` | Print every `ContractError` variant with its discriminant |
 

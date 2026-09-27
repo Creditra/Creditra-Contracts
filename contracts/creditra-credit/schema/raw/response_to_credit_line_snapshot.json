@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Nullable_CreditLineSnapshotResponse",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/CreditLineSnapshotResponse"
+    },
+    {
+      "type": "null"
+    }
+  ],
+  "definitions": {
+    "Addr": {
+      "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+      "type": "string"
+    },
+    "CollateralEntryResponse": {
+      "description": "A single entry in a borrower's multi-collateral portfolio.",
+      "type": "object",
+      "required": [
+        "amount",
+        "denom",
+        "risk_weight_bps"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Raw deposited balance (before risk weighting).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "denom": {
+          "description": "Token denomination.",
+          "type": "string"
+        },
+        "risk_weight_bps": {
+          "description": "Risk weight in basis points applied to this token.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreditLineSnapshotResponse": {
+      "description": "Full read-only snapshot of a credit line and its associated state.\n\nReturned by [`QueryMsg::CreditLineSnapshot`]. Aggregates the core credit-line record, all draws, collateral balances, and the derived health factor in a single response so callers avoid multiple round-trip queries.\n\n# Health factor semantics\n\n- `health_factor_bps == u32::MAX` when `total_utilized == 0` (no outstanding debt). - A value below `10_000` indicates the position is under-collateralized. - A value of `10_000` means collateral exactly covers the utilized amount. - A value above `10_000` means the position is over-collateralized.",
+      "type": "object",
+      "required": [
+        "active",
+        "borrower",
+        "collateral_amount",
+        "collateral_denom",
+        "credit_amount",
+        "credit_denom",
+        "credit_line_id",
+        "draws",
+        "health_factor_bps",
+        "multi_collateral",
+        "total_utilized",
+        "weighted_collateral_total"
+      ],
+      "properties": {
+        "active": {
+          "description": "Whether the credit line is currently active.",
+          "type": "boolean"
+        },
+        "borrower": {
+          "description": "Borrower address.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
+        },
+        "collateral_amount": {
+          "description": "Primary collateral balance held against this credit line.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "collateral_denom": {
+          "description": "Primary collateral token denomination.",
+          "type": "string"
+        },
+        "credit_amount": {
+          "description": "Maximum principal that may be outstanding across all draws.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "credit_denom": {
+          "description": "Credit (borrowable) token denomination.",
+          "type": "string"
+        },
+        "credit_line_id": {
+          "description": "Stable numeric id of the credit line.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "draws": {
+          "description": "All draws associated with this credit line (active and repaid).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DrawSnapshotEntry"
+          }
+        },
+        "health_factor_bps": {
+          "description": "Collateral-aware health factor in basis points. `u32::MAX` when `total_utilized == 0`.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "multi_collateral": {
+          "description": "Multi-token collateral breakdown (may be empty when no multi-token collateral has been deposited).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CollateralEntryResponse"
+          }
+        },
+        "total_utilized": {
+          "description": "Sum of all un-repaid draw amounts (outstanding principal).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "weighted_collateral_total": {
+          "description": "Risk-weighted total across all collateral tokens.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DrawSnapshotEntry": {
+      "description": "A single draw entry included in the credit-line snapshot.",
+      "type": "object",
+      "required": [
+        "amount",
+        "denom",
+        "draw_id",
+        "drawn_at",
+        "drawn_by",
+        "repaid"
+      ],
+      "properties": {
+        "amount": {
+          "description": "Principal drawn.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "denom": {
+          "description": "Token denomination of this draw.",
+          "type": "string"
+        },
+        "draw_id": {
+          "description": "Per-line numeric draw id.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "drawn_at": {
+          "description": "Block time when the draw was created.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Timestamp"
+            }
+          ]
+        },
+        "drawn_by": {
+          "description": "Address that initiated the draw.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
+        },
+        "repaid": {
+          "description": "`true` when the draw has been fully repaid.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Timestamp": {
+      "description": "A point in time in nanosecond precision.\n\nThis type can represent times from 1970-01-01T00:00:00Z to 2554-07-21T23:34:33Z.\n\n## Examples\n\n``` # use cosmwasm_std::Timestamp; let ts = Timestamp::from_nanos(1_000_000_202); assert_eq!(ts.nanos(), 1_000_000_202); assert_eq!(ts.seconds(), 1); assert_eq!(ts.subsec_nanos(), 202);\n\nlet ts = ts.plus_seconds(2); assert_eq!(ts.nanos(), 3_000_000_202); assert_eq!(ts.seconds(), 3); assert_eq!(ts.subsec_nanos(), 202); ```",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint64"
+        }
+      ]
+    },
+    "Uint128": {
+      "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
+      "type": "string"
+    },
+    "Uint64": {
+      "description": "A thin wrapper around u64 that is using strings for JSON encoding/decoding, such that the full u64 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u64` to get the value out:\n\n``` # use cosmwasm_std::Uint64; let a = Uint64::from(42u64); assert_eq!(a.u64(), 42);\n\nlet b = Uint64::from(70u32); assert_eq!(b.u64(), 70); ```",
+      "type": "string"
+    }
+  }
+}

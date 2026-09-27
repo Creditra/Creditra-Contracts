@@ -145,8 +145,11 @@ fn fee_split_remainder_goes_to_bounty_on_rounding() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 36);
-    assert_eq!(summary.bounty_balance, 74);
+    // Deterministic largest-remainder split of 110 at a 3333/6667 ratio:
+    // treasury floor = 36, bounty floor = 73, leftover unit goes to the larger
+    // fractional claim (treasury), so 37 / 73. Sum is always conserved (= 110).
+    assert_eq!(summary.treasury_balance, 37);
+    assert_eq!(summary.bounty_balance, 73);
     assert_eq!(summary.treasury_balance + summary.bounty_balance, 110);
 }
 

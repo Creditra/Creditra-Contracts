@@ -131,6 +131,22 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 > that need these entries to survive beyond the ~6-month window without a draw
 > or repay should call `bump_persistent_ttl` explicitly on the relevant key.
 
+> **✅ Accrual hot-read paths now bump on read (Closes #949)**
+>
+> `self_suspend_credit_line` (via `suspend_credit_line_internal`),
+> `default_credit_line`, `reinstate_credit_line`, `settle_default_liquidation`,
+> and `reverse_draw` previously loaded the borrower's `CreditLineData` with a
+> raw `env.storage().persistent().get(&borrower)` call ahead of
+> `accrual::apply_accrual`, bypassing the TTL bump. A borrower who only ever
+> interacted through one of these read paths — without an intervening
+> `draw_credit` / `repay_credit` — would have their entry's TTL silently drift
+> toward the archival threshold, since (unlike `persist_credit_line`, which
+> always bumps on write) some of these paths return early without persisting
+> (idempotent no-ops, guard-clause reverts). All five now load the line via
+> `storage::get_credit_line`, so the TTL bump happens unconditionally on read,
+> before any status check or early return. See
+> `contracts/credit/tests/storage_ttl.rs` for the regression tests.
+
 ---
 
 ## Summary — Bump Coverage by Variant
