@@ -326,8 +326,14 @@ emits `("credit","rate_form")` with `true`.
 | `withdraw_bounty(admin)`          | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`.                      |
 
 On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
-`TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
-See `contracts/credit/src/fees.rs`.
+`TreasuryBalance` and `BountyBalance` by largest-remainder apportionment
+(`math_utils::split_conserving`): both shares are floored, then the leftover base
+unit goes to the recipient with the larger fractional claim, ties broken in
+favour of treasury. The shares always sum exactly to the fee. Flat late fees are
+credited to `TreasuryBalance` only and are **not** split. See
+`contracts/credit/src/fees.rs` and [`docs/treasury.md`](./treasury.md) for the
+full lifecycle, worked examples, the `AuctionActive` freeze, and the immediate
+vs 24-hour-timelocked withdrawal paths.
 
 ### 2.8 Settlement & oracle
 

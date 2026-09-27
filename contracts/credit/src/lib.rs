@@ -1315,9 +1315,12 @@ impl Credit {
 
     /// Set the treasury share of skimmed protocol fees in basis points (admin only).
     ///
-    /// `treasury_share_bps` must be in `0..=10_000`. The bounty pool receives the
-    /// remainder of each fee after the treasury portion is floored. When unset,
-    /// the default is `10_000` (100 % treasury, backward compatible).
+    /// `treasury_share_bps` must be in `0..=10_000`. The fee is apportioned by
+    /// [`crate::math_utils::split_conserving`] (largest remainder): each side is
+    /// floored, then the leftover base unit goes to the recipient with the larger
+    /// fractional claim, ties broken in favour of treasury, so the shares always
+    /// sum exactly to the fee. When unset, the default is `10_000` (100 %
+    /// treasury, backward compatible). See `docs/treasury.md` §3.
     ///
     /// Reverts with [`ContractError::AuctionActive`] while any liquidation
     /// auction is in flight (Issue #1169): the split is frozen until the last

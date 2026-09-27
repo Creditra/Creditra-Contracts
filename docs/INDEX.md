@@ -72,6 +72,15 @@ For the rate / accrual formulas:
 - [`docs/RISK_PRICING.md`](./RISK_PRICING.md) — the algorithm in depth with
   worked examples.
 
+For protocol fees, the treasury and bounty pools, and how fee revenue leaves the
+contract:
+
+- [`docs/treasury.md`](./treasury.md) — fee lifecycle end to end: accrual
+  sources, the value-conserving split rule with worked examples, bounty vs
+  treasury, the `AuctionActive` freeze, and both withdrawal paths (immediate
+  and 24-hour timelocked).
+
+
 For event schema:
 - [`docs/EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) — **canonical event catalog and
   versioning policy** (replaces scattered references in indexer-integration).
@@ -135,6 +144,7 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `interest-accrual.md` | ~3 | Accrual normative reference |
 | `interest-accrual-design.md` | ~6 | Accrual design spec |
 | `risk-based-rate-formula.md` | ~3 | Rate formula normative reference |
+| `treasury.md` | ~10 | **Treasury fee lifecycle end to end** (accrual → split → withdrawal) |
 | `contract-errors.md`, `errors.md` | ~4 each | Error code tables |
 | `storage-layout.md` | ~4 | Storage tier reference |
 | `threat-model.md` | ~4 | Authorization matrix |
