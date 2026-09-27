@@ -13,7 +13,8 @@
 
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
+use soroban_sdk::{Address, Env, IntoVal};
 
 use creditra_credit::{Credit, CreditClient, FreezeReason};
 
@@ -218,4 +219,204 @@ fn reinit_with_same_admin_also_reverts() {
     client.init(&admin);
     // Same admin — still must revert.
     client.init(&admin);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Protocol-config defaults around liquidity setup (Issue #1352)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// What is pinned here
+//
+// `get_protocol_config` reports `liquidity_token: None` and
+// `liquidity_source: Some(<contract address>)` straight after `init`, and
+// `get_liquidity_source` falls back to the contract address. Integrators and
+// the draw path both depend on "draws are funded from the contract itself until
+// an admin points the source somewhere else", so those defaults are asserted
+// here rather than left implicit.
+
+fn deploy_with_id(env: &Env) -> (CreditClient<'_>, Address, Address) {
+    let admin = Address::generate(env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(env, &contract_id);
+    client.init(&admin);
+    (client, admin, contract_id)
+}
+
+/// Immediately after `init`: no liquidity token, source defaults to the
+/// contract's own address, and the fallback getter agrees with the config view.
+#[test]
+fn init_pins_protocol_config_defaults() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, contract_id) = deploy_with_id(&env);
+
+    let config = client.get_protocol_config();
+    assert_eq!(
+        config.liquidity_token, None,
+        "no liquidity token may be configured until set_liquidity_token is called"
+    );
+    assert_eq!(
+        config.liquidity_source,
+        Some(contract_id.clone()),
+        "init must default the liquidity source to the contract's own address"
+    );
+    assert_eq!(
+        client.get_liquidity_source(),
+        contract_id,
+        "get_liquidity_source must fall back to the contract address, not panic"
+    );
+}
+
+/// `set_liquidity_token` is reflected in the config view and leaves the source
+/// default intact.
+#[test]
+fn set_liquidity_token_is_reflected_in_protocol_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, contract_id) = deploy_with_id(&env);
+    let token = Address::generate(&env);
+
+    client.set_liquidity_token(&token);
+
+    let config = client.get_protocol_config();
+    assert_eq!(config.liquidity_token, Some(token));
+    assert_eq!(
+        config.liquidity_source,
+        Some(contract_id),
+        "setting the token must not move the liquidity source"
+    );
+}
+
+/// A later `set_liquidity_token` replaces the previous token.
+#[test]
+fn set_liquidity_token_overwrites_previous_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _) = deploy_with_id(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    client.set_liquidity_token(&first);
+    client.set_liquidity_token(&second);
+
+    assert_eq!(client.get_protocol_config().liquidity_token, Some(second));
+}
+
+/// `set_liquidity_source` overrides the init default in both the config view and
+/// the fallback getter.
+#[test]
+fn set_liquidity_source_overrides_init_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, contract_id) = deploy_with_id(&env);
+    let reserve = Address::generate(&env);
+
+    client.set_liquidity_source(&reserve);
+
+    assert_eq!(
+        client.get_protocol_config().liquidity_source,
+        Some(reserve.clone()),
+        "the config view must report the configured reserve"
+    );
+    assert_eq!(
+        client.get_liquidity_source(),
+        reserve,
+        "the fallback getter must return the configured reserve, not the contract"
+    );
+    assert_ne!(reserve, contract_id);
+}
+
+/// Setting the source does not touch the token slot.
+#[test]
+fn set_liquidity_source_does_not_change_liquidity_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _) = deploy_with_id(&env);
+    let token = Address::generate(&env);
+    client.set_liquidity_token(&token);
+
+    client.set_liquidity_source(&Address::generate(&env));
+
+    assert_eq!(client.get_protocol_config().liquidity_token, Some(token));
+}
+
+/// A failed re-init must not reset either liquidity slot.
+#[test]
+fn failed_reinit_does_not_reset_liquidity_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _) = deploy_with_id(&env);
+    let token = Address::generate(&env);
+    let reserve = Address::generate(&env);
+    client.set_liquidity_token(&token);
+    client.set_liquidity_source(&reserve);
+
+    let attacker = Address::generate(&env);
+    assert!(client.try_init(&attacker).is_err(), "re-init must fail");
+
+    let config = client.get_protocol_config();
+    assert_eq!(config.liquidity_token, Some(token));
+    assert_eq!(config.liquidity_source, Some(reserve));
+}
+
+/// A caller that is not the configured admin is rejected by both setters, and
+/// the rejected calls leave the defaults untouched.
+#[test]
+fn non_admin_cannot_set_liquidity_config() {
+    let env = Env::default();
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    // init itself is not auth-gated — it only requires an empty admin slot.
+    client.init(&admin);
+
+    // Mock the *caller's* auth, never the admin's: the host must reject both
+    // calls because the stored admin did not authorize them.
+    let caller = Address::generate(&env);
+    let token = Address::generate(&env);
+    let reserve = Address::generate(&env);
+
+    env.mock_auths(&[
+        MockAuth {
+            address: &caller,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_liquidity_token",
+                args: (&token,).into_val(&env),
+                sub_invokes: &[],
+            },
+        },
+        MockAuth {
+            address: &caller,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_liquidity_source",
+                args: (&reserve,).into_val(&env),
+                sub_invokes: &[],
+            },
+        },
+    ]);
+
+    assert!(
+        client.try_set_liquidity_token(&token).is_err(),
+        "a non-admin caller must not set the liquidity token"
+    );
+    assert!(
+        client.try_set_liquidity_source(&reserve).is_err(),
+        "a non-admin caller must not set the liquidity source"
+    );
+
+    let config = client.get_protocol_config();
+    assert_eq!(config.liquidity_token, None, "rejected call must not write");
+    assert_eq!(
+        config.liquidity_source,
+        Some(contract_id),
+        "rejected call must leave the init default in place"
+    );
 }
