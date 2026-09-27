@@ -321,6 +321,7 @@ fn treasury_withdrawal_executed_shape() {
             amount: 500,
             executor: admin.clone(),
             executed_at: 200,
+            remaining_balance: 25,
         },
     );
 
@@ -738,6 +739,7 @@ fn all_credit_event_structs_instantiate() {
         amount: 500,
         executor: admin.clone(),
         executed_at: 200,
+        remaining_balance: 25,
     };
     let _ = AttestationBatchCommittedEvent {
         borrower: borrower.clone(),

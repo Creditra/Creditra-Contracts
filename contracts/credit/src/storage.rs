@@ -808,6 +808,19 @@ pub fn add_treasury_balance(env: &Env, amount: i128) {
         .set(&DataKey::TreasuryBalance, &updated_balance);
 }
 
+/// Deduct a timelocked withdrawal snapshot without discarding newer fees.
+/// Returns the balance remaining after the withdrawal.
+pub fn subtract_treasury_balance(env: &Env, amount: i128) -> i128 {
+    let remaining = get_treasury_balance(env)
+        .checked_sub(amount)
+        .filter(|balance| amount >= 0 && *balance >= 0)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InsufficientTreasuryBalance));
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryBalance, &remaining);
+    remaining
+}
+
 /// Clear accumulated treasury balance after withdrawal.
 pub fn clear_treasury_balance(env: &Env) {
     env.storage()

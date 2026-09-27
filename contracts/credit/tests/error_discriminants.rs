@@ -75,6 +75,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::AuctionCallFailed as u32, 62);
     // Appended in Issue #1169 — fee config frozen while an auction is active.
     assert_eq!(ContractError::AuctionActive as u32, 63);
+    assert_eq!(ContractError::InsufficientTreasuryBalance as u32, 64);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -140,6 +141,7 @@ fn no_duplicate_discriminants() {
         ContractError::IncompatibleVersion as u32,
         ContractError::AuctionCallFailed as u32,
         ContractError::AuctionActive as u32,
+        ContractError::InsufficientTreasuryBalance as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -153,7 +155,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 61;
+    const EXPECTED_VARIANT_COUNT: usize = 62;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -218,6 +220,7 @@ fn variant_count_is_known() {
         ContractError::AuctionCallFailed as u32,
         ContractError::StaleStateTransition as u32,
         ContractError::AuctionActive as u32,
+        ContractError::InsufficientTreasuryBalance as u32,
     ];
 
     assert_eq!(
@@ -701,6 +704,7 @@ fn every_variant_has_known_category() {
         ContractError::IncompatibleVersion.category(),
         ContractError::AuctionCallFailed.category(),
         ContractError::AuctionActive.category(),
+        ContractError::InsufficientTreasuryBalance.category(),
     ];
 
     let mut sorted: Vec<ContractErrorCategory> = all_variants.clone();
@@ -711,7 +715,7 @@ fn every_variant_has_known_category() {
         12,
         "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 61, "Expected 61 ContractError variants");
+    assert_eq!(all_variants.len(), 62, "Expected 62 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

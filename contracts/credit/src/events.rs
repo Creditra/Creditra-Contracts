@@ -603,6 +603,8 @@ pub struct TreasuryWithdrawalExecutedEvent {
     pub executor: Address,
     /// Ledger timestamp at execution.
     pub executed_at: u64,
+    /// Fees accrued after the proposal, still accounted for by the treasury.
+    pub remaining_balance: i128,
 }
 
 /// Publish a treasury withdrawal proposed event.
