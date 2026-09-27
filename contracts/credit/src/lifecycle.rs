@@ -723,6 +723,32 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
+/// Allocate a repayment amount across accrued interest and principal.
+///
+/// Splits `amount` interest-first: `accrued_interest` is reduced first,
+/// then the remainder reduces `utilized_amount` (principal). Returns the
+/// `(interest_repaid, principal_repaid)` breakdown.
+///
+/// The amount is clamped to `credit_line.utilized_amount` to prevent
+/// over-repayment. This preserves the `accrued_interest <= utilized_amount`
+/// invariant because reducing `accrued_interest` first ensures it never
+/// exceeds the remaining `utilized_amount`.
+pub fn allocate_repayment(credit_line: &mut CreditLineData, amount: i128) -> (i128, i128) {
+    let effective_repay = if amount > credit_line.utilized_amount {
+        credit_line.utilized_amount
+    } else {
+        amount
+    };
+
+    let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+    let principal_repaid = effective_repay - interest_repaid;
+
+    credit_line.accrued_interest -= interest_repaid;
+    credit_line.utilized_amount -= effective_repay;
+
+    (interest_repaid, principal_repaid)
+}
+
 /// Apply auction liquidation proceeds to a defaulted credit line (admin only).
 ///
 /// Reduces `accrued_interest` first, then `utilized_amount`, by `amount`
@@ -889,10 +915,8 @@ pub fn settle_default_liquidation(
     }
 
     // Step 8: State mutation (after all validation succeeds)
-    credit_line.utilized_amount = credit_line
-        .utilized_amount
-        .checked_sub(recovered_amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    let (interest_recovered, principal_recovered) =
+        allocate_repayment(&mut credit_line, recovered_amount);
 
     let previous_status = credit_line.status;
     if credit_line.utilized_amount == 0 {
@@ -937,6 +961,8 @@ pub fn settle_default_liquidation(
             borrower,
             settlement_id,
             recovered_amount,
+            interest_recovered,
+            principal_recovered,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
             close_factor_bps,
