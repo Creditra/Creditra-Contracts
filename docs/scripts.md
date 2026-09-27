@@ -75,6 +75,18 @@ scripts/list_contract_errors.py --json     # machine-readable
 The JSON output is convenient for keeping SDK / indexer error tables in
 sync with the contract source of truth.
 
+## `scripts/gas-regression.sh`
+
+Runs the budget regression tests for the `credit` contract, comparing observed resource usage (CPU/memory) against the pinned baselines in `contracts/.gas-baseline.json`. It fails if any measurement drifts beyond the configured tolerance.
+
+```bash
+scripts/gas-regression.sh             # run tests (used in CI)
+scripts/gas-regression.sh --regen     # regenerate baselines, then test
+scripts/gas-regression.sh --regen-only  # regenerate baselines only
+```
+
+To regenerate the baseline, run `scripts/gas-regression.sh --regen-only`. This overwrites `contracts/.gas-baseline.json` with fresh numbers. Review the diff and commit the updated baseline.
+
 ## Conventions
 
 - Shell scripts target `bash` and use `set -euo pipefail`.

@@ -85,6 +85,9 @@ jobs:
         working-directory: contracts/creditra-credit
         run: cargo test $CARGOFLAGS --no-fail-fast
 
+      - name: Run gas regression
+        run: scripts/gas-regression.sh
+
       - name: Build native release
         working-directory: contracts/creditra-credit
         run: cargo build $CARGOFLAGS --release
