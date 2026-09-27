@@ -9,6 +9,7 @@
 //! - draw_credit is blocked when draws are frozen
 //! - freeze_draws/unfreeze_draws are idempotent
 
+use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient, FreezeReason};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
@@ -116,9 +117,15 @@ fn repay_credit_succeeds_while_draws_frozen() {
     let client = CreditClient::new(&env, &contract_id);
     let borrower = Address::generate(&env);
 
-    // Setup: open line, draw, then freeze draws
+    // Setup: open line, collateralize, draw, then freeze draws
     client.open_credit_line(&borrower, &1_000, &300, &50);
-    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
+    // `draw_credit` enforces the collateral-ratio floor (ContractError #35), so
+    // a collateralized line is required. The borrower must hold the collateral
+    // token before depositing it.
+    let sac = token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&borrower, &100_000);
+    sac.mint(&contract_id, &1_000);
+    client.deposit_collateral(&borrower, &100_000_i128);
     client.draw_credit(&borrower, &500);
 
     let before = client.get_credit_line(&borrower).unwrap();
@@ -151,7 +158,10 @@ fn repay_credit_full_repayment_while_draws_frozen() {
 
     // Setup
     client.open_credit_line(&borrower, &1_000, &300, &50);
-    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
+    let sac = token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&borrower, &100_000);
+    sac.mint(&contract_id, &1_000);
+    client.deposit_collateral(&borrower, &100_000_i128);
     client.draw_credit(&borrower, &800);
 
     // Freeze draws
@@ -236,4 +246,109 @@ fn unfreeze_draws_idempotent() {
     // Unfreeze when already unfrozen - should succeed
     client.unfreeze_draws();
     assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
+}
+
+// ── Draw-error precedence across every draw-blocking layer (Issue #1358) ─────
+//
+// `draw_credit` evaluates its guards in a fixed order:
+//
+//   paused (#18) > global freeze (#19) > borrower freeze (#40) > line freeze (#46) > status
+//
+// `repay_credit` is deliberately not gated by any of them, so repayment remains
+// available in every combination. These tests pin the precedence so a future
+// reordering of the guard chain is caught immediately, and confirm that
+// self-suspension composes with each freeze layer instead of replacing it.
+
+fn setup_active_line_with_liquidity() -> (Env, Address, Address, Address, Address) {
+    let (env, admin, contract_id, token_address) = setup_with_token();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    client.open_credit_line(&borrower, &10_000_i128, &300_u32, &50_u32);
+    let sac = token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&borrower, &1_000_000_i128);
+    sac.mint(&contract_id, &1_000_000_i128);
+    client.deposit_collateral(&borrower, &100_000_i128);
+
+    (env, admin, borrower, contract_id, token_address)
+}
+
+fn assert_draw_error(
+    client: &CreditClient<'_>,
+    borrower: &Address,
+    amount: i128,
+    expected: ContractError,
+) {
+    let result = client.try_draw_credit(borrower, &amount);
+    let err = result
+        .err()
+        .expect("draw_credit should have failed")
+        .expect("expected a typed contract error");
+    assert_eq!(err, expected.into(), "unexpected draw error");
+}
+
+#[test]
+fn draw_error_precedence_runs_paused_global_borrower_line() {
+    let (env, admin, borrower, contract_id, _token) = setup_active_line_with_liquidity();
+    let client = CreditClient::new(&env, &contract_id);
+
+    // Stack all four layers, then peel them off in precedence order.
+    client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+    client.freeze_borrower_until(&admin, &borrower, &(env.ledger().timestamp() + 10_000));
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+    client.set_protocol_paused(&true);
+
+    assert_draw_error(&client, &borrower, 100, ContractError::Paused);
+
+    client.set_protocol_paused(&false);
+    assert_draw_error(&client, &borrower, 100, ContractError::DrawsFrozen);
+
+    client.unfreeze_draws();
+    assert_draw_error(&client, &borrower, 100, ContractError::BorrowerFrozen);
+
+    client.unfreeze_borrower(&admin, &borrower);
+    assert_draw_error(&client, &borrower, 100, ContractError::CreditLineFrozen);
+
+    // Every layer lifted: the draw now goes through.
+    client.unfreeze_credit_line(&borrower);
+    client.draw_credit(&borrower, &100);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        100
+    );
+}
+
+#[test]
+fn draw_error_precedence_line_freeze_beats_suspended_status() {
+    let (env, _admin, borrower, contract_id, _token) = setup_active_line_with_liquidity();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+    client.self_suspend_credit_line(&borrower);
+
+    // Freeze layers are evaluated before the status check, so the freeze error
+    // is the one callers observe even after the line is self-suspended.
+    assert_draw_error(&client, &borrower, 100, ContractError::CreditLineFrozen);
+}
+
+#[test]
+fn repayment_is_available_with_every_layer_stacked() {
+    let (env, admin, borrower, contract_id, token) = setup_active_line_with_liquidity();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.draw_credit(&borrower, &2_000_i128);
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+    client.freeze_borrower_until(&admin, &borrower, &(env.ledger().timestamp() + 10_000));
+    client.freeze_credit_line(&borrower, &FreezeReason::Compliance);
+    client.self_suspend_credit_line(&borrower);
+
+    assert_draw_error(&client, &borrower, 100, ContractError::DrawsFrozen);
+
+    token::Client::new(&env, &token).approve(&borrower, &contract_id, &500_i128, &1_000_u32);
+    client.repay_credit(&borrower, &500_i128);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        1_500
+    );
 }
