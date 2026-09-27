@@ -170,7 +170,8 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
         .base_rate_bps
         .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
     let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
-    raw.clamp(cfg.min_rate_bps, upper)
+    let lower = cfg.min_rate_bps.min(upper);
+    raw.clamp(lower, upper)
 }
 
 /// Update risk parameters for an existing credit line (admin only).

@@ -2139,6 +2139,9 @@ impl Credit {
         assert_not_paused(&env);
         require_admin_auth(&env);
 
+        if min_rate_bps > crate::risk::MAX_INTEREST_RATE_BPS {
+            env.panic_with_error(ContractError::RateTooHigh);
+        }
         if min_rate_bps > max_rate_bps {
             env.panic_with_error(ContractError::InvalidAmount);
         }
