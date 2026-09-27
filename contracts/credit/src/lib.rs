@@ -129,7 +129,7 @@ mod risk;
 mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
-mod scoring;
+pub mod scoring;
 mod storage;
 pub mod types;
 

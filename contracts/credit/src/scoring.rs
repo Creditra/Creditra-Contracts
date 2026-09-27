@@ -109,8 +109,10 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
 /// ```text
 /// score = (hash_bytes[0] + hash_bytes[1] + ... + hash_bytes[31]) % 101
 /// ```
-/// This ensures the score is uniformly distributed in [0, 100] while being
-/// cryptographically bound to the VRF output.
+/// The mapping is deterministic and bound to the committed hash. Its
+/// distribution is characterised — and measured — for
+/// [`derive_score_from_hash`]; see the `# Distribution` section there and the
+/// fixed-seed distribution test in `contracts/credit/tests/vrf_commitment.rs`.
 pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> bool {
     let key = DataKey::VrfCommitment(borrower.clone());
     let commitment: VrfCommitment = env
@@ -131,7 +133,8 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 ///
 /// This is a deterministic, non-invertible function that maps a 256-bit hash
 /// to a score in the range [0, 100]. The function is designed to be:
-/// - Uniform: Each score has approximately equal probability
+/// - Approximately uniform: the byte sum is folded modulo 101, which averages
+///   the underlying bell curve out — see `# Distribution` below
 /// - Deterministic: Same hash always produces same score
 /// - Non-invertible: Cannot recover the hash from the score
 ///
@@ -145,6 +148,24 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 /// ```text
 /// score = (sum of all bytes) % 101
 /// ```
+///
+/// # Distribution
+///
+/// The score is approximately uniform over `[0, 100]`, but not because the
+/// byte sum is: the sum of 32 uniform bytes is bell-shaped (mean 4080,
+/// standard deviation ~418), and folding that shape modulo 101 averages it
+/// out because the deviation is more than four times the modulus.
+///
+/// This is measured rather than assumed. The fixed-seed distribution test in
+/// `contracts/credit/tests/vrf_commitment.rs`
+/// (`test_derive_score_distribution_uniformity_result_with_fixed_seed`) draws
+/// 20 000 hashes, verifies the byte sum really is bell-shaped, and applies a
+/// chi-square goodness-of-fit test against the uniform hypothesis, which it
+/// does not reject. Boundary hashes are pinned by
+/// `test_derive_score_boundary_hashes_are_pinned` in the same file.
+///
+/// Those tests reach this private helper through
+/// [`derive_score_from_hash_test_helper`].
 fn derive_score_from_hash(hash: &BytesN<32>) -> u32 {
     let mut sum: u32 = 0;
     for i in 0u32..32 {
