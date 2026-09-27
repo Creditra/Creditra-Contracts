@@ -9,7 +9,7 @@ they are operator-facing utilities only.
 | Script | Purpose |
 | ------ | ------- |
 | `build_wasm.sh` | Compile both workspace contracts to `target/wasm32-unknown-unknown/release/*.wasm`. Asserts the reproducible-build policy (pinned toolchain + `--verify-active`) and builds `--locked`. |
-| `check-wasm-size.sh` | Build (optional) and fail when any release WASM exceeds **100 KiB** (`THRESHOLD_BYTES=102400`). |
+| `check-wasm-size.sh` | Build (optional) and fail when any release WASM exceeds **50 KB** (`THRESHOLD_BYTES=51200`). |
 | `test_check_wasm_size.sh` | Focused guard tests for `check-wasm-size.sh` (synthetic artifacts, no build). |
 | `check-toolchain.sh` | Enforce the reproducible-build policy: exact toolchain pin in `rust-toolchain.toml`, required targets/components, CI workflow consumes the pin, lock files committed. `--verify-active` additionally fails when the active `rustc` does not match the pin. |
 | `test_check_toolchain.sh` | Focused guard tests for `check-toolchain.sh` (synthetic fixtures, no toolchain install). |

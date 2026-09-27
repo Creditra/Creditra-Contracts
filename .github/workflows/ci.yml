@@ -101,16 +101,16 @@ jobs:
 
       # Enforce the artifact size budget with the same scanner the guard tests
       # exercise (scripts/check-wasm-size.sh), so CI and local policy checks
-      # share one implementation. Threshold is unchanged at 614,400 bytes.
-      - name: Verify WASM artifact
-        env:
-          THRESHOLD_BYTES: "614400"
-          WASM_DIR: contracts/creditra-credit/target/wasm32-unknown-unknown/release
-        run: scripts/check-wasm-size.sh --check-only
+      # share one implementation. Threshold is 51,200 bytes (50 KB).
+      - name: Verify WASM artifact size budget
+        run: scripts/check-wasm-size.sh
+
+      - name: Verify WASM artifact baseline
+        run: scripts/check-wasm-baseline.sh
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: creditra-credit-wasm
-          path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          path: target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
