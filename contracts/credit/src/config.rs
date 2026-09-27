@@ -64,8 +64,14 @@ pub fn init(env: Env, admin: Address) {
         .instance()
         .set(&DataKey::TotalUtilized, &0_i128);
     set_schema_version(&env, crate::SCHEMA_VERSION);
-    // Set default minimum collateral ratio to 150% (15000 bps) in production, 0 in tests
-    #[cfg(not(test))]
+    // Ship a conservative 150 % (15 000 bps) collateral floor on every build.
+    //
+    // This used to be gated behind `cfg(not(test))`, which meant in-crate unit
+    // tests ran with the key unset while integration tests (compiled against the
+    // non-test lib) observed 150 %. The same scenario then behaved differently
+    // depending on where the test lived. The default is now unconditional and
+    // tests that want unsecured draws opt out explicitly with
+    // `set_min_collateral_ratio_bps(0)`.
     crate::storage::set_min_collateral_ratio_bps(&env, 15000);
 }
 
