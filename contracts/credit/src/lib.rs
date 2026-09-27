@@ -668,51 +668,64 @@ impl Credit {
         let (effective_repay, interest_repaid, _principal_repaid) =
             lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
 
+        // Repayment moves real tokens into the protocol, so the liquidity
+        // token has to be configured. The transfer block used to be skipped
+        // entirely when `LiquidityToken` was unset, while `utilized_amount`
+        // and `accrued_interest` were still reduced and `RepaymentEvent` was
+        // still emitted: a deployment without a token let borrowers
+        // extinguish debt for free. `draw_credit` already fails the same way,
+        // and the check runs before any state mutation, so a failed repay
+        // leaves the credit line untouched (#1221).
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityToken)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::MissingLiquidityToken)
+            });
+
         if effective_repay > 0 {
-            let maybe_token: Option<Address> =
-                env.storage().instance().get(&DataKey::LiquidityToken);
-            if let Some(token_address) = maybe_token {
-                let reserve_address: Address = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::LiquiditySource)
-                    .unwrap_or_else(|| env.current_contract_address());
+            let reserve_address: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::LiquiditySource)
+                .unwrap_or_else(|| env.current_contract_address());
 
-                let token_client = token::Client::new(&env, &token_address);
-                let contract_address = env.current_contract_address();
+            let token_client = token::Client::new(&env, &token_address);
+            let contract_address = env.current_contract_address();
 
-                // Compute protocol fee only on the interest component.
-                let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
-                let mut fee: i128 = 0;
-                if fee_bps > 0 && interest_repaid > 0 {
-                    fee = crate::math_utils::apply_bps(
-                        interest_repaid as u128,
-                        fee_bps,
-                        Rounding::Floor,
-                    ) as i128;
-                }
+            // Compute protocol fee only on the interest component.
+            let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let mut fee: i128 = 0;
+            if fee_bps > 0 && interest_repaid > 0 {
+                fee = crate::math_utils::apply_bps(
+                    interest_repaid as u128,
+                    fee_bps,
+                    Rounding::Floor,
+                ) as i128;
+            }
 
-                // Transfer fee portion into contract (treasury accumulator), then
-                // transfer remaining amount into the reserve.
-                if fee > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &contract_address,
-                        &fee,
-                    );
-                    crate::fees::accrue_protocol_fee(&env, &borrower, fee);
-                }
+            // Transfer fee portion into contract (treasury accumulator), then
+            // transfer remaining amount into the reserve.
+            if fee > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &contract_address,
+                    &fee,
+                );
+                crate::fees::accrue_protocol_fee(&env, &borrower, fee);
+            }
 
-                let reserve_amount = effective_repay.saturating_sub(fee);
-                if reserve_amount > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &reserve_address,
-                        &reserve_amount,
-                    );
-                }
+            let reserve_amount = effective_repay.saturating_sub(fee);
+            if reserve_amount > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &reserve_address,
+                    &reserve_amount,
+                );
             }
         }
 
@@ -6482,5 +6495,104 @@ mod test_max_draw_amount {
             assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
             assert_eq!(hf, 66_666);
         }
+    }
+}
+
+
+/// Regression coverage for the repay-side liquidity token requirement (#1221).
+///
+/// `repay_credit` used to skip the token transfer entirely when
+/// `LiquidityToken` was unset while still reducing `utilized_amount`, which
+/// let a deployment with an unconfigured token extinguish debt for free.
+#[cfg(test)]
+mod test_issue_1221_repay_requires_liquidity_token {
+    use super::*;
+    use crate::types::ContractError;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env};
+
+    /// Contract and an open credit line, with **no** liquidity token set.
+    fn setup_without_token(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        (client, contract_id, borrower)
+    }
+
+    /// Seed real debt on the line without a token. This is the state a
+    /// deployment lands in when the token was never configured (or was
+    /// unset later), and it is exactly what the old repay path let borrowers
+    /// wipe out for free.
+    fn seed_debt(env: &Env, contract_id: &Address, borrower: &Address, amount: i128) {
+        env.as_contract(contract_id, || {
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get::<Address, CreditLineData>(borrower)
+                .unwrap();
+            line.utilized_amount = amount;
+            env.storage().persistent().set(borrower, &line);
+        });
+    }
+
+    /// Repaying without `set_liquidity_token` reverts with #22 and leaves the
+    /// credit line untouched.
+    #[test]
+    fn repay_without_liquidity_token_reverts_with_missing_token() {
+        let env = Env::default();
+        let (client, contract_id, borrower) = setup_without_token(&env);
+        seed_debt(&env, &contract_id, &borrower, 500);
+
+        let outcome = client.try_repay_credit(&borrower, &200_i128);
+        assert_eq!(outcome, Err(Ok(ContractError::MissingLiquidityToken.into())));
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            500
+        );
+    }
+
+    /// With a token configured, repay still moves `effective_repay` into the
+    /// reserve and reduces the debt.
+    #[test]
+    fn repay_with_liquidity_token_still_reduces_debt() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &10_000_i128);
+        StellarAssetClient::new(&env, &token).mint(&borrower, &10_000_i128);
+        TokenClient::new(&env, &token).approve(
+            &borrower,
+            &contract_id,
+            &10_000_i128,
+            &1_000_000_u32,
+        );
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // This case is about the repay path, not about collateral, so remove
+        // the collateral requirement instead of funding a position.
+        client.set_min_collateral_ratio_bps(&0_u32);
+
+        client.draw_credit(&borrower, &500_i128);
+        client.repay_credit(&borrower, &200_i128);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            300
+        );
+        assert_eq!(TokenClient::new(&env, &token).balance(&borrower), 10_300);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contract_id), 9_700);
     }
 }
