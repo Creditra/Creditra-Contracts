@@ -501,7 +501,10 @@ impl Credit {
 
         // Enforce minimum collateral ratio
         let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15000);
-        let current_collateral = crate::storage::get_collateral_balance(&env, &borrower);
+        // Value the borrower's collateral through the shared helper so balances
+        // deposited via `deposit_collateral_token` back the draw and per-asset
+        // risk weights are applied (Floor) to every unit.
+        let current_collateral = crate::collateral::effective_collateral_value(&env, &borrower);
         let required_collateral = (updated_utilized as i128)
             .checked_mul(min_ratio_bps as i128)
             .unwrap_or_else(|| {
