@@ -185,10 +185,20 @@ if [[ "$VERIFY_ACTIVE" -eq 1 && "$fail" -eq 0 ]]; then
     fi
 fi
 
+# --- 6. Cargo.toml rust-version must match the pinned toolchain --------------
+CARGO_TOML="$REPO_ROOT/Cargo.toml"
+if [[ -f "$CARGO_TOML" ]]; then
+    rust_version="$(sed -n 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CARGO_TOML" | head -n1)"
+    if [[ -n "$rust_version" && "$rust_version" != "$channel" ]]; then
+        echo "::error::Cargo.toml rust-version ($rust_version) does not match rust-toolchain.toml channel ($channel)." >&2
+        fail=1
+    fi
+fi
+
 if [[ "$fail" -ne 0 ]]; then
     echo "::error::Reproducible-build policy violations found. CI FAILED." >&2
     exit 1
 fi
 
-echo "Reproducible-build policy OK: toolchain pinned to $channel, wasm target + components declared, lock files committed."
+echo "Reproducible-build policy OK: toolchain pinned to $channel, wasm target + components declared, lock files committed, rust-version aligned."
 exit 0

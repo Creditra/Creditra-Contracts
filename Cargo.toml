@@ -9,13 +9,12 @@ members = [
     "contracts/lifecycle",
     "contracts/query",
     "contracts/freeze",
-    "contracts/risk",
     "gateway-contract/contracts/auction_contract",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.97.1"
 
 [workspace.dependencies]
 soroban-sdk = "22"
