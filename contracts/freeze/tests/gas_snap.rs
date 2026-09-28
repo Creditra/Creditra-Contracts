@@ -111,7 +111,7 @@ fn gas_freeze_borrower_until() {
     let (env, client, admin, borrower) = setup();
     let expiry = env.ledger().timestamp() + 3600;
     snap("freeze_borrower_until", &env, || {
-        client.freeze_borrower_until(&admin, &borrower, &expiry);
+        client.freeze_borrower_until(&borrower, &expiry);
     });
 }
 
@@ -119,8 +119,8 @@ fn gas_freeze_borrower_until() {
 fn gas_unfreeze_borrower() {
     let (env, client, admin, borrower) = setup();
     let expiry = env.ledger().timestamp() + 3600;
-    client.freeze_borrower_until(&admin, &borrower, &expiry);
+    client.freeze_borrower_until(&borrower, &expiry);
     snap("unfreeze_borrower", &env, || {
-        client.unfreeze_borrower(&admin, &borrower);
+        client.unfreeze_borrower(&borrower);
     });
 }

@@ -1,0 +1,18 @@
+---
+source: contracts/credit/tests/auth_snap.rs
+assertion_line: 694
+expression: auths.last().unwrap()
+---
+(
+    Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM),
+    AuthorizedInvocation {
+        function: Contract(
+            (
+                Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M),
+                Symbol(unfreeze_borrower),
+                Vec(Ok(Address(obj#545))),
+            ),
+        ),
+        sub_invocations: [],
+    },
+)

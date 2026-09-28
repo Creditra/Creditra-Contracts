@@ -21,7 +21,7 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
 
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&reserve);
-    client.set_treasury(&admin, &treasury);
+    client.set_treasury(&treasury);
 
     (env, contract_id, token_address, borrower, reserve, treasury)
 }

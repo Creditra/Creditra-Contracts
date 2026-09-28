@@ -49,7 +49,7 @@
 //! contract state for risk dashboards. Stability of the discriminants and
 //! field layout is enforced by CI tests so a downstream consumer can pin
 //! against a `major.minor.patch` of `CONTRACT_API_VERSION` (currently
-//! `(1, 0, 0)`).
+//! `(2, 0, 0)`, after the breaking admin-argument removal in Issue #1281).
 
 use soroban_sdk::{contracttype, Address};
 

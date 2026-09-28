@@ -102,7 +102,6 @@ mod amount_validation_tests;
 mod attestation;
 mod auth;
 mod borrow;
-mod penalties;
 mod collateral;
 #[path = "../../collateral/src/admin.rs"]
 mod collateral_admin;
@@ -116,6 +115,7 @@ pub mod instrument;
 mod lifecycle;
 mod oracle_validation;
 mod oracles;
+mod penalties;
 
 #[path = "../../lifecycle/src/views.rs"]
 mod lifecycle_views;
@@ -147,22 +147,21 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
-use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
+use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
-    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
-    publish_oracle_quorum_price_set_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
-    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    publish_borrow_lifecycle_event, publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event, publish_credit_line_event,
+    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
+    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
+    publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
+    publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event, publish_repayment_event,
+    publish_token_rescued_event, publish_treasury_withdrawal_executed,
+    publish_treasury_withdrawal_proposed, BorrowLifecycleEvent, BorrowLifecyclePhase,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
@@ -187,11 +186,19 @@ use crate::types::{
     OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
     QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
-pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
+/// Contract ABI version consumed by off-chain indexers and SDK clients.
+///
+/// **Bumped to `2.0.0` by Issue #1281** — a breaking signature change. The
+/// `admin: Address` parameter was removed from `set_treasury`, `set_bounty`,
+/// `withdraw_treasury`, `withdraw_bounty`, `propose_treasury_withdrawal`,
+/// `execute_treasury_withdrawal`, `block_borrower`, `unblock_borrower`,
+/// `bulk_block_borrowers`, `freeze_borrower_until` and `unfreeze_borrower`.
+/// The admin identity is now derived from the `Symbol("admin")` instance slot,
+/// so each of those entrypoints requires exactly one authorization. The
+/// handshake version returned by `get_version()` is independent and unchanged.
+pub const CONTRACT_API_VERSION: (u32, u32, u32) = (2, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
@@ -285,10 +292,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -735,7 +738,12 @@ impl Credit {
             previous_utilized,
             Some(previous_status),
         );
-        lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
+        lifecycle::advance_repayment_schedule_after_repay(
+            &env,
+            &borrower,
+            effective_repay,
+            interest_repaid,
+        );
 
         let _timestamp = env.ledger().timestamp();
         publish_interest_accrued_event(
@@ -1004,11 +1012,7 @@ impl Credit {
     /// - `env`: Soroban environment.
     /// - `borrower`: Borrower address to configure.
     /// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
-    pub fn set_borrower_liq_grace(
-        env: Env,
-        borrower: Address,
-        grace_period_seconds: u64,
-    ) {
+    pub fn set_borrower_liq_grace(env: Env, borrower: Address, grace_period_seconds: u64) {
         lifecycle::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
     }
 
@@ -1216,8 +1220,10 @@ impl Credit {
     }
 
     /// Configure the treasury address where withdrawn fees will be sent (admin only).
-    pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
-        admin.require_auth();
+    ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    pub fn set_treasury(env: Env, treasury: Address) {
         require_admin_auth(&env);
         crate::storage::set_treasury_address(&env, &treasury);
     }
@@ -1233,9 +1239,12 @@ impl Credit {
     /// timelock. The amount is a snapshot of the current treasury balance at
     /// proposal time, and the proposal may be executed only after the timelock
     /// expires.
-    pub fn propose_treasury_withdrawal(env: Env, admin: Address) {
-        admin.require_auth();
-        require_admin_auth(&env);
+    ///
+    /// The proposer recorded in the proposal and in
+    /// `TreasuryWithdrawalProposedEvent` is the stored admin address, so the
+    /// attribution cannot be forged by a caller-supplied value (Issue #1281).
+    pub fn propose_treasury_withdrawal(env: Env) {
+        let admin = require_admin_auth(&env);
 
         let treasury = crate::storage::get_treasury_address(&env)
             .unwrap_or_else(|| env.panic_with_error(ContractError::TreasuryNotSet));
@@ -1249,7 +1258,7 @@ impl Credit {
         let proposal = TreasuryWithdrawalProposal {
             recipient: treasury,
             amount,
-            proposer: admin.clone(),
+            proposer: admin,
             proposed_at,
             execute_after: proposed_at.saturating_add(86_400),
         };
@@ -1268,9 +1277,12 @@ impl Credit {
     }
 
     /// Execute the currently pending treasury withdrawal, if the timelock has elapsed.
-    pub fn execute_treasury_withdrawal(env: Env, admin: Address) {
-        admin.require_auth();
-        require_admin_auth(&env);
+    ///
+    /// The `executor` recorded in `TreasuryWithdrawalExecutedEvent` is the
+    /// stored admin address, so the attribution cannot be forged by a
+    /// caller-supplied value (Issue #1281).
+    pub fn execute_treasury_withdrawal(env: Env) {
+        let admin = require_admin_auth(&env);
 
         let proposal = get_pending_treasury_withdrawal(&env)
             .unwrap_or_else(|| env.panic_with_error(ContractError::NoPendingTreasuryWithdrawal));
@@ -1339,8 +1351,10 @@ impl Credit {
     }
 
     /// Configure the bounty pool address where withdrawn bounty fees will be sent (admin only).
-    pub fn set_bounty(env: Env, admin: Address, bounty: Address) {
-        admin.require_auth();
+    ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    pub fn set_bounty(env: Env, bounty: Address) {
         require_admin_auth(&env);
         crate::storage::set_bounty_address(&env, &bounty);
     }
@@ -1351,8 +1365,10 @@ impl Credit {
     }
 
     /// Withdraw accumulated bounty pool balance to configured bounty address (admin only).
-    pub fn withdraw_bounty(env: Env, admin: Address) {
-        admin.require_auth();
+    ///
+    /// Authorization is the single `require_admin_auth` call on the stored admin
+    /// address; no `admin` argument is accepted (Issue #1281).
+    pub fn withdraw_bounty(env: Env) {
         require_admin_auth(&env);
 
         let bounty_addr = crate::storage::get_bounty_address(&env)
@@ -1379,8 +1395,10 @@ impl Credit {
     }
 
     /// Withdraw accumulated treasury balance to configured treasury address (admin only).
-    pub fn withdraw_treasury(env: Env, admin: Address) {
-        admin.require_auth();
+    ///
+    /// Authorization is the single `require_admin_auth` call on the stored admin
+    /// address; no `admin` argument is accepted (Issue #1281).
+    pub fn withdraw_treasury(env: Env) {
         require_admin_auth(&env);
 
         let treasury_addr = crate::storage::get_treasury_address(&env)
@@ -1469,7 +1487,11 @@ impl Credit {
     ///     let page2 = client.get_credit_lines_paginated(Some(cursor), 10);
     /// }
     /// ```
-    pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> CreditLinesPage {
+    pub fn get_credit_lines_paginated(
+        env: Env,
+        cursor: Option<u32>,
+        limit: u32,
+    ) -> CreditLinesPage {
         views::get_credit_lines_paginated(env, cursor, limit)
     }
 
@@ -2206,7 +2228,12 @@ impl Credit {
                 max_age_seconds,
             },
         );
-        publish_oracle_quorum_config_set_event(&env, min_quorum_k, max_deviation_bps, max_age_seconds);
+        publish_oracle_quorum_config_set_event(
+            &env,
+            min_quorum_k,
+            max_deviation_bps,
+            max_age_seconds,
+        );
     }
 
     /// Return the current multi-oracle quorum configuration, if set.
@@ -2241,9 +2268,8 @@ impl Credit {
         assert_not_paused(&env);
         require_admin_auth(&env);
 
-        let qcfg = get_oracle_quorum_config(&env).unwrap_or_else(|| {
-            env.panic_with_error(ContractError::OraclePriceInvalid)
-        });
+        let qcfg = get_oracle_quorum_config(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::OraclePriceInvalid));
 
         if prices.len() > oracles::MAX_ORACLE_FEEDS {
             env.panic_with_error(ContractError::OraclePriceInvalid);
@@ -2259,10 +2285,12 @@ impl Credit {
 
     /// Block a single borrower. Admin only. Idempotent.
     ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    ///
     /// # Events
     /// Emits `BorrowerBlockedEvent { blocked: true }`.
-    pub fn block_borrower(env: Env, admin: Address, borrower: Address) {
-        admin.require_auth();
+    pub fn block_borrower(env: Env, borrower: Address) {
         require_admin_auth(&env);
         storage_set_borrower_blocked(&env, &borrower, true);
         publish_borrower_blocked_event(&env, &borrower, true);
@@ -2270,10 +2298,12 @@ impl Credit {
 
     /// Unblock a single borrower. Admin only. Idempotent.
     ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    ///
     /// # Events
     /// Emits `BorrowerBlockedEvent { blocked: false }`.
-    pub fn unblock_borrower(env: Env, admin: Address, borrower: Address) {
-        admin.require_auth();
+    pub fn unblock_borrower(env: Env, borrower: Address) {
         require_admin_auth(&env);
         set_borrower_unblocked(&env, &borrower);
         publish_borrower_blocked_event(&env, &borrower, false);
@@ -2287,13 +2317,15 @@ impl Credit {
 
     /// Block up to `BULK_BLOCK_MAX` borrowers in a single call. Admin only.
     ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    ///
     /// # Panics
     /// If `borrowers.len() > BULK_BLOCK_MAX`.
     ///
     /// # Events
     /// Emits one `BorrowerBlockedEvent { blocked: true }` per borrower.
-    pub fn bulk_block_borrowers(env: Env, admin: Address, borrowers: soroban_sdk::Vec<Address>) {
-        admin.require_auth();
+    pub fn bulk_block_borrowers(env: Env, borrowers: soroban_sdk::Vec<Address>) {
         require_admin_auth(&env);
         if borrowers.len() > BULK_BLOCK_MAX {
             env.panic_with_error(ContractError::InvalidAmount);
@@ -2678,10 +2710,12 @@ impl Credit {
     /// Temporarily freeze a borrower's draws until the given expiry timestamp (admin only).
     ///
     /// # Parameters
-    /// - `admin`: Must be the current contract admin (checked via `require_admin_auth` + explicit `require_auth`).
     /// - `borrower`: The address whose draw capability should be frozen.
     /// - `expiry_ts`: Ledger timestamp (seconds) at which the freeze auto-expires.
     ///   Must be strictly greater than the current ledger timestamp.
+    ///
+    ///   The admin identity is derived from the `Symbol("admin")` instance slot via
+    ///   [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
     ///
     /// # Behaviour
     /// - Stores the expiry timestamp in persistent storage under [`DataKey::FrozenBorrower`].
@@ -2696,8 +2730,7 @@ impl Credit {
     ///
     /// # Events
     /// Emits `BorrowerFrozenEvent` on topic `("br_freeze",)`.
-    pub fn freeze_borrower_until(env: Env, admin: Address, borrower: Address, expiry_ts: u64) {
-        admin.require_auth();
+    pub fn freeze_borrower_until(env: Env, borrower: Address, expiry_ts: u64) {
         require_admin_auth(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
 
@@ -2734,10 +2767,12 @@ impl Credit {
     /// If no freeze is currently set, this is a no-op. Repayments have never
     /// been affected by this flag, so unfreezing early just restores draw access.
     ///
+    /// The admin identity is derived from the `Symbol("admin")` instance slot via
+    /// [`require_admin_auth`]; no `admin` argument is accepted (Issue #1281).
+    ///
     /// # Errors
     /// - Reverts with auth error if caller is not the configured admin.
-    pub fn unfreeze_borrower(env: Env, admin: Address, borrower: Address) {
-        admin.require_auth();
+    pub fn unfreeze_borrower(env: Env, borrower: Address) {
         require_admin_auth(&env);
         enforce_borrow_admin_cooldown(&env, &borrower);
         clear_borrower_frozen(&env, &borrower);
@@ -4791,7 +4826,7 @@ mod test_mock_liquidity_token_extended {
         assert_eq!(cfg.rate_change_min_interval, 3600);
     }
 
-// ── Collateral risk weight tests ─────────────────────────────────────────────
+    // ── Collateral risk weight tests ─────────────────────────────────────────────
 
     #[test]
     #[should_panic(expected = "Error(Contract, #8)")]
@@ -5806,7 +5841,7 @@ mod test_borrower_freeze {
         let now = 1_700_000_000u64;
         env.ledger().set_timestamp(now);
 
-        client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
+        client.freeze_borrower_until(&borrower, &(now + 3600));
 
         assert!(client.is_borrower_frozen(&borrower));
         assert_eq!(
@@ -5824,7 +5859,7 @@ mod test_borrower_freeze {
 
         let now = 1_700_000_000u64;
         env.ledger().set_timestamp(now);
-        client.freeze_borrower_until(&admin, &borrower, &now);
+        client.freeze_borrower_until(&borrower, &now);
     }
 
     /// Freeze expires automatically when ledger timestamp passes expiry_ts.
@@ -5836,7 +5871,7 @@ mod test_borrower_freeze {
         let start = 1_700_000_000u64;
         env.ledger().set_timestamp(start);
 
-        client.freeze_borrower_until(&admin, &borrower, &(start + 3600));
+        client.freeze_borrower_until(&borrower, &(start + 3600));
         assert!(client.is_borrower_frozen(&borrower));
 
         env.ledger().set_timestamp(start + 3600);
@@ -5844,16 +5879,70 @@ mod test_borrower_freeze {
     }
 
     /// freeze_borrower_until requires admin auth.
+    ///
+    /// Issue #1281: the entrypoint no longer takes an `admin` argument, so the
+    /// negative case is "the only signer is a non-admin". Authorizing that
+    /// non-admin alone leaves the stored admin's authorization unsatisfied and
+    /// the call reverts before any state change.
     #[test]
     #[should_panic]
     fn freeze_borrower_until_requires_auth() {
-        let env = Env::default();
-        let (client, _admin, borrower, _contract_id) = setup(&env);
-        let non_admin = Address::generate(&env);
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
 
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        // Authorize the setup calls explicitly. `env.mock_all_auths()` must not
+        // be used here: it authorizes *every* invocation, so the admin check
+        // under test would be satisfied and the call would never panic.
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "init",
+                    args: soroban_sdk::vec![&env, admin.into_val(&env)],
+                    sub_invokes: &[],
+                },
+            }])
+            .init(&admin);
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "open_credit_line",
+                    args: soroban_sdk::vec![
+                        &env,
+                        borrower.into_val(&env),
+                        1_000_i128.into_val(&env),
+                        300_u32.into_val(&env),
+                        70_u32.into_val(&env),
+                    ],
+                    sub_invokes: &[],
+                },
+            }])
+            .open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+        let non_admin = Address::generate(&env);
         let now = 1_700_000_000u64;
         env.ledger().set_timestamp(now);
-        client.freeze_borrower_until(&non_admin, &borrower, &(now + 3600));
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &non_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "freeze_borrower_until",
+                    args: (&borrower, now + 3600).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .freeze_borrower_until(&borrower, &(now + 3600));
     }
 
     /// unfreeze_borrower lifts the freeze before expiry.
@@ -5865,10 +5954,10 @@ mod test_borrower_freeze {
         let now = 1_700_000_000u64;
         env.ledger().set_timestamp(now);
 
-        client.freeze_borrower_until(&admin, &borrower, &(now + 7200));
+        client.freeze_borrower_until(&borrower, &(now + 7200));
         assert!(client.is_borrower_frozen(&borrower));
 
-        client.unfreeze_borrower(&admin, &borrower);
+        client.unfreeze_borrower(&borrower);
         assert!(!client.is_borrower_frozen(&borrower));
         assert_eq!(client.get_borrower_frozen_until(&borrower), None);
     }
@@ -5893,7 +5982,7 @@ mod test_borrower_freeze {
         let expiry = now + 3600;
         env.ledger().set_timestamp(now);
 
-        client.freeze_borrower_until(&admin, &borrower, &expiry);
+        client.freeze_borrower_until(&borrower, &expiry);
 
         let events = env.events().all();
         let (_contract, topics, data) = events.last().unwrap();
@@ -5920,7 +6009,7 @@ mod test_borrower_freeze {
         client.set_liquidity_token(&token);
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1_000_i128);
 
-        client.freeze_borrower_until(&admin, &borrower, &(now + 3600));
+        client.freeze_borrower_until(&borrower, &(now + 3600));
         client.draw_credit(&borrower, &100_i128);
     }
 }

@@ -35,9 +35,17 @@
 //! | `forgive_debt`              | admin                  |
 //! | `settle_default_liquidation`| admin                  |
 //! | `close_credit_line`         | closer.require_auth()  |
-//! | `block_borrower`            | admin (explicit + role)|
-//! | `unblock_borrower`          | admin (explicit + role)|
-//! | `bulk_block_borrowers`      | admin (explicit + role)|
+//! | `block_borrower`            | admin (derived)        |
+//! | `unblock_borrower`          | admin (derived)        |
+//! | `bulk_block_borrowers`      | admin (derived)        |
+//! | `freeze_borrower_until`     | admin (derived)        |
+//! | `unfreeze_borrower`         | admin (derived)        |
+//! | `set_treasury`              | admin (derived)        |
+//! | `set_bounty`                | admin (derived)        |
+//! | `withdraw_treasury`         | admin (derived)        |
+//! | `withdraw_bounty`           | admin (derived)        |
+//! | `propose_treasury_withdrawal` | admin (derived)      |
+//! | `execute_treasury_withdrawal` | admin (derived)      |
 //! | `draw_credit`               | borrower               |
 //! | `repay_credit`              | borrower               |
 //! | `self_suspend_credit_line`  | borrower               |
@@ -45,16 +53,39 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient, FreezeReason};
-use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
+use soroban_sdk::testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke};
 use soroban_sdk::{Address, Env, IntoVal, Symbol};
 
+/// Registers the contract, initializes it, and opens one credit line.
+///
+/// The admin's authorization for `open_credit_line` is mocked explicitly rather
+/// than with `mock_all_auths`. `mock_all_auths` would authorize every address,
+/// which makes a `#[should_panic]` assertion pass for the wrong reason.
+/// `mock_auths` entries are consumed by the call they are registered for, so
+/// the function under test in each test below runs with no valid authorization.
 fn setup(env: &Env) -> (CreditClient<'_>, Address, Address, Address) {
     let admin = Address::generate(env);
     let borrower = Address::generate(env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(env, &contract_id);
     client.init(&admin);
-    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "open_credit_line",
+                args: soroban_sdk::vec![
+                    env,
+                    borrower.into_val(env),
+                    1_000_i128.into_val(env),
+                    300_u32.into_val(env),
+                    50_u32.into_val(env),
+                ],
+                sub_invokes: &[],
+            },
+        }])
+        .open_credit_line(&borrower, &1_000_i128, &300_u32, &50_u32);
     (client, contract_id, admin, borrower)
 }
 
@@ -178,7 +209,7 @@ fn accept_admin_wrong_signer() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "accept_admin",
-                args: ().into_val(&env),
+                args: soroban_sdk::vec![&env],
                 sub_invokes: &[],
             },
         }])
@@ -259,33 +290,236 @@ fn close_credit_line_stranger_unauthorized() {
 }
 
 // ── Borrower blocklist ───────────────────────────────────────────────────────
+//
+// The blocklist entrypoints no longer take an `admin` argument (Issue #1281):
+// the admin is derived from the `Symbol("admin")` instance slot. The negative
+// case is therefore "the only authorized signer is not the admin", so each test
+// mocks a single non-admin auth and then issues the call.
 
 #[test]
 #[should_panic]
 fn block_borrower_unauthorized() {
     let env = Env::default();
-    let (client, _, _, borrower) = setup(&env);
+    let (client, contract_id, _, borrower) = setup(&env);
     let non_admin = Address::generate(&env);
-    client.block_borrower(&non_admin, &borrower);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "block_borrower",
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .block_borrower(&borrower);
 }
 
 #[test]
 #[should_panic]
 fn unblock_borrower_unauthorized() {
     let env = Env::default();
-    let (client, _, _, borrower) = setup(&env);
+    let (client, contract_id, _, borrower) = setup(&env);
     let non_admin = Address::generate(&env);
-    client.unblock_borrower(&non_admin, &borrower);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "unblock_borrower",
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .unblock_borrower(&borrower);
 }
 
 #[test]
 #[should_panic]
 fn bulk_block_borrowers_unauthorized() {
     let env = Env::default();
-    let (client, _, _, borrower) = setup(&env);
+    let (client, contract_id, _, borrower) = setup(&env);
     let non_admin = Address::generate(&env);
     let list = soroban_sdk::vec![&env, borrower];
-    client.bulk_block_borrowers(&non_admin, &list);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "bulk_block_borrowers",
+                args: soroban_sdk::vec![&env, (&list).into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .bulk_block_borrowers(&list);
+}
+
+// ── Borrower freeze (Issue #1281) ───────────────────────────────────────────
+
+#[test]
+#[should_panic]
+fn freeze_borrower_until_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, borrower) = setup(&env);
+    let non_admin = Address::generate(&env);
+    let now = 1_700_000_000u64;
+    env.ledger().set_timestamp(now);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "freeze_borrower_until",
+                args: soroban_sdk::vec![
+                    &env,
+                    borrower.into_val(&env),
+                    (now + 3600).into_val(&env),
+                ],
+                sub_invokes: &[],
+            },
+        }])
+        .freeze_borrower_until(&borrower, &(now + 3600));
+}
+
+#[test]
+#[should_panic]
+fn unfreeze_borrower_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, borrower) = setup(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "unfreeze_borrower",
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .unfreeze_borrower(&borrower);
+}
+
+// ── Treasury and bounty (Issue #1281) ───────────────────────────────────────
+//
+// These fund setters previously took an `admin: Address` argument that was
+// required in addition to the stored admin's authorization. The argument is
+// gone, so the negative case is a sole non-admin signer.
+
+#[test]
+#[should_panic]
+fn set_treasury_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_treasury",
+                args: soroban_sdk::vec![&env, treasury.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_treasury(&treasury);
+}
+
+#[test]
+#[should_panic]
+fn set_bounty_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    let bounty = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_bounty",
+                args: soroban_sdk::vec![&env, bounty.into_val(&env)],
+                sub_invokes: &[],
+            },
+        }])
+        .set_bounty(&bounty);
+}
+
+#[test]
+#[should_panic]
+fn withdraw_treasury_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "withdraw_treasury",
+                args: soroban_sdk::vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .withdraw_treasury();
+}
+
+#[test]
+#[should_panic]
+fn withdraw_bounty_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "withdraw_bounty",
+                args: soroban_sdk::vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .withdraw_bounty();
+}
+
+#[test]
+#[should_panic]
+fn propose_treasury_withdrawal_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "propose_treasury_withdrawal",
+                args: soroban_sdk::vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .propose_treasury_withdrawal();
+}
+
+#[test]
+#[should_panic]
+fn execute_treasury_withdrawal_unauthorized() {
+    let env = Env::default();
+    let (client, contract_id, _, _) = setup(&env);
+    let non_admin = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "execute_treasury_withdrawal",
+                args: soroban_sdk::vec![&env],
+                sub_invokes: &[],
+            },
+        }])
+        .execute_treasury_withdrawal();
 }
 
 // ── Risk updates ────────────────────────────────────────────────────────────
@@ -434,7 +668,7 @@ fn self_suspend_wrong_signer() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "self_suspend_credit_line",
-                args: (&borrower,).into_val(&env),
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
                 sub_invokes: &[],
             },
         }])
@@ -456,7 +690,7 @@ fn suspend_credit_line_non_admin_mock_auth() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "suspend_credit_line",
-                args: (&borrower,).into_val(&env),
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
                 sub_invokes: &[],
             },
         }])
@@ -476,7 +710,7 @@ fn default_credit_line_non_admin_mock_auth() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "default_credit_line",
-                args: (&borrower,).into_val(&env),
+                args: soroban_sdk::vec![&env, borrower.into_val(&env)],
                 sub_invokes: &[],
             },
         }])
@@ -496,7 +730,7 @@ fn freeze_draws_non_admin_mock_auth() {
             invoke: &MockAuthInvoke {
                 contract: &contract_id,
                 fn_name: "freeze_draws",
-                args: ().into_val(&env),
+                args: soroban_sdk::vec![&env],
                 sub_invokes: &[],
             },
         }])
@@ -542,4 +776,3 @@ fn set_protocol_paused_non_admin_mock_auth() {
         }])
         .set_protocol_paused(&true);
 }
-

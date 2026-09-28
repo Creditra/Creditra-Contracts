@@ -1044,7 +1044,7 @@ mod error_path_tests {
         // Withdrawing to an unconfigured treasury address must revert with
         // TreasuryNotSet (the proposal-based withdrawal entrypoint was removed
         // upstream; the direct withdrawal path carries the same guard).
-        let result = client.try_withdraw_treasury(&admin);
+        let result = client.try_withdraw_treasury();
 
         assert!(result.is_err(), "Expected error when treasury not set");
         let err = result.err().unwrap();

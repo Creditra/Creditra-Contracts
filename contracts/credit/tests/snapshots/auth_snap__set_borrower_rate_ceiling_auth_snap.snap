@@ -1,0 +1,18 @@
+---
+source: contracts/credit/tests/auth_snap.rs
+assertion_line: 199
+expression: auths.last().unwrap()
+---
+(
+    Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM),
+    AuthorizedInvocation {
+        function: Contract(
+            (
+                Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M),
+                Symbol(set_borrower_rate_ceiling),
+                Vec(Ok(Address(obj#549)), Ok(U32(1000))),
+            ),
+        ),
+        sub_invocations: [],
+    },
+)

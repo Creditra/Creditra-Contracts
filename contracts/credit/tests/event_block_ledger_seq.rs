@@ -51,7 +51,7 @@ fn block_emits_ledger_matching_sequence() {
 
     advance_ledger(&env, 5);
     let seq = env.ledger().sequence();
-    client.block_borrower(&_admin, &borrower);
+    client.block_borrower(&borrower);
 
     let event = last_blocked_event(&env);
     assert_eq!(event.ledger, seq, "block ledger must equal env sequence");
@@ -67,7 +67,7 @@ fn block_after_advancing_twice_matches_newer_sequence() {
 
     advance_ledger(&env, 3);
     let seq1 = env.ledger().sequence();
-    client.block_borrower(&_admin, &borrower);
+    client.block_borrower(&borrower);
 
     let ev1 = last_blocked_event(&env);
     assert_eq!(ev1.ledger, seq1);
@@ -75,7 +75,7 @@ fn block_after_advancing_twice_matches_newer_sequence() {
     advance_ledger(&env, 10);
     let borrower2 = Address::generate(&env);
     let seq2 = env.ledger().sequence();
-    client.block_borrower(&_admin, &borrower2);
+    client.block_borrower(&borrower2);
 
     let ev2 = last_blocked_event(&env);
     assert_eq!(ev2.ledger, seq2, "second block must reflect later sequence");
@@ -93,11 +93,11 @@ fn unblock_emits_ledger_matching_sequence() {
     let (client, _admin) = setup(&env);
     let borrower = Address::generate(&env);
 
-    client.block_borrower(&_admin, &borrower);
+    client.block_borrower(&borrower);
 
     advance_ledger(&env, 7);
     let seq = env.ledger().sequence();
-    client.unblock_borrower(&_admin, &borrower);
+    client.unblock_borrower(&borrower);
 
     let event = last_blocked_event(&env);
     assert_eq!(event.ledger, seq, "unblock ledger must equal env sequence");
@@ -113,13 +113,13 @@ fn block_then_unblock_ledger_values_differ() {
     let borrower = Address::generate(&env);
 
     let seq_block = env.ledger().sequence();
-    client.block_borrower(&_admin, &borrower);
+    client.block_borrower(&borrower);
     let ev_block = last_blocked_event(&env);
     assert_eq!(ev_block.ledger, seq_block);
 
     advance_ledger(&env, 1);
     let seq_unblock = env.ledger().sequence();
-    client.unblock_borrower(&_admin, &borrower);
+    client.unblock_borrower(&borrower);
     let ev_unblock = last_blocked_event(&env);
     assert_eq!(ev_unblock.ledger, seq_unblock);
     assert!(ev_unblock.ledger > ev_block.ledger);
@@ -139,10 +139,7 @@ fn bulk_block_emits_one_event_per_borrower_all_with_same_ledger() {
     advance_ledger(&env, 4);
     let seq = env.ledger().sequence();
 
-    client.bulk_block_borrowers(
-        &_admin,
-        &soroban_sdk::vec![&env, b1.clone(), b2.clone(), b3.clone()],
-    );
+    client.bulk_block_borrowers(&soroban_sdk::vec![&env, b1.clone(), b2.clone(), b3.clone()]);
 
     // Collect all blk_chg events emitted after the clear point
     let kind = Symbol::new(&env, "blk_chg");
@@ -181,7 +178,7 @@ fn bulk_block_ledger_matches_at_emission_not_call_time() {
     let b1 = Address::generate(&env);
     let b2 = Address::generate(&env);
 
-    client.bulk_block_borrowers(&_admin, &soroban_sdk::vec![&env, b1.clone(), b2.clone()]);
+    client.bulk_block_borrowers(&soroban_sdk::vec![&env, b1.clone(), b2.clone()]);
 
     let kind = Symbol::new(&env, "blk_chg");
     let mut events = Vec::new();
@@ -210,7 +207,7 @@ fn block_at_default_sequence_matches() {
     let borrower = Address::generate(&env);
 
     let seq = env.ledger().sequence();
-    client.block_borrower(&_admin, &borrower);
+    client.block_borrower(&borrower);
 
     let event = last_blocked_event(&env);
     assert_eq!(

@@ -293,8 +293,8 @@ for almost every event. Stability pinned by
 `tests/event_topic_stability.rs`.
 
 **Treasury**. The address where protocol fees withdrawn from the credit
-contract land. Set by `set_treasury(admin, treasury_addr)`. Drained by
-`withdraw_treasury(admin)`.
+contract land. Set by `set_treasury(treasury_addr)`. Drained by
+`withdraw_treasury()`.
 
 ---
 

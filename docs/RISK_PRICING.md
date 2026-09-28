@@ -534,7 +534,7 @@ where $\phi = \text{ProtocolFeeBps} \leq \text{MAX\_PROTOCOL\_FEE\_BPS} =
 1\,000$ (`lib.rs:63`). The fee is `transfer_from(borrower, contract, fee)`
 (accumulates in `TreasuryBalance`); the reserve portion is
 `transfer_from(borrower, liquidity_source, a_reserve)`. The admin later
-calls `withdraw_treasury(admin)` (`lib.rs:770`) to drain accumulated fees
+calls `withdraw_treasury()` (`lib.rs:770`) to drain accumulated fees
 to `TreasuryAddress`.
 
 ### 5.1 Why interest-first?

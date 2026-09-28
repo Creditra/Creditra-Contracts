@@ -38,7 +38,7 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&reserve);
-    client.set_treasury(&admin, &treasury);
+    client.set_treasury(&treasury);
     client.set_protocol_fee_bps(&1_000); // 10 % fee so repayments build a balance
 
     // Open a line, draw, advance time so interest accrues, then repay with fee.
@@ -75,7 +75,7 @@ fn proposal_stores_correct_fields() {
     env.ledger().with_mut(|l| l.timestamp = now);
 
     let admin = Address::generate(&env);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     let proposal = client
         .get_pending_treasury_withdrawal()
@@ -94,7 +94,7 @@ fn proposal_captures_current_treasury_balance() {
     let balance_before = client.get_protocol_summary().treasury_balance;
 
     let admin = Address::generate(&env);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     let proposal = client.get_pending_treasury_withdrawal().unwrap();
     assert_eq!(proposal.amount, balance_before);
@@ -119,8 +119,8 @@ fn duplicate_proposal_is_rejected() {
     let client = CreditClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
-    client.propose_treasury_withdrawal(&admin);
-    client.propose_treasury_withdrawal(&admin); // must panic with TreasuryProposalExists
+    client.propose_treasury_withdrawal();
+    client.propose_treasury_withdrawal(); // must panic with TreasuryProposalExists
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn propose_requires_treasury_configured() {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
     // no set_treasury — must panic with TreasuryNotSet
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 }
 
 // ── Timelock boundary tests ──────────────────────────────────────────────────
@@ -147,11 +147,11 @@ fn execute_before_timelock_is_rejected() {
 
     let now = 100_000_u64;
     env.ledger().with_mut(|l| l.timestamp = now);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     // One second before the unlock.
     env.ledger().with_mut(|l| l.timestamp = now + TIMELOCK - 1);
-    client.execute_treasury_withdrawal(&admin); // must panic with TreasuryTimelockActive
+    client.execute_treasury_withdrawal(); // must panic with TreasuryTimelockActive
 }
 
 #[test]
@@ -162,10 +162,10 @@ fn execute_exactly_at_timelock_succeeds() {
 
     let now = 100_000_u64;
     env.ledger().with_mut(|l| l.timestamp = now);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     env.ledger().with_mut(|l| l.timestamp = now + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     // Funds arrived.
     let token_client = token::Client::new(&env, &token_address);
@@ -179,11 +179,11 @@ fn execute_after_timelock_succeeds() {
     let admin = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     env.ledger()
         .with_mut(|l| l.timestamp = 100_000 + TIMELOCK + 3_600); // +1 h extra
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     let token_client = token::Client::new(&env, &token_address);
     assert!(token_client.balance(&treasury) > 0);
@@ -200,10 +200,10 @@ fn execute_transfers_full_proposed_amount() {
     let expected = client.get_protocol_summary().treasury_balance;
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     let token_client = token::Client::new(&env, &token_address);
     assert_eq!(token_client.balance(&treasury), expected);
@@ -216,10 +216,10 @@ fn execute_clears_proposal_and_treasury_balance() {
     let admin = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     // Proposal gone.
     assert!(client.get_pending_treasury_withdrawal().is_none());
@@ -235,13 +235,13 @@ fn replay_execution_is_rejected() {
     let admin = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
 
     env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     // Second execute with no proposal must panic with NoPendingTreasuryWithdrawal.
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn execute_without_proposal_is_rejected() {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
     // No proposal exists — must panic with NoPendingTreasuryWithdrawal.
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 }
 
 #[test]
@@ -270,15 +270,15 @@ fn zero_balance_proposal_executes_without_token_transfer() {
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
     client.set_liquidity_token(&token_id.address());
-    client.set_treasury(&admin, &treasury);
+    client.set_treasury(&treasury);
 
     // Treasury balance is 0 — proposal amount will be 0.
     env.ledger().with_mut(|l| l.timestamp = 1_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
     assert_eq!(client.get_pending_treasury_withdrawal().unwrap().amount, 0);
 
     env.ledger().with_mut(|l| l.timestamp = 1_000 + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin); // must not panic
+    client.execute_treasury_withdrawal(); // must not panic
 
     assert!(client.get_pending_treasury_withdrawal().is_none());
 }
@@ -292,12 +292,12 @@ fn new_proposal_allowed_after_execution() {
     let admin = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
-    client.propose_treasury_withdrawal(&admin);
+    client.propose_treasury_withdrawal();
     env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
-    client.execute_treasury_withdrawal(&admin);
+    client.execute_treasury_withdrawal();
 
     // A second proposal can be submitted after execution.
     env.ledger().with_mut(|l| l.timestamp = 200_000);
-    client.propose_treasury_withdrawal(&admin); // must not panic
+    client.propose_treasury_withdrawal(); // must not panic
     assert!(client.get_pending_treasury_withdrawal().is_some());
 }

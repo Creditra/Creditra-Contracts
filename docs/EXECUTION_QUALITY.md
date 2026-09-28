@@ -248,7 +248,7 @@ wrapping, even when CI builds with `--release`.
 - [ ] `set_rate_change_limits(max_change_bps, min_interval)` — rate-change
       cap
 - [ ] `set_penalty_surcharge_bps(...)`, `set_grace_period_config(...)`
-- [ ] `set_protocol_fee_bps(...)`, `set_treasury(admin, treasury)`
+- [ ] `set_protocol_fee_bps(...)`, `set_treasury(treasury)`
 - [ ] Run a happy-path smoke: `open_credit_line` → `draw_credit` →
       `repay_credit` → verify events
 - [ ] Run a default smoke: `open_credit_line` → `draw_credit` →

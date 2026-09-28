@@ -31,8 +31,8 @@ fn setup<'a>(
 
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&contract_id);
-    client.set_treasury(&admin, &treasury);
-    client.set_bounty(&admin, &bounty);
+    client.set_treasury(&treasury);
+    client.set_bounty(&bounty);
 
     (
         contract_id,
@@ -198,7 +198,7 @@ fn withdraw_bounty_transfers_accumulated_balance() {
     assert_eq!(token_client.balance(&bounty), 0);
     assert_eq!(client.get_protocol_summary().bounty_balance, 110);
 
-    client.withdraw_bounty(&admin);
+    client.withdraw_bounty();
 
     assert_eq!(token_client.balance(&bounty), 110);
     assert_eq!(client.get_protocol_summary().bounty_balance, 0);
@@ -214,7 +214,7 @@ fn withdraw_bounty_without_address_reverts() {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
 
-    let result = client.try_withdraw_bounty(&admin);
+    let result = client.try_withdraw_bounty();
     assert!(result.is_err());
     assert_eq!(
         result.err().unwrap().unwrap(),

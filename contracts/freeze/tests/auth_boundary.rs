@@ -128,7 +128,7 @@ fn mock_admin_freeze_borrower_until<'a>(
                 sub_invokes: &[],
             },
         }])
-        .freeze_borrower_until(admin, borrower, &expiry_ts);
+        .freeze_borrower_until(borrower, &expiry_ts);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -144,7 +144,10 @@ fn freeze_draws_authorized_records_admin_auth() {
 
     let auths = env.auths();
     assert_eq!(auths.len(), 1, "freeze_draws must record exactly one auth");
-    assert_eq!(auths[0].0, admin, "freeze_draws must be authorized by admin");
+    assert_eq!(
+        auths[0].0, admin,
+        "freeze_draws must be authorized by admin"
+    );
     assert!(client.is_draws_frozen());
 }
 
@@ -157,8 +160,15 @@ fn unfreeze_draws_authorized_records_admin_auth() {
     client.unfreeze_draws();
 
     let auths = env.auths();
-    assert_eq!(auths.len(), 1, "unfreeze_draws must record exactly one auth");
-    assert_eq!(auths[0].0, admin, "unfreeze_draws must be authorized by admin");
+    assert_eq!(
+        auths.len(),
+        1,
+        "unfreeze_draws must record exactly one auth"
+    );
+    assert_eq!(
+        auths[0].0, admin,
+        "unfreeze_draws must be authorized by admin"
+    );
     assert!(!client.is_draws_frozen());
 }
 
@@ -209,7 +219,7 @@ fn freeze_borrower_until_authorized_records_admin_auth() {
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
 
-    client.freeze_borrower_until(&admin, &borrower, &expiry);
+    client.freeze_borrower_until(&borrower, &expiry);
 
     let auths = env.auths();
     assert!(
@@ -228,9 +238,9 @@ fn unfreeze_borrower_authorized_records_admin_auth() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
-    client.freeze_borrower_until(&admin, &borrower, &expiry);
+    client.freeze_borrower_until(&borrower, &expiry);
 
-    client.unfreeze_borrower(&admin, &borrower);
+    client.unfreeze_borrower(&borrower);
 
     let auths = env.auths();
     assert!(
@@ -294,7 +304,7 @@ fn unfreeze_credit_line_reverts_without_auth() {
 fn freeze_borrower_until_reverts_without_auth() {
     let env = Env::default();
     let (client, _contract_id, admin, borrower) = setup_no_mock(&env);
-    client.freeze_borrower_until(&admin, &borrower, &(START_TS + 3_600));
+    client.freeze_borrower_until(&borrower, &(START_TS + 3_600));
 }
 
 #[test]
@@ -304,7 +314,7 @@ fn unfreeze_borrower_reverts_without_auth() {
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
     let expiry = START_TS + 3_600;
     mock_admin_freeze_borrower_until(&env, &client, &contract_id, &admin, &borrower, expiry);
-    client.unfreeze_borrower(&admin, &borrower);
+    client.unfreeze_borrower(&borrower);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -418,7 +428,7 @@ fn freeze_borrower_until_wrong_signer_reverts() {
                 sub_invokes: &[],
             },
         }])
-        .freeze_borrower_until(&admin, &borrower, &expiry);
+        .freeze_borrower_until(&borrower, &expiry);
 }
 
 #[test]
@@ -440,7 +450,7 @@ fn unfreeze_borrower_wrong_signer_reverts() {
                 sub_invokes: &[],
             },
         }])
-        .unfreeze_borrower(&admin, &borrower);
+        .unfreeze_borrower(&borrower);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -503,7 +513,7 @@ fn get_credit_line_freeze_reason_requires_no_auth() {
 fn is_borrower_frozen_requires_no_auth() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
-    client.freeze_borrower_until(&admin, &borrower, &(START_TS + 3_600));
+    client.freeze_borrower_until(&borrower, &(START_TS + 3_600));
 
     let _ = client.is_borrower_frozen(&borrower);
     assert!(
@@ -517,7 +527,7 @@ fn get_borrower_frozen_until_requires_no_auth() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
-    client.freeze_borrower_until(&admin, &borrower, &expiry);
+    client.freeze_borrower_until(&borrower, &expiry);
 
     let _ = client.get_borrower_frozen_until(&borrower);
     assert!(

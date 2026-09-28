@@ -25,6 +25,24 @@
 //! to enforce the auth policy. Adding a new admin-gated entrypoint is
 //! mechanical and cannot accidentally skip the check.
 //!
+//! # Single-auth policy (Issue #1281)
+//!
+//! An admin-gated entrypoint must never also take an `admin: Address`
+//! parameter and call `require_auth()` on it. Two such checks ask the host
+//! for two separate authorizations: when the argument differs from the stored
+//! admin the call is unsatisfiable, and when it matches, the same address is
+//! authenticated twice for one logical admin action. It also lets a caller
+//! attribute an action to an arbitrary address in the emitted event.
+//!
+//! The rule enforced here is therefore:
+//!
+//! - The admin is read from the instance slot ([`require_admin`]) and
+//!   authenticated exactly once ([`require_admin_auth`]).
+//! - No public entrypoint accepts an admin address as a parameter.
+//! - Because `require_admin_auth` returns the address, entrypoints that must
+//!   record the acting admin (for example in an event payload) use that
+//!   returned value rather than a caller-supplied one.
+//!
 //! Admin rotation is two-step (`propose_admin` → `accept_admin` with a
 //! configurable delay) and is implemented in [`crate::lib`] rather than
 //! here; this module only reads the current admin slot.
