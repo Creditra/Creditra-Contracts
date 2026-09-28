@@ -76,6 +76,10 @@
 //!   - Key: `(Symbol("liq_seen"), borrower, settlement_id)`
 //!   - Value: `bool` (presence = settled; replay reverts
 //!     `ContractError::AlreadyInitialized = 14`)
+//!   - TTL refreshed on write and on the replay-check read via
+//!     [`crate::storage::bump_settlement_marker_ttl`], keeping the marker
+//!     aligned with the credit-line entry so replay protection never lapses
+//!     via archival.
 //! - **Credit-limit bounds**: Instance storage (`MinCreditLimit`,
 //!   `MaxCreditLimit`).
 //! - **Repayment schedule**: Persistent storage
@@ -111,6 +115,7 @@ use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
     add_treasury_balance as storage_add_treasury_balance,
     assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl,
+    bump_settlement_marker_ttl,
     clear_repayment_schedule, get_credit_line,
     get_late_fee_flat as storage_get_late_fee_flat,
     get_repayment_schedule, persist_credit_line,
@@ -1068,6 +1073,7 @@ pub fn settle_default_liquidation(
 
     // Step 3: Replay protection (gate before credit line reads)
     let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    bump_settlement_marker_ttl(&env, &settlement_key);
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
@@ -1137,6 +1143,7 @@ pub fn settle_default_liquidation(
 
     // Step 9: Replay protection & oracle price recording
     env.storage().persistent().set(&settlement_key, &true);
+    bump_settlement_marker_ttl(&env, &settlement_key);
     if let Some(price) = oracle_result.price() {
         crate::oracle_validation::record_accepted_oracle_price(&env, price);
     }

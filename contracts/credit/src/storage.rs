@@ -349,6 +349,20 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
         .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
 }
 
+/// Refresh the persistent TTL for a default-liquidation replay marker.
+///
+/// Mirrors the auction contract's `bump_settlement_marker_ttl`
+/// (`gateway-contract/contracts/auction_contract/src/storage.rs`): the marker
+/// lives under `(Symbol("liq_seen"), borrower, settlement_id)` and must
+/// outlive every credit-line state it guards, so it is bumped to the same
+/// ~6-month window as the credit-line entry on write and on the replay-check
+/// read path. The bump is a no-op when the marker does not yet exist.
+pub fn bump_settlement_marker_ttl(env: &Env, key: &(Symbol, Address, Symbol)) {
+    if env.storage().persistent().has(key) {
+        bump_persistent_ttl(env, key);
+    }
+}
+
 /// Refresh the persistent TTL for an active credit-line freeze record.
 pub fn bump_credit_line_freeze_ttl(env: &Env, borrower: &Address) {
     let key = DataKey::CreditLineFreeze(borrower.clone());

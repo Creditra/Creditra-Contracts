@@ -115,6 +115,18 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `DrawAudit(Address, u64)` | `i128` | none (direct `persistent().set`) | Written on draw; **no explicit TTL bump** | Written in `reverse_draw` (read at line 1393 of `lib.rs`); `get` ← `reverse_draw` |
 | `DrawReversedAmount(Address, u64)` | `i128` | none (direct `persistent().set`) | Accumulated on each partial reversal; **no explicit TTL bump** | `persistent().set` ← `reverse_draw` (line 1413 of `lib.rs`); `get` ← `reverse_draw` (line 1398) |
 
+### Non-`DataKey` replay-protection marker
+
+The default-liquidation replay marker is **not** a `DataKey` variant. It is a
+raw persistent key `(Symbol("liq_seen"), borrower, settlement_id)` written by
+`settle_default_liquidation` and must outlive every credit-line state it
+guards, so its TTL is bumped to the same ~6-month window as the credit-line
+entry. Mirrors the auction contract's `bump_settlement_marker_ttl`.
+
+| Key | Value type | Bump function | Bump cadence | Touching entrypoints |
+|---|---|---|---|---|
+| `(Symbol("liq_seen"), Address, Symbol)` | `bool` | `bump_settlement_marker_ttl` | On **every** settlement write and on the replay-check read | `settle_default_liquidation` (replay check at Step 3, marker write at Step 9) |
+
 > **⚠ TTL hygiene note — unbumped persistent keys**
 >
 > The ten persistent-tier variants marked "no explicit TTL bump" above rely on
@@ -186,6 +198,7 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `CollateralBalance(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
 | `DrawAudit(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |
 | `DrawReversedAmount(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |
+| `(Symbol("liq_seen"), Address, Symbol)` default-liquidation replay marker | Persistent | ✅ | `bump_settlement_marker_ttl` on settlement write and replay check |
 
 ---
 
