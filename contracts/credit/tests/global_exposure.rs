@@ -20,7 +20,7 @@
 
 use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::{Address, Env};
 
@@ -325,6 +325,37 @@ fn cap_blocks_third_borrower_that_would_exceed_aggregate() {
     client.draw_credit(&b1, &800_i128);
     // total = 1_600; cap = 2_000; draw 401 → projected 2_001 > 2_000
     client.draw_credit(&b2, &401_i128);
+}
+
+#[test]
+fn cap_includes_interest_accrued_on_idle_credit_lines() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Ensure the initial draws establish a non-zero accrual checkpoint.
+    env.ledger().set_timestamp(1_000);
+    let (client, _admin, borrowers, _cid) = setup_multi(&env, 2);
+    let borrower_a = borrowers[0].clone();
+    let borrower_b = borrowers[1].clone();
+
+    client.draw_credit(&borrower_a, &900_i128);
+    client.draw_credit(&borrower_b, &900_i128);
+    assert_eq!(client.get_total_utilized(), 1_800);
+
+    // 900 at 3% for one Julian year accrues 27 on each line.  A 10-unit
+    // draw would look like 1,810 against the stale accumulator, but its
+    // actual post-draw exposure is 1,800 + 27 + 27 + 10 = 1,864.
+    env.ledger().set_timestamp(1_000 + 31_557_600);
+    client.set_max_total_exposure(&1_863_i128);
+
+    let result = client.try_draw_credit(&borrower_a, &10_i128);
+    assert!(result.is_err(), "idle-line interest must count toward the cap");
+
+    // Removing the cap is still an explicit opt-out, even after the same
+    // accrued-interest scenario.
+    client.set_max_total_exposure(&0_i128);
+    client.draw_credit(&borrower_a, &10_i128);
+    assert_eq!(client.get_credit_line(&borrower_a).unwrap().utilized_amount, 937);
+    assert_eq!(client.get_credit_line(&borrower_b).unwrap().utilized_amount, 900);
 }
 
 #[test]

@@ -538,13 +538,29 @@ impl Credit {
         }
 
         // Global protocol exposure cap: block draws that would push total
-        // utilization across all lines above the configured maximum.
+        // utilization across all lines above the configured maximum.  Interest
+        // on otherwise idle lines must be included in this decision as well.
         if let Some(max_exposure) = crate::storage::get_max_total_exposure(&env) {
+            // `credit_line` is already accrued above but has not yet been
+            // persisted. Accrue every other line first so the stored aggregate
+            // includes their pending interest, then add this line's pending
+            // accrual to the projection below.
+            accrual::accrue_all_except(&env, &borrower);
             let current_total = crate::storage::get_total_utilized(&env);
-            let projected = current_total.checked_add(amount).unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::Overflow)
-            });
+            let pending_current_accrual = credit_line
+                .utilized_amount
+                .checked_sub(previous_utilized)
+                .unwrap_or_else(|| {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::Overflow)
+                });
+            let projected = current_total
+                .checked_add(pending_current_accrual)
+                .and_then(|total| total.checked_add(amount))
+                .unwrap_or_else(|| {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::Overflow)
+                });
             if projected > max_exposure {
                 clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::ExposureCapExceeded);
