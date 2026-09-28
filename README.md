@@ -1,5 +1,7 @@
 # Creditra Contracts
 
+[![CI](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml)
+
 **Decentralized, risk-priced credit on Stellar / Soroban — without
 overcollateralization.** Credit lines whose limit and interest rate evolve
 continuously from on-chain behavioral signals, financial attestations, and a
@@ -8,8 +10,11 @@ separate auction contract using a one-shot, replay-protected cross-contract
 handoff.
 
 This is the **Creditra-Contracts** workspace: two Soroban WebAssembly contracts,
-about 14.5 KLOC of Rust, current line coverage **98.94 %**, release WASM under
-a **50 KB hard CI budget**.
+about 14.5 KLOC of Rust, release WASM under a **50 KB hard CI budget**. Line
+coverage is **not** claimed as a number here: CI measures it on every run and
+fails the build below the enforced floor — see
+[`docs/COVERAGE.md`](./docs/COVERAGE.md) for the current floor and measured
+value.
 
 | Doc | What it answers |
 |---|---|
@@ -125,10 +130,22 @@ cargo test --workspace
 
 ### Coverage
 
+Measured and enforced in CI by the `coverage` job in
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml), over
+`contracts/creditra-credit` — the crate that job actually builds and tests.
+The job fails below `MIN_LINE_COVERAGE`, publishes the HTML report as the
+`coverage-report` artifact, and writes the measured numbers to its job summary.
+
 ```bash
-cargo llvm-cov --workspace --all-targets --fail-under-lines 95
-# Current: 99.51 % regions, 98.94 % lines
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cd contracts/creditra-credit
+
+# Reproduce the CI gate
+cargo llvm-cov --all-targets --html --fail-under-lines 92
 ```
+
+The floor, the measured value, and the reason the root Soroban workspace is not
+yet included are documented in [`docs/COVERAGE.md`](./docs/COVERAGE.md).
 
 ### Deploy (testnet)
 
@@ -267,8 +284,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.
-- 42 integration test files, ~817 `#[test]` annotations, 98.94 % line
-  coverage in CI.
+- 42 integration test files, ~817 `#[test]` annotations, line coverage measured
+  and floor-enforced in CI on every run.
 
 ### Next milestones
 
@@ -336,8 +353,10 @@ ls contracts/credit/tests/*.rs | wc -l                # 42 integration files
 grep -r '#\[test\]' contracts/ gateway-contract/ | wc -l   # ~817 tests
 git log --oneline | grep -c Merge                     # ~332 merged PRs
 
-# Coverage
-cargo llvm-cov --workspace --all-targets --fail-under-lines 95
+# Coverage (the gate CI enforces, from the crate CI actually builds)
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+(cd contracts/creditra-credit \
+  && cargo llvm-cov --all-targets --html --fail-under-lines 92)
 
 # Size budget
 cargo build --release --target wasm32-unknown-unknown -p creditra-credit \
