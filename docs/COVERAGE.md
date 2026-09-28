@@ -6,15 +6,24 @@ The Creditra workspace enforces **minimum 95% line coverage** via `cargo-llvm-co
 
 ## CI Enforcement
 
-Three workflows enforce coverage:
+One workflow enforces coverage:
 
-| Workflow | Trigger | Command |
-|---|---|---|
-| `ci.yml` (coverage job) | Push/PR to `main`, `master`, `develop`, `feature/**` | `cargo llvm-cov --workspace --all-targets --fail-under-lines 95` |
-| `coverage.yml` | Push/PR to `main`, `master` | Same + LCOV upload to Codecov |
-| `pr-coverage.yml` | PR to `main`, `master`, `develop` | Same + PR summary comment |
+| Workflow | Job | Trigger | Command |
+|---|---|---|---|
+| `ci.yml` | `coverage` | Push/PR to `main`, `master`, `develop` | `cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 95 --html` |
 
-All three use `--fail-under-lines 95` to gate the pipeline. If coverage drops below 95%, the workflow exits non-zero and blocks the CI.
+The job uses `--fail-under-lines 95` to gate the pipeline. If coverage drops below 95%, the workflow exits non-zero and blocks the CI.
+
+The job also runs `scripts/check-toolchain.sh --verify-active --lock Cargo.lock`, so the coverage run resolves the committed workspace lockfile on the toolchain pinned in `rust-toolchain.toml`.
+`llvm-tools-preview` is declared in that same pin, which is what `cargo-llvm-cov` needs to link the LLVM profile runtime.
+
+## Report Artefact
+
+The HTML report is published as the `coverage-html` workflow artefact (`target/llvm-cov/html`) instead of being committed to the repository.
+Download it from the run summary on the Actions page; the upload step runs with `if: always()` so the measurement that explains a failing gate is still available.
+
+Because the report is generated per run, `coverage/` is git-ignored and no longer tracked.
+The README badge is served by the Actions workflow status API for the `coverage` job, so it cannot drift from the last real measurement.
 
 ## Running Locally
 
@@ -56,9 +65,10 @@ Use conditional compilation for coverage-only annotations:
 
 The workspace already recognizes `cfg(coverage)` and `cfg(coverage_nightly)` lint keys.
 
-## Current Coverage
+## Interpreting the Gate
 
-The current line coverage is approximately **97–99%** across the workspace (see `coverage/` directory for the latest HTML report).
+The gate measures every target in the workspace, so a regression anywhere in the workspace, not only in the contract crate, can drop the total below the floor.
+When a run fails, read the per-file line percentages in the uploaded `coverage-html` report before assuming the change you just made caused it.
 
 ## Troubleshooting
 
@@ -67,4 +77,6 @@ The current line coverage is approximately **97–99%** across the workspace (se
 | `error: no 'cargo-llvm-cov' found` | Tool not installed | `cargo install cargo-llvm-cov` |
 | Stale `*.profraw` files | Previous run artifacts | `scripts/clean_profraw.sh` |
 | Coverage below 95% | Untested new code | Add tests for uncovered lines |
-| LCOV upload fails | Missing `CODECOOK_TOKEN` secret | Set in GitHub repo settings |
+| `error: failed to parse lock file` | Committed `Cargo.lock` is not a valid lockfile | Re-resolve with `cargo update --workspace`, or repair the offending entry |
+| No report in the artefact list | The run failed before instrumentation, so no profile data was produced | Read the failing step; the coverage step reports the actual error |
+

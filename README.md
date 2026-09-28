@@ -8,8 +8,10 @@ separate auction contract using a one-shot, replay-protected cross-contract
 handoff.
 
 This is the **Creditra-Contracts** workspace: two Soroban WebAssembly contracts,
-about 14.5 KLOC of Rust, current line coverage **98.94 %**, release WASM under
-a **50 KB hard CI budget**.
+about 14.5 KLOC of Rust, line coverage gated at **95 % minimum** in CI, release
+WASM under a **50 KB hard CI budget**.
+
+[![Line coverage](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml/badge.svg?job=coverage)](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml?query=branch%3Amain)
 
 | Doc | What it answers |
 |---|---|
@@ -127,8 +129,14 @@ cargo test --workspace
 
 ```bash
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
-# Current: 99.51 % regions, 98.94 % lines
 ```
+
+The `coverage` job in [`ci.yml`](./.github/workflows/ci.yml) runs exactly that
+command and fails the build below the 95 % line floor.
+The HTML report is published as the `coverage-html` workflow artifact rather
+than committed, so the badge above always reflects a real measurement instead
+of a checked-in snapshot.
+See [`docs/COVERAGE.md`](./docs/COVERAGE.md) for the local workflow.
 
 ### Deploy (testnet)
 
@@ -267,8 +275,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.
-- 42 integration test files, ~817 `#[test]` annotations, 98.94 % line
-  coverage in CI.
+- 42 integration test files, ~817 `#[test]` annotations, and a 95 % line
+  coverage floor enforced in CI.
 
 ### Next milestones
 

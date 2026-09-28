@@ -21,8 +21,10 @@ cross-contract handoff.
 
 The protocol is implemented as two Soroban WebAssembly contracts totaling
 ~14.5 KLOC of Rust (`contracts/credit/src/lib.rs` alone is 5 449 lines), with
-≥40 integration test files and current measured line coverage of **98.94 %**
-(`COVERAGE_REPORT.md`). The credit contract's release WASM is under a hard
+≥40 integration test files and a line-coverage floor of **95 %** enforced in CI
+by the `coverage` job (see [`docs/COVERAGE.md`](./docs/COVERAGE.md); the measured
+figure is published as a workflow artefact rather than stored in this document).
+The credit contract's release WASM is under a hard
 **50 KB CI budget** and is built with `opt-level = "z"`, full LTO, and stripped
 symbols (`Cargo.toml`).
 
@@ -520,7 +522,7 @@ Storage layout for the planned module (in `docs/default-oracle.md`):
 | Upgrade model                     | Proxy + governance               | Governance migrations             | Module replacement                | Admin-gated atomic `update_current_contract_wasm` + version bump |
 | Event schema for indexers         | Solidity events                  | Solidity events                   | Solidity events                   | Stable Soroban topics, see `docs/indexer-integration.md` |
 | WASM / bytecode size              | N/A (Solidity, ≥ 30 KB per facet) | N/A                              | N/A                               | **< 50 KB hard CI budget** (`creditra-credit.wasm`) |
-| Test coverage                     | varies                            | varies                            | varies                            | 98.94 % lines / 99.51 % regions |
+| Test coverage                     | varies                            | varies                            | varies                            | ≥ 95 % lines, gated in CI (`coverage` job) |
 
 ---
 

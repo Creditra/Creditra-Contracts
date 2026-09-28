@@ -115,11 +115,15 @@ The bulk live in the 42 integration files and the auction's `test.rs`.
 
 ### 2.1 Current numbers
 
-From `README.md` and `COVERAGE_REPORT.md` (most recent run):
+Line coverage is not stored in this repository.
+The `coverage` job in `.github/workflows/ci.yml` measures it on every push and
+pull request, fails the build below the floor, and publishes the HTML report as
+the `coverage-html` artefact.
+The README badge is served by the Actions status API for that job, so the
+number shown there is always a real measurement.
 
-- **Regions: 99.51 %**
-- **Lines: 98.94 %**
 - **Threshold enforced in CI: 95.00 %** (`cargo llvm-cov --fail-under-lines 95`)
+- **Exact current figure:** read the `coverage` job summary, or download the `coverage-html` artefact and open `index.html`
 
 ### 2.2 Reproducing locally
 
@@ -127,18 +131,14 @@ From `README.md` and `COVERAGE_REPORT.md` (most recent run):
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 ```
 
-The CI workflow at `.github/workflows/coverage.yml` runs this on every push
-to `main`/`master` and on every PR.
+The `coverage` job in `.github/workflows/ci.yml` runs exactly this on every push
+to `main`/`master`/`develop` and on every PR.
 
 ### 2.3 What is not covered
 
-Per `COVERAGE_REPORT.md`, the small remaining gap is in stub functions used
-during earlier development (`repay_credit` placeholder, etc.) — these have
-since been replaced by full implementations. The current gap (1.06 % lines)
-is in defensively-dead branches that revert with `ContractError::Overflow`
-under arithmetic conditions only reachable by misconfigured constants
-(e.g. `MaxRepayAmount > i128::MAX / 2`). These paths are tested but the
-revert is the only observable behavior.
+Per-file line percentages, including the remaining uncovered lines, are in the
+`coverage-html` artefact for the relevant run.
+Read them there rather than trusting a number checked into this file.
 
 ---
 
@@ -172,13 +172,10 @@ CI workflows in `.github/workflows/`:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push (`main`/`master`/`develop`/`feature/**`) and PR | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, then WASM build with a hard **50 KB size budget** (`THRESHOLD_BYTES=51200`) |
-| `test.yml` | push / PR | `cargo test --workspace --all-targets` |
-| `coverage.yml` | push (`main`/`master`) and PR | `cargo llvm-cov --workspace --all-targets --fail-under-lines 95` |
-| `pr-coverage.yml` | PR | Comment-with-coverage-delta on PRs |
-| `build-wasm.yml` | push / PR | Release-WASM artifact build for `creditra-credit` and `gateway-auction`, uploads to artifact storage |
-| `wasm-size.yml` | push / PR | Build all workspace WASM via `scripts/check-wasm-size.sh`; fail if **any** artifact exceeds **100 KiB** (`THRESHOLD_BYTES=102400`) |
-| `gas.yml` | push / PR | Per-entrypoint CPU/memory budget regression against `contracts/.gas-baseline.json` (via `instrument` feature) |
+| `ci.yml` (`contract` job) | push (`main`/`master`/`develop`) and PR | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` (in `contracts/creditra-credit`), then WASM build with a hard **50 KB size budget** (`THRESHOLD_BYTES=51200`), uploading `creditra-credit-wasm` |
+| `ci.yml` (`coverage` job) | push (`main`/`master`/`develop`) and PR | `cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 95 --html`, uploading the `coverage-html` report |
+
+`ci.yml` is currently the only workflow in this repository; the `coverage.yml`, `pr-coverage.yml`, `test.yml`, `build-wasm.yml`, `wasm-size.yml`, and `gas.yml` rows that earlier revisions of this table listed do not exist.
 
 The size-budget enforcement is the load-bearing one: it guarantees the WASM
 artifact stays deployable under Soroban's per-contract bytecode limits. The
