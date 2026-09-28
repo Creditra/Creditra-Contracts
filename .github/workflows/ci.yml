@@ -114,3 +114,69 @@ jobs:
           name: creditra-credit-wasm
           path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
+
+  coverage:
+    name: Workspace line coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same single-source-of-truth policy as the `contract` job: coverage is
+      # only a meaningful guarantee when it is measured with the toolchain the
+      # repository pins. Do not hardcode a version here and do not use a
+      # floating channel ref, both of which scripts/check-toolchain.sh rejects.
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Pinned toolchain channel: $channel"
+
+      # llvm-cov rewrites instrumented binaries with the LLVM profile runtime
+      # from llvm-tools-preview, and the runtime must match the pinned
+      # toolchain exactly or the emitted profile data is rejected.
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+
+      # Enforce the reproducible-build policy for the workspace root lockfile
+      # that this job actually resolves, not just the CosmWasm sub-package
+      # lockfile checked by the `contract` job.
+      - name: Verify reproducible-build policy
+        run: scripts/check-toolchain.sh --verify-active --lock Cargo.lock
+
+      # Installed from crates.io with --locked rather than through a
+      # third-party installer action, so the tool version is auditable from
+      # the registry and the workflow keeps its external dependency surface
+      # to actions/* only.
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      # The gate documented in README.md and docs/COVERAGE.md. --locked keeps
+      # the run on the committed dependency graph, and --html is emitted in
+      # the same invocation so the report exists whenever the tests compile,
+      # including on the runs where the threshold check fails.
+      - name: Enforce minimum line coverage
+        run: cargo llvm-cov --workspace --all-targets --locked --fail-under-lines 95 --html
+
+      # `always()` so a failing gate still publishes the measurement that
+      # explains *why* it failed. `warn` rather than `error` because a run
+      # that dies before instrumentation (compile error in a test target)
+      # legitimately produces no report, and that must not mask the real
+      # failure reported by the step above.
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: target/llvm-cov/html
+          if-no-files-found: warn
+          retention-days: 14

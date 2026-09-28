@@ -6,4 +6,8 @@
 # as any toolchain-behavior-sensitive baseline (e.g. WASM size budgets).
 channel = "1.97.1"
 targets = ["wasm32-unknown-unknown"]
-components = ["rustfmt", "clippy"]
+# llvm-tools-preview supplies the LLVM profile runtime that `cargo llvm-cov`
+# links into instrumented test binaries. It is declared here, alongside
+# rustfmt/clippy, so the coverage job and a local `cargo llvm-cov` run resolve
+# the same runtime as the pinned toolchain.
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
