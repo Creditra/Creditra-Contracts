@@ -168,7 +168,7 @@ use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    enforce_freeze_cooldown, enter_reentrancy_guard, get_borrower_by_credit_line_id,
     get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
     get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
@@ -177,7 +177,7 @@ use crate::storage::{
     proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_oracle_quorum_config, set_pending_treasury_withdrawal,
     set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
     MAX_ENUMERATION_LIMIT,
 };
@@ -285,10 +285,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -400,9 +396,10 @@ impl Credit {
     /// Draws credit by transferring liquidity tokens to the borrower.
     ///
     /// Enforces status, limit, and liquidity checks before executing the transfer.
-    /// A reentrancy guard is set on entry and cleared on every exit path (success
-    /// and failure). If this function is re-entered while the guard is active,
-    /// the call reverts with [`ContractError::Reentrancy`].
+    /// A reentrancy guard is held for the whole call and released on the success
+    /// path; if this function is re-entered while the guard is active, the call
+    /// reverts with [`ContractError::Reentrancy`]. Error branches below do not
+    /// clear the guard — a panic reverts the flag with the rest of the frame.
     ///
     /// # Parameters
     /// - `borrower`: The address drawing credit; must authorize this call.
@@ -415,30 +412,29 @@ impl Credit {
     /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         assert_not_paused(&env);
-        set_reentrancy_guard(&env);
+        // RAII guard: held for the remainder of the call and released when
+        // `_guard` drops on the success path. Error branches below just panic —
+        // a panic reverts the guard write with the rest of the frame.
+        let _guard = enter_reentrancy_guard(&env);
 
         borrower.require_auth();
 
         if amount <= 0 {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InvalidAmount);
         }
 
         // Global emergency freeze: block all draws during liquidity reserve operations.
         if freeze::is_draws_frozen(&env) {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::DrawsFrozen);
         }
 
         // Per-borrower temporary draw freeze with auto-expiry.
         if storage_is_borrower_frozen(&env, &borrower) {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::BorrowerFrozen);
         }
 
         // Per-credit-line admin freeze with structured reason taxonomy.
         if freeze::is_credit_line_frozen(&env, &borrower) {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineFrozen);
         }
 
@@ -449,14 +445,12 @@ impl Credit {
             .get::<DataKey, i128>(&DataKey::MaxDrawAmount)
         {
             if amount > max_draw {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::DrawExceedsMaxAmount);
             }
         }
 
         let stored_line: CreditLineData =
             storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::CreditLineNotFound)
             });
         let previous_utilized = stored_line.utilized_amount;
@@ -464,7 +458,6 @@ impl Credit {
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
 
         if let Some(error) = borrow::draw_status_error(credit_line.status) {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(error);
         }
 
@@ -479,7 +472,6 @@ impl Credit {
             if let Some(last_draw_ts) = storage_get_last_draw_ts(&env, &borrower) {
                 let now = env.ledger().timestamp();
                 if now < last_draw_ts.saturating_add(min_interval) {
-                    clear_reentrancy_guard(&env);
                     env.panic_with_error(ContractError::DrawCooldownActive);
                 }
             }
@@ -490,12 +482,10 @@ impl Credit {
             .utilized_amount
             .checked_add(amount)
             .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::Overflow)
             });
 
         if updated_utilized > credit_line.credit_limit {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::OverLimit);
         }
 
@@ -505,20 +495,17 @@ impl Credit {
         let required_collateral = (updated_utilized as i128)
             .checked_mul(min_ratio_bps as i128)
             .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::Overflow)
             })
             / 10_000;
 
         if current_collateral < required_collateral {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
         }
 
         // Enforce per-borrower utilization cap if configured.
         if let Some(cap_bps) = storage_get_utilization_cap_bps(&env, &borrower) {
             let credit_limit_u128 = u128::try_from(credit_line.credit_limit).unwrap_or_else(|_| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::Overflow)
             });
             let cap_amount = i128::try_from(mul_div(
@@ -528,11 +515,9 @@ impl Credit {
                 Rounding::Floor,
             ))
             .unwrap_or_else(|_| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::Overflow)
             });
             if updated_utilized > cap_amount {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OverLimit);
             }
         }
@@ -542,11 +527,9 @@ impl Credit {
         if let Some(max_exposure) = crate::storage::get_max_total_exposure(&env) {
             let current_total = crate::storage::get_total_utilized(&env);
             let projected = current_total.checked_add(amount).unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::Overflow)
             });
             if projected > max_exposure {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::ExposureCapExceeded);
             }
         }
@@ -556,7 +539,6 @@ impl Credit {
             .instance()
             .get(&DataKey::LiquidityToken)
             .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::MissingLiquidityToken)
             });
         let reserve_address: Address = env
@@ -564,14 +546,12 @@ impl Credit {
             .instance()
             .get(&DataKey::LiquiditySource)
             .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::MissingLiquiditySource)
             });
 
         let token_client = token::Client::new(&env, &token_address);
         let reserve_balance = token_client.balance(&reserve_address);
         if reserve_balance < amount {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InsufficientLiquidityReserve);
         }
         token_client.transfer(&reserve_address, &borrower, &amount);
@@ -609,7 +589,6 @@ impl Credit {
                 timestamp,
             },
         );
-        clear_reentrancy_guard(&env);
     }
 
     /// Repay outstanding credit (principal + accrued interest).
@@ -624,11 +603,11 @@ impl Credit {
     /// - [`ContractError::RepayExceedsMaxAmount`] — amount exceeds per-tx repay cap.
     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
         // --- Reentrancy guard (defense-in-depth) ---
-        set_reentrancy_guard(&env);
+        // Released automatically when `_guard` drops on the success path.
+        let _guard = enter_reentrancy_guard(&env);
         borrower.require_auth();
 
         if amount <= 0 {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::InvalidAmount);
         }
 
@@ -639,14 +618,12 @@ impl Credit {
             .get::<DataKey, i128>(&DataKey::MaxRepayAmount)
         {
             if amount > max_repay {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::RepayExceedsMaxAmount);
             }
         }
 
         let stored_line: CreditLineData =
             storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::CreditLineNotFound)
             });
         let previous_utilized = stored_line.utilized_amount;
@@ -654,7 +631,6 @@ impl Credit {
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
 
         if credit_line.status == CreditStatus::Closed {
-            clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineClosed);
         }
 
@@ -767,7 +743,6 @@ impl Credit {
             },
         );
 
-        clear_reentrancy_guard(&env);
     }
 
     pub fn update_risk_parameters(
@@ -1937,22 +1912,20 @@ impl Credit {
         oracle_price: Option<i128>,
     ) {
         // Reentrancy guard: settlement touches accounting and may interact
-        // with an external auction contract, so we guard the full path.
-        // INVARIANT: every exit path below must clear the guard before
-        // propagating a panic; CPI calls use try_* variants so a remote
-        // contract panic cannot escape without clearing.
+        // with an external auction contract, so we guard the whole path. The
+        // flag is released when `_guard` drops on the success path; failure
+        // paths below intentionally leave it alone because a panic reverts the
+        // flag along with every other write in this frame.
         require_admin_auth(&env);
-        set_reentrancy_guard(&env);
+        let _guard = enter_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.
         if let Some(cfg) = crate::storage::get_oracle_config(&env) {
             let price = oracle_price.unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid)
             });
 
             if price <= 0 {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::OraclePriceInvalid);
             }
 
@@ -1961,17 +1934,14 @@ impl Credit {
             if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
                 let age = now.saturating_sub(last_ts);
                 if age > cfg.max_age_seconds {
-                    clear_reentrancy_guard(&env);
                     env.panic_with_error(ContractError::OraclePriceStale);
                 }
 
                 if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
                     let deviation = compute_deviation_bps(price, last_price).unwrap_or_else(|| {
-                        clear_reentrancy_guard(&env);
                         env.panic_with_error(ContractError::OraclePriceInvalid)
                     });
                     if deviation > cfg.max_deviation_bps {
-                        clear_reentrancy_guard(&env);
                         env.panic_with_error(ContractError::OraclePriceDeviation);
                     }
                 }
@@ -1983,12 +1953,12 @@ impl Credit {
 
         // Cross-contract auction settlement hook (when configured).
         //
-        // Both CPI calls use the try_* variants so that a panic or error
-        // inside the auction contract is caught here and the reentrancy guard
-        // is cleared before we re-panic with a typed ContractError.  Without
-        // this, any panic in the remote contract would unwind through this
-        // frame leaving the guard permanently set — bricking all subsequent
-        // settlement calls.
+        // Both CPI calls use the try_* variants so a panic or error inside the
+        // auction contract is caught here and surfaced as a typed
+        // ContractError instead of escaping this frame untagged. No manual
+        // guard cleanup is needed on these branches: re-panicking reverts the
+        // guard write along with the rest of the frame, so a failing
+        // settlement can never leave the flag set for later calls.
         if let Some(auction_addr) = crate::storage::get_auction_contract(&env) {
             let auction_client = AuctionClient::new(&env, &auction_addr);
 
@@ -1996,28 +1966,27 @@ impl Credit {
             // try_get_version returns Err if the CPI itself panics (e.g. the
             // auction contract is undeployed, runs out of budget, or panics
             // internally).  A version mismatch (wrong major) is a logic error;
-            // a CPI failure is an infrastructure error — both clear the guard
-            // and surface a distinct, diagnosable error code.
+            // a CPI failure is an infrastructure error — both surface a
+            // distinct, diagnosable error code.
             let remote_version = match auction_client.try_get_version() {
                 Ok(Ok(v)) => v,
                 Ok(Err(_)) | Err(_) => {
                     // CPI call itself failed (contract panic, missing contract,
-                    // budget exceeded, …).  Guard cleared; caller can retry
-                    // after resolving the auction contract issue.
-                    clear_reentrancy_guard(&env);
+                    // budget exceeded, …).  Caller can retry after resolving
+                    // the auction contract issue; the panic rolls the guard
+                    // write back, so nothing is left set.
                     env.panic_with_error(ContractError::AuctionCallFailed);
                 }
             };
 
             if !handshake::verify_version(&env, remote_version) {
-                // Version handshake failed.  No state was mutated.
-                // Guard cleared; retry after upgrading to a compatible version.
-                clear_reentrancy_guard(&env);
+                // Version handshake failed.  No state was mutated; retry after
+                // upgrading to a compatible version.
                 env.panic_with_error(ContractError::IncompatibleVersion);
             }
 
             // ── Step 2: Settlement CPI ───────────────────────────────────────
-            // Same guard-clearing pattern for the main settlement call.
+            // Same typed-error mapping for the main settlement call.
             let auction_recovered = match auction_client.try_settle_default_liquidation(
                 &settlement_id,
                 &env.current_contract_address(),
@@ -2025,7 +1994,6 @@ impl Credit {
             ) {
                 Ok(Ok(amount)) => amount,
                 Ok(Err(_)) | Err(_) => {
-                    clear_reentrancy_guard(&env);
                     env.panic_with_error(ContractError::AuctionCallFailed);
                 }
             };
@@ -2035,7 +2003,6 @@ impl Credit {
             // A mismatch means the auction state and the credit-contract call
             // are out of sync; reject atomically before any accounting mutation.
             if auction_recovered != recovered_amount {
-                clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::AuctionCallFailed);
             }
         }
@@ -2048,7 +2015,6 @@ impl Credit {
             close_factor_bps,
             oracle_price,
         );
-        clear_reentrancy_guard(&env);
     }
 
     // ── Auction contract admin ────────────────────────────────────────────────
@@ -6091,6 +6057,61 @@ mod test_max_draw_amount {
                 client.get_credit_line(&borrower).unwrap().utilized_amount,
                 200
             );
+        }
+    }
+
+    /// Unit tests for the scoped (RAII) reentrancy guard helper.
+    ///
+    /// These drive `storage::enter_reentrancy_guard` directly instead of going
+    /// through `draw_credit`/`repay_credit`, so they pin the guard *lifetime*
+    /// (held for the scope, released on drop, rejects re-entry) independently of
+    /// the amount/limit/collateral rules enforced by the entrypoints.
+    #[cfg(test)]
+    mod test_scoped_reentrancy_guard {
+        use super::*;
+        use crate::storage::{enter_reentrancy_guard, reentrancy_key};
+
+        fn guard_is_set(env: &Env) -> bool {
+            env.storage()
+                .instance()
+                .get::<_, bool>(&reentrancy_key(env))
+                .unwrap_or(false)
+        }
+
+        /// Success path: the flag stays set for as long as the handle lives and
+        /// is released when it drops, leaving the contract ready for the next call.
+        #[test]
+        fn guard_is_held_for_the_scope_and_released_on_drop() {
+            let env = Env::default();
+            let contract_id = env.register(Credit, ());
+
+            env.as_contract(&contract_id, || {
+                {
+                    let _guard = enter_reentrancy_guard(&env);
+                    assert!(guard_is_set(&env), "guard must be set while held");
+                }
+
+                assert!(!guard_is_set(&env), "guard must be cleared once released");
+            });
+        }
+
+        /// Re-entry while the guard is held must be rejected with `Reentrancy`.
+        #[test]
+        fn reentrant_entry_while_guard_is_held_reverts() {
+            let env = Env::default();
+            let contract_id = env.register(Credit, ());
+
+            env.as_contract(&contract_id, || {
+                let _guard = enter_reentrancy_guard(&env);
+                let reentrant = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _nested = enter_reentrancy_guard(&env);
+                }));
+
+                assert!(
+                    reentrant.is_err(),
+                    "a nested entry while the guard is held must revert"
+                );
+            });
         }
     }
 

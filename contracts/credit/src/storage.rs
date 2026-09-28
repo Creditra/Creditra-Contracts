@@ -48,10 +48,25 @@
 //! # Reentrancy & pause primitives
 //!
 //! The instance `Symbol("reentrancy")` slot is set by
-//! [`set_reentrancy_guard`] (which reverts `Reentrancy = 11` if already
-//! set) and cleared by [`clear_reentrancy_guard`]. The instance
+//! [`set_reentrancy_guard`] (which reverts `Reentrancy = 11` if already set)
+//! and cleared by [`clear_reentrancy_guard`]. Guarded entrypoints should not
+//! pair those two by hand: bind the [`ReentrancyGuard`] returned by
+//! [`enter_reentrancy_guard`] for the duration of the guarded body and the
+//! flag is released automatically when it goes out of scope. The instance
 //! `Symbol("paused")` slot is consulted via [`assert_not_paused`] which
 //! reverts `Paused = 18` when the protocol is paused.
+//!
+//! ## Revert-on-panic semantics
+//!
+//! Failure paths deliberately do **not** clear the guard. When a Soroban
+//! frame traps — via [`Env::panic_with_error`], an arithmetic overflow, or a
+//! panic propagated out of a nested contract call — the host discards
+//! **every** storage write that frame performed, including the instance write
+//! from [`set_reentrancy_guard`]. A panicking call therefore cannot leave the
+//! flag set, and `Symbol("reentrancy")` needs no explicit cleanup before
+//! `panic_with_error`. What *would* leak the flag is a success path that
+//! forgets to release it, which the [`ReentrancyGuard`] drop glue makes
+//! impossible.
 //!
 //! See [`docs/storage-layout.md`](../../../docs/storage-layout.md) for the
 //! tier reference and
@@ -905,8 +920,10 @@ pub fn grace_period_key(env: &Env) -> Symbol {
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 ///
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,
-/// indicating a reentrant call. Caller **must** call [`clear_reentrancy_guard`]
-/// on every success and failure path to release the guard.
+/// indicating a reentrant call. Prefer [`enter_reentrancy_guard`], which sets
+/// and releases the flag for you; call this directly only when the guard
+/// lifetime cannot be expressed as a scope. The flag does not need to be
+/// cleared on failure paths — see the module-level revert-on-panic notes.
 ///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
@@ -925,8 +942,10 @@ pub fn set_reentrancy_guard(env: &Env) {
 
 /// Clear the reentrancy guard set by [`set_reentrancy_guard`].
 ///
-/// Must be called on every exit path (success and failure) of any function
-/// that called [`set_reentrancy_guard`].
+/// Runs automatically when a [`ReentrancyGuard`] drops, i.e. on the success
+/// path of a guarded entrypoint. Failure paths leave the flag alone on
+/// purpose: a panic rolls the write back, so clearing first would be
+/// redundant (see the module-level revert-on-panic notes).
 ///
 /// # Storage
 /// - **Type**: Instance storage
@@ -936,6 +955,55 @@ pub fn set_reentrancy_guard(env: &Env) {
 pub fn clear_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     env.storage().instance().set(&key, &false);
+}
+
+/// RAII handle for the contract-wide reentrancy guard.
+///
+/// Returned by [`enter_reentrancy_guard`]; releases the guard when dropped, so
+/// a guarded entrypoint only has to bind it once at the top:
+///
+/// ```ignore
+/// pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
+///     let _guard = enter_reentrancy_guard(&env);
+///     // ... validation and mutation ...
+///     // error branches just `panic_with_error`; the guard is reverted with
+///     // the rest of the frame, and released here on the success path.
+/// }
+/// ```
+///
+/// A guard that is never bound is released immediately, so the value is
+/// `#[must_use]` and discarding it as a bare expression statement (for example
+/// `enter_reentrancy_guard(&env);`) is a lint error. Bind it to a named
+/// variable that lives as long as the guarded body:
+///
+/// ```ignore
+/// let _guard = enter_reentrancy_guard(&env); // held for the whole body
+/// ```
+///
+/// Note that `let _ = enter_reentrancy_guard(&env);` also releases the guard at
+/// once, because `_` drops the value on the spot; use `_guard`, not `_`.
+#[must_use = "bind the guard to a named variable for the duration of the guarded scope"]
+pub struct ReentrancyGuard<'a> {
+    env: &'a Env,
+}
+
+impl Drop for ReentrancyGuard<'_> {
+    fn drop(&mut self) {
+        clear_reentrancy_guard(self.env);
+    }
+}
+
+/// Acquire the contract-wide reentrancy guard for the current scope.
+///
+/// Reverts with [`ContractError::Reentrancy`] (`Reentrancy = 11`) if the guard
+/// is already held, i.e. on a re-entrant call. Otherwise returns a
+/// [`ReentrancyGuard`] that clears the flag when it drops, which happens on
+/// the success path of the calling entrypoint. Failure paths need no cleanup:
+/// a panic reverts the flag write along with the rest of the frame (see the
+/// module-level revert-on-panic notes).
+pub fn enter_reentrancy_guard(env: &Env) -> ReentrancyGuard<'_> {
+    set_reentrancy_guard(env);
+    ReentrancyGuard { env }
 }
 
 /// Set a per-borrower interest rate floor (admin only, enforced by caller).
