@@ -2,9 +2,9 @@
 name = "creditra-query"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra query (v7) structured events, capabilities view, and error stability tests"
+description = "Creditra query (v7) structured events, capabilities view, and error stability tests (test/indexer support crate, not deployable)"
 license = "MIT"
-keywords = ["soroban", "stellar", "query", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "query", "credit"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "README.md"
 

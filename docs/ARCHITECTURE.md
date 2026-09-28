@@ -480,7 +480,20 @@ See `docs/indexer-integration.md` for JSON decoding examples.
 
 ---
 
-## 11. References
+## 11. Support Crates (Test/Indexer)
+
+The `contracts/` directory contains several wrapper crates that are **not deployable smart contracts**. They exist solely to host integration tests, error stability snapshots, or to expose read-only capability bitmaps to off-chain indexers and clients without requiring them to simulate full transactions. These crates mostly re-export logic from the main `creditra-credit` contract.
+
+The wrapper crates include:
+- `creditra-accrual`: Error stability tests and gas snapshots for accrual logic.
+- `creditra-borrow`: Error stability tests for the borrow/draw/repay surface.
+- `creditra-freeze`: Authentication boundary tests for freeze operations.
+- `creditra-lifecycle`: Read-only bitmap reporting permitted lifecycle transitions.
+- `creditra-query`: Read-only bitmap reporting borrower-scoped query capabilities.
+
+---
+
+## 12. References
 
 - `contracts/credit/src/lib.rs` — all entrypoints
 - `contracts/credit/src/lifecycle.rs` — state machine implementation

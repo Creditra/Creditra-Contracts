@@ -65,6 +65,11 @@ flowchart LR
 | `creditra-credit` | `contracts/credit/` | Credit-line core: open / draw / repay / risk update / default / settle / upgrade. `lib.rs` is 5 449 lines, 13 sub-modules. |
 | `creditra-risk` | `contracts/risk/` | Standalone risk admin cooldown contract: time-based circuit breaker for admin risk-mutation actions. |
 | `gateway-auction` | `gateway-contract/contracts/auction_contract/` | Minimal English & Dutch auction; one-shot settlement handoff back to credit. |
+| `creditra-accrual` | `contracts/accrual/` | Test/indexer support crate: error stability for accrual (not deployed). |
+| `creditra-borrow` | `contracts/borrow/` | Test/indexer support crate: error stability for borrow (not deployed). |
+| `creditra-freeze` | `contracts/freeze/` | Test/indexer support crate: auth boundary coverage for freeze (not deployed). |
+| `creditra-lifecycle` | `contracts/lifecycle/` | Test/indexer support crate: read-only bitmap for lifecycle transitions (not deployed). |
+| `creditra-query` | `contracts/query/` | Test/indexer support crate: capabilities view and events (not deployed). |
 
 Full module catalog and entrypoint signatures: [`docs/PROTOCOL_SPEC.md`](./docs/PROTOCOL_SPEC.md).
 Sequence diagrams for draw, repay, default → auction → settle:

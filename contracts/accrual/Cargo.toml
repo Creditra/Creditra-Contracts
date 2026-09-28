@@ -2,11 +2,11 @@
 name = "creditra-accrual"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra accrual v7 error stability tests"
+description = "Creditra accrual v7 error stability tests (test/indexer support crate, not deployable)"
 license = "MIT"
-keywords = ["soroban", "stellar", "accrual", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "accrual", "credit"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
-readme = "../../README.md"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
