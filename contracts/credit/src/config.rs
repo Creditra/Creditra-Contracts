@@ -36,8 +36,16 @@
 //! parameters. The admin then dials in the rate formula, exposure caps,
 //! and so on before opening the first credit line.
 //!
+//! A full working deployment requires:
+//! 1. `init`
+//! 2. `set_liquidity_token` (required for drawing)
+//! 3. `set_liquidity_source` (unsafe default uses contract's own address)
+//! 4. `set_min_collateral_ratio_bps` (optional)
+//! 5. `set_auction_contract` (wiring credit to auction)
+//! 6. `set_factory_contract` (on auction side, wiring back to credit)
+//!
 //! See [`docs/deploy.md`](../../../docs/deploy.md) for the required
-//! deployment sequence and
+//! deployment sequence, CLI commands, and a smoke test sequence, and
 //! [`docs/EXECUTION_QUALITY.md`](../../../docs/EXECUTION_QUALITY.md) §6
 //! for the full testnet / mainnet checklist.
 

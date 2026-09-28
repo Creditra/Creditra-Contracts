@@ -132,12 +132,32 @@ cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 
 ### Deploy (testnet)
 
+A full working deployment requires initializing the credit contract and wiring it to the auction contract.
+
 ```bash
+# 1. Deploy the contract
 soroban contract deploy \
   --wasm target/wasm32-unknown-unknown/release/creditra_credit.wasm \
   --source <identity> --network testnet
+
+# 2. Initialize
 soroban contract invoke --id <addr> --source <identity> --network testnet -- init --admin <admin-addr>
+
+# 3. Set liquidity token (required for drawing)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_liquidity_token --token_address <token-addr>
+
+# 4. Set liquidity source (WARNING: Unsafe default uses contract's own address)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_liquidity_source --reserve_address <reserve-addr>
+
+# 5. Set minimum collateral ratio (optional)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_min_collateral_ratio_bps --ratio_bps 15000
+
+# 6. Wire auction contract
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_auction_contract --auction_contract <auction-addr>
+soroban contract invoke --id <auction-addr> --source <auction-admin-identity> --network testnet -- set_factory_contract --factory <addr>
 ```
+
+For a comprehensive guide on the deployment sequence and invariants, see [`docs/deploy.md`](./docs/deploy.md).
 
 Full testnet + mainnet checklists are in
 [`docs/EXECUTION_QUALITY.md`](./docs/EXECUTION_QUALITY.md) §6.
