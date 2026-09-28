@@ -61,9 +61,8 @@ const RATE_BPS: u32 = 500;
 /// Token balance minted to the contract and each borrower (generous headroom).
 const TOKEN_BALANCE: i128 = 10_000_000;
 
-/// Seconds per year used by the contract's `prorate_interest` helper.
-/// Matches `accrual::SECONDS_PER_YEAR` (non-Julian 365-day year).
-const SECONDS_PER_YEAR: u64 = 31_536_000;
+/// Seconds per Julian year used by the contract's `prorate_interest` helper.
+const SECONDS_PER_YEAR: u64 = 31_557_600;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test harness
@@ -105,9 +104,10 @@ fn setup() -> Ctx {
     sac.mint(&contract_id, &TOKEN_BALANCE);
     sac.mint(&borrower, &TOKEN_BALANCE);
 
-    // Collateral must be in place before draw (150 % LTV floor).
-    client.deposit_collateral(&borrower, &COLLATERAL);
+    // Open before depositing: the global collateral conservation check
+    // enumerates registered credit lines. Collateral must precede the draw.
     client.open_credit_line(&borrower, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
+    client.deposit_collateral(&borrower, &COLLATERAL);
     client.draw_credit(&borrower, &DRAW_AMOUNT);
 
     Ctx {
@@ -125,7 +125,7 @@ fn fund_repayment(ctx: &Ctx, amount: i128) {
         &ctx.borrower,
         &ctx.contract_id,
         &amount,
-        &u32::MAX,
+        &ctx.env.ledger().sequence().saturating_add(1_000),
     );
 }
 
@@ -275,10 +275,10 @@ proptest! {
         let borrower_b = Address::generate(&ctx.env);
         let sac = token::StellarAssetClient::new(&ctx.env, &ctx.token_address);
         sac.mint(&borrower_b, &TOKEN_BALANCE);
-        // Borrow B needs collateral too.
+        // Register B before depositing to preserve global collateral accounting.
         let client = ctx.client();
-        client.deposit_collateral(&borrower_b, &COLLATERAL);
         client.open_credit_line(&borrower_b, &CREDIT_LIMIT, &RATE_BPS, &50_u32);
+        client.deposit_collateral(&borrower_b, &COLLATERAL);
         client.draw_credit(&borrower_b, &DRAW_AMOUNT);
 
         // Give each borrower a different schedule with a fixed, deterministic due date.
@@ -360,11 +360,13 @@ proptest! {
             schedule.next_due_ts,
             expected,
             "contract={} model={} \
-             (amount_per_period={amount_per_period}, period_seconds={period_seconds}, \
-              elapsed_secs={elapsed_secs}, repay={repay}, accrued={accrued}, \
-              effective_repay={effective_repay}, interest_repaid={interest_repaid}, \
-              principal_repaid={principal_repaid})",
-            schedule.next_due_ts, expected,
+             (amount_per_period={}, period_seconds={}, \
+              elapsed_secs={}, repay={}, accrued={}, \
+              effective_repay={}, interest_repaid={}, \
+              principal_repaid={})",
+            schedule.next_due_ts, expected, amount_per_period, period_seconds,
+            elapsed_secs, repay, accrued, effective_repay, interest_repaid,
+            principal_repaid,
         );
     }
 
@@ -448,12 +450,8 @@ mod edge_cases {
         fund_repayment(&ctx, DRAW_AMOUNT);
         ctx.client().repay_credit(&ctx.borrower, &DRAW_AMOUNT);
 
-        // Admin-close (closer == admin is always allowed regardless of balance).
-        // Since mock_all_auths is active the admin address is not tracked; we
-        // generate a fresh address and use it as the `closer` argument — the
-        // contract will accept it as the admin under `mock_all_auths`.
-        let admin_closer = Address::generate(&ctx.env);
-        ctx.client().close_credit_line(&ctx.borrower, &admin_closer);
+        // Self-close is permitted now that the utilization is zero.
+        ctx.client().close_credit_line(&ctx.borrower, &ctx.borrower);
 
         assert!(
             ctx.client().get_repayment_schedule(&ctx.borrower).is_none(),
@@ -647,4 +645,207 @@ mod edge_cases {
             outstanding = outstanding.saturating_sub(r.min(outstanding));
         }
     }
+}
+
+// Structured late-fee modes are exercised through real repayments so both the
+// accrual and installment paths must agree on which configuration is active.
+
+#[test]
+fn structured_flat_charges_only_overdue_installments_and_suppresses_legacy_apr() {
+    use creditra_credit::penalties::{FlatFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_flat(&99);
+    client.set_penalty_surcharge_bps(&300);
+    let config = LateFeeConfig::Flat(FlatFeeConfig { amount: 7 });
+    client.set_late_fee_config(&Some(config));
+    assert_eq!(client.get_late_fee_config(), Some(config));
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &86_400, &(T0 + 1));
+    ctx.env.ledger().set_timestamp(T0 + SECONDS_PER_YEAR);
+
+    // At the base 500 bps for one Julian year, interest is exactly 1,000.
+    // Three 1,000-unit principal installments are repaid, all overdue.
+    fund_repayment(&ctx, 4_000);
+    let treasury_before = client.get_protocol_summary().treasury_balance;
+    client.repay_credit(&ctx.borrower, &4_000);
+    assert_eq!(
+        client
+            .get_credit_line(&ctx.borrower)
+            .unwrap()
+            .utilized_amount,
+        17_000
+    );
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance - treasury_before,
+        21
+    );
+    assert_eq!(
+        client
+            .get_repayment_schedule(&ctx.borrower)
+            .unwrap()
+            .next_due_ts,
+        T0 + 1 + 3 * 86_400
+    );
+}
+
+#[test]
+fn structured_apr_overrides_legacy_apr_without_charging_either_flat_fee() {
+    use creditra_credit::penalties::{AprFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_flat(&99);
+    client.set_penalty_surcharge_bps(&300);
+    let config = LateFeeConfig::AprBased(AprFeeConfig { surcharge_bps: 200 });
+    client.set_late_fee_config(&Some(config));
+    assert_eq!(client.get_late_fee_config(), Some(config));
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &86_400, &(T0 + 1));
+    ctx.env.ledger().set_timestamp(T0 + SECONDS_PER_YEAR);
+
+    // One year at 700 bps = 1,400, not 500 (base), 1,600 (legacy),
+    // or 2,000 (both surcharges). Repayment covers interest + 1 period.
+    fund_repayment(&ctx, 2_400);
+    let treasury_before = client.get_protocol_summary().treasury_balance;
+    client.repay_credit(&ctx.borrower, &2_400);
+    assert_eq!(
+        client
+            .get_credit_line(&ctx.borrower)
+            .unwrap()
+            .utilized_amount,
+        19_000
+    );
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance,
+        treasury_before
+    );
+    assert_eq!(
+        client
+            .get_repayment_schedule(&ctx.borrower)
+            .unwrap()
+            .next_due_ts,
+        T0 + 1 + 86_400
+    );
+}
+
+#[test]
+fn clearing_structured_config_restores_both_legacy_fee_paths() {
+    use creditra_credit::penalties::{FlatFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_flat(&11);
+    client.set_penalty_surcharge_bps(&300);
+    client.set_late_fee_config(&Some(LateFeeConfig::Flat(FlatFeeConfig { amount: 7 })));
+    client.set_late_fee_config(&None);
+    assert_eq!(client.get_late_fee_config(), None);
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &86_400, &(T0 + 1));
+    ctx.env.ledger().set_timestamp(T0 + SECONDS_PER_YEAR);
+
+    // 500 + 300 bps = 800 bps => 1,600 interest, then one overdue
+    // installment at the original legacy flat fee of 11.
+    fund_repayment(&ctx, 2_600);
+    let treasury_before = client.get_protocol_summary().treasury_balance;
+    client.repay_credit(&ctx.borrower, &2_600);
+    assert_eq!(
+        client
+            .get_credit_line(&ctx.borrower)
+            .unwrap()
+            .utilized_amount,
+        19_000
+    );
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance - treasury_before,
+        11
+    );
+}
+
+#[test]
+fn structured_zero_flat_disables_both_legacy_fees() {
+    use creditra_credit::penalties::{FlatFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_flat(&99);
+    client.set_penalty_surcharge_bps(&300);
+    client.set_late_fee_config(&Some(LateFeeConfig::Flat(FlatFeeConfig { amount: 0 })));
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &86_400, &(T0 + 1));
+    ctx.env.ledger().set_timestamp(T0 + SECONDS_PER_YEAR);
+    fund_repayment(&ctx, 2_000);
+    let treasury_before = client.get_protocol_summary().treasury_balance;
+    client.repay_credit(&ctx.borrower, &2_000);
+    assert_eq!(
+        client
+            .get_credit_line(&ctx.borrower)
+            .unwrap()
+            .utilized_amount,
+        19_000
+    );
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance,
+        treasury_before
+    );
+}
+
+#[test]
+fn structured_flat_charges_only_past_due_installments() {
+    use creditra_credit::penalties::{FlatFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_flat(&99);
+    client.set_late_fee_config(&Some(LateFeeConfig::Flat(FlatFeeConfig { amount: 7 })));
+    // No elapsed interest at t=T0. The first installment is exactly due,
+    // not overdue; the next is still in the future.
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &100, &T0);
+    fund_repayment(&ctx, 2_000);
+    let treasury_before = client.get_protocol_summary().treasury_balance;
+    client.repay_credit(&ctx.borrower, &2_000);
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance,
+        treasury_before
+    );
+
+    // Reset the schedule so the first installment is overdue and the
+    // second one is not. An advance payment may only charge the former.
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &100, &T0);
+    ctx.env.ledger().set_timestamp(T0 + 1);
+    fund_repayment(&ctx, 2_000);
+    client.repay_credit(&ctx.borrower, &2_000);
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance - treasury_before,
+        7
+    );
+}
+
+#[test]
+fn structured_flat_treasury_overflow_rolls_back_repayment() {
+    use creditra_credit::penalties::{FlatFeeConfig, LateFeeConfig};
+    let ctx = setup();
+    let client = ctx.client();
+    client.set_late_fee_config(&Some(LateFeeConfig::Flat(FlatFeeConfig {
+        amount: i128::MAX,
+    })));
+    client.set_repayment_schedule(&ctx.borrower, &1_000, &86_400, &(T0 + 1));
+    ctx.env.ledger().set_timestamp(T0 + SECONDS_PER_YEAR);
+    fund_repayment(&ctx, 3_000);
+    let before = client
+        .get_credit_line(&ctx.borrower)
+        .unwrap()
+        .utilized_amount;
+    let due = client
+        .get_repayment_schedule(&ctx.borrower)
+        .unwrap()
+        .next_due_ts;
+    assert!(client.try_repay_credit(&ctx.borrower, &3_000).is_err());
+    assert_eq!(
+        client
+            .get_credit_line(&ctx.borrower)
+            .unwrap()
+            .utilized_amount,
+        before
+    );
+    assert_eq!(
+        client
+            .get_repayment_schedule(&ctx.borrower)
+            .unwrap()
+            .next_due_ts,
+        due
+    );
+    assert_eq!(client.get_protocol_summary().treasury_balance, 0);
 }

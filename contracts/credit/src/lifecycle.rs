@@ -1373,24 +1373,38 @@ pub fn advance_repayment_schedule_after_repay(
         return;
     }
 
-    // ── Late-fee surcharge ──────────────────────────────────────────────────
-    let late_fee = crate::storage::get_late_fee_flat(env);
-    if late_fee > 0 {
+    // A configured mode supersedes both legacy keys. compute_late_fee returns
+    // zero for AprBased: that surcharge is applied to interest in apply_accrual,
+    // never credited again as a flat fee on repayment.
+    let config = crate::storage::get_late_fee_config(env);
+    let legacy_fee = if config.is_none() {
+        crate::storage::get_late_fee_flat(env)
+    } else {
+        0
+    };
+    if config.is_some() || legacy_fee > 0 {
         let now = env.ledger().timestamp();
         for i in 0_u64..installments_paid {
             let due_ts = schedule
                 .next_due_ts
                 .saturating_add(i.saturating_mul(schedule.period_seconds));
             if now > due_ts {
-                crate::storage::add_treasury_balance(env, late_fee);
-                crate::events::publish_late_fee_charged_event(
-                    env,
-                    crate::events::LateFeeChargedEvent {
-                        borrower: borrower.clone(),
-                        fee: late_fee,
-                        installment_index: i.saturating_add(1),
-                    },
-                );
+                let late_fee = match config {
+                    Some(cfg) => crate::penalties::compute_late_fee(cfg, 1)
+                        .unwrap_or_else(|err| env.panic_with_error(err)),
+                    None => legacy_fee,
+                };
+                if late_fee > 0 {
+                    crate::storage::add_treasury_balance(env, late_fee);
+                    crate::events::publish_late_fee_charged_event(
+                        env,
+                        crate::events::LateFeeChargedEvent {
+                            borrower: borrower.clone(),
+                            fee: late_fee,
+                            installment_index: i.saturating_add(1),
+                        },
+                    );
+                }
             }
         }
     }

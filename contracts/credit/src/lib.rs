@@ -102,7 +102,9 @@ mod amount_validation_tests;
 mod attestation;
 mod auth;
 mod borrow;
-mod penalties;
+pub mod penalties;
+#[cfg(test)]
+mod penalties_tests;
 mod collateral;
 #[path = "../../collateral/src/admin.rs"]
 mod collateral_admin;
@@ -285,10 +287,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
