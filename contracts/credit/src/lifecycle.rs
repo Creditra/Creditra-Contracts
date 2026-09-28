@@ -943,9 +943,16 @@ pub fn default_credit_line(env: Env, borrower: Address) {
 /// Reduces `accrued_interest` first, then `utilized_amount`, by `amount`
 /// (clamped to the outstanding balance). No token movement occurs — this is
 /// pure accounting relief, e.g. for negotiated settlements handled off-chain.
+///
+/// Admin authorization is enforced by the `lib.rs` wrapper
+/// ([`crate::Contract::forgive_debt`]), exactly like the other admin entry
+/// points that delegate here — see [`suspend_credit_line`] and
+/// [`reinstate_credit_line`]. Re-checking it in this frame makes every call
+/// fail with `Error(Auth, ExistingValue)` ("frame is already authorized"),
+/// because the admin's authorization for this invocation was already
+/// established by the wrapper.
 pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
 
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
