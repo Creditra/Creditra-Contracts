@@ -1058,12 +1058,18 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
         env.storage()
             .persistent()
             .set(&key, &true);
+        bump_persistent_ttl(env, &key);
     } else {
         env.storage()
             .persistent()
             .remove(&key);
+        // Only the instance TTL can be bumped here: the per-borrower record has
+        // just been removed, and `extend_ttl` on a removed key reverts with
+        // `Storage(MissingValue)`. Bumping unconditionally made
+        // `unblock_borrower` revert for every borrower and left the block in
+        // place. Unblocking is now idempotent, as the entrypoint documents.
+        bump_instance_ttl(env);
     }
-    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.
