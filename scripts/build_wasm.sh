@@ -24,7 +24,7 @@ scripts/check-toolchain.sh --verify-active
 
 case "$SELECTOR" in
     all)
-        cargo build --target "$TARGET" --profile "$PROFILE" --workspace --locked
+        cargo build --target "$TARGET" --profile "$PROFILE" --locked -p creditra-credit -p creditra-risk -p gateway-auction
         ;;
     credit)
         cargo build --target "$TARGET" --profile "$PROFILE" \

@@ -169,6 +169,12 @@ Creditra-Contracts/
 │       ├── query.rs           # read-only helpers, is_delinquent
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
+├── contracts/accrual/       # Test/indexer support wrapper crates
+├── contracts/borrow/        # (Re-export credit contract for testing and indexing)
+├── contracts/collateral/
+├── contracts/freeze/
+├── contracts/lifecycle/
+├── contracts/query/
 ├── contracts/risk/
 │   ├── Cargo.toml
 │   └── src/
