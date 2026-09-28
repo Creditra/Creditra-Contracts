@@ -7,8 +7,8 @@
 //! paths so that active credit lines are not silently archived by the network.
 
 use creditra_credit::storage::{
-    DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD, LEDGER_BUMP_AMOUNT,
-    LEDGER_BUMP_THRESHOLD,
+    bump_settlement_marker_ttl, DataKey, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+    LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD,
 };
 use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
@@ -329,6 +329,40 @@ fn settle_default_liquidation_bumps_credit_line_ttl_on_accrual_read() {
     assert!(
         ttl_after >= LEDGER_BUMP_AMOUNT,
         "credit-line TTL not bumped on settle_default_liquidation: {ttl_after}"
+    );
+}
+
+#[test]
+fn settlement_marker_matches_credit_line_ttl_and_bumps_on_replay_check() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.default_credit_line(&borrower);
+
+    let settlement_id = Symbol::new(&env, "settle_ttl");
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &settlement_id,
+        &10_000_u32,
+        &None,
+    );
+
+    let settlement_key = (Symbol::new(&env, "liq_seen"), borrower.clone(), settlement_id);
+    let line_ttl = ttl_for_key(&env, &contract_id, &borrower);
+    let marker_ttl = ttl_for_key(&env, &contract_id, &settlement_key);
+    assert_eq!(marker_ttl, line_ttl, "settlement marker TTL must match credit line");
+
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, marker_ttl.saturating_sub(target_remaining));
+    env.as_contract(&contract_id, || bump_settlement_marker_ttl(&env, &settlement_key));
+
+    let marker_ttl_after = ttl_for_key(&env, &contract_id, &settlement_key);
+    assert!(
+        marker_ttl_after >= CREDIT_LINE_TTL_EXTEND_TO,
+        "settlement marker TTL not bumped on replay check: initial={marker_ttl} after={marker_ttl_after}"
     );
 }
 
