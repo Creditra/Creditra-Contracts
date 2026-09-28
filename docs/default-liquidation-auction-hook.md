@@ -39,6 +39,8 @@ Entrypoint: settle_default_liquidation(auction_id, credit_contract, borrower)
 - One-time per auction_id.
 - Emits LIQ_SETL/auction with auction_id, credit_contract, borrower, winner, recovered_amount.
 
+For the complete protocol handshake details, required configuration, and failure modes, see the [Auction Contract Settlement Handshake](../gateway-contract/contracts/auction_contract/auction.md#settlement-handshake) documentation.
+
 ## Trust Boundaries
 
 ### On-chain
