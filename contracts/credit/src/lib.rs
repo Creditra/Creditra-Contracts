@@ -110,7 +110,7 @@ mod config;
 pub mod events;
 mod fees;
 mod freeze;
-mod handshake;
+pub mod handshake;
 #[cfg(all(not(target_arch = "wasm32"), feature = "instrument"))]
 pub mod instrument;
 mod lifecycle;
@@ -130,7 +130,7 @@ mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 mod scoring;
-mod storage;
+pub mod storage;
 pub mod types;
 
 #[cfg(test)]
@@ -285,10 +285,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -499,7 +495,7 @@ impl Credit {
             env.panic_with_error(ContractError::OverLimit);
         }
 
-        // Enforce minimum collateral ratio
+        // Enforce minimum collateral ratio: required_collateral = floor(utilized * min_ratio_bps / 10_000)
         let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15000);
         let current_collateral = crate::storage::get_collateral_balance(&env, &borrower);
         let required_collateral = (updated_utilized as i128)
