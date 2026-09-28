@@ -1551,20 +1551,15 @@ impl Credit {
     /// collateral ratio check. 10_000 bps (100%) means full value; lower
     /// values discount the asset.
     ///
-    /// # Errors
-    /// - Reverts with [`ContractError::InvalidRiskWeight`] if `weight_bps > 10_000`.
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed since the last
-    ///   critical collateral admin action.
-    /// - Reverts if caller is not the configured admin.
-    /// Set the risk weight for a collateral asset (admin only).
-    ///
     /// # Arguments
     /// * `asset` - The collateral asset address
     /// * `weight_bps` - Risk weight in basis points
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::InvalidRiskWeight` if `weight_bps > 10_000`.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
         collateral_admin::set_collateral_risk_weight(&env, &asset, weight_bps);
     }
@@ -1573,17 +1568,13 @@ impl Credit {
     ///
     /// Dial down to `0` to disable the ratio check on draws and withdrawals.
     ///
-    /// # Errors
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed.
-    /// Set the minimum collateral ratio required for borrowing (admin only).
-    ///
     /// # Arguments
     /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
-    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
         collateral_admin::set_min_collateral_ratio_bps(&env, ratio_bps);
     }
@@ -1644,42 +1635,31 @@ impl Credit {
     /// | [`ContractError::CollateralRatioBelowMinimum`] (35) | post-release HF < threshold |
     /// | [`ContractError::MissingLiquidityToken`] (22) | no token configured |
     /// | [`ContractError::Overflow`] (12) | arithmetic overflow |
+    /// | Auth panic | caller is not `borrower` |
     ///
     /// # Events
     ///
     /// Emits `("credit", "col_prel")` → [`crate::events::CollateralPartialReleasedEvent`]
     /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
-    /// Allow a borrower to release a portion of their collateral while keeping health factor above threshold.
-    ///
-    /// # Authorization
-    /// Requires `borrower.require_auth()`.
-    ///
-    /// # Errors
-    /// * `ContractError::InvalidAmount` if `amount <= 0`
-    /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
-    /// * `ContractError::CollateralRatioBelowMinimum` if release would violate ratio
     pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::partial_release_collateral(&env, &borrower, amount);
     }
 
     // ── Multi-collateral entrypoints ─────────────────────────────────────────
 
-    /// Admin: add a token to the collateral allowlist.
+    /// Admin: set the list of allowed collateral tokens.
     ///
-    /// The token must be a valid SAC-compatible contract address. Once listed
+    /// The tokens must be valid SAC-compatible contract addresses. Once listed
     /// borrowers can call [`deposit_collateral_token`] / [`withdraw_collateral_token`]
-    /// using this token.
-    ///
-    /// # Errors
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed.
-    /// Set the list of allowed collateral tokens (admin only).
+    /// using these tokens.
     ///
     /// # Arguments
     /// * `tokens` - Vector of token addresses to allow
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
         collateral_admin::set_collateral_token_allowlist(&env, &tokens);
     }
@@ -1693,11 +1673,10 @@ impl Credit {
         crate::storage::get_collateral_token_allowlist(&env)
     }
 
-    /// Deposit a specific allowlisted collateral token from the borrower.
-    ///
-    /// Requires borrower `require_auth`. Reverts with `MissingLiquidityToken` if
-    /// `token` is not on the allowlist.
     /// Deposit a specific allowed collateral token into the contract.
+    ///
+    /// Requires borrower authentication. Reverts with `MissingLiquidityToken` if
+    /// `token` is not on the allowlist.
     ///
     /// # Authorization
     /// Requires `borrower.require_auth()`.
@@ -1706,15 +1685,15 @@ impl Credit {
     /// * `ContractError::InvalidAmount` if `amount <= 0`
     /// * `ContractError::MissingLiquidityToken` if token not allowed
     /// * `ContractError::Overflow` on arithmetic overflow
+    /// * Auth panic if caller is not `borrower`
     pub fn deposit_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::deposit_collateral_token(&env, &borrower, &token, amount);
     }
 
-    /// Withdraw a specific allowlisted collateral token to the borrower.
-    ///
-    /// Requires borrower `require_auth`. Reverts with `InsufficientCollateralBalance`
-    /// if the borrower's balance for `token` is below `amount`.
     /// Withdraw a specific allowed collateral token to the borrower.
+    ///
+    /// Requires borrower authentication. Reverts with `InsufficientCollateralBalance`
+    /// if the borrower's balance for `token` is below `amount`.
     ///
     /// # Authorization
     /// Requires `borrower.require_auth()`.
@@ -1723,6 +1702,7 @@ impl Credit {
     /// * `ContractError::InvalidAmount` if `amount <= 0`
     /// * `ContractError::MissingLiquidityToken` if token not allowed
     /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
+    /// * Auth panic if caller is not `borrower`
     pub fn withdraw_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::withdraw_collateral_token(&env, &borrower, &token, amount);
     }
