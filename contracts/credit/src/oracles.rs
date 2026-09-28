@@ -453,6 +453,212 @@ mod test {
         let val = client.get_median_value();
         assert_eq!(val, 150);
     }
+
+    // --- Proptests and Reference Implementation ---
+    use proptest::prelude::*;
+    use proptest::collection::vec as prop_vec;
+
+    /// Pure Rust reference implementation for weighted median
+    fn reference_median(reports: &[(u128, u32)]) -> Option<u128> {
+        if reports.is_empty() {
+            return None;
+        }
+        let mut total_weight = 0u64; // use u64 to avoid overflow during sum
+        let mut sorted = reports.to_vec();
+        sorted.sort_by_key(|r| r.0);
+        
+        for (_, w) in &sorted {
+            total_weight += *w as u64;
+        }
+        if total_weight == 0 {
+            return None;
+        }
+        
+        let target = (total_weight + 1) / 2; // div_ceil(2)
+        let mut cumulative = 0u64;
+        for (v, w) in sorted {
+            cumulative += w as u64;
+            if cumulative >= target {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        
+        #[test]
+        fn prop_random_inputs(
+            weights in prop_vec(1..=1_000_000u32, 1..=20),
+            values in prop_vec(1..=1_000_000_000u128, 1..=20)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+                total_weight += w;
+            }
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+        }
+
+        #[test]
+        fn prop_equal_weights(
+            values in prop_vec(1..=1_000_000_000u128, 1..=20)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = values.len();
+            let mut valid_reports = std::vec::Vec::new();
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = 100u32;
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+            }
+            
+            client.set_quorum_threshold(&(n as u32 * 100 / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+        }
+
+        #[test]
+        fn prop_single_dominant_weight(
+            mut weights in prop_vec(1..=10_000u32, 1..=10),
+            values in prop_vec(1..=1_000_000_000u128, 1..=10)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            
+            // Make the first weight dominant
+            let sum: u32 = weights.iter().skip(1).sum();
+            weights[0] = sum + 1;
+            
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+                total_weight += w;
+            }
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+            assert_eq!(contract_median, values[0]); // dominant weight dictates median
+        }
+
+        #[test]
+        fn prop_stale_reports_excluded(
+            weights in prop_vec(1..=10_000u32, 2..=10),
+            values in prop_vec(1..=1_000_000_000u128, 2..=10)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                
+                if i % 2 == 0 {
+                    env.ledger().with_mut(|li| li.timestamp = 0);
+                } else {
+                    env.ledger().with_mut(|li| li.timestamp = 2000);
+                    valid_reports.push((v, w));
+                    total_weight += w;
+                }
+                
+                client.report_value(&addr, &v);
+            }
+            
+            env.ledger().with_mut(|li| li.timestamp = 2500);
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            if valid_reports.is_empty() {
+                assert!(client.try_get_median_value().is_err());
+            } else {
+                let contract_median = client.get_median_value();
+                let ref_median = reference_median(&valid_reports).unwrap();
+                assert_eq!(contract_median, ref_median);
+            }
+        }
+    }
+
+    #[test]
+    fn test_removed_oracle_ignored() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _) = setup_test(&env);
+        
+        let o1 = Address::generate(&env);
+        let o2 = Address::generate(&env);
+        
+        client.add_oracle(&o1, &100);
+        client.add_oracle(&o2, &200);
+        
+        client.report_value(&o1, &10);
+        client.report_value(&o2, &50);
+        
+        client.set_quorum_threshold(&100);
+        client.set_reporting_window(&1000);
+        
+        assert_eq!(client.get_median_value(), 50);
+        
+        client.remove_oracle(&o2);
+        
+        assert_eq!(client.get_median_value(), 10);
+    }
 }
 
 // # Multi-oracle quorum price resolution
