@@ -151,18 +151,21 @@ use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
-    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
+    publish_bounty_withdrawn_event, publish_borrow_lifecycle_event,
+    publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event,
+    publish_credit_line_event, publish_draw_reversed_event, publish_drawn_event,
+    publish_interest_accrued_event, publish_oracle_config_set_event,
     publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
     publish_oracle_quorum_price_set_event, publish_paused_event,
     publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
-    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    publish_rate_formula_config_event, publish_repayment_event,
+    publish_token_rescued_event, publish_treasury_withdrawal_executed,
+    publish_treasury_withdrawal_proposed, publish_treasury_withdrawn_event,
+    BountyWithdrawnEvent, BorrowLifecycleEvent, BorrowLifecyclePhase,
+    ContractUpgradedEvent, CreditLineEvent, DrawReversedEvent, DrawnEvent,
+    InterestAccruedEvent, RepaymentEvent, TreasuryWithdrawalExecutedEvent,
+    TreasuryWithdrawalProposedEvent, TreasuryWithdrawnEvent,
 };
 use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
@@ -285,10 +288,6 @@ impl Credit {
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
-    }
-
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -1376,6 +1375,14 @@ impl Credit {
         token_client.transfer(&contract_address, &bounty_addr, &amount);
 
         crate::storage::clear_bounty_balance(&env);
+        publish_bounty_withdrawn_event(
+            &env,
+            BountyWithdrawnEvent {
+                recipient: bounty_addr,
+                amount,
+                executor: admin,
+            },
+        );
     }
 
     /// Withdraw accumulated treasury balance to configured treasury address (admin only).
@@ -1404,6 +1411,14 @@ impl Credit {
         token_client.transfer(&contract_address, &treasury_addr, &amount);
 
         crate::storage::clear_treasury_balance(&env);
+        publish_treasury_withdrawn_event(
+            &env,
+            TreasuryWithdrawnEvent {
+                recipient: treasury_addr,
+                amount,
+                executor: admin,
+            },
+        );
     }
 
     /// Get the current storage schema version.
