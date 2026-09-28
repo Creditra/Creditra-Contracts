@@ -1027,8 +1027,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::DrawAuditTrail {
             credit_line_id,
             draw_id,
+            start_after,
+            limit,
         } => {
-            let resp = views::query_draw_audit_trail(deps, credit_line_id, draw_id)
+            let resp = views::query_draw_audit_trail(deps, credit_line_id, draw_id, start_after, limit)
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
             to_json_binary(&resp)
         }
