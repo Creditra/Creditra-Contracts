@@ -91,12 +91,20 @@ Read in this order:
 5. [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](../CIRCUIT_BREAKER_IMPLEMENTATION.md)
    — pause / unpause semantics.
 
+For oracle behaviour and settlement gating:
+
+- [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md) — **canonical reference for
+  all three oracle mechanisms** (single-price circuit breaker, quorum-of-K, and the
+  weighted-median registry): precedence table, staleness rules per mechanism, and
+  failure codes. Start here.
+
 For the off-chain orchestrator that handles default auctions:
 
 1. [`docs/default-liquidation-auction-hook.md`](./default-liquidation-auction-hook.md)
    — handoff protocol.
 2. [`docs/default-oracle.md`](./default-oracle.md) — staged default-signal
-   oracle design.
+   oracle design (unimplemented; see
+   [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md) for the price oracles).
 
 ---
 
