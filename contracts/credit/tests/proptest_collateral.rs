@@ -298,10 +298,10 @@ proptest! {
         // required_collateral = ceil(utilized * 15_000 / 10_000)
         // post_balance = collateral - withdraw
         // Allowed: post_balance >= required
-        let required = draw
-            .checked_mul(15_000)
-            .unwrap_or(i128::MAX)
-            .div_ceil(10_000);
+        let required = {
+            let n = draw.checked_mul(15_000).unwrap_or(i128::MAX);
+            n / 10_000 + if n % 10_000 == 0 { 0 } else { 1 }
+        };
 
         let post_balance = collateral.saturating_sub(withdraw);
 
@@ -418,8 +418,8 @@ fn overflow_deposit_panics_not_wraps() {
     // verifying that normal deposits within range always use checked_add
     // correctly: the tracked balance from checked_add must match.
     let balance = client.get_collateral(&borrower);
-    prop_assert_eq!(balance, 1_000_000);
-    prop_assert!(balance >= 0);
+    assert_eq!(balance, 1_000_000);
+    assert!(balance >= 0);
 }
 
 // ── Invariant 8: Random operation sequences ───────────────────────────────────
@@ -474,8 +474,8 @@ proptest! {
 
                         prop_assert_eq!(
                             after, tracked_balance,
-                            "{label}: balance mismatch after deposit: got {}, tracked {}",
-                            after, tracked_balance,
+                            "{}; balance mismatch after deposit: got {}, tracked {}",
+                            label, after, tracked_balance,
                         );
                     }
                     // If overflow panicked, that's fine — the invariant is preserved.
@@ -492,8 +492,8 @@ proptest! {
 
                         prop_assert_eq!(
                             after, tracked_balance,
-                            "{label}: balance mismatch after withdraw: got {}, tracked {}",
-                            after, tracked_balance,
+                            "{}; balance mismatch after withdraw: got {}, tracked {}",
+                            label, after, tracked_balance,
                         );
                     }
                     // If panicked (insufficient balance), balance is unchanged.
@@ -656,7 +656,7 @@ mod edge_cases {
         assert_eq!(client.get_collateral(&borrower), large - half);
 
         // Withdraw the remaining half
-        client.withdraw_collateral(&borrower, &large - half);
+        client.withdraw_collateral(&borrower, &(large - half));
         assert_eq!(client.get_collateral(&borrower), 0);
     }
 
