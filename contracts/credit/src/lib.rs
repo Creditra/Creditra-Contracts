@@ -287,10 +287,6 @@ impl Credit {
         (1, 0, 0)
     }
 
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
-    }
-
     pub fn get_contract_version() -> (u32, u32, u32) {
         CONTRACT_API_VERSION
     }
@@ -906,15 +902,17 @@ impl Credit {
         storage_get_utilization_cap_bps(&env, &borrower)
     }
 
-    /// Commit to a VRF output for a borrower's credit score derivation (admin only).
+    /// Publish an admin score pre-commitment for a borrower (admin only).
     ///
-    /// This function stores a hash of the VRF output, creating a binding commitment
-    /// that prevents ex-post manipulation of the credit score. The commitment must
-    /// be set before `update_risk_parameters` can be called with a new score.
+    /// Stores a 32-byte hash; while it exists, `update_risk_parameters` accepts
+    /// only a score equal to `sum(bytes) % 101` of that hash. The admin supplies
+    /// both the hash and the score, and **no VRF proof is verified** — this is a
+    /// pre-commitment / change-detection mechanism, not proof of randomness.
+    /// See the `scoring` module docs for the full trust assumptions and caveats.
     ///
     /// # Parameters
-    /// - `borrower`: Address of the borrower whose score will be derived from this VRF.
-    /// - `commitment_hash`: 256-bit hash of the VRF output.
+    /// - `borrower`: Address of the borrower whose score is being pre-committed.
+    /// - `commitment_hash`: 32-byte value the revealed score must reduce to.
     ///
     /// # Errors
     /// - Reverts if protocol is paused.
@@ -924,10 +922,12 @@ impl Credit {
         scoring::commit_vrf_output(env, borrower, commitment_hash)
     }
 
-    /// Clear the VRF commitment for a borrower (admin only).
+    /// Clear a borrower's score pre-commitment (admin only).
     ///
-    /// This function removes the VRF commitment, allowing a new commitment to be
-    /// made. This is intended for cases where the VRF process needs to be restarted.
+    /// After clearing, `update_risk_parameters` no longer checks the score
+    /// against a published hash until a new commitment is made. Because this is
+    /// admin-only and resets the check, routine use would defeat the
+    /// change-detection property — see the `scoring` module docs.
     ///
     /// # Parameters
     /// - `borrower`: Address of the borrower.
@@ -939,13 +939,13 @@ impl Credit {
         scoring::clear_vrf_commitment(env, borrower)
     }
 
-    /// Get the VRF commitment for a borrower (if it exists).
+    /// Get the score pre-commitment for a borrower, if one exists.
     ///
     /// # Parameters
     /// - `borrower`: Address of the borrower.
     ///
     /// # Returns
-    /// The VRF commitment data, or `None` if no commitment exists.
+    /// The pre-commitment data, or `None` if no commitment exists.
     pub fn get_vrf_commitment(env: Env, borrower: Address) -> Option<scoring::VrfCommitment> {
         scoring::get_vrf_commitment(&env, &borrower)
     }

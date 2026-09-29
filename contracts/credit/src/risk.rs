@@ -246,7 +246,11 @@ pub fn update_risk_parameters(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
+    // Admin auth is enforced by the `lib.rs` wrapper (`require_admin_auth`).
+    // Re-checking it here would issue a second `require_auth` for the same admin
+    // address inside one invocation, which the Soroban host rejects with
+    // `Error(Auth, ExistingValue)` ("frame is already authorized"). This matches
+    // the single-auth convention documented on `lifecycle::suspend_credit_line`.
     assert_risk_admin_cooldown_elapsed(&env);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
@@ -262,16 +266,18 @@ pub fn update_risk_parameters(
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
-    // Verify VRF commitment if score is changing
+    // Admin score pre-commitment check, applied only when the score changes.
+    // This compares the score against `sum(hash bytes) % 101` of the hash the
+    // admin previously committed. It verifies no VRF proof and does not
+    // authenticate the stored bytes as a VRF output — see `crate::scoring` for
+    // the trust assumptions.
     if risk_score != credit_line.risk_score {
         if let Some(_commitment) = crate::scoring::get_vrf_commitment(&env, &borrower) {
-            // VRF commitment exists - verify the score matches
             if !crate::scoring::verify_vrf_commitment(&env, &borrower, risk_score) {
                 env.panic_with_error(ContractError::Unauthorized);
             }
         }
-        // If no commitment exists, allow the update for backward compatibility
-        // (existing credit lines without VRF commitments)
+        // No commitment → no check (backward compatibility for existing lines).
     }
 
     // Validate credit limit is within configured bounds
