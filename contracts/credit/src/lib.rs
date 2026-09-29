@@ -738,14 +738,7 @@ impl Credit {
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
 
         let _timestamp = env.ledger().timestamp();
-        publish_interest_accrued_event(
-            &env,
-            InterestAccruedEvent {
-                borrower: borrower.clone(),
-                accrued_amount: 0,
-                new_utilized_amount: new_utilized,
-            },
-        );
+
         publish_repayment_event(
             &env,
             RepaymentEvent {
