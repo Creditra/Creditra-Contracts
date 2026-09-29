@@ -94,5 +94,23 @@
     "cpu_instructions": 189764,
     "memory_bytes": 32696,
     "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "draw_credit_n10",
+    "cpu_instructions": 540000,
+    "memory_bytes": 90000,
+    "tolerance_pct": 10.0
+  },
+  {
+    "entrypoint": "draw_credit_n100",
+    "cpu_instructions": 560000,
+    "memory_bytes": 95000,
+    "tolerance_pct": 10.0
+  },
+  {
+    "entrypoint": "draw_credit_n500",
+    "cpu_instructions": 600000,
+    "memory_bytes": 105000,
+    "tolerance_pct": 10.0
   }
 ]
