@@ -492,18 +492,14 @@ impl Credit {
             env.panic_with_error(ContractError::OverLimit);
         }
 
-        // Enforce minimum collateral ratio
-        let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15000);
+        // Enforce minimum collateral ratio using ceiling rounding so that draw,
+        // withdraw, partial-release, and health-factor all share the same
+        // boundary. See `crate::collateral::required_collateral` for details.
+        let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15_000);
         let current_collateral = crate::storage::get_collateral_balance(&env, &borrower);
-        let required_collateral = (updated_utilized as i128)
-            .checked_mul(min_ratio_bps as i128)
-            .unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::Overflow)
-            })
-            / 10_000;
+        let required_col = crate::collateral::required_collateral(&env, updated_utilized, min_ratio_bps);
 
-        if current_collateral < required_collateral {
+        if current_collateral < required_col {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
         }

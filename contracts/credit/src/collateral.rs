@@ -55,6 +55,33 @@ use crate::storage::{
 use crate::types::{CollateralEventKind, ContractError};
 use soroban_sdk::{token, Address, Env};
 
+/// Compute the minimum collateral required for a given `utilized` amount and
+/// `ratio_bps` configuration, using **ceiling** (conservative) division.
+///
+/// # Formula
+///
+/// ```text
+/// required = ceil(utilized * ratio_bps / 10_000)
+/// ```
+///
+/// Ceiling rounding is conservative for the protocol: it ensures a borrower
+/// cannot be left in a state where draw succeeds but any non-zero withdrawal
+/// immediately fails. All call sites — `draw_credit`, `withdraw_collateral`,
+/// `partial_release_collateral`, and `get_health_factor` — must use this
+/// function to guarantee consistent boundary behaviour.
+///
+/// # Panics
+///
+/// Panics with [`ContractError::Overflow`] if the intermediate multiplication
+/// `utilized * ratio_bps` overflows `i128`.
+pub fn required_collateral(env: &Env, utilized: i128, ratio_bps: u32) -> i128 {
+    let numerator = utilized
+        .checked_mul(ratio_bps as i128)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    // ceil(numerator / 10_000)
+    numerator / 10_000_i128 + if numerator % 10_000_i128 == 0 { 0 } else { 1 }
+}
+
 /// Deposit collateral tokens from the borrower into the contract.
 /// Requires borrower authentication.
 pub fn deposit_collateral(env: &Env, borrower: &Address, amount: i128) {
@@ -126,15 +153,10 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
     // If no credit line exists, they can withdraw everything.
     if let Some(credit_line) = get_credit_line(env, borrower) {
         if credit_line.utilized_amount > 0 {
-            // Compute required collateral after withdrawal
-            let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15000);
-            // Round up so a dust-sized utilization cannot leave the credit line
-            // below the configured minimum collateral ratio.
-            let required_numerator = (credit_line.utilized_amount as i128)
-                .checked_mul(min_ratio_bps as i128)
-                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
-            let required = required_numerator / 10_000
-                + if required_numerator % 10_000 == 0 { 0 } else { 1 };
+            let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+            // Use the shared helper so draw, withdraw, partial-release, and
+            // health-factor all apply identical ceiling rounding.
+            let required = required_collateral(env, credit_line.utilized_amount, min_ratio_bps);
 
             if post_balance < required {
                 env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
@@ -256,14 +278,9 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
     if utilized_amount > 0 {
         let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
 
-        // required = ceil(utilized * min_ratio_bps / 10_000)
-        // Round up so a dust-sized utilization cannot leave the credit line
-        // below the configured minimum collateral ratio.
-        let required_numerator = utilized_amount
-            .checked_mul(min_ratio_bps as i128)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
-        let required = required_numerator / 10_000_i128
-            + if required_numerator % 10_000_i128 == 0 { 0 } else { 1 };
+        // Use the shared helper so draw, withdraw, partial-release, and
+        // health-factor all apply identical ceiling rounding.
+        let required = required_collateral(env, utilized_amount, min_ratio_bps);
 
         if post_balance < required {
             env.panic_with_error(ContractError::CollateralRatioBelowMinimum);

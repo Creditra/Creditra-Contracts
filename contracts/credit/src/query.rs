@@ -140,34 +140,35 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     // default of 15_000 bps (150 %) applies.
     let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15_000);
 
-    // Convert to u128 for overflow-safe multiplication.
+    // When min_ratio_bps is 0 the position is infinitely healthy (no ratio
+    // requirement).
+    if min_ratio_bps == 0 {
+        return u32::MAX;
+    }
+
+    // Use the same ceiling-based required_collateral that draw, withdraw, and
+    // partial-release all use.  This guarantees:
+    //   health_bps == 10_000  ⟺  collateral == required_collateral
+    //   health_bps  < 10_000  ⟺  collateral  < required_collateral (liquidatable)
+    //   health_bps  > 10_000  ⟺  collateral  > required_collateral (healthy)
+    let required =
+        crate::collateral::required_collateral(&env, utilized, min_ratio_bps);
+
+    if required == 0 {
+        // Pathological: utilized > 0 but ceiling rounds to 0 (impossible with
+        // non-zero ratio_bps, but guard against it defensively).
+        return u32::MAX;
+    }
+
+    // health_bps = collateral * 10_000 / required
+    // Convert to u128 to avoid overflow on large collateral values.
     let collateral_u128 = collateral.max(0) as u128;
-    let utilized_u128 = utilized.max(0) as u128;
-    let min_ratio_u128 = min_ratio_bps as u128;
+    let required_u128 = required.max(0) as u128;
 
-    // health_bps = collateral * 100_000_000 / (utilized * min_ratio)
-    //
-    // The intermediate numerator is `collateral * 10_000` scaled up by another
-    // `10_000` to preserve precision before the final division:
-    //
-    //   collateral * 10_000                 collateral * 100_000_000
-    //   ───────────────────────    =    ─────────────────────────────
-    //   utilized * min_ratio / 10_000        utilized * min_ratio
-    let numerator = collateral_u128
-        .checked_mul(100_000_000)
-        .unwrap_or(u128::MAX);
-
-    let denominator = utilized_u128
-        .checked_mul(min_ratio_u128)
-        .unwrap_or(u128::MAX);
-
-    // If the denominator is 0 (due to min_ratio_bps = 0), the position is infinitely healthy.
-    // We also guard against division-by-zero.
-    let health_bps = if denominator == 0 {
-        u128::from(u32::MAX)
-    } else {
-        numerator / denominator
-    };
+    let health_bps = collateral_u128
+        .checked_mul(10_000)
+        .unwrap_or(u128::MAX)
+        / required_u128;
 
     // Clamp to u32 range.  Values beyond u32::MAX are theoretically possible
     // with extreme collateral-to-debt ratios but serve the same keeper

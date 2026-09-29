@@ -740,3 +740,193 @@ mod edge_cases {
         assert_eq!(client.get_collateral(&borrower), 7_000);
     }
 }
+
+// ── Issue #1279: Collateral rounding alignment ─────────────────────────────────
+//
+// These tests verify that draw_credit, withdraw_collateral,
+// partial_release_collateral, and get_health_factor all agree on the required
+// collateral threshold and use ceiling (conservative) rounding.
+
+/// Helper: compute ceil(utilized * ratio_bps / 10_000) — the same formula
+/// used by `crate::collateral::required_collateral`.
+fn ceil_required(utilized: i128, ratio_bps: u32) -> i128 {
+    let n = utilized * ratio_bps as i128;
+    n / 10_000 + if n % 10_000 == 0 { 0 } else { 1 }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 512, .. ProptestConfig::default() })]
+
+    /// A draw that lands exactly at the ceiling boundary must be accepted, and
+    /// a subsequent zero-withdraw (amount = 1) must NOT be rejected solely
+    /// because of rounding — i.e. the same rounding rule applies at both sites.
+    ///
+    /// Specifically: if `collateral == ceil(utilized * ratio / 10_000)` then
+    /// `withdraw_collateral(1)` must fail with InsufficientCollateral (ratio
+    /// breach), not succeed — confirming draw and withdraw share the same
+    /// boundary and we cannot end up in a state where withdraw falsely passes.
+    #[test]
+    fn draw_boundary_withdraw_consistent(
+        (utilized, ratio_bps) in (
+            1_i128..=500_000_i128,
+            1_u32..=30_000_u32,
+        )
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(creditra_credit::Credit, ());
+        let client = creditra_credit::CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&token);
+
+        // Set custom ratio
+        client.set_min_collateral_ratio_bps(&ratio_bps);
+
+        // Credit limit big enough for the draw.
+        let credit_limit = utilized + 1_000_000;
+        client.open_credit_line(&borrower, &credit_limit, &500_u32, &50_u32);
+
+        // Deposit exactly the ceiling-required collateral so the draw lands at
+        // the boundary.
+        let required = ceil_required(utilized, ratio_bps);
+        let mint_amount = required + utilized + 100_000;
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&borrower, &mint_amount);
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&token, &(utilized + 100_000));
+
+        if required > 0 {
+            client.deposit_collateral(&borrower, &required);
+        }
+
+        // Draw must succeed (we have exactly the required collateral).
+        client.draw_credit(&borrower, &utilized);
+
+        // Now try to withdraw 1 unit — this should FAIL (ratio would be breached)
+        // because post_balance = required - 1 < required.
+        let withdraw_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.withdraw_collateral(&borrower, &1_i128);
+        }));
+        prop_assert!(
+            withdraw_result.is_err(),
+            "withdraw(1) after draw at boundary should fail (ratio breach), \
+             but succeeded. utilized={}, ratio_bps={}, required={}",
+            utilized, ratio_bps, required,
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 512, .. ProptestConfig::default() })]
+
+    /// When `collateral == ceil(utilized * ratio_bps / 10_000)`, i.e. the
+    /// borrower is exactly at the minimum, `get_health_factor` must return
+    /// exactly `10_000` — matching the draw acceptance threshold.
+    #[test]
+    fn health_factor_exactly_10000_at_boundary(
+        (utilized, ratio_bps) in (
+            1_i128..=500_000_i128,
+            1_u32..=30_000_u32,
+        )
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(creditra_credit::Credit, ());
+        let client = creditra_credit::CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&token);
+
+        client.set_min_collateral_ratio_bps(&ratio_bps);
+
+        let credit_limit = utilized + 1_000_000;
+        client.open_credit_line(&borrower, &credit_limit, &500_u32, &50_u32);
+
+        let required = ceil_required(utilized, ratio_bps);
+        let mint_amount = required + utilized + 100_000;
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&borrower, &mint_amount);
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&token, &(utilized + 100_000));
+
+        if required > 0 {
+            client.deposit_collateral(&borrower, &required);
+        }
+
+        client.draw_credit(&borrower, &utilized);
+
+        // With collateral == ceil(utilized * ratio_bps / 10_000), the health
+        // factor must be exactly 10_000 (at the minimum threshold).
+        let hf = client.get_health_factor(&borrower);
+        prop_assert_eq!(
+            hf,
+            10_000_u32,
+            "health_factor expected 10_000 at boundary but got {}. \
+             utilized={}, ratio_bps={}, required={}",
+            hf, utilized, ratio_bps, required,
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 512, .. ProptestConfig::default() })]
+
+    /// For any (utilized, ratio_bps), `partial_release_collateral` must
+    /// enforce the same required threshold as `withdraw_collateral`.
+    /// Depositing exactly `required`, drawing `utilized`, then calling
+    /// `partial_release_collateral(1)` must fail.
+    #[test]
+    fn partial_release_boundary_consistent_with_withdraw(
+        (utilized, ratio_bps) in (
+            1_i128..=500_000_i128,
+            1_u32..=30_000_u32,
+        )
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(creditra_credit::Credit, ());
+        let client = creditra_credit::CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        client.set_liquidity_source(&token);
+
+        client.set_min_collateral_ratio_bps(&ratio_bps);
+
+        let credit_limit = utilized + 1_000_000;
+        client.open_credit_line(&borrower, &credit_limit, &500_u32, &50_u32);
+
+        let required = ceil_required(utilized, ratio_bps);
+        let mint_amount = required + utilized + 100_000;
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&borrower, &mint_amount);
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&token, &(utilized + 100_000));
+
+        if required > 0 {
+            client.deposit_collateral(&borrower, &required);
+        }
+        client.draw_credit(&borrower, &utilized);
+
+        // partial_release(1) must also fail at this boundary.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.partial_release_collateral(&borrower, &1_i128);
+        }));
+        prop_assert!(
+            result.is_err(),
+            "partial_release(1) at boundary should fail, but succeeded. \
+             utilized={}, ratio_bps={}, required={}",
+            utilized, ratio_bps, required,
+        );
+    }
+}
+
