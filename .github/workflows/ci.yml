@@ -3,8 +3,20 @@ name: CI
 on:
   push:
     branches: [main, master, develop]
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'contracts/credit/src/math_utils.rs'
+      - 'contracts/credit/proofs/**'
+      - 'gateway-contract/contracts/auction_contract/src/curves.rs'
+      - 'gateway-contract/contracts/auction_contract/proofs/**'
   pull_request:
     branches: [main, master, develop]
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'contracts/credit/src/math_utils.rs'
+      - 'contracts/credit/proofs/**'
+      - 'gateway-contract/contracts/auction_contract/src/curves.rs'
+      - 'gateway-contract/contracts/auction_contract/proofs/**'
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
@@ -55,7 +67,7 @@ jobs:
       # lock files, or the workflow itself drift from the reproducible-build
       # policy (e.g. a stray rustup override or an uncommitted Cargo.lock).
       - name: Verify reproducible-build policy
-        run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
+        run: scripts/check-toolchain.sh --verify-active --lock Cargo.lock
 
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
@@ -77,23 +89,23 @@ jobs:
           rustup target list --installed
 
       - name: Check formatting
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo fmt -- --check
 
       - name: Run clippy
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo clippy $CARGOFLAGS --all-targets -- -D warnings
 
       - name: Run tests
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo test $CARGOFLAGS --no-fail-fast
 
       - name: Build native release
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo build $CARGOFLAGS --release
 
       - name: Build WASM release
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         env:
           RUSTFLAGS: -C link-arg=--allow-undefined
         # Build only the library for the wasm target so host-side binaries
@@ -108,15 +120,37 @@ jobs:
       - name: Verify WASM artifact
         env:
           THRESHOLD_BYTES: "614400"
-          WASM_DIR: contracts/creditra-credit/target/wasm32-unknown-unknown/release
+          WASM_DIR: contracts/credit/target/wasm32-unknown-unknown/release
         run: scripts/check-wasm-size.sh --check-only
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: creditra-credit-wasm
-          path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          path: contracts/credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
+
+  kani:
+    name: Kani formal proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Kani verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked kani-verifier
+
+      - name: Run credit prorate proof harnesses
+        working-directory: contracts/credit
+        run: cargo kani -p creditra-credit
+
+      - name: Run auction Dutch-price proof harnesses
+        working-directory: gateway-contract/contracts/auction_contract
+        run: cargo kani -p gateway-auction
 
   fuzz:
     name: Fuzz nightly

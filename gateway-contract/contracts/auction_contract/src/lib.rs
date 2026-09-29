@@ -1,6 +1,12 @@
 #![cfg_attr(not(test), no_std)]
 
 mod auth;
+/// Kani proof harnesses for Dutch-auction pricing properties.
+/// Compiled only under `cfg(kani)`; invisible to normal builds and tests.
+/// Run with `cargo kani -p gateway-auction`.
+#[cfg(kani)]
+#[path = "../proofs/dutch_price.rs"]
+mod dutch_price_proofs;
 pub mod curves;
 mod errors;
 mod events;
