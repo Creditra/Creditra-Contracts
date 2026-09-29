@@ -213,10 +213,7 @@ addressed before mainnet.
    Deployments should use a multisig contract as that address, but the
    protocol does not enforce that.
 
-5. **Year-length mismatch.** `accrual::SECONDS_PER_YEAR = 31_536_000` (365 d)
-   is dead code; the live accrual goes through `math_utils::SECONDS_PER_YEAR =
-   31_557_600` (Julian, 365.25 d). The dead constant should be removed in a
-   follow-up to avoid reader confusion.
+5. **Year-length constant unified.** All accrual math uses `math_utils::SECONDS_PER_YEAR = 31_557_600` (Julian, 365.25 d). The duplicate 365-day constant in `accrual.rs` has been removed (issue #1303).
 
 6. **Pre-existing build failures.** A baseline `cargo check --workspace`
    reports 65 errors at the documentation cutoff, all in

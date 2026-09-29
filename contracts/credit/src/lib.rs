@@ -197,9 +197,6 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 
 #[allow(dead_code)]
-const SECONDS_PER_YEAR: u64 = 31_536_000;
-
-#[allow(dead_code)]
 const SCHEMA_VERSION: u32 = 1;
 
 /// Maximum borrowers that can be blocked in a single `bulk_block_borrowers` call.
@@ -281,6 +278,10 @@ pub struct Credit;
 impl Credit {
     pub fn init(env: Env, admin: Address) {
         config::init(env, admin)
+    }
+
+    pub fn get_version() -> (u32, u32, u32) {
+        (1, 0, 0)
     }
 
     pub fn get_contract_version() -> (u32, u32, u32) {
@@ -730,14 +731,7 @@ impl Credit {
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
 
         let _timestamp = env.ledger().timestamp();
-        publish_interest_accrued_event(
-            &env,
-            InterestAccruedEvent {
-                borrower: borrower.clone(),
-                accrued_amount: 0,
-                new_utilized_amount: new_utilized,
-            },
-        );
+
         publish_repayment_event(
             &env,
             RepaymentEvent {
@@ -1937,40 +1931,51 @@ impl Credit {
         set_reentrancy_guard(&env);
 
         // Oracle price-feed circuit breaker: validate price before settlement.
-        if let Some(cfg) = crate::storage::get_oracle_config(&env) {
-            let price = oracle_price.unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::OraclePriceInvalid)
-            });
-
-            if price <= 0 {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::OraclePriceInvalid);
-            }
-
-            let now = env.ledger().timestamp();
-
-            if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
-                let age = now.saturating_sub(last_ts);
-                if age > cfg.max_age_seconds {
+        //
+        // Quorum mode takes precedence over single-oracle mode: when an
+        // `OracleQuorumConfig` is set, the stored quorum price is authoritative
+        // and the caller-supplied `oracle_price` is ignored — `oracle_validation`
+        // enforces that downstream. Running this single-oracle block in quorum
+        // mode would reject the settlement with `OraclePriceInvalid` (#36)
+        // whenever no caller price is supplied, and would let a caller-supplied
+        // price overwrite the quorum price when one is.
+        if crate::storage::get_oracle_quorum_config(&env).is_none() {
+            if let Some(cfg) = crate::storage::get_oracle_config(&env) {
+                let price = oracle_price.unwrap_or_else(|| {
                     clear_reentrancy_guard(&env);
-                    env.panic_with_error(ContractError::OraclePriceStale);
+                    env.panic_with_error(ContractError::OraclePriceInvalid)
+                });
+
+                if price <= 0 {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::OraclePriceInvalid);
                 }
 
-                if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
-                    let deviation = compute_deviation_bps(price, last_price).unwrap_or_else(|| {
+                let now = env.ledger().timestamp();
+
+                if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
+                    let age = now.saturating_sub(last_ts);
+                    if age > cfg.max_age_seconds {
                         clear_reentrancy_guard(&env);
-                        env.panic_with_error(ContractError::OraclePriceInvalid)
-                    });
-                    if deviation > cfg.max_deviation_bps {
-                        clear_reentrancy_guard(&env);
-                        env.panic_with_error(ContractError::OraclePriceDeviation);
+                        env.panic_with_error(ContractError::OraclePriceStale);
+                    }
+
+                    if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
+                        let deviation =
+                            compute_deviation_bps(price, last_price).unwrap_or_else(|| {
+                                clear_reentrancy_guard(&env);
+                                env.panic_with_error(ContractError::OraclePriceInvalid)
+                            });
+                        if deviation > cfg.max_deviation_bps {
+                            clear_reentrancy_guard(&env);
+                            env.panic_with_error(ContractError::OraclePriceDeviation);
+                        }
                     }
                 }
-            }
 
-            crate::storage::set_oracle_last_price(&env, price, now);
-            publish_oracle_price_accepted_event(&env, price, now);
+                crate::storage::set_oracle_last_price(&env, price, now);
+                publish_oracle_price_accepted_event(&env, price, now);
+            }
         }
 
         // Cross-contract auction settlement hook (when configured).
@@ -2243,6 +2248,14 @@ impl Credit {
 
         let canonical_price = oracles::resolve_quorum_price(&env, &prices, &qcfg);
         let now = env.ledger().timestamp();
+        // Quorum-mode settlement reads the resolved price from its own keys
+        // (`DataKey::OracleQuorumPrice` / `OracleQuorumPriceTs`), so the median
+        // must be persisted there. Storing it under the single-oracle key
+        // instead left quorum mode with no price at all, and every settlement
+        // reverted `OracleQuorumNotMet` (#50) regardless of age. The
+        // single-oracle key is still written: it is the "last accepted price"
+        // read by the deviation circuit breaker and by collateral release.
+        crate::storage::set_oracle_quorum_price(&env, canonical_price, now);
         crate::storage::set_oracle_last_price(&env, canonical_price, now);
         publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
@@ -4398,7 +4411,7 @@ mod test_mock_liquidity_token {
 
         // Advance ledger timestamp by exactly one year
         env.ledger()
-            .set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
+            .set_timestamp(checkpoint + crate::math_utils::SECONDS_PER_YEAR as u64);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
