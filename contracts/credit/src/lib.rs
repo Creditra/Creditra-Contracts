@@ -197,9 +197,6 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
 
 #[allow(dead_code)]
-const SECONDS_PER_YEAR: u64 = 31_536_000;
-
-#[allow(dead_code)]
 const SCHEMA_VERSION: u32 = 1;
 
 /// Maximum borrowers that can be blocked in a single `bulk_block_borrowers` call.
@@ -4399,7 +4396,7 @@ mod test_mock_liquidity_token {
 
         // Advance ledger timestamp by exactly one year
         env.ledger()
-            .set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
+            .set_timestamp(checkpoint + crate::math_utils::SECONDS_PER_YEAR as u64);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);

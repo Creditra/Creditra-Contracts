@@ -68,8 +68,7 @@ entrypoints are inside a single `#[contractimpl]` block at
 | `LEDGER_BUMP_AMOUNT`             | `3_110_400`       | `storage.rs:122`     | ~6 months at 5s/ledger        |
 | `LEDGER_BUMP_THRESHOLD`          | `1_555_200`       | `storage.rs:123`     | ~3 months bump trigger        |
 | `INSTANCE_BUMP_AMOUNT/THRESHOLD` | mirror of above   | `storage.rs:126-127` |                               |
-| `SECONDS_PER_YEAR` (accrual)     | `31_536_000`      | `accrual.rs:60`      | dead-code, legacy             |
-| `SECONDS_PER_YEAR` (math)        | `31_557_600`      | `math_utils.rs:60`   | Julian — live                 |
+| `SECONDS_PER_YEAR`               | `31_557_600`      | `math_utils.rs:60`   | Julian — live                 |
 | `BPS_DENOMINATOR`                | `10_000`          | `math_utils.rs:57`   |                               |
 | `BPS_YEAR_DENOM`                 | `315_576_000_000` | `math_utils.rs:66`   | precomputed                   |
 
