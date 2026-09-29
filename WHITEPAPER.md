@@ -634,7 +634,7 @@ reader who wants to verify, the load-bearing files are:
 - `docs/state-machine.md`, `docs/interest-accrual.md`,
   `docs/risk-based-rate-formula.md`, `docs/threat-model.md`,
   `docs/default-liquidation-auction-hook.md`, `docs/storage-layout.md`,
-  `docs/contract-errors.md`, `docs/indexer-integration.md`
+  `docs/errors.md`, `docs/indexer-integration.md`
 
 The new long-form companion documents are:
 

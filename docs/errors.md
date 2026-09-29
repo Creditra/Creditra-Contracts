@@ -1,96 +1,185 @@
-# ContractError Reference
+# `ContractError` Reference — Canonical
 
-**Version: 2026-04-24**  
-**Source of truth: `contracts/credit/src/types.rs`**
+**Source of truth:** [`ContractError`](../contracts/credit/src/types.rs) in
+`contracts/credit/src/types.rs`.
+**Verify the tables against it:** `python3 scripts/list_contract_errors.py --check`
 
-This document is the canonical reference for all `ContractError` discriminants in the
-Creditra Credit contract. Integrators (TypeScript SDK, Rust SDK, indexers) must use
-these integer codes to identify failure reasons.
+This is the **single canonical error reference** for the `creditra-credit`
+Soroban contract. Every other error document in this repository is a redirect
+to this page. Integrators (TypeScript SDK, Rust SDK, indexers) match on the
+integer codes published here.
+
+If you find a code here that the contract does not emit, or an emitted code that
+is missing, it is a bug in this page — fix it here, not in a copy.
+
+---
+
+## Scope
+
+This page covers the credit contract's `ContractError` only. Errors from other
+crates have their own canonical pages:
+
+| Enum | Canonical page |
+|------|----------------|
+| `ContractError` (credit) | this page |
+| `CollateralError` (collateral) | [`docs/errors/collateral.md`](./errors/collateral.md) |
+| `FreezeError` (freeze) | [`docs/errors/freeze.md`](./errors/freeze.md) |
+
+The V1 → V2 client-side error-encoding migration of the CosmWasm
+`creditra-credit` package is a separate concern with its own log:
+[`docs/ERROR_MIGRATION.md`](./ERROR_MIGRATION.md).
 
 ---
 
 ## Stability Guarantee
 
-Discriminants are **permanent and immutable** once assigned. The contract is deployed
-on Stellar Soroban and cannot be upgraded without a migration. Changing or reordering
-a discriminant would silently break all SDK clients that match on integer codes.
+Discriminants are **permanent and immutable** once assigned. The contract is
+deployed on Stellar Soroban and cannot be upgraded without a migration. Changing
+or reordering a discriminant would silently break all SDK clients that match on
+integer codes.
 
-Rules enforced by CI (`tests/error_discriminants.rs`):
+Rules asserted by `contracts/credit/tests/error_discriminants.rs`:
 
 - Every variant has an explicit `= N` assignment in `types.rs`.
 - No two variants share the same integer.
 - New variants are always appended at the end with the next available integer.
 - The assertion test file must be updated alongside any enum change.
+- This page's two tables match the enum exactly.
+
+`scripts/list_contract_errors.py --check` re-asserts the last item without a
+Rust toolchain, and runs in CI. Run it before opening a PR that touches
+`types.rs` or this file.
+
+**13** (`LimitDecreaseRequiresRepayment`) was removed and **56** was reserved and
+never assigned. Both discriminants are permanently retired: they must never be
+reissued, so a stale client that still maps `13` fails closed instead of
+decoding into a live variant.
+
+`ContractError` is declared with `#[soroban_sdk::contracterror(export = false)]`:
+it has grown past the 50-case `SCSpecUdtUnionV0.cases<50>` limit of the
+Soroban contract spec. Errors still reach clients with their pinned numeric
+discriminants — only the generated spec entry is skipped.
 
 ---
 
 ## Error Code Table
 
-| Code | Variant                          | When it occurs | Resolution |
-|------|----------------------------------|----------------|------------|
-| `1`  | `Unauthorized`                   | Caller is not the authorized party for this operation (e.g., non-borrower calling `draw_credit`). | Ensure the correct signer is authorizing the transaction. |
-| `2`  | `NotAdmin`                       | Caller does not hold the admin role stored in instance storage. | Use the admin keypair or rotate admin via `propose_admin` / `accept_admin`. |
-| `3`  | `CreditLineNotFound`             | No credit line exists in persistent storage for the given borrower address. | Verify the borrower address and that `open_credit_line` was called successfully. |
-| `4`  | `CreditLineClosed`               | The credit line status is `Closed`; draws and repayments are both blocked. | A closed line cannot be reopened. Open a new credit line for the borrower. |
-| `5`  | `InvalidAmount`                  | The supplied amount is zero, negative, or otherwise outside the valid range. | Pass a strictly positive `i128` value. |
-| `6`  | `OverLimit`                      | The requested draw would push `utilized_amount` above `credit_limit`. | Reduce the draw amount or request a limit increase via `update_risk_parameters`. |
-| `7`  | `NegativeLimit`                  | A credit limit of zero or below was supplied to `update_risk_parameters`. | Supply a positive `i128` credit limit. |
-| `8`  | `RateTooHigh`                    | `interest_rate_bps` exceeds `10 000` (100 %) or the configured `max_rate_change_bps` delta. | Use a rate in the range `0–10 000` bps. |
-| `9`  | `ScoreTooHigh`                   | `risk_score` exceeds `100`. | Supply a score in the range `0–100`. |
-| `10` | `UtilizationNotZero`             | An operation that requires zero utilization was attempted while the borrower still has an outstanding balance. | Repay the full balance before retrying. |
-| `11` | `Reentrancy`                     | A reentrant call was detected via the reentrancy guard on `draw_credit` or `repay_credit`. | This should not occur with standard Stellar Asset Contracts. Investigate the token contract for unexpected callbacks. |
-| `12` | `Overflow`                       | An arithmetic operation (e.g., `checked_add` on `utilized_amount`) would overflow `i128`. | Amounts near `i128::MAX` are not supported. Reduce the draw or limit value. |
-| `13` | `LimitDecreaseRequiresRepayment` | A limit decrease was requested that would push `credit_limit` below `utilized_amount`. The line transitions to `Restricted` status. | Borrower must repay the excess (`utilized_amount - new_limit`) before the limit can be lowered further. |
-| `14` | `AlreadyInitialized`             | `init` was called on a contract that already has an admin stored. | `init` is a one-time operation. Do not call it again after deployment. |
-| `15` | `AdminAcceptTooEarly`            | `accept_admin` was called before the `delay_seconds` window set in `propose_admin` has elapsed. | Wait until `env.ledger().timestamp() >= accept_after` and retry. |
-| `16` | `BorrowerBlocked`                | The borrower address is on the admin-managed block list; draws are disabled. | Contact the protocol admin to remove the block, or use a different borrower address. |
-| `17` | `DrawExceedsMaxAmount`           | The requested draw amount exceeds the per-transaction cap set via `set_max_draw_amount`. | Split the draw into smaller transactions or request a cap increase from the admin. |
-| `18` | `Paused`                         | The protocol is paused via the emergency circuit breaker; operation is blocked. | Wait for the admin to unpause the protocol via `set_protocol_paused(false)`. `repay_credit` remains active during a pause. |
-| `19` | `DrawsFrozen`                    | Draws are globally frozen during liquidity reserve operations. | Wait for the admin to call `unfreeze_draws`. Repayments remain available. |
-| `20` | `CreditLineSuspended`            | A draw was attempted while the credit line status is `Suspended`. | Reinstate the line or resolve the suspension before drawing. |
-| `21` | `CreditLineDefaulted`            | A draw was attempted while the credit line status is `Defaulted`. | Defaulted lines cannot draw; use repayment or liquidation workflows. |
-| `22` | `MissingLiquidityToken`          | `draw_credit` or `repay_credit` requires a liquidity token, but none is configured. | Admin must call `set_liquidity_token` before liquidity-moving operations. |
-| `23` | `MissingLiquiditySource`         | `draw_credit` or `repay_credit` requires a liquidity source, but none is configured. | Admin must call `set_liquidity_source` or run the configured initialization path. |
-| `24` | `InsufficientLiquidityReserve`   | The reserve token balance is below the requested draw amount. | Fund the liquidity source or reduce the draw amount. |
-| `25` | `LiquidityTokenCallFailed`       | A liquidity token interaction failed where the contract can expose a canonical token-call failure. | Inspect the configured token contract and retry only after the token issue is resolved. |
-| `26` | `InsufficientRepaymentAllowance` | The borrower has not approved enough liquidity token allowance for `repay_credit`. | Approve at least the effective repayment amount for the credit contract. |
-| `27` | `InsufficientRepaymentBalance`   | The borrower's liquidity token balance is below the effective repayment amount. | Transfer or mint enough tokens to the borrower before retrying repayment. |
-| `28` | `RepayExceedsMaxAmount`          | The requested repay exceeds the per-transaction cap. | Split into smaller transactions. |
-| `29` | `DrawCooldownActive`             | Borrower attempted to draw before cooldown elapsed. | Wait for the cooldown interval. |
-| `30` | `TreasuryNotSet`                 | Treasury address is not configured. | Admin must call `set_treasury`. |
-| `31` | `ExposureCapExceeded`            | Draw would exceed the global protocol exposure cap. | Reduce draw amount or wait for repayments. |
-| `32` | `AdminNotInitialized`            | Admin address has not been initialized. | Deployer must call `init()` first. |
-| `33` | `TimestampRegression`            | Timestamp regression detected. | Re-sync ledger view and retry. |
-| `34` | `LimitOutOfBounds`               | Credit limit outside configured min/max bounds. | Adjust limit to `[min, max]` range. |
-| `35` | `CollateralRatioBelowMinimum`    | Collateral ratio is below the minimum required. | Reduce withdrawal or add collateral. |
-| `36` | `OraclePriceInvalid`             | Oracle price is zero, negative, or malformed. | Ensure oracle returns a valid positive price. |
-| `37` | `OraclePriceStale`               | Oracle price exceeds `max_age_seconds`. | Wait for oracle price update. |
-| `38` | `OraclePriceDeviation`           | Oracle price deviation exceeds configured maximum. | Do not retry with same price; await new price. |
-| `39` | `InsufficientCollateralBalance`  | Borrower's collateral balance is below the withdrawal amount. | Reduce withdrawal amount. |
-| `40` | `BorrowerFrozen`                 | Borrower's draws are temporarily frozen until expiry. | Wait for freeze expiry or contact admin. |
-| `41` | `BountyNotSet`                   | Bounty pool address is not configured. | Admin must call `set_bounty`. |
-| `42` | `NoPendingTreasuryWithdrawal`    | No pending treasury withdrawal proposal exists. | Create a proposal first via `propose_treasury_withdrawal`. |
-| `43` | `TreasuryTimelockActive`         | The 24-hour treasury timelock has not elapsed. | Wait for timelock. |
-| `44` | `TreasuryProposalExists`         | A treasury withdrawal proposal already exists. | Execute or cancel the existing proposal. |
-| `45` | `CloseFactorAboveMax`            | The supplied close_factor_bps exceeds the protocol maximum. | Reduce close_factor_bps. |
-| `46` | `CreditLineFrozen`               | Credit line draws are frozen by admin (compliance hold). | Wait for admin `unfreeze_credit_line`. |
-| `47` | `DrawReversalWindowExpired`      | Draw reversal attempted after the allowed window expired. | Reversal no longer possible. |
-| `48` | `OriginalDrawNotFound`           | Original draw record not found for reversal. | No matching draw record. |
-| `49` | `AttestationBatchNotFound`       | No attestation batch has been committed. | Admin must commit a batch first. |
-| `50` | `OracleQuorumNotMet`             | Oracle quorum condition not satisfied. | Submit prices from more feeds. |
-| `51` | `AlreadySettled`                 | Liquidation for this (borrower, id) already processed. | No action needed — already settled. |
-| `52` | `InvalidRiskWeight`              | Collateral risk weight exceeds 10 000 bps. | Ensure risk weight is in `0..=10_000`. |
-| `53` | `InvalidAttestation`             | Attestation proof is invalid or no batch committed. | Commit a valid batch and retry. |
-| `54` | `AdminCollateralCooldownActive`  | Critical collateral admin action before cool-off elapsed. | Wait for `admin_collateral_cooldown_seconds` or set interval to `0`. |
+61 variants. `Category` is the value returned by
+[`ContractError::category()`](../contracts/credit/src/types.rs).
+
+| Code | Variant | Category | When it occurs | SDK recovery |
+|------|---------|----------|----------------|--------------|
+| `1`  | `Unauthorized` | Auth | Caller is not the authorized party for the operation (e.g. non-borrower calling `draw_credit`). | Reconnect a wallet holding the required role. |
+| `2`  | `NotAdmin` | Auth | Caller does not hold the admin role stored in instance storage. | Use the admin keypair, or rotate admin via `propose_admin` / `accept_admin`. |
+| `3`  | `CreditLineNotFound` | Misc | No credit line exists in persistent storage for the given borrower. | Call `open_credit_line` first, or fix the borrower address. |
+| `4`  | `CreditLineClosed` | Lifecycle | The line's status is `Closed`; draws and state transitions are blocked. | Terminal — open a new credit line. |
+| `5`  | `InvalidAmount` | Numeric | Amount is zero, negative, or outside the accepted range. | Pass a strictly positive `i128`. |
+| `6`  | `OverLimit` | Limit | The draw would push `utilized_amount` above `credit_limit`. | Reduce the draw to the available headroom. |
+| `7`  | `NegativeLimit` | Numeric | A negative credit limit was supplied to a credit-line configuration flow. | Supply a non-negative `i128` credit limit. |
+| `8`  | `RateTooHigh` | Risk | The proposed rate exceeds `10 000` bps (100 %) or the configured `max_rate_change_bps` delta. | Clamp the change inside `RateChangeConfig` bounds. |
+| `9`  | `ScoreTooHigh` | Risk | `risk_score` exceeds `100`. | Normalize the score to `[0, 100]`. |
+| `10` | `UtilizationNotZero` | Limit | An operation requiring zero utilization ran while debt was outstanding. | Repay the full balance, then retry. |
+| `11` | `Reentrancy` | Reentrancy | A reentrant call was detected by the guard on `draw_credit` / `repay_credit`. | Do **not** retry blindly. Inspect the token contract for callbacks. |
+| `12` | `Overflow` | Numeric | A `checked_*` operation would exceed `i128` range. | Reduce the amount; values near `i128::MAX` are out of scope. |
+| `14` | `AlreadyInitialized` | Lifecycle | `init` was called on a contract that already has an admin stored. | No action — `init` is one-time. |
+| `15` | `AdminAcceptTooEarly` | Misc | `accept_admin` ran before the `delay_seconds` window from `propose_admin` elapsed. | Wait until `ledger().timestamp() >= accept_after`. |
+| `16` | `BorrowerBlocked` | Block | The borrower is on the admin-managed block list; draws are disabled. | Contact the admin; repayments are still accepted. |
+| `17` | `DrawExceedsMaxAmount` | Limit | The draw exceeds the per-transaction cap set by `set_max_draw_amount`. | Split the draw into smaller transactions. |
+| `18` | `Paused` | Risk | The emergency circuit breaker is active; guarded operations are blocked. | Retry after `set_protocol_paused(false)`. `repay_credit` stays live. |
+| `19` | `DrawsFrozen` | Block | Draws are globally frozen for liquidity-reserve operations. | Wait for `unfreeze_draws`. Repayments remain available. |
+| `20` | `CreditLineSuspended` | Lifecycle | The line's status is `Suspended` (admin or self-suspension). | Await reinstatement. Repayments are still allowed. |
+| `21` | `CreditLineDefaulted` | Lifecycle | The line's status is `Defaulted`. | Cure by repayment or proceed through the liquidation path. |
+| `22` | `MissingLiquidityToken` | Liquidity | `draw_credit` / `repay_credit` needs a liquidity token, but none is configured. | Admin must call `set_liquidity_token`. |
+| `23` | `MissingLiquiditySource` | Liquidity | A liquidity source is required but none is configured. | Admin must call `set_liquidity_source`. |
+| `24` | `InsufficientLiquidityReserve` | Liquidity | The reserve token balance is below the requested draw. | Fund the reserve or reduce the draw. |
+| `25` | `LiquidityTokenCallFailed` | Liquidity | A token interaction failed on a path the contract can observe. | Inspect the token contract before retrying. |
+| `26` | `InsufficientRepaymentAllowance` | Liquidity | Borrower allowance is below the effective repayment amount. | Approve at least the effective repayment for this contract. |
+| `27` | `InsufficientRepaymentBalance` | Liquidity | Borrower token balance is below the effective repayment amount. | Fund the borrower, then retry. |
+| `28` | `RepayExceedsMaxAmount` | Limit | The repay exceeds the per-transaction cap. | Split into smaller transactions. |
+| `29` | `DrawCooldownActive` | Risk | The borrower drew again before `draw_min_interval_seconds` elapsed. | Wait for the cooldown window. |
+| `30` | `TreasuryNotSet` | Liquidity | A treasury withdrawal was attempted with no treasury configured. | Admin must call `set_treasury`. |
+| `31` | `ExposureCapExceeded` | Liquidity | The draw would push total utilization past the global exposure cap. | Reduce the draw or wait for repayments elsewhere. |
+| `32` | `AdminNotInitialized` | Auth | An admin-gated entrypoint ran before `init` set the admin. | Deployer must call `init()` with a valid admin address. |
+| `33` | `TimestampRegression` | Numeric | A write carried a timestamp not strictly greater than the stored one. | Re-sync the ledger view and retry. |
+| `34` | `LimitOutOfBounds` | Numeric | A credit limit fell outside the configured `[min_limit, max_limit]`. | Read the bounds and adjust the proposed limit. |
+| `35` | `CollateralRatioBelowMinimum` | Collateral | A withdrawal (or draw) would leave the ratio below `MinCollateralRatioBps`. | Reduce the withdrawal or add collateral. |
+| `36` | `OraclePriceInvalid` | Oracle | The oracle price is zero, negative, or malformed. | Await a valid positive price. |
+| `37` | `OraclePriceStale` | Oracle | The oracle price is older than `max_age_seconds`. | Await a price update. |
+| `38` | `OraclePriceDeviation` | Oracle | Price deviation from the prior value exceeds `max_deviation_bps`. | Await a new price; do not retry with the same one. |
+| `39` | `InsufficientCollateralBalance` | Collateral | The withdrawal amount exceeds the borrower's collateral balance. | Query the balance and reduce the amount. |
+| `40` | `BorrowerFrozen` | Block | The borrower's draws are frozen until a stored expiry timestamp. | Wait for expiry or ask the admin to lift the freeze. |
+| `41` | `BountyNotSet` | Liquidity | A bounty withdrawal was attempted with no bounty pool configured. | Admin must call `set_bounty`. |
+| `42` | `NoPendingTreasuryWithdrawal` | Misc | A treasury withdrawal was executed with no pending proposal. | Create a proposal via `propose_treasury_withdrawal`. |
+| `43` | `TreasuryTimelockActive` | Misc | The 24-hour treasury timelock has not elapsed since the proposal. | Wait for the timelock. |
+| `44` | `TreasuryProposalExists` | Misc | A treasury withdrawal proposal already exists. | Execute or cancel the existing proposal first. |
+| `45` | `CloseFactorAboveMax` | Limit | The supplied `close_factor_bps` exceeds the protocol maximum. | Reduce `close_factor_bps` to the configured max. |
+| `46` | `CreditLineFrozen` | Block | An admin freeze with a structured `FreezeReason` is set on the line. | Admin calls `unfreeze_credit_line`. Repayments stay available. |
+| `47` | `DrawReversalWindowExpired` | Limit | `reverse_draw` ran after `DRAW_REVERSAL_WINDOW_SECS`. | No reversal is possible; the window has closed. |
+| `48` | `OriginalDrawNotFound` | Misc | No draw audit record matches the reversal request. | No reversal is possible without the original record. |
+| `49` | `AttestationBatchNotFound` | Misc | Attestation verification ran with no committed batch. | Admin must commit a batch first. |
+| `50` | `OracleQuorumNotMet` | Oracle | Fewer than `min_quorum_k` feeds agreed within the deviation bound. | Submit prices from more independent feeds. |
+| `51` | `AlreadySettled` | Lifecycle | Liquidation for this `(borrower, settlement_id)` pair was already processed. | No action — replay protection. Use a fresh `settlement_id` per event. |
+| `52` | `InvalidRiskWeight` | Numeric | A collateral risk weight above `10 000` bps was supplied. | Use a weight in `0..=10_000` bps. |
+| `53` | `InvalidAttestation` | Misc | The attestation proof failed verification, or no batch is committed. | Commit a valid batch and resubmit a valid proof. |
+| `54` | `RiskAdminCooldownActive` | Risk | A risk-admin mutation ran before `risk_admin_cooldown_seconds` elapsed since the last one. | Wait for the cooldown, or set it to `0` to disable. |
+| `55` | `OracleNotFound` | Oracle | The oracle address is not present in the oracle registry. | Register the oracle before managing it. |
+| `57` | `FreezeCooldownActive` | Block | A freeze action ran before `freeze_cooldown_seconds` elapsed since the last freeze. | Wait for the cooldown, or clear the configured interval. |
+| `58` | `AdminCollateralCooldownActive` | Collateral | A critical collateral admin action ran before its cool-off window elapsed. | Wait for the window, or set the interval to `0`. |
+| `59` | `LiquidationGraceActive` | Lifecycle | Defaulting ran while the per-borrower suspension grace window was still open. | Wait for the grace window to expire, then retry. |
+| `60` | `StaleStateTransition` | Lifecycle | The line is already in the requested target state (stale or duplicate transition). | No action — re-read state; the transition already applied. |
+| `61` | `IncompatibleVersion` | Handshake | The auction contract's protocol version does not match the credit contract's. | Upgrade one side to a compatible version, then retry the settlement. |
+| `62` | `AuctionCallFailed` | Handshake | The auction CPI call failed or returned an unexpected value. | Fix the `recovered_amount` / auction issue, then retry. No credit state was mutated. |
+| `63` | `AuctionActive` | Lifecycle | A fee-configuration change was attempted while a liquidation auction was in flight. | Wait until the last active auction leaves the `Defaulted` pipeline. |
 
 ---
 
-## SDK Usage Examples
+## Categories
+
+`ContractError::category()` returns a stable `#[repr(u32)]`
+`ContractErrorCategory`. Use it for client-side grouping instead of
+hard-coding code ranges.
+
+| Code | Category | Count | Variants |
+|------|----------|------:|----------|
+| `1`  | Auth | 3 | `Unauthorized`, `NotAdmin`, `AdminNotInitialized` |
+| `2`  | Lifecycle | 8 | `CreditLineClosed`, `AlreadyInitialized`, `CreditLineSuspended`, `CreditLineDefaulted`, `AlreadySettled`, `LiquidationGraceActive`, `StaleStateTransition`, `AuctionActive` |
+| `3`  | Numeric | 6 | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds`, `InvalidRiskWeight` |
+| `4`  | Limit | 6 | `OverLimit`, `UtilizationNotZero`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired` |
+| `5`  | Liquidity | 9 | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
+| `6`  | Risk | 5 | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `RiskAdminCooldownActive` |
+| `7`  | Oracle | 5 | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound` |
+| `8`  | Collateral | 3 | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance`, `AdminCollateralCooldownActive` |
+| `9`  | Block | 5 | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen`, `FreezeCooldownActive` |
+| `10` | Reentrancy | 1 | `Reentrancy` |
+| `11` | Misc | 8 | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation` |
+| `12` | Handshake | 2 | `IncompatibleVersion`, `AuctionCallFailed` |
+| | **Total** | **61** | |
+
+### Category-level recovery
+
+| Category | Dominant SDK recovery |
+|----------|-----------------------|
+| Auth | Reconnect the correct wallet; if `AdminNotInitialized`, ask the deployer to run `init()`. |
+| Lifecycle | Wait for the admin action, or open a new credit line when the old one is terminal. |
+| Numeric | Re-validate inputs client-side; re-sync the ledger view on `TimestampRegression`. |
+| Limit | Reduce the amount to fit the headroom, or repay first. |
+| Liquidity | Replenish allowance / balance, or wait for the reserve. |
+| Risk | Clamp the input, or wait for the cooldown / unpause. |
+| Oracle | Await a valid, fresh price from a quorum of feeds. |
+| Collateral | Reduce the withdrawal or deposit more collateral. |
+| Block | Contact the admin, or wait for the freeze to lift. |
+| Reentrancy | Do not retry; inspect on-chain state and the calling token. |
+| Misc | Create the missing entity or wait out the timelock. |
+| Handshake | Safe to retry once the peer contract is upgraded or the call is corrected. |
+
+---
+
+## SDK Usage
 
 ### Rust
 
 ```rust
-use creditra_credit::types::ContractError;
+use creditra_credit::types::{ContractError, ContractErrorCategory};
 
 match result {
     Err(e) if e == ContractError::OverLimit as u32 => {
@@ -100,6 +189,22 @@ match result {
         // handle not found
     }
     _ => {}
+}
+```
+
+Group by category instead of enumerating codes — `category()` is itself stable
+ABI, so a new variant inherits its bucket without an SDK change:
+
+```rust
+use creditra_credit::types::{ContractError, ContractErrorCategory};
+
+/// Route access-control and draw-block failures to support; the caller
+/// cannot make the call succeed by retrying.
+fn needs_support(error: ContractError) -> bool {
+    matches!(
+        error.category(),
+        ContractErrorCategory::Auth | ContractErrorCategory::Block
+    )
 }
 ```
 
@@ -123,61 +228,68 @@ try {
 
 ## Security Notes
 
-### Failure Modes and Trust Boundaries
+### Failure modes and trust boundaries
 
-**Reentrancy (code 11)**  
-The reentrancy guard on `draw_credit` and `repay_credit` is defense-in-depth.
-Standard Stellar Asset Contracts do not invoke callbacks into the caller, so this
-error should never appear in production. If it does, the token contract being used
-is non-standard and must be audited before use.
+**Reentrancy (11)** — the guard on `draw_credit` and `repay_credit` is
+defense-in-depth. Standard Stellar Asset Contracts do not invoke callbacks into
+the caller, so this should never appear in production. If it does, the token
+contract in use is non-standard and must be audited.
 
-**Overflow (code 12)**  
-All arithmetic on `utilized_amount` uses `checked_add`; overflow reverts the
-transaction with no state change. Amounts near `i128::MAX` (~1.7 × 10³⁸) are
-outside the intended operating range of the protocol.
+**Overflow (12)** — all arithmetic on `utilized_amount` uses `checked_add`;
+overflow reverts with no state change. Amounts near `i128::MAX`
+(~1.7 × 10³⁸) are outside the protocol's intended operating range.
 
-**AlreadyInitialized (code 14)**  
-The `init` guard prevents admin takeover via re-initialization. The check reads
-instance storage before writing; a rejected second call leaves storage unchanged.
+**AlreadyInitialized (14)** — the `init` guard prevents admin takeover via
+re-initialization. It reads instance storage before writing, so a rejected
+second call leaves storage unchanged.
 
-**AdminAcceptTooEarly (code 15)**  
-The two-step admin rotation (`propose_admin` → `accept_admin`) includes an optional
-time-lock. The delay is enforced against `env.ledger().timestamp()`, which is
-network-provided and monotonic enough for coarse governance windows. It is not
-suitable for sub-second precision.
+**AdminAcceptTooEarly (15)** — the two-step admin rotation
+(`propose_admin` → `accept_admin`) includes an optional timelock enforced
+against `env.ledger().timestamp()`. That clock is coarse and monotonic enough
+for governance windows, but is not suitable for sub-second precision.
 
-**BorrowerBlocked (code 16)**  
-The block list is admin-controlled. Blocking a borrower prevents draws but does not
-affect repayments — a blocked borrower can still repay outstanding debt.
+**Paused (18)** — the emergency circuit breaker blocks every guarded
+state-mutating operation except `repay_credit`, which stays live so users can
+still reduce debt exposure during an incident. Read-only views are never
+blocked.
 
-**DrawExceedsMaxAmount (code 17)**  
-The per-transaction draw cap is a risk-management control, not a security boundary.
-It limits the blast radius of a compromised borrower key or a buggy integration.
+**Liquidity errors (22–27)** — liquidity-moving paths use typed
+`ContractError` codes rather than ad-hoc panic strings, and check configuration,
+reserve, allowance, and balance *before* any state mutation. Soroban token calls
+that trap internally are not catchable; these variants cover the failures this
+contract can observe.
 
-**Paused (code 18)**  
-The protocol pause is an emergency circuit breaker controlled by the admin. When
-activated, all state-mutating operations are blocked except `repay_credit`, which
-remains active to allow users to reduce their debt exposure even during an incident.
-The pause state is stored in instance storage and checked at the entry of every
-guarded function. Read-only operations (`get_credit_line`, `is_protocol_paused`, etc.)
-are never blocked.
+**Handshake errors (61, 62)** — the auction settlement path clears its
+reentrancy guard before raising either variant, so no partial credit-line state
+is left behind and the settlement is safe to retry once the auction contract is
+upgraded (61) or the call is corrected (62).
 
-**Liquidity errors (codes 22-27)**
-Liquidity-moving operations use stable `ContractError` codes instead of ad-hoc
-panic strings. `draw_credit` requires both `LiquidityToken` and `LiquiditySource`,
-then checks the source balance before transferring. `repay_credit` requires the
-same configuration and checks allowance and borrower balance before `transfer_from`.
-Soroban token calls that trap internally are not catchable by this contract; the
-canonical token-call variants cover failures observable before state mutation.
+**AuctionActive (63)** — fee parameters stay frozen while any liquidation
+auction is in flight, so an ongoing auction's settlement economics cannot change
+mid-flight. The block lifts when the last active auction leaves the `Defaulted`
+pipeline.
 
-### General Trust Model
+### Trust model
 
-| Actor           | Trusted for |
-|-----------------|-------------|
-| Admin           | Lifecycle operations, risk parameters, block list, liquidity config |
-| Borrower        | Drawing and repaying their own credit line only |
+| Actor | Trusted for |
+|-------|-------------|
+| Admin | Lifecycle operations, risk parameters, block list, liquidity config |
+| Borrower | Drawing and repaying their own credit line only |
 | Liquidity token | Standard Stellar Asset Contract behavior (no callbacks) |
-| Ledger timestamp| Coarse monotonic ordering (governance delays, accrual intervals) |
+| Auction contract | Protocol version match and honest CPI return values |
+| Ledger timestamp | Coarse monotonic ordering (governance delays, accrual intervals) |
 
-Errors in the `1–2` range (`Unauthorized`, `NotAdmin`) indicate an access-control
-violation and should be treated as security-relevant events by monitoring systems.
+`Unauthorized` (1) and `NotAdmin` (2) indicate an access-control violation and
+should be treated as security-relevant events by monitoring systems.
+
+---
+
+## Related documents
+
+- [`docs/ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) — V1 → V2 client-side error
+  encoding migration for the CosmWasm `creditra-credit` package.
+- [`docs/errors/collateral.md`](./errors/collateral.md) — `CollateralError`.
+- [`docs/errors/freeze.md`](./errors/freeze.md) — `FreezeError`.
+- [`docs/PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) — per-entrypoint validation
+  order and which error each check raises.
+- [`docs/indexer-integration.md`](./indexer-integration.md) — event decoding.

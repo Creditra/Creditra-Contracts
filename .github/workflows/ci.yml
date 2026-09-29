@@ -74,6 +74,13 @@ jobs:
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
 
+      # `docs/errors.md` is the single canonical error reference. This keeps it
+      # from drifting from `contracts/credit/src/types.rs`, which would hand SDK
+      # consumers a code the contract cannot emit. Stdlib-only Python, so it
+      # needs no toolchain beyond the runner.
+      - name: Verify canonical error reference
+        run: python3 scripts/list_contract_errors.py --check
+
       # The reproducible-build guard scripts are the enforcement layer for the
       # pinned-toolchain policy. Run their own test suites so a regression in
       # the guards themselves fails CI, not just a regression in the contracts.

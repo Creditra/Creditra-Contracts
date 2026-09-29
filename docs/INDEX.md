@@ -44,7 +44,7 @@ Reproducible verification:
 cargo llvm-cov --workspace --all-targets --fail-under-lines 95
 cargo build --release --target wasm32-unknown-unknown -p creditra-credit
 ls -l target/wasm32-unknown-unknown/release/creditra_credit.wasm  # < 50 KB
-python3 scripts/list_contract_errors.py --json | jq 'length'      # 38
+python3 scripts/list_contract_errors.py --check                 # canonical doc is in sync
 ```
 
 ---
@@ -55,7 +55,8 @@ Read in this order:
 
 1. [`docs/PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) — every entrypoint with exact
    signature, validation order, error returns, storage tiers.
-2. [`docs/contract-errors.md`](./contract-errors.md) — 38-row error table.
+2. [`docs/errors.md`](./errors.md) — **canonical** error reference: 61 codes,
+   category, trigger, and SDK recovery per variant.
 3. [`docs/state-machine.md`](./state-machine.md) — authoritative
    `CreditStatus` transition table.
 4. [`docs/indexer-integration.md`](./indexer-integration.md) — event topics,
@@ -135,7 +136,8 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `interest-accrual.md` | ~3 | Accrual normative reference |
 | `interest-accrual-design.md` | ~6 | Accrual design spec |
 | `risk-based-rate-formula.md` | ~3 | Rate formula normative reference |
-| `contract-errors.md`, `errors.md` | ~4 each | Error code tables |
+| `errors.md` | ~6 | **Canonical `ContractError` reference** (codes, categories, recovery) |
+| `errors/collateral.md`, `errors/freeze.md` | ~3 each | `CollateralError` / `FreezeError` catalogs |
 | `storage-layout.md` | ~4 | Storage tier reference |
 | `threat-model.md` | ~4 | Authorization matrix |
 | `default-liquidation-auction-hook.md` | ~3 | Cross-contract handoff |
@@ -149,6 +151,29 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `deploy.md` | ~2 | Deploy quickstart |
 | `contributing-tests.md` | ~3 | Test helper conventions |
 | `scripts.md` | ~2 | Helper script reference |
+
+### Error documentation
+
+[`docs/errors.md`](./errors.md) is the single canonical error reference for the
+credit contract's `ContractError`. Add codes there and nowhere else;
+`tests/error_discriminants.rs` and `scripts/list_contract_errors.py --check`
+both fail if the published table drifts from
+`contracts/credit/src/types.rs`.
+
+These files are redirect stubs and deliberately carry no tables:
+
+| File | Superseded by |
+|---|---|
+| `ERROR_CODES.md`, `contract-errors.md`, `error-taxonomy.md` | [`errors.md`](./errors.md) |
+| `errors/borrow.md`, `../contracts/credit/docs/errors.md` | [`errors.md`](./errors.md) |
+
+Kept separately because they describe different enums or a different concern:
+
+| File | Scope |
+|---|---|
+| [`errors/collateral.md`](./errors/collateral.md) | `CollateralError` (`contracts/collateral`) |
+| [`errors/freeze.md`](./errors/freeze.md) | `FreezeError` (`contracts/freeze`) |
+| [`ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) | V1 → V2 client-side error-encoding migration log |
 
 ### Top-level companions
 

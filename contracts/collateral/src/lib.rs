@@ -32,10 +32,10 @@
 ///   errors verbatim because they convey the same semantic meaning
 ///   (e.g. **withdrawal amount exceeds deposited balance**). SDK consumers
 ///   can map these codes against the canonical table at
-///    `docs/ERROR_CODES.md` (../../docs/ERROR_CODES.md).
+///    `docs/errors.md` (../../docs/errors.md).
 //? 2. **Collateral-specific tier** (codes `100+`):
 ///    New variants exclusive to the collateral contract. These occupy the
-///    `100+` namespace deliberately — the credit contract uses `1n.99` and
+///    `100+` namespace deliberately — the credit contract uses `1..=63` and
 ///    the gap ensures no visual collision if a future PR appends to either
 ///    catalog.
 ///

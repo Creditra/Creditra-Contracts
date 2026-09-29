@@ -39,7 +39,7 @@
 //!
 //! SDK clients decoding an error code emitted from the collateral contract
 //! can map the integer directly to the canonical table at
-//! [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md).
+//! [`docs/errors.md`](../../../docs/errors.md).
 //!
 //! # Collateral-specific tier semantics
 //!
@@ -67,9 +67,9 @@ use soroban_sdk::contracterror;
 ///
 /// - **Mirror tier** (`5`, `12`, `22`, `35`, `39`) — semantic twins of the
 ///   canonical `ContractError` codes; SDK clients can match them against
-///   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md).
+///   [`docs/errors.md`](../../../docs/errors.md).
 /// - **Collateral-specific tier** (`100+`) — namespaced to leave a clear gap
-///   from the credit contract's `1..49` range, defending against accidental
+///   from the credit contract's `1..=63` range, defending against accidental
 ///   collisions if either contract appends to its enum in the future.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -79,7 +79,7 @@ pub enum CollateralError {
     //
     // Each mirror variant carries the same discriminant *and* the same
     // semantic meaning as its canonical counterpart, so SDK consumers
-    // can map an emitted integer against docs/ERROR_CODES.md directly.
+    // can map an emitted integer against docs/errors.md directly.
 
     /// Amount is zero, negative, or otherwise not a valid token amount.
     ///
@@ -122,8 +122,8 @@ pub enum CollateralError {
     // ── Collateral-specific tier (codes 100+) ───────────────────────────────
     //
     // These discriminants are exclusive to the collateral contract and
-    // start at 100 to leave a 50-slot buffer above the credit contract's
-    // 1..=49 range. New variants MUST be appended at the end of this
+    // start at 100 to leave a wide buffer above the credit contract's
+    // 1..=63 range. New variants MUST be appended at the end of this
     // block (after 105) and paired with an assertion in tests/catalog.rs.
 
     /// The supplied collateral token address is not in the
@@ -270,7 +270,7 @@ mod tests {
     }
 
     /// Verify the collateral-specific tier does not collide with the
-    /// credit contract's `1..=49` range. This is the second line of
+    /// credit contract's `1..=63` range. This is the second line of
     /// defence against accidental renumbering.
     #[test]
     fn collateral_specific_tier_starts_at_or_above_100() {

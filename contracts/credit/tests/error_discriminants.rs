@@ -558,75 +558,245 @@ fn category_mappings_are_stable() {
     );
 }
 
-/// Verify the borrow error catalog remains synchronized with the enum.
-#[test]
-fn borrow_error_catalog_lists_all_variants() {
-    let catalog_path =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors/borrow.md");
-    let catalog = std::fs::read_to_string(&catalog_path)
-        .unwrap_or_else(|_| panic!("Missing borrow error catalog at {:?}", catalog_path));
+// ═══════════════════════════════════════════════════════════════════════════
+// Documentation sync: docs/errors.md is the canonical reference
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `docs/errors.md` is the single place in the repository that publishes the
+// credit contract's `ContractError` table. Every other error document is a
+// redirect stub. These tests fail if the published table drifts from the enum,
+// which is what lets the redirects stay safe.
 
-    for variant in [
-        "Unauthorized",
-        "NotAdmin",
-        "CreditLineNotFound",
-        "CreditLineClosed",
-        "InvalidAmount",
-        "OverLimit",
-        "NegativeLimit",
-        "RateTooHigh",
-        "ScoreTooHigh",
-        "UtilizationNotZero",
-        "Reentrancy",
-        "Overflow",
-        // "LimitDecreaseRequiresRepayment",
-        "AlreadyInitialized",
-        "QuorumNotMet",
-        "OracleNotFound",
-        "OracleAlreadyExists",
-        "AdminAcceptTooEarly",
-        "BorrowerBlocked",
-        "DrawExceedsMaxAmount",
-        "Paused",
-        "DrawsFrozen",
-        "CreditLineSuspended",
-        "CreditLineDefaulted",
-        "MissingLiquidityToken",
-        "MissingLiquiditySource",
-        "InsufficientLiquidityReserve",
-        "LiquidityTokenCallFailed",
-        "InsufficientRepaymentAllowance",
-        "InsufficientRepaymentBalance",
-        "RepayExceedsMaxAmount",
-        "DrawCooldownActive",
-        "TreasuryNotSet",
-        "ExposureCapExceeded",
-        "AdminNotInitialized",
-        "TimestampRegression",
-        "LimitOutOfBounds",
-        "CollateralRatioBelowMinimum",
-        "OraclePriceInvalid",
-        "OraclePriceStale",
-        "OraclePriceDeviation",
-        "InsufficientCollateralBalance",
-        "BorrowerFrozen",
-        "BountyNotSet",
-        "NoPendingTreasuryWithdrawal",
-        "TreasuryTimelockActive",
-        "TreasuryProposalExists",
-        "CloseFactorAboveMax",
-        "CreditLineFrozen",
-        "DrawReversalWindowExpired",
-        "OriginalDrawNotFound",
-        "AttestationBatchNotFound",
-        "OracleQuorumNotMet",
-        "AlreadySettled",
-        "InvalidRiskWeight",
-    ] {
+/// Every `ContractError` variant, in declaration order.
+fn all_contract_errors() -> Vec<ContractError> {
+    vec![
+        ContractError::Unauthorized,
+        ContractError::NotAdmin,
+        ContractError::CreditLineNotFound,
+        ContractError::CreditLineClosed,
+        ContractError::InvalidAmount,
+        ContractError::OverLimit,
+        ContractError::NegativeLimit,
+        ContractError::RateTooHigh,
+        ContractError::ScoreTooHigh,
+        ContractError::UtilizationNotZero,
+        ContractError::Reentrancy,
+        ContractError::Overflow,
+        ContractError::AlreadyInitialized,
+        ContractError::AdminAcceptTooEarly,
+        ContractError::BorrowerBlocked,
+        ContractError::DrawExceedsMaxAmount,
+        ContractError::Paused,
+        ContractError::DrawsFrozen,
+        ContractError::CreditLineSuspended,
+        ContractError::CreditLineDefaulted,
+        ContractError::MissingLiquidityToken,
+        ContractError::MissingLiquiditySource,
+        ContractError::InsufficientLiquidityReserve,
+        ContractError::LiquidityTokenCallFailed,
+        ContractError::InsufficientRepaymentAllowance,
+        ContractError::InsufficientRepaymentBalance,
+        ContractError::RepayExceedsMaxAmount,
+        ContractError::DrawCooldownActive,
+        ContractError::TreasuryNotSet,
+        ContractError::ExposureCapExceeded,
+        ContractError::AdminNotInitialized,
+        ContractError::TimestampRegression,
+        ContractError::LimitOutOfBounds,
+        ContractError::CollateralRatioBelowMinimum,
+        ContractError::OraclePriceInvalid,
+        ContractError::OraclePriceStale,
+        ContractError::OraclePriceDeviation,
+        ContractError::InsufficientCollateralBalance,
+        ContractError::BorrowerFrozen,
+        ContractError::BountyNotSet,
+        ContractError::NoPendingTreasuryWithdrawal,
+        ContractError::TreasuryTimelockActive,
+        ContractError::TreasuryProposalExists,
+        ContractError::CloseFactorAboveMax,
+        ContractError::CreditLineFrozen,
+        ContractError::DrawReversalWindowExpired,
+        ContractError::OriginalDrawNotFound,
+        ContractError::AttestationBatchNotFound,
+        ContractError::OracleQuorumNotMet,
+        ContractError::AlreadySettled,
+        ContractError::InvalidRiskWeight,
+        ContractError::InvalidAttestation,
+        ContractError::RiskAdminCooldownActive,
+        ContractError::OracleNotFound,
+        ContractError::FreezeCooldownActive,
+        ContractError::AdminCollateralCooldownActive,
+        ContractError::LiquidationGraceActive,
+        ContractError::StaleStateTransition,
+        ContractError::IncompatibleVersion,
+        ContractError::AuctionCallFailed,
+        ContractError::AuctionActive,
+    ]
+}
+
+/// Read the canonical error reference, which is the only place allowed to
+/// publish the `ContractError` table.
+fn canonical_error_doc() -> String {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors.md");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("Missing canonical error reference at {path:?}"))
+}
+
+/// Body of a `## <heading>` section, up to the next `---` rule.
+fn doc_section<'a>(doc: &'a str, heading: &str) -> &'a str {
+    let after = doc
+        .split_once(&format!("## {heading}"))
+        .unwrap_or_else(|| panic!("docs/errors.md is missing a '{heading}' section"))
+        .1;
+    after
+        .split_once("\n---")
+        .unwrap_or_else(|| panic!("the '{heading}' section must be closed by a `---` rule"))
+        .0
+}
+
+/// Split a Markdown table row into trimmed, non-empty cells.
+fn table_cells(line: &str) -> Vec<&str> {
+    line.split('|')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .collect()
+}
+
+/// Verify the canonical code table publishes exactly the enum — no missing
+/// rows, no retired rows, and no category drift.
+#[test]
+fn canonical_error_code_table_matches_enum() {
+    use std::collections::BTreeMap;
+
+    let doc = canonical_error_doc();
+    let table = doc_section(&doc, "Error Code Table");
+
+    // code -> (variant, category) as published in the canonical table.
+    let mut published: BTreeMap<u32, (String, String)> = BTreeMap::new();
+    for line in table.lines() {
+        let cells = table_cells(line);
+        if cells.len() < 3 {
+            continue;
+        }
+        let Ok(code) = cells[0].trim_matches('`').parse::<u32>() else {
+            continue; // header / separator row
+        };
+        let variant = cells[1].trim_matches('`').to_string();
+        let category = cells[2].trim_matches('`').to_string();
         assert!(
-            catalog.contains(variant),
-            "Borrow error catalog is missing the variant {variant}"
+            !variant.is_empty() && !category.is_empty(),
+            "docs/errors.md row for code {code} is missing a variant or a category"
         );
+        assert!(
+            published.insert(code, (variant, category)).is_none(),
+            "docs/errors.md publishes code {code} more than once"
+        );
+    }
+
+    let expected: BTreeMap<u32, (String, String)> = all_contract_errors()
+        .into_iter()
+        .map(|error| {
+            (
+                error as u32,
+                (format!("{error:?}"), format!("{:?}", error.category())),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        published.len(),
+        expected.len(),
+        "docs/errors.md publishes {} code rows but the enum has {} variants. \
+         A published row that the contract cannot emit is a broken SDK contract.",
+        published.len(),
+        expected.len()
+    );
+
+    let drift: Vec<String> = expected
+        .iter()
+        .filter_map(|(code, (variant, category))| match published.get(code) {
+            None => Some(format!("code {code} ({variant}) is missing from docs/errors.md")),
+            Some((doc_variant, doc_category)) => {
+                let mut notes = Vec::new();
+                if doc_variant != variant {
+                    notes.push(format!(
+                        "code {code} is `{doc_variant}`, expected `{variant}`"
+                    ));
+                }
+                if doc_category != category {
+                    notes.push(format!(
+                        "code {code} ({variant}) is category `{doc_category}`, expected `{category}`"
+                    ));
+                }
+                (!notes.is_empty()).then(|| notes.join("; "))
+            }
+        })
+        .collect();
+
+    assert!(
+        drift.is_empty(),
+        "docs/errors.md has drifted from ContractError:\n  {}",
+        drift.join("\n  ")
+    );
+}
+
+/// Verify the canonical category summary lists exactly the variants that
+/// `ContractError::category()` returns, with the right per-category counts.
+#[test]
+fn canonical_error_category_table_matches_enum() {
+    use std::collections::BTreeMap;
+
+    let doc = canonical_error_doc();
+    let table = doc_section(&doc, "Categories");
+
+    // category name -> variants published for it.
+    let mut published: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for line in table.lines() {
+        let cells = table_cells(line);
+        if cells.len() < 4 || cells[0].trim_matches('`').parse::<u32>().is_err() {
+            continue; // header / separator / total row
+        }
+        let category = cells[1].trim_matches('`').to_string();
+        let variants = cells[3]
+            .split(',')
+            .map(|variant| variant.trim().trim_matches('`').to_string())
+            .filter(|variant| !variant.is_empty())
+            .collect();
+        assert!(
+            published.insert(category.clone(), variants).is_none(),
+            "docs/errors.md lists the {category} category more than once"
+        );
+    }
+
+    let mut expected: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for error in all_contract_errors() {
+        expected
+            .entry(format!("{:?}", error.category()))
+            .or_default()
+            .push(format!("{error:?}"));
+    }
+
+    assert_eq!(
+        published.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "docs/errors.md must publish exactly the categories the enum defines"
+    );
+
+    for (category, variants) in &expected {
+        let documented = &published[category];
+        assert_eq!(
+            documented.len(),
+            variants.len(),
+            "docs/errors.md lists {} variants for {category}, the enum maps {}",
+            documented.len(),
+            variants.len()
+        );
+        for variant in variants {
+            assert!(
+                documented.contains(variant),
+                "docs/errors.md omits {variant} from the {category} category"
+            );
+        }
     }
 }
 

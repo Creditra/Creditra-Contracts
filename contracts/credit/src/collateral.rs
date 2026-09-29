@@ -39,7 +39,7 @@
 //! # Error reuse note
 //!
 //! Over-withdraw reverts with [`ContractError::InsufficientCollateralBalance`]
-//! (`= 39`). See [`docs/contract-errors.md`](../../../docs/contract-errors.md)
+//! (`= 39`). See [`docs/errors.md`](../../../docs/errors.md)
 //! for the full error table.
 
 use crate::events::{

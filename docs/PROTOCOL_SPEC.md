@@ -615,56 +615,20 @@ borrower, line, previous_utilized)` (`storage.rs:257`), which atomically
 
 ## 5. Error Taxonomy
 
-The full enum (38 variants, `#[repr(u32)]`, discriminants stable ABI). The
-table also appears in `docs/contract-errors.md` and is the source of truth
-for off-chain decoders.
+`ContractError` is a `#[repr(u32)]` enum with stable ABI discriminants. The
+canonical table — every code with its variant, category, trigger condition, and
+SDK recovery — lives in [`docs/errors.md`](./errors.md) and nowhere else, so
+this section does not restate it. Per-entrypoint validation order, and therefore
+which check raises which code, is described in the walkthroughs above.
 
-| Code | Variant                          | Semantic                                                   |
-| ---- | -------------------------------- | ---------------------------------------------------------- |
-| 1    | `Unauthorized`                   | Caller fails an auth check (not admin / not borrower)      |
-| 2    | `NotAdmin`                       | Caller lacks admin privilege specifically                  |
-| 3    | `CreditLineNotFound`             | Borrower has no credit line in storage                     |
-| 4    | `CreditLineClosed`               | Line is in terminal `Closed` state                         |
-| 5    | `InvalidAmount`                  | Amount is zero, negative, or out-of-range                  |
-| 6    | `OverLimit`                      | Draw would exceed `credit_limit`                           |
-| 7    | `NegativeLimit`                  | Credit limit < 0                                           |
-| 8    | `RateTooHigh`                    | Rate delta exceeds cap, or rate > 10_000                   |
-| 9    | `ScoreTooHigh`                   | Risk score > 100                                           |
-| 10   | `UtilizationNotZero`             | Operation requires zero utilization                        |
-| 11   | `Reentrancy`                     | Reentrancy detected                                        |
-| 12   | `Overflow`                       | Arithmetic overflow                                        |
-| 13   | `LimitDecreaseRequiresRepayment` | Lower limit blocked by current utilization                 |
-| 14   | `AlreadyInitialized`             | `init` already ran, or `(borrower, settlement_id)` replay  |
-| 15   | `AdminAcceptTooEarly`            | Rotation delay not elapsed                                 |
-| 16   | `BorrowerBlocked`                | Borrower on blocklist                                      |
-| 17   | `DrawExceedsMaxAmount`           | Per-tx draw cap                                            |
-| 18   | `Paused`                         | Circuit breaker active                                     |
-| 19   | `DrawsFrozen`                    | Global draws frozen                                        |
-| 20   | `CreditLineSuspended`            | Line suspended                                             |
-| 21   | `CreditLineDefaulted`            | Line defaulted                                             |
-| 22   | `MissingLiquidityToken`          | Liquidity token unset                                      |
-| 23   | `MissingLiquiditySource`         | Liquidity source unset                                     |
-| 24   | `InsufficientLiquidityReserve`   | Reserve balance insufficient                               |
-| 25   | `LiquidityTokenCallFailed`       | Token call failed observably                               |
-| 26   | `InsufficientRepaymentAllowance` | Allowance below repay amount                               |
-| 27   | `InsufficientRepaymentBalance`   | Balance below repay amount (also collateral over-withdraw) |
-| 28   | `RepayExceedsMaxAmount`          | Per-tx repay cap                                           |
-| 29   | `DrawCooldownActive`             | Draw cooldown not elapsed                                  |
-| 30   | `TreasuryNotSet`                 | Treasury address unset                                     |
-| 31   | `ExposureCapExceeded`            | Global exposure cap                                        |
-| 32   | `AdminNotInitialized`            | Admin missing from instance storage                        |
-| 33   | `TimestampRegression`            | Timestamp moved backwards                                  |
-| 34   | `LimitOutOfBounds`               | Outside min/max credit-limit bounds                        |
-| 35   | `CollateralRatioBelowMinimum`    | Under-collateralized                                       |
-| 36   | `OraclePriceInvalid`             | Oracle price ≤ 0 or malformed                              |
-| 37   | `OraclePriceStale`               | Exceeds `max_age_seconds`                                  |
-| 38   | `OraclePriceDeviation`           | Exceeds `max_deviation_bps`                                |
+`tests/error_discriminants.rs` and `scripts/list_contract_errors.py --check`
+both fail if the published table drifts from
+`contracts/credit/src/types.rs`.
 
-Auction errors (`AuctionError`, 12 variants, see
-`gateway-contract/contracts/auction_contract/src/errors.rs`):
-`NotWinner=1, AlreadyClaimed=2, NotClosed=3, NoFactoryContract=4,
-Unauthorized=5, InvalidState=6, BidTooLow=7, AuctionNotOpen=8,
-AuctionNotClosed=9, Reentrancy=10, NoWinner=11, NotFound=12`.
+The auction contract has its own enum, `AuctionError`, declared in
+`gateway-contract/contracts/auction_contract/src/errors.rs`. Errors raised on
+the credit side of the handoff are `ContractError::IncompatibleVersion` (61) and
+`ContractError::AuctionCallFailed` (62); see [`docs/errors.md`](./errors.md).
 
 ---
 

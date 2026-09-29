@@ -1,13 +1,16 @@
 # Collateral Error Catalog
 
-**Version: 2026-04-24**
-**Source of truth: [`CollateralError`](../contracts/collateral/src/errors.rs) enum in `contracts/collateral/src/errors.rs`.**
+**Source of truth: [`CollateralError`](../../contracts/collateral/src/errors.rs) enum in `contracts/collateral/src/errors.rs`.**
 
 **Published contract crate: `creditra-collateral`.**
 
 **CI guards:**
-- [`tests/catalog.rs`](../contracts/collateral/tests/catalog.rs) pins every discriminant.
-- [`tests/err_stab.rs`](../contracts/collateral/tests/err_stab.rs) freezes the v7 collateral error surface (discriminants, mirror sync, namespace, count).
+- [`tests/catalog.rs`](../../contracts/collateral/tests/catalog.rs) pins every discriminant.
+- [`tests/err_stab.rs`](../../contracts/collateral/tests/err_stab.rs) freezes the v7 collateral error surface (discriminants, mirror sync, namespace, count).
+
+**Canonical credit-contract table:** [`docs/errors.md`](../errors.md). Together
+with [`docs/errors/freeze.md`](./freeze.md) this is the only other error table
+in the repository; every other error document is a redirect to `docs/errors.md`.
 
 This document is the canonical reference for the `CollateralError` catalog
 emitted by the Creditra collateral domain. Integrators (TypeScript SDK, Rust
@@ -35,7 +38,7 @@ Rules enforced by CI (`tests/catalog.rs` + `tests/err_stab.rs`):
   `mirror_matches_canonical_credit_contract_error_table`, and
   `collateral_v7_mirror_tier_matches_canonical_contract_error_table` tests
   pin every mirror discriminant against the canonical credit contract
-  `ContractError` table at [`docs/ERROR_CODES.md`](ERROR_CODES.md).
+  `ContractError` table at [`docs/errors.md`](../errors.md).
 - Collateral-specific codes stay in the reserved `100+` namespace.
 
 ---
@@ -47,8 +50,8 @@ distinct role:
 
 | Tier | Codes | Purpose |
 |------|-------|---------|
-| **Mirror** | `5`, `12`, `22`, `35`, `39` | Semantically identical to canonical `ContractError` codes published by `contracts/credit/src/types.rs`. SDK consumers can map these integers directly to the canonical table at [`docs/ERROR_CODES.md`](ERROR_CODES.md). |
-| **Collateral-specific** | `100+` | Errors that have no canonical counterpart in the credit contract's `ContractError`. Reserved namespace with a `50`-slot buffer above the credit contract's `1..=49` range. |
+| **Mirror** | `5`, `12`, `22`, `35`, `39` | Semantically identical to canonical `ContractError` codes published by `contracts/credit/src/types.rs`. SDK consumers can map these integers directly to the canonical table at [`docs/errors.md`](../errors.md). |
+| **Collateral-specific** | `100+` | Errors that have no canonical counterpart in the credit contract's `ContractError`. Reserved namespace, far above the credit contract's current `1..=63` range. |
 
 The `100+` gap is intentional. It defends against accidental collisions if a
 future PR appends either catalog, and it gives front-end integrators an
@@ -140,7 +143,7 @@ try {
 The mirror tier overlaps the credit contract's `ContractError` codes. SDK
 clients should be able to decode these without needing to look up a
 per-contract table — the canonical reference at
-[`docs/ERROR_CODES.md`](ERROR_CODES.md) covers both the credit contract and the
+[`docs/errors.md`](../errors.md) covers both the credit contract and the
 mirror tier of this catalog.
 
 | Mirror code | Same-named variant in `ContractError`? | Identical meaning? |
@@ -165,7 +168,7 @@ error `35`, the SDK decodes via `ContractError::CollateralRatioBelowMinimum`.
 If a transaction targets `creditra-collateral` and the host returns `35`, the
 SDK decodes via `CollateralError::CollateralRatioBelowMinimum` (or — being
 agnostic — via the bytes `35` and the canonical table at
-[`docs/ERROR_CODES.md`](ERROR_CODES.md)).
+[`docs/errors.md`](../errors.md)).
 
 The two decode paths converge because the variants share their *semantic*
 meaning. Code `35` on either contract means exactly one thing across the
@@ -176,11 +179,11 @@ minimum ratio floor"*.
 
 ## Categories
 
-The collateral domain groups its mirror errors into the same four
-top-level categories as the credit contract. Categories are
+The collateral domain groups its mirror errors into the same top-level
+categories as the credit contract. Categories are
 documentation-only here (the runtime `ContractErrorCategory` lives in the
-credit crate). For SDK side-decoding, prefer the canonical category table at
-[`docs/error-taxonomy.md`](error-taxonomy.md).
+credit crate). For SDK side-decoding, use the category column of the canonical
+table at [`docs/errors.md`](../errors.md).
 
 | Category    | Mirror codes | Description                               |
 |-------------|--------------|-------------------------------------------|
@@ -209,12 +212,11 @@ mapping; SDK clients should treat each variant as its own bucket.
 
 ## Related Documents
 
-- [`docs/ERROR_CODES.md`](ERROR_CODES.md) — canonical flat code table for the
-  credit contract.
-- [`docs/error-taxonomy.md`](error-taxonomy.md) — error categories with
-  SDK recovery actions.
-- [`docs/errors.md`](errors.md) — canonical reference for the credit
-  contract's `ContractError`.
-- [`docs/storage-layout.md`](storage-layout.md) — storage keys for collateral
+- [`docs/errors.md`](../errors.md) — **canonical** error reference for the
+  credit contract's `ContractError`; all other error docs redirect here.
+- [`docs/errors/freeze.md`](./freeze.md) — `FreezeError` catalog.
+- [`docs/ERROR_MIGRATION.md`](../ERROR_MIGRATION.md) — V1 → V2 error-encoding
+  migration log.
+- [`docs/storage-layout.md`](../storage-layout.md) — storage keys for collateral
   balances (relevant context for understanding
   `CollateralBalanceForTokenNotFound`).

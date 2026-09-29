@@ -330,7 +330,7 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 | `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper |
 | `scripts/check-toolchain.sh [--verify-active]` | Enforce the reproducible-build policy (exact toolchain pin, committed locks, CI workflow consumes the pin) |
 | `scripts/clean_profraw.sh [--dry-run]` | Remove stray `*.profraw` coverage profiles outside `target/` |
-| `scripts/list_contract_errors.py [--json]` | Print every `ContractError` variant with its discriminant |
+| `scripts/list_contract_errors.py [--json\|--categories\|--check]` | Print every `ContractError` variant, or verify `docs/errors.md` against the enum |
 
 See [`scripts/README.md`](scripts/README.md) for conventions.
 
@@ -363,7 +363,7 @@ cargo build --release --target wasm32-unknown-unknown -p creditra-credit \
   && ls -l target/wasm32-unknown-unknown/release/creditra_credit.wasm   # < 50 KB
 
 # Error catalog
-python3 scripts/list_contract_errors.py --json | jq 'length'   # 38
+python3 scripts/list_contract_errors.py --check
 ```
 
 ---

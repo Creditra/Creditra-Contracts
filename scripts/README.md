@@ -15,7 +15,7 @@ they are operator-facing utilities only.
 | `test_check_toolchain.sh` | Focused guard tests for `check-toolchain.sh` (synthetic fixtures, no toolchain install). |
 | `clean_profraw.sh` | Remove stray `*.profraw` coverage files left over by `cargo llvm-cov`. |
 | `check_workspace.sh` | Convenience wrapper around `cargo check --workspace --locked`. |
-| `list_contract_errors.py` | Print every `ContractError` variant declared in `contracts/credit/src/types.rs` with its discriminant. |
+| `list_contract_errors.py` | Print every `ContractError` variant declared in `contracts/credit/src/types.rs` with its discriminant, or verify the canonical table (`--check`) / list categories (`--categories`). |
 | `gas-regression.sh` | Run per-entrypoint budget regression tests (or regenerate baselines with `--regen`). |
 | `regen_budget_baseline.sh` | Regenerate `contracts/credit/test_snapshots/budget.json` via the `budget_baseline` example. |
 
