@@ -1092,22 +1092,29 @@ impl Credit {
     /// Return the collateral-aware health factor for a borrower, expressed in
     /// basis points (bps).
     ///
-    /// Off-chain keepers use this single query to decide whether a borrower is
-    /// under-collateralized and eligible for `default_credit_line`.
+    /// # Keeper notice & excluded inputs
     ///
-    /// # Interpretation
+    /// Off-chain keepers must **not** rely on this metric alone or assume the contract
+    /// enforces it during defaults. Key limitations:
+    /// - **Excluded inputs**: Ignores multi-token collateral, risk weights / haircuts,
+    ///   oracle prices (assumes 1:1 nominal unit parity), installment delinquency
+    ///   ([`is_delinquent`]), and uncheckpointed pending interest.
+    /// - **Default does not check health factor**: `default_credit_line` is admin-discretionary
+    ///   and does **not** inspect `get_health_factor`. The contract permits defaults on any
+    ///   eligible line (`Active`, `Suspended`, `SelfSuspended`, `Restricted`) outside
+    ///   liquidation grace, regardless of the health factor value.
     ///
-    /// - Returns `u32::MAX` when `utilized_amount == 0` (no debt → infinitely
-    ///   healthy).
-    /// - A value below `10_000` means the position is under-collateralized and
-    ///   eligible for liquidation (`default_credit_line`).
-    /// - A value of `10_000` means the collateral exactly covers the minimum
-    ///   required amount.
-    /// - A value above `10_000` means the position is over-collateralized
-    ///   relative to the minimum ratio.
+    /// # Recommended keeper thresholds
+    /// - `u32::MAX`: No outstanding debt (`utilized <= 0`) — healthy.
+    /// - `≥ 12_000` (≥ 120%): Healthy buffer — no action.
+    /// - `10_000..11_999` (100%–120%): Caution / monitor — nearing minimum required ratio.
+    /// - `< 10_000` (< 100%): Under-collateralized advisory threshold — default candidate.
+    /// - `< 8_000` (< 80%): Critically under-collateralized — urgent liquidation candidate.
+    /// - Delinquency: When [`is_delinquent`] is `true` past grace, the line is default-eligible
+    ///   independent of health factor.
     ///
-    /// See [`query::get_health_factor`] for the full formula and edge-case
-    /// documentation.
+    /// See [`query::get_health_factor`] and `docs/credit.md` for the full formula,
+    /// blind-spot analysis, and recommended keeper orchestration logic.
     pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         query::get_health_factor(env, borrower)
     }
@@ -6486,6 +6493,58 @@ mod test_max_draw_amount {
             let hf = client.get_health_factor(&borrower);
             assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
             assert_eq!(hf, 66_666);
+        }
+
+        // ── default_credit_line does not consult health factor on-chain ───────
+
+        #[test]
+        fn default_credit_line_does_not_check_health_factor_on_chain() {
+            let env = Env::default();
+            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+            // Generous collateral: 10_000 collateral for 1_000 debt => hf = 66_666 (well above 10_000)
+            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+            collateral::deposit_collateral(&env, &borrower, 10_000);
+            client.draw_credit(&borrower, &1_000);
+
+            let hf = client.get_health_factor(&borrower);
+            assert!(hf >= 12_000, "expected healthy buffer (hf >= 12_000), got {}", hf);
+
+            // default_credit_line is an administrative transition and does not check health factor;
+            // it succeeds without revert despite the healthy collateral ratio.
+            client.default_credit_line(&borrower);
+            let line = client.get_credit_line(&borrower).unwrap();
+            assert_eq!(line.status, CreditStatus::Defaulted);
+        }
+
+        // ── keeper-style: delinquency allows default despite high collateral ──
+
+        #[test]
+        fn delinquent_borrower_can_be_defaulted_despite_high_health_factor() {
+            let env = Env::default();
+            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+            collateral::deposit_collateral(&env, &borrower, 10_000);
+            client.draw_credit(&borrower, &1_000);
+
+            // Set repayment schedule: due at ts=100
+            client.set_repayment_schedule(&borrower, &500, &86400, &100);
+
+            // Advance ledger timestamp past due date
+            env.ledger().set_timestamp(200);
+
+            // Borrower is delinquent according to the schedule
+            assert!(client.is_delinquent(&borrower));
+
+            // Health factor remains well above healthy threshold
+            let hf = client.get_health_factor(&borrower);
+            assert!(hf >= 12_000);
+
+            // Keeper defaults borrower based on delinquency signal
+            client.default_credit_line(&borrower);
+            let line = client.get_credit_line(&borrower).unwrap();
+            assert_eq!(line.status, CreditStatus::Defaulted);
         }
     }
 }
