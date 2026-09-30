@@ -60,7 +60,7 @@
 
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, publish_risk_admin_cooldown_configured};
-use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
+use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line,
     assert_risk_admin_cooldown_elapsed, set_last_risk_admin_action_ts, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};

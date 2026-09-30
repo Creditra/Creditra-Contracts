@@ -772,6 +772,7 @@ pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
 
 /// Persist protocol fee basis points.
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
+    assert!(bps <= 10_000, "protocol fee bps cannot exceed 100%");
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
 }
 

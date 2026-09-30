@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-##c[cfg_attr(not(test), no_std])
+#![cfg_attr(not(test), no_std)]
 
 //! Creditra accrual v7 contract — re-exports the credit contract's accrual surface for error-stability testing, event indexer support, and compositional reuse.
 

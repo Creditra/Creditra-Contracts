@@ -126,7 +126,7 @@ mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
 mod risk;
-mod views;
+pub mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 mod scoring;
@@ -147,6 +147,7 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
+use crate::events::CreditLineEvent;
 use crate::auth::{require_admin, require_admin_auth};
 use crate::attestation::AttestationBatch;
 use crate::events::{
@@ -163,6 +164,7 @@ use crate::events::{
     DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
     TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
+
 use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
@@ -706,7 +708,8 @@ impl Credit {
                     crate::fees::accrue_protocol_fee(&env, &borrower, fee);
                 }
 
-                let reserve_amount = effective_repay.saturating_sub(fee);
+                let fee = fee.min(effective_repay);
+                let reserve_amount = effective_repay - fee;
                 if reserve_amount > 0 {
                     token_client.transfer_from(
                         &contract_address,
@@ -4193,7 +4196,7 @@ mod test_mock_liquidity_token {
             Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
             symbol_short!("reinstate")
         );
-        let event_data: CreditLineEvent = data.try_into_val(&env).unwrap();
+        let event_data: crate::events::CreditLineEvent = data.try_into_val(&env).unwrap();
         assert_eq!(event_data.status, CreditStatus::Active);
     }
 

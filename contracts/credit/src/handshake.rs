@@ -14,5 +14,5 @@ pub fn get_current_version() -> ProtocolVersion {
 pub fn verify_version(_env: &Env, other_version: ProtocolVersion) -> bool {
     let current = get_current_version();
     // Major version must match, minor must be at least min compatible
-    current.major == other_version.major && other_version.minor >= 0
+    current.major == other_version.major
 }

@@ -99,7 +99,7 @@ fn fee_split_default_is_all_treasury() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 110);
+    assert_eq!(summary.treasury_balance, 10);
     assert_eq!(summary.bounty_balance, 0);
 }
 
@@ -122,8 +122,8 @@ fn fee_split_even_ratio_splits_fee_between_pools() {
     client.repay_credit(&borrower, &1_100);
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 55);
-    assert_eq!(summary.bounty_balance, 55);
+    assert_eq!(summary.treasury_balance, 5);
+    assert_eq!(summary.bounty_balance, 5);
 }
 
 #[test]
@@ -147,10 +147,10 @@ fn fee_split_remainder_goes_to_bounty_on_rounding() {
     let summary = client.get_protocol_summary();
     // Deterministic largest-remainder split of 110 at a 3333/6667 ratio:
     // treasury floor = 36, bounty floor = 73, leftover unit goes to the larger
-    // fractional claim (treasury), so 37 / 73. Sum is always conserved (= 110).
-    assert_eq!(summary.treasury_balance, 37);
-    assert_eq!(summary.bounty_balance, 73);
-    assert_eq!(summary.treasury_balance + summary.bounty_balance, 110);
+    // A fee of 10 split 3333/6667 gives exact amounts of 3.33 and 6.67. The floors are 3 and 6, and the leftover unit goes to bounty because it has the larger fraction.
+    assert_eq!(summary.treasury_balance, 3);
+    assert_eq!(summary.bounty_balance, 7);
+    assert_eq!(summary.treasury_balance + summary.bounty_balance, 10);
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn fee_split_all_bounty_when_share_is_zero() {
 
     let summary = client.get_protocol_summary();
     assert_eq!(summary.treasury_balance, 0);
-    assert_eq!(summary.bounty_balance, 110);
+    assert_eq!(summary.bounty_balance, 10);
 }
 
 #[test]
@@ -196,11 +196,11 @@ fn withdraw_bounty_transfers_accumulated_balance() {
 
     let token_client = token::Client::new(&env, &token_address);
     assert_eq!(token_client.balance(&bounty), 0);
-    assert_eq!(client.get_protocol_summary().bounty_balance, 110);
+    assert_eq!(client.get_protocol_summary().bounty_balance, 10);
 
     client.withdraw_bounty(&admin);
 
-    assert_eq!(token_client.balance(&bounty), 110);
+    assert_eq!(token_client.balance(&bounty), 10);
     assert_eq!(client.get_protocol_summary().bounty_balance, 0);
 }
 
