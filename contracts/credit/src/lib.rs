@@ -696,6 +696,12 @@ impl Credit {
                     ) as i128;
                 }
 
+                // Clamp the fee to what's actually being repaid so that
+                // fee + reserve_amount == effective_repay always holds exactly,
+                // regardless of fee_bps configuration. This must happen before
+                // any transfer or accrual uses `fee`.
+                let fee = fee.min(effective_repay);
+
                 // Transfer fee portion into contract (treasury accumulator), then
                 // transfer remaining amount into the reserve.
                 if fee > 0 {
@@ -708,7 +714,6 @@ impl Credit {
                     crate::fees::accrue_protocol_fee(&env, &borrower, fee);
                 }
 
-                let fee = fee.min(effective_repay);
                 let reserve_amount = effective_repay - fee;
                 if reserve_amount > 0 {
                     token_client.transfer_from(
