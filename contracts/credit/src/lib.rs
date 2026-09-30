@@ -153,28 +153,27 @@ use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrow_lifecycle_event, publish_borrower_blocked_event,
     publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
+    publish_contract_upgraded_event, publish_draw_reversed_event,
     publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
     publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
     publish_oracle_quorum_price_set_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
+    publish_rate_formula_config_event, publish_repayment_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
     DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
     TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::math_utils::{compute_deviation_bps, mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    clear_reentrancy_guard, get_borrower_by_credit_line_id,
     get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
     get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    proposed_at_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
     set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
@@ -182,13 +181,12 @@ use crate::storage::{
     MAX_ENUMERATION_LIMIT,
 };
 use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
+    BorrowCapabilities, ContractError, CreditLineData, CreditLinesPage,
     CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+    contract, contractimpl, token, Address, BytesN, Env, Symbol, Vec,
 };
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
@@ -279,9 +277,6 @@ pub struct Credit;
 
 #[contractimpl]
 impl Credit {
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
-    }
 
     pub fn get_version() -> (u32, u32, u32) {
         (1, 0, 0)
@@ -586,8 +581,15 @@ impl Credit {
             Some(previous_status),
         );
 
-        let timestamp = env.ledger().timestamp();
+                let timestamp = env.ledger().timestamp();
         storage_set_last_draw_ts(&env, &borrower, timestamp);
+        env.storage().persistent().set(
+            &DataKey::DrawAudit(DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp,
+            }),
+            &amount,
+        );
         publish_drawn_event(
             &env,
             DrawnEvent {
@@ -2399,9 +2401,13 @@ impl Credit {
 
         // Bump TTL on read: this is a hot accrual read path, so an active
         // borrower's entry must never be archived independently of draw/repay.
-        let mut credit_line: CreditLineData = storage_get_credit_line(&env, &borrower)
+                // Bump TTL on read: this is a hot accrual read path, so an active
+        // borrower's entry must never be archived independently of draw/repay.
+        let stored_line: CreditLineData = storage_get_credit_line(&env, &borrower)
             .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
-        credit_line = accrual::apply_accrual(&env, credit_line);
+        let previous_utilized = stored_line.utilized_amount;
+        let previous_status = Some(stored_line.status);
+        let mut credit_line = accrual::apply_accrual(&env, stored_line);
 
         let original_draw: i128 = env
             .storage()
@@ -2429,8 +2435,14 @@ impl Credit {
             .checked_sub(amount)
             .unwrap_or_else(|| env.panic_with_error(ContractError::OverLimit));
 
-        credit_line.utilized_amount = new_utilized_amount;
-        env.storage().persistent().set(&borrower, &credit_line);
+                credit_line.utilized_amount = new_utilized_amount;
+        crate::storage::persist_credit_line(
+            &env,
+            &borrower,
+            &credit_line,
+            previous_utilized,
+            previous_status,
+        );
         env.storage().persistent().set(
             &DataKey::DrawReversedAmount(DrawAuditKey {
                 borrower: borrower.clone(),

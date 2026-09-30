@@ -59,7 +59,7 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
+    ContractError, CreditLineData, CreditStatus, GracePeriodConfig,
     OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
 use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
