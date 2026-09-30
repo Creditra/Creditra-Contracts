@@ -1268,6 +1268,13 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
 /// Set or replace a borrower's installment repayment schedule (admin only).
 ///
+/// Replacing a schedule resets `next_due_ts` to `first_due_ts`; it does not
+/// preserve the previous schedule's due date. Rescheduling an overdue line
+/// into the future therefore clears its delinquent status until the new due
+/// date and grace period have passed. Closed lines may also be rescheduled,
+/// although [`crate::query::is_delinquent`] always returns `false` for them.
+/// Setting or replacing a schedule emits no event.
+///
 /// # Parameters
 /// - `borrower`: Borrower whose credit line schedule is being configured.
 /// - `amount_per_period`: Required principal repayment amount per installment; must be positive.

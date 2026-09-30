@@ -84,3 +84,45 @@ fn delinquency_triggers_after_the_grace_boundary() {
     env.ledger().with_mut(|li| li.timestamp = 10_001);
     assert!(client.is_delinquent(&borrower));
 }
+
+#[test]
+fn rescheduling_overdue_borrower_resets_due_date_and_clears_delinquency() {
+    let (env, _admin, contract_id, token_address) = setup_env();
+    let borrower = Address::generate(&env);
+    let client = CreditClient::new(&env, &contract_id);
+    env.ledger().with_mut(|li| li.timestamp = 10_000);
+    setup_borrower_with_draw(&env, &contract_id, &token_address, &borrower, 500);
+
+    client.set_repayment_schedule(&borrower, &100, &86_400, &9_940);
+    assert!(client.is_delinquent(&borrower));
+
+    let event_count_before_reschedule = env.events().all().len();
+    client.set_repayment_schedule(&borrower, &200, &172_800, &20_000);
+
+    let schedule = client.get_repayment_schedule(&borrower).unwrap();
+    assert_eq!(schedule.amount_per_period, 200);
+    assert_eq!(schedule.period_seconds, 172_800);
+    assert_eq!(schedule.next_due_ts, 20_000);
+    assert!(!client.is_delinquent(&borrower));
+    assert_eq!(env.events().all().len(), event_count_before_reschedule);
+}
+
+#[test]
+fn closed_line_can_be_rescheduled_but_is_not_delinquent() {
+    let (env, admin, contract_id, token_address) = setup_env();
+    let borrower = Address::generate(&env);
+    let client = CreditClient::new(&env, &contract_id);
+    setup_borrower_with_draw(&env, &contract_id, &token_address, &borrower, 500);
+
+    client.set_repayment_schedule(&borrower, &100, &86_400, &1_000);
+    client.close_credit_line(&borrower, &admin);
+    assert!(client.get_repayment_schedule(&borrower).is_none());
+
+    client.set_repayment_schedule(&borrower, &200, &172_800, &20_000);
+
+    let schedule = client.get_repayment_schedule(&borrower).unwrap();
+    assert_eq!(schedule.amount_per_period, 200);
+    assert_eq!(schedule.period_seconds, 172_800);
+    assert_eq!(schedule.next_due_ts, 20_000);
+    assert!(!client.is_delinquent(&borrower));
+}
