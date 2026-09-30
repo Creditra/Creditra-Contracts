@@ -60,7 +60,7 @@
 ///
 /// [`CollateralError`]: errors::CollateralError
 
-pub mod data::{}
+pub mod data {}
 pub mod views;
 pub use views::*;
 
@@ -76,9 +76,8 @@ const STATE_VERSION: u32 = 1;
 /// The `version` field is an explicit marker that allows future schema
 /// migrations to distinguish records written by this version of the contract
 /// from legacy unversioned records.
-///
-[#contracttype]
-#derive(Clone)
+#[contracttype]
+#[derive(Clone)]
 pub struct VersionedBalance {
     pub version: u32,
     pub amount: i128,
@@ -129,7 +128,7 @@ fn store_balance(env: &Env, user: &Address, amount: i128) {
 }
 
 /// Soroban contract root for the collateral domain.
-#contract]
+#[contract]
 pub struct Collateral;
 
 #[contractimpl]
