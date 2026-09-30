@@ -73,8 +73,9 @@ For the rate / accrual formulas:
   worked examples.
 
 For event schema:
-- [`docs/EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) — **canonical event catalog and
-  versioning policy** (replaces scattered references in indexer-integration).
+- [`docs/EVENT_CATALOG.md`](./EVENT_CATALOG.md) — **canonical event catalog and
+  versioning policy** (replaces the former `EVENTS_CATALOG.md`, `EVENT_SCHEMA.md`,
+  and `events-schema.md`; validated by `events_catalog.rs`).
 
 ---
 
@@ -144,8 +145,7 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 | `upgrade-policy.md` | ~3 | Upgrade procedure |
 | `utilization-cap.md` | ~3 | Per-borrower utilization cap |
 | `indexer-integration.md` | ~4 | Off-chain event decoding |
-| `EVENTS_CATALOG.md` | ~6 | **Authoritative event catalog and versioning policy** |
-| `events-schema.md` | ~4 | Legacy event schema reference (superseded by `EVENTS_CATALOG.md`) |
+| `EVENT_CATALOG.md` | ~6 | **Authoritative event catalog and versioning policy** (validated by `events_catalog.rs`) |
 | `deploy.md` | ~2 | Deploy quickstart |
 | `contributing-tests.md` | ~3 | Test helper conventions |
 | `scripts.md` | ~2 | Helper script reference |

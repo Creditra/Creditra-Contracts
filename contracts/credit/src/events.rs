@@ -17,7 +17,7 @@
 //! single-element `("blk_chg",)` topic for borrower blocklist changes.
 //!
 //! **Canonical schema and versioning policy:**
-//! See [`docs/events-schema.md`](../../../docs/events-schema.md) for the full
+//! See [`docs/EVENT_CATALOG.md`](../../../docs/EVENT_CATALOG.md) for the full
 //! authoritative event catalog, topic versions, and payload field orders.
 //!
 //! # How
@@ -37,7 +37,7 @@
 //! with a version suffix (e.g., `("credit","drawn_v2")`).
 //!
 //! See [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for the
-//! end-to-end event topology, [`docs/events-schema.md`](../../../docs/events-schema.md)
+//! end-to-end event topology, [`docs/EVENT_CATALOG.md`](../../../docs/EVENT_CATALOG.md)
 //! for the canonical catalog and versioning rules, and
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
 //! per-entrypoint event-emission table.
@@ -573,6 +573,19 @@ pub fn publish_grace_waiver_applied_event(
     );
 }
 
+/// Public alias for `GraceWaiverAppliedEvent` — used by the events catalog and tests.
+pub type GraceWaiverReceiptEvent = GraceWaiverAppliedEvent;
+
+/// Publish a grace waiver receipt event (alias for `publish_grace_waiver_applied_event`).
+pub fn publish_grace_waiver_receipt_event(
+    env: &Env,
+    borrower: &Address,
+    waived_amount: i128,
+    mode: crate::types::GraceWaiverMode,
+) {
+    publish_grace_waiver_applied_event(env, borrower, waived_amount, mode);
+}
+
 
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
@@ -761,6 +774,8 @@ pub struct CreditLineFreezeEvent {
     pub borrower: Address,
     pub frozen: bool,
     pub reason: crate::types::FreezeReason,
+    /// Ledger sequence at time of change (for off-chain indexers).
+    pub ledger: u32,
 }
 
 pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
@@ -780,6 +795,7 @@ pub fn publish_credit_line_freeze_event(
             borrower: borrower.clone(),
             frozen,
             reason,
+            ledger: env.ledger().sequence(),
         },
     );
 }

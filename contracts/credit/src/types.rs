@@ -633,6 +633,8 @@ pub enum FreezeReason {
     OperationalMaintenance = 3,
     /// Borrower-initiated voluntary draw pause.
     BorrowerRequest = 4,
+    /// Admin-initiated freeze for general administrative purposes.
+    AdminAction = 5,
 }
 
 /// Aggregated, single-call read-only view of a borrower's full credit-line state.
