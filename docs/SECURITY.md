@@ -240,6 +240,7 @@ addressed before mainnet.
 - Soroban SDK and host-function bugs (report to Stellar).
 - Front-end / wallet integrations.
 - DoS at the network layer.
+- Experimental contracts under `contracts/soroban/contracts/` (crowdpay, escrow) — standalone R&D, not workspace members, unrelated to the credit-lines protocol.
 
 **Severity & rewards** (illustrative; subject to deployment-time tuning):
 
