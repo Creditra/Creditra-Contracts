@@ -73,16 +73,17 @@ fn protocol_summary_returns_aggregate_totals() {
 /// cover `treasury_balance + bounty_balance + total_collateral` (see the
 /// rustdoc on `get_proof_of_reserve` in `views.rs`).
 ///
-/// `advance_repayment_schedule_after_repay` (lifecycle.rs) credits
-/// `treasury_balance` with the flat late fee for every overdue installment,
-/// but never collects a matching token transfer for it. The credit is
-/// phantom: it stays invisible as long as idle reserve liquidity pads the
-/// contract's balance, and is only exposed once that liquidity is redrawn.
+/// Originally `advance_repayment_schedule_after_repay` (lifecycle.rs) credited
+/// `treasury_balance` with the flat late fee without collecting a matching
+/// token transfer (a phantom credit). `repay_credit` now pulls the late fee
+/// from the borrower, but `draw_credit` still only checks the raw reserve
+/// balance, so redrawing the idle reserve also drains the tokens that back
+/// the accrued treasury balance.
 ///
-/// This test drives that exact sequence with a real Stellar asset contract
-/// (never a mock) and checks the invariant after every step. It holds
-/// through the draw and the overdue repay, then breaks — by exactly the
-/// flat late fee amount — once the idle reserve is redrawn. Tracked by
+/// This test drives that sequence with a real Stellar asset contract (never a
+/// mock) and checks the invariant after every step. It holds through the draw
+/// and the overdue repay, then breaks — by exactly the flat late fee amount —
+/// once the idle reserve is redrawn. Tracked by
 /// https://github.com/Creditra/Creditra-Contracts/issues/1342.
 #[test]
 #[should_panic(expected = "proof-of-reserve violated")]

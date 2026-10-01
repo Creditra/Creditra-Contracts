@@ -6,4 +6,9 @@
 # as any toolchain-behavior-sensitive baseline (e.g. WASM size budgets).
 channel = "1.97.1"
 targets = ["wasm32-unknown-unknown"]
-components = ["rustfmt", "clippy"]
+# `llvm-tools` supplies the `llvm-profdata` / `llvm-cov` binaries that
+# cargo-llvm-cov shells out to. Declaring it here keeps the coverage numbers CI
+# enforces byte-for-byte comparable with the ones a local run produces: both
+# sides profile the same pinned compiler. Without it, a contributor measuring
+# locally with a different LLVM would silently compute a different denominator.
+components = ["rustfmt", "clippy", "llvm-tools"]
