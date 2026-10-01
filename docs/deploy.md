@@ -56,7 +56,7 @@ soroban contract invoke \
 
 ---
 
-## Step 3 — Call `set_liquidity_token` (recommended)
+## Step 3 — Call `set_liquidity_token` (required for drawing)
 
 Without a liquidity token, draw operations transfer no tokens (state-only
 accounting). Set the token before opening credit lines that will be drawn:
@@ -71,10 +71,9 @@ soroban contract invoke \
 
 ---
 
-## Step 4 — Call `set_liquidity_source` (optional)
+## Step 4 — Call `set_liquidity_source` (strongly recommended)
 
-By default the contract itself is the liquidity reserve. To use an external
-reserve (e.g. a multisig treasury):
+**WARNING:** By default, the contract itself is the liquidity reserve. This is an unsafe default for production unless the contract holds its own funds. To use an external reserve (e.g., a multisig treasury), you must set the liquidity source:
 
 ```bash
 soroban contract invoke \
@@ -82,6 +81,79 @@ soroban contract invoke \
   --source $ADMIN_KEY \
   -- set_liquidity_source \
   --reserve_address $RESERVE_ADDRESS
+```
+
+---
+
+## Step 5 — Call `set_min_collateral_ratio_bps` (optional)
+
+Set the minimum collateral ratio (in basis points) required for borrowers. For example, 15000 is 150%.
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $ADMIN_KEY \
+  -- set_min_collateral_ratio_bps \
+  --ratio_bps 15000
+```
+
+---
+
+## Step 6 — Auction Contract Wiring
+
+To enable default liquidations, the credit and auction contracts must be wired together.
+
+1. Set the auction contract on the credit contract:
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $ADMIN_KEY \
+  -- set_auction_contract \
+  --auction_contract $AUCTION_CONTRACT_ID
+```
+
+2. Register the credit contract as a factory on the auction contract side:
+```bash
+soroban contract invoke \
+  --id $AUCTION_CONTRACT_ID \
+  --source $AUCTION_ADMIN_KEY \
+  -- set_factory_contract \
+  --factory $CONTRACT_ID
+```
+
+---
+
+## Step 7 — Smoke Test Sequence
+
+Verify the deployment by performing a basic open, draw, and repay sequence.
+
+1. Open a credit line:
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $BORROWER_KEY \
+  -- open_credit_line \
+  --borrower $BORROWER_ADDRESS
+```
+
+2. Draw credit:
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $BORROWER_KEY \
+  -- draw_credit \
+  --borrower $BORROWER_ADDRESS \
+  --amount 10000000
+```
+
+3. Repay credit:
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source $BORROWER_KEY \
+  -- repay_credit \
+  --borrower $BORROWER_ADDRESS \
+  --amount 10000000
 ```
 
 ---
@@ -125,6 +197,27 @@ key with a hardware wallet or multisig.
 
 ---
 
+## Upgrading a deployed contract
+
+Once the contract is live, WASM upgrades are applied through the admin-gated
+`upgrade` entrypoint. Upgrades preserve all storage (credit lines, config,
+borrower data) and keep the contract address unchanged.
+
+Before upgrading, operators must:
+1. Verify storage layout compatibility against `contracts/credit/src/types.rs`
+   (no struct fields removed or reordered; no enum discriminants changed).
+2. Pass the stability test guards:
+   `cargo test -p creditra-credit error_discriminants_are_stable`
+   `cargo test -p creditra-credit test_event_topics_stability`
+3. Complete a full testnet rehearsal.
+4. Confirm `get_schema_version` increments after the upgrade commits.
+
+Full pre-upgrade checklist, schema version semantics, zero `old_wasm_hash`
+explanation, testnet rehearsal steps, and rollback procedure:
+**[`docs/upgrade-policy.md`](./upgrade-policy.md)**
+
+---
+
 ## Related files
 
 | File | Role |
@@ -133,3 +226,4 @@ key with a hardware wallet or multisig.
 | `contracts/credit/src/storage.rs` | `admin_key`, `DataKey` |
 | `contracts/credit/src/types.rs` | `ContractError::AlreadyInitialized` |
 | `contracts/credit/tests/init_idempotency.rs` | Tests for init guard |
+| `docs/upgrade-policy.md` | WASM upgrade runbook: pre-checks, execution, verification, rollback |

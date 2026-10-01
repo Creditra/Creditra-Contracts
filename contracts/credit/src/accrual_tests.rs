@@ -18,6 +18,8 @@ mod tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
 
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
@@ -238,6 +240,8 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
 
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
@@ -436,6 +440,8 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -483,6 +489,8 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
 
         assert!(client.get_grace_period_config().is_none());
 
@@ -505,6 +513,8 @@ mod grace_period_tests {
         let client = CreditClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
         // Drop auths by creating a fresh env without mock_all_auths.
         let env2 = Env::default();
         let client2 = CreditClient::new(&env2, &contract_id);
@@ -521,6 +531,8 @@ mod grace_period_tests {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unsecured draws are intentional in these unit tests.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_grace_period_config(&1000_u64, &GraceWaiverMode::ReducedRate, &10_001_u32);
     }
 

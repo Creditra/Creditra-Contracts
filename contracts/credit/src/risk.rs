@@ -61,7 +61,7 @@
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, publish_risk_admin_cooldown_configured};
 use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
-    assert_risk_admin_cooldown_elapsed, set_last_risk_admin_action_ts, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
+    assert_risk_admin_cooldown_elapsed_for, set_last_risk_admin_action_ts_for, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
@@ -246,8 +246,11 @@ pub fn update_risk_parameters(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
-    assert_risk_admin_cooldown_elapsed(&env);
+    // Admin-only, enforced by the `lib.rs` wrapper (`require_admin_auth`); not
+    // re-checked here because a second `require_auth` for the already-authorized
+    // admin address within one invocation is rejected by the Soroban auth frame
+    // as `Error(Auth, ExistingValue)`.
+    assert_risk_admin_cooldown_elapsed_for(&env, &borrower);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
@@ -355,7 +358,7 @@ pub fn update_risk_parameters(
         credit_line.risk_score,
     );
 
-    set_last_risk_admin_action_ts(&env, env.ledger().timestamp());
+    set_last_risk_admin_action_ts_for(&env, &borrower, env.ledger().timestamp());
 }
 
 /// Get the configured rate-change limits, if any.

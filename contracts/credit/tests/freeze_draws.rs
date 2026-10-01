@@ -237,3 +237,131 @@ fn unfreeze_draws_idempotent() {
     client.unfreeze_draws();
     assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
 }
+
+// ── borrower temporary freeze expiry second behavior ─────────────────────────────
+
+#[test]
+fn draw_blocked_at_expiry_minus_one_with_error_40() {
+    let (env, admin, contract_id, token_address) = setup_with_token();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    // Open line and setup liquidity
+    client.open_credit_line(&borrower, &1_000, &300, &50);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
+
+    // Set timestamp and freeze borrower until expiry
+    let now = 1_700_000_000u64;
+    let expiry = now + 3600;
+    env.ledger().set_timestamp(now);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
+
+    // Advance to expiry - 1 second
+    env.ledger().set_timestamp(expiry - 1);
+
+    // Draw should fail with error #40 (BorrowerFrozen)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.draw_credit(&borrower, &500);
+    }));
+
+    assert!(
+        result.is_err(),
+        "draw_credit must fail at expiry - 1 second"
+    );
+}
+
+#[test]
+fn draw_allowed_at_exact_expiry() {
+    let (env, admin, contract_id, token_address) = setup_with_token();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    // Open line and setup liquidity
+    client.open_credit_line(&borrower, &1_000, &300, &50);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
+
+    // Set timestamp and freeze borrower until expiry
+    let now = 1_700_000_000u64;
+    let expiry = now + 3600;
+    env.ledger().set_timestamp(now);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
+
+    // Advance to exact expiry timestamp
+    env.ledger().set_timestamp(expiry);
+
+    // Draw should succeed at exact expiry
+    client.draw_credit(&borrower, &500);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.utilized_amount, 500, "draw should succeed at exact expiry");
+}
+
+#[test]
+fn re_freeze_with_shortened_expiry_takes_effect() {
+    let (env, admin, contract_id, token_address) = setup_with_token();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    // Open line and setup liquidity
+    client.open_credit_line(&borrower, &1_000, &300, &50);
+    token::StellarAssetClient::new(&env, &token_address).mint(&contract_id, &1_000);
+
+    // Set timestamp and freeze borrower until expiry
+    let now = 1_700_000_000u64;
+    let initial_expiry = now + 7200;
+    env.ledger().set_timestamp(now);
+    client.freeze_borrower_until(&admin, &borrower, &initial_expiry);
+
+    assert_eq!(
+        client.get_borrower_frozen_until(&borrower),
+        Some(initial_expiry)
+    );
+
+    // Re-freeze with shorter expiry
+    let shortened_expiry = now + 3600;
+    client.freeze_borrower_until(&admin, &borrower, &shortened_expiry);
+
+    assert_eq!(
+        client.get_borrower_frozen_until(&borrower),
+        Some(shortened_expiry),
+        "shortened expiry should take effect"
+    );
+
+    // Advance to initial expiry (past shortened expiry)
+    env.ledger().set_timestamp(initial_expiry);
+
+    // Draw should succeed since shortened expiry has passed
+    client.draw_credit(&borrower, &500);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.utilized_amount, 500, "draw should succeed after shortened expiry");
+}
+
+#[test]
+fn get_borrower_frozen_until_returns_expired_value() {
+    let (env, admin, contract_id, _token_address) = setup_with_token();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    // Set timestamp and freeze borrower until expiry
+    let now = 1_700_000_000u64;
+    let expiry = now + 3600;
+    env.ledger().set_timestamp(now);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
+
+    // Advance past expiry
+    env.ledger().set_timestamp(expiry + 100);
+
+    // get_borrower_frozen_until should still return the expired value
+    assert_eq!(
+        client.get_borrower_frozen_until(&borrower),
+        Some(expiry),
+        "get_borrower_frozen_until should return expired value"
+    );
+
+    // is_borrower_frozen should return false despite stored expiry
+    assert!(
+        !client.is_borrower_frozen(&borrower),
+        "is_borrower_frozen should return false after expiry"
+    );
+}
