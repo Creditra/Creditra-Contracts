@@ -285,10 +285,24 @@ fn test_penalty_surcharge_with_zero_surcharge_no_effect() {
 
     // Interest should be computed at 500 bps (no penalty)
     assert!(credit_line.accrued_interest > 0);
+
+    // Surcharge is 0, so no penalty-rate-entered event should ever be emitted.
+    let events = env.events().all();
+    let penalty_event = events.iter().find(|e| {
+        if e.1.len() < 2 {
+            return false;
+        }
+        let t0: soroban_sdk::Symbol =
+            soroban_sdk::Symbol::try_from_val(&env, &e.1.get(0).unwrap()).unwrap();
+        let t1: soroban_sdk::Symbol =
+            soroban_sdk::Symbol::try_from_val(&env, &e.1.get(1).unwrap()).unwrap();
+        t0 == soroban_sdk::Symbol::new(&env, "credit") && t1 == soroban_sdk::Symbol::new(&env, "pen_enter")
+    });
+    assert!(penalty_event.is_none());
 }
 
 #[test]
-fn test_penalty_surcharge_clamped_to_max_rate() {
+fn test_penalty_surcharge_clamps_at_rate_cap() {
     let env = Env::default();
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
@@ -300,24 +314,55 @@ fn test_penalty_surcharge_clamped_to_max_rate() {
     let token = Address::generate(&env);
     credit::Credit::set_liquidity_token(env.clone(), token.clone());
 
-    // Open a credit line with 9500 bps (95%)
-    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 9500, 50);
+    // Open a credit line with 9_500 bps (95%)
+    credit::Credit::open_credit_line(env.clone(), borrower.clone(), 1_000_000, 9_500, 50);
 
-    // Set penalty surcharge to 1000 bps (10%)
-    // Base rate (9500) + surcharge (1000) = 10500, which exceeds MAX_INTEREST_RATE_BPS (10000)
-    credit::Credit::set_penalty_surcharge_bps(env.clone(), 1000);
+    // Set penalty surcharge to 1_000 bps (10%).
+    // Base rate (9_500) + surcharge (1_000) = 10_500, which exceeds the
+    // 10_000 bps (100% APR) rate cap and must be clamped.
+    credit::Credit::set_penalty_surcharge_bps(env.clone(), 1_000);
 
-    // Set up grace period
-    credit::Credit::set_grace_period_config(env.clone(), 86400 * 30, credit::types::GraceWaiverMode::FullWaiver, 0);
+    // Set up a grace period so the borrower can become delinquent.
+    credit::Credit::set_grace_period_config(
+        env.clone(),
+        86400 * 30,
+        credit::types::GraceWaiverMode::FullWaiver,
+        0,
+    );
 
-    // Advance time to make borrower delinquent
-    env.ledger().set_timestamp(86400 * 35);
+    // Draw funds so utilized_amount > 0 — apply_accrual is a no-op on a
+    // zero-utilization line, so without this the clamp is never exercised.
+    let principal: i128 = 100_000;
+    credit::Credit::draw_credit(env.clone(), borrower.clone(), principal);
 
-    // Apply accrual - effective rate should be clamped to 10000 bps (MAX)
-    credit::Credit::accrue_batch(env.clone(), soroban_sdk::Vec::from_array(&env, [borrower.clone()]));
+    // Advance time past the grace period to make the borrower delinquent.
+    let elapsed_secs: u64 = 86400 * 35;
+    env.ledger().set_timestamp(elapsed_secs);
+
+    // Apply accrual — effective rate must be clamped to 10_000 bps, not 10_500 bps.
+    credit::Credit::accrue_batch(
+        env.clone(),
+        soroban_sdk::Vec::from_array(&env, [borrower.clone()]),
+    );
 
     let credit_line = credit::Credit::get_credit_line(env.clone(), borrower.clone()).unwrap();
 
-    // The accrual should succeed without overflow
-    assert!(credit_line.accrued_interest >= 0);
+    // Exact interest at the clamped 10_000 bps rate, floor-prorated over
+    // the elapsed interval: principal * 10_000 * elapsed / (10_000 * SECONDS_PER_YEAR).
+    const SECONDS_PER_YEAR: u128 = 31_536_000;
+    const CLAMPED_RATE_BPS: u128 = 10_000;
+    let expected_interest = (principal as u128 * CLAMPED_RATE_BPS * elapsed_secs as u128)
+        / (10_000u128 * SECONDS_PER_YEAR);
+
+    assert_eq!(credit_line.accrued_interest as u128, expected_interest);
+    assert_eq!(
+        credit_line.utilized_amount,
+        principal + expected_interest as i128
+    );
+
+    // Sanity check: an unclamped 10_500 bps rate would yield strictly more
+    // interest, proving the cap is what's actually limiting this result.
+    let unclamped_interest =
+        (principal as u128 * 10_500u128 * elapsed_secs as u128) / (10_000u128 * SECONDS_PER_YEAR);
+    assert!(expected_interest < unclamped_interest);
 }
