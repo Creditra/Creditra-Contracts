@@ -475,6 +475,16 @@ Interest accrual is lazy. `accrued_interest` and `utilized_amount` reflect the l
 ### `get_credit_line_count(env) -> u64`
 View function — returns the total number of credit lines that have been opened.
 
+### `get_health_factor(env, borrower) -> u32`
+View function — returns the borrower's collateral-aware health factor in basis points (bps).
+
+- Returns `u32::MAX` when `utilized_amount <= 0` (no outstanding debt → infinitely healthy).
+- A value of `10_000` bps (100%) represents a position whose collateral exactly satisfies the configured minimum collateral ratio (`MinCollateralRatioBps`, defaulting to `15_000` bps / 150%).
+- Values strictly below `10_000` indicate nominal under-collateralization relative to the minimum ratio.
+- **Excluded inputs & blind spots**: Evaluates only the single deposited collateral balance; ignores multi-token collateral, asset-specific risk weights / haircuts, oracle price feeds (assumes 1:1 nominal parity with debt token), installment schedule delinquency ([`is_delinquent`](#is_delinquentenv-borrower)), and uncheckpointed pending interest.
+- **Administrative default**: `default_credit_line` does **not** check or enforce `get_health_factor` on-chain. Defaults are administrative actions.
+- See [Keeper Integration and Default Eligibility](#keeper-integration-and-default-eligibility) for operational guidelines, recommended keeper evaluation flow, and example action thresholds.
+
 ### `enumerate_credit_lines(env, start_after, limit) -> Vec<(u64, CreditLineData)>`
 View function — returns a paginated list of credit lines in insertion order.
 
@@ -777,6 +787,163 @@ like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
 - Default liquidation lifecycle: `default_credit_line` emits `liq_req` → auction flow executes off-chain/on-chain as configured → admin applies proceeds via `settle_default_liquidation`.
 - Oracle-assisted default design: `docs/default-oracle.md`.
 - Auction hook architecture: `docs/default-liquidation-auction-hook.md`.
+
+---
+
+## Keeper Integration and Default Eligibility
+
+Off-chain automated agents (keepers) and risk monitors track borrower health, evaluate solvency, and propose or trigger default liquidations. This section details how keepers should interact with the protocol, the calculations and blind spots of the on-chain health factor query, and recommended decision pipelines.
+
+### Understanding `get_health_factor`
+
+The `get_health_factor(borrower)` view entrypoint computes a collateral-to-debt ratio scaled in basis points (bps):
+
+$$\text{health\_bps} = \frac{\text{collateral} \times 100\,000\,000}{\text{utilized\_amount} \times \text{min\_ratio\_bps}}$$
+
+- **Base Parity**: `10_000` bps (100%) represents a position whose collateral exactly satisfies the configured minimum collateral ratio (`MinCollateralRatioBps`, defaulting to `15_000` bps / 150%).
+- **Infinite Health**: When a borrower has no debt (`utilized_amount <= 0`), the function returns `u32::MAX`.
+- **Under-collateralization**: A value strictly below `10_000` indicates that the nominal deposited collateral is insufficient to meet the required collateral threshold.
+
+### Health Factor Blind Spots & Excluded Inputs
+
+Keepers must **never** treat `get_health_factor` as a complete or self-sufficient liquidation signal. The on-chain calculation is deliberately lightweight and omits several vital risk dimensions:
+
+1. **Excluded: Multi-Token Collateral**:
+   The contract only checks the single on-chain collateral balance record (`DataKey::Collateral(borrower)`). Any collateral deposited across multi-token vaults, secondary collateral tokens, or external escrow accounts is completely ignored by this metric.
+2. **Excluded: Asset Risk Weights and Haircuts**:
+   Every unit of collateral is credited at face value (100% nominal weight). The calculation does not apply volatility haircuts, liquidity tiers, or asset-specific collateral factors.
+3. **Excluded: Oracle Pricing and Exchange Rates**:
+   `get_health_factor` assumes a 1:1 nominal unit parity between the collateral token and the borrowed liquidity token. It does **not** fetch or integrate oracle price feeds. Consequently, market price movements, exchange rate fluctuations, and stablecoin depeg events are completely invisible to this query.
+4. **Excluded: Installment Delinquency and Payment Schedules**:
+   A borrower may be in severe payment default on their installment schedule despite maintaining sufficient collateral. `get_health_factor` does not evaluate repayment schedules or missed payments. Keepers must query [`is_delinquent`](#is_delinquentenv-borrower) to detect schedule delinquency.
+5. **Excluded: Uncheckpointed Pending Interest**:
+   The stored `utilized_amount` reflects debt up to the most recent mutating contract call (draw, repay, or admin action). Uncapitalized interest accrued since `last_accrual_ts` is not included in the read-only query output.
+
+### Crucial Invariant: Default Does NOT Check Health Factor On-Chain
+
+A common misconception among keeper operators is that the contract enforces under-collateralization before allowing a credit line to be defaulted.
+
+> [!WARNING]
+> **`default_credit_line` does NOT consult `get_health_factor` on-chain.**
+> The `default_credit_line` entrypoint is an **administrative discretionary action** (`require_admin_auth`). The on-chain contract validates only:
+> 1. Protocol is not paused (`assert_not_paused`).
+> 2. Caller has admin authorization (`require_admin_auth`).
+> 3. Credit line exists and is not already in a terminal state (`Closed`).
+> 4. Valid status transition (`Active`, `Suspended`, `SelfSuspended`, or `Restricted` $\to$ `Defaulted`).
+> 5. Any active per-borrower liquidation grace period has expired (`LiquidationGraceActive`).
+>
+> The contract will **not** reject a default call if `get_health_factor >= 10_000`, nor will it automatically default a line when `get_health_factor < 10_000`. Keepers must implement all validation and threshold checks off-chain.
+
+### Recommended Keeper Decision Logic
+
+Production keepers should implement a multi-factor evaluation pipeline before proposing or executing `default_credit_line`:
+
+```text
+                           ┌────────────────────────┐
+                           │   Poll Borrower Line   │
+                           └───────────┬────────────┘
+                                       │
+                         Is protocol paused or Closed?
+                                ├── Yes ──> [ Skip ]
+                                └── No
+                                       │
+                      ┌────────────────┴────────────────┐
+                      ▼                                 ▼
+             [ Delinquency Path ]             [ Collateral Path ]
+                      │                                 │
+           Call `is_delinquent(borrower)`    Compute Oracle-Adjusted HF:
+           Is borrower delinquent?           value = Σ(balance_i × price_i × haircut_i)
+                      │                      effective_debt = utilized + pending_interest
+           ├── Yes: Check grace period       health = value / (effective_debt × min_ratio)
+           │   Past grace?                              │
+           │   ├── Yes ──> [ Default Eligible ]         │
+           │   └── No  ──> [ In Grace Window ]          │
+           └── No: Clean payment record                 │
+                                                        │
+                      ┌─────────────────────────────────┘
+                      ▼
+         Evaluate Health Factor Thresholds:
+         • HF >= 12_000 (>= 120%) : Healthy / Safe
+         • 10_000 <= HF < 12_000  : Caution / Monitor
+         • HF < 10_000 (< 100%)   : Under-collateralized (Default Candidate)
+         • HF < 8_000 (< 80%)     : Critical Solvency Risk (Urgent Default)
+                      │
+           Eligible for liquidation?
+           ├── Yes: Verify Liquidation Grace Window
+           │   Expired?
+           │   ├── Yes ──> [ Execute/Propose default_credit_line ]
+           │   └── No  ──> [ Queue for expiry ]
+           └── No: Healthy position
+```
+
+### Keeper Action Thresholds
+
+| Health Factor (bps) | Collateral Ratio vs Requirement | Risk Category | Keeper Operational Action |
+|---|---|---|---|
+| `u32::MAX` | No outstanding debt | Zero Risk | No action required. Position is fully unencumbered. |
+| `≥ 12_000` | $\ge 120\%$ of minimum | Well-Collateralized | Healthy buffer. Routine periodic monitoring. |
+| `10_000..11_999` | $100\% - 120\%$ of minimum | Moderate Risk / Caution | Elevated monitoring frequency; notify borrower if alert hook configured. |
+| `< 10_000` | $< 100\%$ of minimum | Under-Collateralized | **Default Candidate**: Verify off-chain oracle prices and liquidation grace; submit default transaction. |
+| `< 8_000` | $< 80\%$ of minimum | Critically Under-Collateralized | **Urgent Default**: Immediate priority transaction to prevent protocol bad debt. |
+| *Any value* | `is_delinquent == true` past grace | Payment Default | **Default Candidate**: Delinquent on schedule; eligible for default regardless of collateral ratio. |
+
+### Example Keeper Implementation Workflow (Pseudocode)
+
+```rust
+// Off-chain Keeper Evaluation Loop
+async fn evaluate_borrower_for_default(
+    client: &CreditClient,
+    oracle: &PriceOracleClient,
+    borrower: &Address,
+) -> Result<KeeperAction, KeeperError> {
+    // 1. Fetch on-chain credit line snapshot
+    let snapshot = client.get_credit_line_snapshot(borrower).await?;
+    if snapshot.line.status == CreditStatus::Closed {
+        return Ok(KeeperAction::None);
+    }
+
+    // 2. Check payment schedule delinquency
+    if snapshot.is_delinquent {
+        let grace_seconds = client.get_per_borrower_liquidation_grace(borrower).await?;
+        let now = current_ledger_timestamp();
+        let base_ts = snapshot.line.suspension_ts.max(snapshot.repayment_schedule.next_due_ts);
+        if now >= base_ts + grace_seconds {
+            return Ok(KeeperAction::TriggerDefault {
+                reason: DefaultReason::Delinquency,
+            });
+        }
+    }
+
+    // 3. Fetch comprehensive oracle-priced collateral valuation
+    let oracle_price = oracle.get_price(&COLLATERAL_TOKEN).await?;
+    let raw_hf = snapshot.health_factor_bps;
+
+    // 4. Calculate real market-adjusted health factor
+    let market_adjusted_hf = calculate_market_health_factor(
+        snapshot.collateral_balance,
+        oracle_price,
+        snapshot.line.utilized_amount,
+        snapshot.line.accrued_interest,
+    );
+
+    // 5. Evaluate against keeper thresholds
+    if market_adjusted_hf < 8_000 {
+        Ok(KeeperAction::TriggerDefault {
+            reason: DefaultReason::CriticalUndercollateralization,
+        })
+    } else if market_adjusted_hf < 10_000 {
+        Ok(KeeperAction::TriggerDefault {
+            reason: DefaultReason::Undercollateralization,
+        })
+    } else if market_adjusted_hf < 12_000 {
+        Ok(KeeperAction::LogWarning {
+            health_factor: market_adjusted_hf,
+        })
+    } else {
+        Ok(KeeperAction::None)
+    }
+}
+```
 
 ---
 

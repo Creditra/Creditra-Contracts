@@ -49,3 +49,43 @@ fn get_contract_version_matches_module_constant() {
         "patch must match CONTRACT_API_VERSION"
     );
 }
+
+// ── get_version / get_contract_version are one version, two names ─────────────
+//
+// `get_version` predates `get_contract_version` and returned a hard-coded
+// `(1, 0, 0)` literal, so a `CONTRACT_API_VERSION` bump could silently leave the
+// two entrypoints disagreeing. It is now an alias of `CONTRACT_API_VERSION`, and
+// these tests are the guard against the literal coming back.
+
+#[test]
+fn get_version_is_an_alias_of_get_contract_version() {
+    let (env, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.get_version(),
+        client.get_contract_version(),
+        "get_version must report the same version as get_contract_version"
+    );
+}
+
+#[test]
+fn get_version_matches_module_constant() {
+    let (env, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.get_version(),
+        CONTRACT_API_VERSION,
+        "get_version must be sourced from CONTRACT_API_VERSION, not a literal"
+    );
+}
+
+#[test]
+fn get_version_reports_the_expected_triple() {
+    let (env, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+    let version = client.get_version();
+
+    assert_eq!((version.0, version.1, version.2), (1, 0, 0));
+}
