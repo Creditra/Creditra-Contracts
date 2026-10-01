@@ -516,6 +516,16 @@ pub struct ContractUpgradedEvent {
     pub new_wasm_hash: soroban_sdk::BytesN<32>,
 }
 
+/// Emitted when an admin re-anchors a stale single-oracle reference price.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleReferenceRefreshedEvent {
+    pub previous_price: i128,
+    pub previous_timestamp: u64,
+    pub new_price: i128,
+    pub timestamp: u64,
+}
+
 pub fn publish_contract_upgraded_event(env: &Env, event: ContractUpgradedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "upgraded")),
@@ -541,6 +551,16 @@ pub fn publish_oracle_price_accepted_event(env: &Env, price: i128, timestamp: u6
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "orc_price")),
         (price, timestamp),
+    );
+}
+
+pub fn publish_oracle_reference_refreshed_event(
+    env: &Env,
+    event: OracleReferenceRefreshedEvent,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_refreshed")),
+        event,
     );
 }
 

@@ -110,7 +110,7 @@ pub fn validate_storage_key_encoding(env: &Env, key_bytes: &Bytes) {
 ///   `BountyAddress`, `BountyBalance`,
 ///   `TotalCollateral`,
 ///   `MinCollateralRatioBps`, `OracleConfig`, `OracleLastPrice`,
-///   `OracleLastPriceTs`).
+///   `OracleLastPriceTs`, `OracleReferenceRefreshTs`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
 ///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
@@ -272,6 +272,8 @@ pub enum DataKey {
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Timestamp of the last admin oracle-reference refresh.
+    OracleReferenceRefreshTs,
     /// Multi-oracle quorum configuration.
     OracleQuorumConfig,
     /// Last resolved multi-oracle quorum price.
@@ -1492,6 +1494,7 @@ pub fn assert_ts_monotonic(env: &Env, stored_ts: u64, new_ts: u64) {
 //   OracleConfig         — admin-supplied policy (deviation & staleness limits)
 //   OracleLastPrice      — last price that passed the breaker
 //   OracleLastPriceTs    — ledger timestamp of that price
+//   OracleReferenceRefreshTs — timestamp of last admin recovery refresh
 //
 // `set_oracle_last_price` updates the two `Last*` entries atomically; readers
 // should always treat them as a pair to avoid races against an in-flight
@@ -1538,6 +1541,20 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
     env.storage()
         .instance()
         .set(&DataKey::OracleLastPriceTs, &ts);
+}
+
+/// Get the timestamp of the last admin oracle-reference refresh.
+pub fn get_oracle_reference_refresh_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleReferenceRefreshTs)
+}
+
+/// Persist the timestamp of the last admin oracle-reference refresh.
+pub fn set_oracle_reference_refresh_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleReferenceRefreshTs, &ts);
 }
 
 // ── Multi-oracle quorum price (resolved from multiple feeds) ────────────────

@@ -8,8 +8,8 @@
 
 use creditra_credit::types::{CreditStatus, OracleConfig};
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{token, Address, Env, Symbol};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 fn setup(env: &Env) -> (CreditClient, Address, Address) {
     env.mock_all_auths();
@@ -88,8 +88,7 @@ fn oracle_outage_recovers_across_many_ledgers() {
 }
 
 #[test]
-#[should_panic]
-fn oracle_outage_rejects_price_after_stale_window() {
+fn oracle_outage_recovers_after_long_silence() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
     client.set_oracle_config(&500_u32, &10_000_u64);
@@ -98,9 +97,43 @@ fn oracle_outage_rejects_price_after_stale_window() {
     let first = open_and_default(&client, &env, &contract_id, 500);
     client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &10_000_u32, &Some(1_000_i128));
 
-    // Advance beyond the configured oracle freshness window without a price update.
+    // Advance beyond the configured freshness window without an accepted price.
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 10_001);
 
+    // Admin re-anchors the stale reference through the independent recovery
+    // path. The emitted event preserves both sides of the price transition.
+    client.refresh_oracle_reference(&2_000_i128);
+    let recovery_event = env.events().all().iter().find_map(|(_, topics, data)| {
+        if topics.len() > 1
+            && Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap()
+                == Symbol::new(&env, "orc_refreshed")
+        {
+            creditra_credit::events::OracleReferenceRefreshedEvent::try_from_val(
+                &env,
+                data,
+            )
+            .ok()
+        } else {
+            None
+        }
+    });
+    let recovery_event = recovery_event.expect("reference refresh must emit an audit event");
+    assert_eq!(recovery_event.previous_price, 1_000);
+    assert_eq!(recovery_event.previous_timestamp, 1_000);
+    assert_eq!(recovery_event.new_price, 2_000);
+    assert_eq!(recovery_event.timestamp, 11_001);
+
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &Some(1_000_i128));
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(2_050_i128),
+    );
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
 }

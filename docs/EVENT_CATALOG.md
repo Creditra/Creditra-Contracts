@@ -1,7 +1,7 @@
 # Event Catalog — Creditra Contracts
 
 **Issue:** #1305  
-**Version:** 1.1  
+**Version:** 1.2
 **Status:** Authoritative — single source of truth for all Creditra events  
 **Scope:** `creditra-credit` (`contracts/credit/`), `gateway-auction`
 (`gateway-contract/contracts/auction_contract/`), `creditra-accrual`
@@ -22,7 +22,7 @@ that file must be reflected here.
 ## Versioning Policy
 
 The contract API version is defined in `contracts/credit/src/lib.rs` as
-`CONTRACT_API_VERSION = (1, 0, 0)`. Event schema follows SemVer-style rules:
+`CONTRACT_API_VERSION = (1, 1, 0)`. Event schema follows SemVer-style rules:
 
 - **Major:** Breaking changes (rename/remove/reorder fields, topic name change)
   require a new topic with a `_vN` suffix and a contract API major bump.
@@ -176,7 +176,17 @@ namespace unless noted.
 | `"orc_qcfg"` | `(u32, u32, u64)` | `(min_quorum_k, max_deviation_bps, max_age_seconds)` | `publish_oracle_quorum_config_set_event` |
 | `"orc_qprc"` | `(i128, u32, u64)` | `(price, quorum_k, timestamp)` | `publish_oracle_quorum_price_set_event` |
 
-### 1.12 Oracle registry events
+### 1.12 Oracle reference recovery event
+
+| Second topic | Payload struct | Field order & types | Added |
+|---|---|---|---|
+| `"orc_refreshed"` | `OracleReferenceRefreshedEvent` | `previous_price: i128`, `previous_timestamp: u64`, `new_price: i128`, `timestamp: u64` | 1.2.0 |
+
+**Publisher:** `publish_oracle_reference_refreshed_event`. Emitted when the
+admin re-anchors a stale single-oracle reference through
+`refresh_oracle_reference`.
+
+### 1.13 Oracle registry events
 
 | Second topic | Payload struct | Fields (in order) | Version added |
 |---|---|---|---|
@@ -270,6 +280,7 @@ All defined in `contracts/credit/src/types.rs`:
 | `publish_close_factor_bps_set_event` | `("credit", "clsfctr")` |
 | `publish_oracle_config_set_event` | `("credit", "orc_cfg")` |
 | `publish_oracle_price_accepted_event` | `("credit", "orc_price")` |
+| `publish_oracle_reference_refreshed_event` | `("credit", "orc_refreshed")` |
 | `publish_oracle_quorum_config_set_event` | `("credit", "orc_qcfg")` |
 | `publish_oracle_quorum_price_set_event` | `("credit", "orc_qprc")` |
 | `publish_oracle_added_event` | `("credit", "orc_add")` |

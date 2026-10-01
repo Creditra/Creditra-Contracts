@@ -547,6 +547,33 @@ fn raw_value_events_shape() {
     }
 }
 
+#[test]
+fn oracle_reference_refreshed_event_shape() {
+    let (env, contract_id, _borrower, _admin) = setup();
+
+    env.as_contract(&contract_id, || {
+        publish_oracle_reference_refreshed_event(
+            &env,
+            OracleReferenceRefreshedEvent {
+                previous_price: 1_000,
+                previous_timestamp: 10,
+                new_price: 1_250,
+                timestamp: 20,
+            },
+        );
+    });
+
+    assert_eq!(first_topic(&env), symbol_short!("credit"));
+    assert_eq!(second_topic(&env), Symbol::new(&env, "orc_refreshed"));
+    let events = env.events().all();
+    let payload = OracleReferenceRefreshedEvent::try_from_val(&env, &events.get(0).unwrap().2)
+        .unwrap();
+    assert_eq!(payload.previous_price, 1_000);
+    assert_eq!(payload.previous_timestamp, 10);
+    assert_eq!(payload.new_price, 1_250);
+    assert_eq!(payload.timestamp, 20);
+}
+
 // ── Oracle registry event shape tests ─────────────────────────────────────────
 
 #[test]
