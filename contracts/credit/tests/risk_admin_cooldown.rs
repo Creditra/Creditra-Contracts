@@ -15,7 +15,7 @@
 use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ fn cooldown_elapses_correctly() {
 }
 
 #[test]
-fn cooldown_is_per_action_not_per_borrower() {
+fn cooldown_is_per_borrower_not_global() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let borrower1 = Address::generate(&env);
@@ -161,14 +161,97 @@ fn cooldown_is_per_action_not_per_borrower() {
     env.ledger().with_mut(|li| li.timestamp = 1000);
     client.update_risk_parameters(&borrower1, &10_000_i128, &600_u32, &80_u32);
 
-    // Update borrower2 at t=1001 should also be blocked (cooldown is global).
+    // Update borrower2 at t=1001 — must NOT be blocked (cooldown is per-borrower).
     env.ledger().with_mut(|li| li.timestamp = 1001);
     let result =
         client.try_update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
     assert!(
-        result.is_err(),
-        "cooldown is global, not per-borrower"
+        result.is_ok(),
+        "cooldown is per-borrower: updating borrower2 should not be blocked by borrower1's cooldown"
     );
+}
+
+#[test]
+fn cooldown_blocks_same_borrower_within_window() {
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower1 = Address::generate(&env);
+    let borrower2 = Address::generate(&env);
+
+    client.open_credit_line(&borrower1, &10_000_i128, &500_u32, &70_u32);
+    client.open_credit_line(&borrower2, &10_000_i128, &500_u32, &70_u32);
+
+    client.set_risk_admin_cooldown(&3600);
+
+    // Update borrower1 at t=1000.
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.update_risk_parameters(&borrower1, &10_000_i128, &600_u32, &80_u32);
+
+    // Updating borrower1 again at t=1001 must still be blocked.
+    env.ledger().with_mut(|li| li.timestamp = 1001);
+    let result =
+        client.try_update_risk_parameters(&borrower1, &10_000_i128, &700_u32, &85_u32);
+    assert!(
+        result.is_err(),
+        "same borrower should still be blocked within the cooldown window"
+    );
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::RiskAdminCooldownActive.into(),
+    );
+}
+
+#[test]
+fn cooldown_independent_windows_per_borrower() {
+    // borrower1 updated at t=1000, borrower2 updated at t=2000.
+    // At t=4500, borrower1's window has elapsed (1000+3600=4600 → not yet, wait)
+    // Actually: borrower1 elapsed at t=4600, borrower2 elapsed at t=5600.
+    // At t=4600 borrower1 succeeds, borrower2 still blocked.
+    // At t=5600 both succeed.
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower1 = Address::generate(&env);
+    let borrower2 = Address::generate(&env);
+
+    client.open_credit_line(&borrower1, &10_000_i128, &500_u32, &70_u32);
+    client.open_credit_line(&borrower2, &10_000_i128, &500_u32, &70_u32);
+
+    client.set_risk_admin_cooldown(&3600);
+
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.update_risk_parameters(&borrower1, &10_000_i128, &600_u32, &80_u32);
+
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    client.update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
+
+    // t=4600: borrower1 cooldown elapsed (1000+3600), borrower2 still locked (2000+3600=5600).
+    env.ledger().with_mut(|li| li.timestamp = 4600);
+    client.update_risk_parameters(&borrower1, &10_000_i128, &700_u32, &85_u32);
+    let result =
+        client.try_update_risk_parameters(&borrower2, &10_000_i128, &700_u32, &85_u32);
+    assert!(result.is_err(), "borrower2 cooldown not yet elapsed at t=4600");
+
+    // t=5600: borrower2 cooldown elapsed.
+    env.ledger().with_mut(|li| li.timestamp = 5600);
+    client.update_risk_parameters(&borrower2, &10_000_i128, &700_u32, &85_u32);
+}
+
+#[test]
+fn portfolio_rescore_not_serialized() {
+    // All three borrowers can be updated within the same cooldown window
+    // as long as each is updated for the first time (no prior action).
+    let (env, _admin, contract_id) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.set_risk_admin_cooldown(&3600);
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    for _ in 0..3 {
+        let borrower = Address::generate(&env);
+        client.open_credit_line(&borrower, &10_000_i128, &500_u32, &70_u32);
+        // Each borrower's first update should succeed immediately regardless of cooldown.
+        client.update_risk_parameters(&borrower, &10_000_i128, &600_u32, &80_u32);
+    }
 }
 
 // ── event emission ───────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ cross-contract handoff.
 The protocol is implemented as two Soroban WebAssembly contracts totaling
 ~14.5 KLOC of Rust (`contracts/credit/src/lib.rs` alone is 5 449 lines), with
 ≥40 integration test files and current measured line coverage of **98.94 %**
-(`COVERAGE_REPORT.md`). The credit contract's release WASM is under a hard
+(`docs/COVERAGE.md`). The credit contract's release WASM is under a hard
 **50 KB CI budget** and is built with `opt-level = "z"`, full LTO, and stripped
 symbols (`Cargo.toml`).
 
@@ -443,7 +443,7 @@ The auction module's docstring describes an anti-snipe extension where bids
 within an extension window push out the close time. The constant
 `ANTI_SNIPE_WINDOW_SECS` / `ANTI_SNIPE_EXTEND_SECS` is referenced in
 PR #430's description (`feature/auction-anti-snipe`); after the
-merge-with-overlapping-`AUCTION_CLOSE_TIME_FIX.md` reconciliation, the live
+merge-with-overlapping-`docs/AUCTION_CLOSE_TIME_FIX.md` reconciliation, the live
 `place_bid` path hard-rejects bids when `now >= end_time` without extending
 (see `docs/SECURITY.md` "Known gaps"). This is tracked as an open item in
 `docs/EXECUTION_QUALITY.md`.
@@ -606,7 +606,7 @@ These are real and acknowledged.
    commit `28bcf4f` reports 65 errors localized to known merge artifacts in
    `contracts/credit/src/lifecycle.rs` (duplicate function bodies) and
    `contracts/credit/src/risk.rs` (duplicate `use` blocks). These are
-   tracked in `IMPLEMENTATION_STATUS.md` and are the next milestone after the
+   tracked in project milestone issues and are the next milestone after the
    documentation pass.
 
 ---
@@ -634,7 +634,7 @@ reader who wants to verify, the load-bearing files are:
 - `docs/state-machine.md`, `docs/interest-accrual.md`,
   `docs/risk-based-rate-formula.md`, `docs/threat-model.md`,
   `docs/default-liquidation-auction-hook.md`, `docs/storage-layout.md`,
-  `docs/contract-errors.md`, `docs/indexer-integration.md`
+  `docs/errors.md`, `docs/indexer-integration.md`
 
 The new long-form companion documents are:
 

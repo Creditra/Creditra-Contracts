@@ -442,12 +442,128 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #53)")]
+    #[should_panic(expected = "Error(Contract, #49)")]
     fn verify_no_batch_panics() {
         let env = Env::default();
         let (client, _admin, borrower) = setup(&env);
         let l = leaf(&env, 0xDD);
         // No batch committed — must panic with InvalidAttestation.
         verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+    }
+    #[test]
+    #[should_panic(expected = "Error(Contract, #49)")]
+    fn verify_cleared_batch_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
+        let l = leaf(&env, 0xEE);
+
+        client.commit_attestation_batch(&borrower, &l, &1);
+        client.clear_attestation_batch(&borrower);
+
+        // Batch cleared - must panic with AttestationBatchNotFound (49)
+        verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+    }
+
+    struct MerkleTree {
+        levels: std::vec::Vec<std::vec::Vec<BytesN<32>>>,
+    }
+
+    impl MerkleTree {
+        fn new(env: &Env, leaves: std::vec::Vec<BytesN<32>>) -> Self {
+            let mut levels = std::vec::Vec::new();
+            levels.push(leaves.clone());
+            let mut current_level = leaves;
+
+            while current_level.len() > 1 {
+                let mut next_level = std::vec::Vec::new();
+                for chunk in current_level.chunks(2) {
+                    if chunk.len() == 2 {
+                        next_level.push(hash_pair(env, &chunk[0], &chunk[1]));
+                    } else {
+                        next_level.push(chunk[0].clone());
+                    }
+                }
+                levels.push(next_level.clone());
+                current_level = next_level;
+            }
+            Self { levels }
+        }
+
+        fn root(&self) -> BytesN<32> {
+            self.levels.last().unwrap()[0].clone()
+        }
+
+        fn proof(&self, env: &Env, leaf_index: usize) -> Vec<BytesN<32>> {
+            let mut proof = std::vec::Vec::new();
+            let mut current_idx = leaf_index;
+
+            for level in self.levels.iter().take(self.levels.len() - 1) {
+                let is_right_node = current_idx % 2 == 1;
+                let sibling_idx = if is_right_node { current_idx - 1 } else { current_idx + 1 };
+                
+                if sibling_idx < level.len() {
+                    proof.push(level[sibling_idx].clone());
+                }
+                current_idx /= 2;
+            }
+
+            Vec::from_slice(env, &proof)
+        }
+    }
+
+    fn test_tree_size(size: usize) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
+
+        let mut leaves = std::vec::Vec::new();
+        for i in 0..size {
+            leaves.push(leaf(&env, i as u8));
+        }
+
+        let tree = MerkleTree::new(&env, leaves.clone());
+        let root = tree.root();
+
+        client.commit_attestation_batch(&borrower, &root, &(size as u32));
+
+        for i in 0..size {
+            let proof = tree.proof(&env, i);
+            assert!(
+                client.verify_attestation_proof(&borrower, &leaves[i], &proof),
+                "Failed to verify leaf {} for tree size {}", i, size
+            );
+
+            // Tampered leaf should fail
+            let tampered_leaf = leaf(&env, 0xFF);
+            assert!(
+                !client.verify_attestation_proof(&borrower, &tampered_leaf, &proof),
+                "Tampered leaf verified for tree size {}", size
+            );
+
+            // Tampered proof should fail (only if proof is not empty)
+            if proof.len() > 0 {
+                let mut tampered_proof_vec = std::vec::Vec::new();
+                for j in 0..proof.len() {
+                    tampered_proof_vec.push(proof.get(j).unwrap());
+                }
+                tampered_proof_vec[0] = leaf(&env, 0xFF);
+                let tampered_proof = Vec::from_slice(&env, &tampered_proof_vec);
+                
+                assert!(
+                    !client.verify_attestation_proof(&borrower, &leaves[i], &tampered_proof),
+                    "Tampered proof verified for tree size {}", size
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn verify_odd_and_even_trees() {
+        test_tree_size(1);
+        test_tree_size(2);
+        test_tree_size(3);
+        test_tree_size(7);
+        test_tree_size(8);
     }
 }

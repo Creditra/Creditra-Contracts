@@ -22,7 +22,10 @@
 //! ## 3. Functional Capabilities Post-Suspension
 //! - ✓ Draw operations are blocked after self-suspension
 //! - ✓ Repayment operations remain allowed after self-suspension
-//! - ✓ Admin can reinstate a self-suspended line to Active
+//! - ✓ Borrower can self-unsuspend their own line back to Active
+//! - ✓ Borrower cannot clear an admin-initiated suspension
+//! - ✓ Admin can unsuspend a self-suspended line to Active
+//! - ✓ `reinstate_credit_line` is rejected for a self-suspended line
 //! - ✓ Admin can force-close a self-suspended line
 //! - ✓ Utilization amount is preserved during self-suspension
 //!
@@ -33,7 +36,7 @@
 
 
 use creditra_credit::{Credit, CreditClient};
-use creditra_credit::types::CreditStatus;
+use creditra_credit::types::{ContractError, CreditStatus, FreezeReason};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token, Address, Env, Symbol, TryFromVal, TryIntoVal, IntoVal,
@@ -333,28 +336,113 @@ fn test_repay_allowed_after_self_suspension() {
 /// - Status transitions from Suspended to Active
 ///
 /// **Note:** This test assumes `reinstate_credit_line` works for Suspended status.
-/// If reinstate only works for Defaulted, this test documents the expected behavior.
+/// Test: Borrower can clear their own self-suspension without admin action.
+///
+/// **Validates:**
+/// - `SelfSuspended → Active` is reachable by the borrower
+/// - The debt record and credit parameters survive the round trip unchanged
+#[test]
+fn test_borrower_can_self_unsuspend_own_line() {
+    let (env, _admin, borrower, contract_id, _token_address, _drawn_amount) =
+        setup_with_utilized_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.self_suspend_credit_line(&borrower);
+    let suspended = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(suspended.status, CreditStatus::SelfSuspended);
+
+    client.self_unsuspend_credit_line(&borrower);
+    let active = client.get_credit_line(&borrower).unwrap();
+
+    assert_eq!(active.status, CreditStatus::Active);
+    assert_eq!(active.utilized_amount, suspended.utilized_amount);
+    assert_eq!(active.credit_limit, suspended.credit_limit);
+    assert_eq!(active.interest_rate_bps, suspended.interest_rate_bps);
+}
+
+/// Test: A borrower cannot clear an admin-initiated suspension.
+///
+/// This is the reason `SelfSuspended` exists as a distinct variant from
+/// `Suspended`: the borrower-only exit path must not double as an override of
+/// the admin's hold.
+///
+/// **Validates:**
+/// - `self_unsuspend_credit_line` rejects a `Suspended` source
+/// - The line stays `Suspended`; no partial state change
+#[test]
+fn test_borrower_cannot_self_unsuspend_admin_suspension() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Suspended
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.self_unsuspend_credit_line(&borrower);
+    }));
+    assert!(
+        result.is_err(),
+        "borrower must not clear an admin-initiated suspension"
+    );
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Suspended
+    );
+}
+
+/// Test: Admin can clear a borrower self-suspension via `unsuspend_credit_line`.
+///
+/// **Validates:**
+/// - `SelfSuspended → Active` is also reachable by the admin
+/// - `unsuspend_credit_line` is the recovery path for both suspension origins
 #[test]
 fn test_admin_can_unsuspend_self_suspended_line() {
-    #[allow(unused_variables)] let (env, _admin, borrower, contract_id, token_address) = setup_with_active_line(); #[allow(unused_variables)] let token = token_address.clone(); let client = CreditClient::new(&env, &contract_id);
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
 
-    // Self-suspend the line
+    client.self_suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
+
+    client.unsuspend_credit_line(&borrower);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Active
+    );
+}
+
+/// Test: `reinstate_credit_line` is not the way out of a suspension.
+///
+/// **Validates:**
+/// - Reinstate only accepts `Defaulted` as a source
+/// - An integrator wiring a `SelfSuspended` line to the reinstate button gets a
+///   deterministic error, not a silent no-op
+#[test]
+fn test_reinstate_cannot_replace_self_unsuspend() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
     client.self_suspend_credit_line(&borrower);
 
-    // Verify status is SelfSuspended
-    let credit_line_suspended = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(credit_line_suspended.status, CreditStatus::SelfSuspended);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+    }));
+    assert!(
+        result.is_err(),
+        "reinstate must reject a SelfSuspended source"
+    );
 
-    // Admin unsuspends by opening a new line (current behavior) or via a dedicated unsuspend function
-    // For now, we test that admin can transition back by re-opening
-    // Note: In production, you may want a dedicated `unsuspend_credit_line` function
-
-    // Since there's no direct unsuspend, we verify admin can force-close and reopen
-    // Or we can test that the line remains suspended until admin takes action
-    // For this test, we document that admin intervention is required
-
-    // This test serves as documentation that self-suspended lines require admin action
-    // to return to Active status (either via reinstate or other admin functions)
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
 }
 
 /// Test: Admin can force-close a self-suspended line.
@@ -618,4 +706,283 @@ fn test_self_suspend_applies_interest_accrual() {
         credit_line_after.utilized_amount >= initial_utilized,
         "Utilized amount should not decrease (may increase with accrued interest)"
     );
+}
+
+// ============================================================================
+// 5. Combined self-suspension x admin freeze layers (Issue #1358)
+// ============================================================================
+//
+// `self_suspend_credit_line` / `self_unsuspend_credit_line` are orthogonal to
+// the three draw-blocking freeze layers — global (`freeze_draws`), per-borrower
+// temporary (`freeze_borrower_until`), and per-credit-line admin
+// (`freeze_credit_line`). This section pins their composition so the
+// least-privilege guarantees documented in `lib.rs` cannot silently regress:
+//
+//   * a borrower self-unsuspend restores `Active` status but must NOT lift any
+//     admin- or protocol-applied freeze;
+//   * self-suspend / self-unsuspend is itself allowed while freeze layers are
+//     active (freezes gate draws, not lifecycle transitions);
+//   * repayment stays available through every layer, including while paused;
+//   * the `borrow_capabilities` view agrees with the real draw guard order:
+//     `paused` > global freeze > borrower freeze > line freeze.
+
+const TEMP_FREEZE_WINDOW: u64 = 10_000;
+
+fn freeze_line(client: &CreditClient<'_>, borrower: &Address) {
+    client.freeze_credit_line(borrower, &FreezeReason::Compliance);
+}
+
+fn freeze_draws_globally(client: &CreditClient<'_>) {
+    client.freeze_draws(&FreezeReason::LiquidityReserve);
+}
+
+fn freeze_borrower_temporarily(
+    client: &CreditClient<'_>,
+    env: &Env,
+    admin: &Address,
+    borrower: &Address,
+) {
+    let expiry_ts = env.ledger().timestamp() + TEMP_FREEZE_WINDOW;
+    client.freeze_borrower_until(admin, borrower, &expiry_ts);
+}
+
+/// Assert `draw_credit` fails with exactly `expected` and leaves state untouched.
+fn assert_draw_is_blocked(
+    client: &CreditClient<'_>,
+    borrower: &Address,
+    amount: i128,
+    expected: ContractError,
+) {
+    let result = client.try_draw_credit(borrower, &amount);
+    let err = result
+        .err()
+        .expect("draw_credit should have been blocked")
+        .expect("expected a typed contract error");
+    assert_eq!(err, expected.into(), "unexpected draw error");
+}
+
+fn self_suspend(client: &CreditClient<'_>, borrower: &Address) {
+    client.self_suspend_credit_line(borrower);
+    assert_eq!(
+        client.get_credit_line(borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
+}
+
+fn self_unsuspend(client: &CreditClient<'_>, borrower: &Address) {
+    client.self_unsuspend_credit_line(borrower);
+    assert_eq!(
+        client.get_credit_line(borrower).unwrap().status,
+        CreditStatus::Active
+    );
+}
+
+// ── Self-unsuspend must not lift any freeze layer ────────────────────────────
+
+#[test]
+fn self_unsuspend_does_not_lift_line_freeze() {
+    let (env, _admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    freeze_line(&client, &borrower);
+    self_suspend(&client, &borrower);
+    self_unsuspend(&client, &borrower);
+
+    assert!(
+        client.is_credit_line_frozen(&borrower),
+        "self-unsuspend must not clear an admin line freeze"
+    );
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::CreditLineFrozen);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(
+        !caps.can_draw,
+        "the surviving line freeze must still block draws"
+    );
+    assert!(caps.can_repay, "repayment is never blocked by a freeze");
+    assert!(
+        caps.can_self_suspend,
+        "status is Active again, so self-suspend is available"
+    );
+}
+
+#[test]
+fn self_unsuspend_does_not_lift_temporary_borrower_freeze() {
+    let (env, admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    freeze_borrower_temporarily(&client, &env, &admin, &borrower);
+    self_suspend(&client, &borrower);
+    self_unsuspend(&client, &borrower);
+
+    assert!(
+        client.is_borrower_frozen(&borrower),
+        "self-unsuspend must not lift the temporary borrower freeze"
+    );
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::BorrowerFrozen);
+}
+
+#[test]
+fn self_unsuspend_does_not_lift_global_draw_freeze() {
+    let (env, _admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    freeze_draws_globally(&client);
+    self_suspend(&client, &borrower);
+    self_unsuspend(&client, &borrower);
+
+    assert!(
+        client.is_draws_frozen(),
+        "self-unsuspend must not lift the global draw freeze"
+    );
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::DrawsFrozen);
+}
+
+#[test]
+fn self_suspend_round_trip_is_allowed_under_every_freeze_layer() {
+    let (env, admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    freeze_draws_globally(&client);
+    freeze_borrower_temporarily(&client, &env, &admin, &borrower);
+    freeze_line(&client, &borrower);
+
+    // Freezes gate draws only; lifecycle transitions still succeed.
+    self_suspend(&client, &borrower);
+    self_unsuspend(&client, &borrower);
+
+    assert!(client.is_draws_frozen());
+    assert!(client.is_borrower_frozen(&borrower));
+    assert!(client.is_credit_line_frozen(&borrower));
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::DrawsFrozen);
+}
+
+#[test]
+fn self_unsuspend_is_blocked_while_protocol_paused() {
+    let (env, _admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    self_suspend(&client, &borrower);
+    client.set_protocol_paused(&true);
+
+    let result = client.try_self_unsuspend_credit_line(&borrower);
+    let err = result
+        .err()
+        .expect("self-unsuspend must be blocked while the protocol is paused")
+        .expect("expected a typed contract error");
+    assert_eq!(err, ContractError::Paused.into());
+
+    // The rejected call left the suspension exactly as it was.
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
+}
+
+// ── Repayment survives every combination ─────────────────────────────────────
+
+#[test]
+fn repayment_succeeds_through_every_freeze_layer_after_self_unsuspend() {
+    let (env, admin, borrower, contract_id, token, drawn) = setup_with_utilized_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    freeze_draws_globally(&client);
+    freeze_borrower_temporarily(&client, &env, &admin, &borrower);
+    freeze_line(&client, &borrower);
+    self_suspend(&client, &borrower);
+    self_unsuspend(&client, &borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(
+        !caps.can_draw,
+        "draws stay blocked by the surviving freeze layers"
+    );
+    assert!(caps.can_repay, "repayment must remain available");
+
+    let repay_amount = 1_000_i128;
+    token::Client::new(&env, &token).approve(&borrower, &contract_id, &repay_amount, &1_000_u32);
+    client.repay_credit(&borrower, &repay_amount);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        drawn - repay_amount,
+        "repayment must succeed through every freeze layer"
+    );
+}
+
+#[test]
+fn repayment_succeeds_while_protocol_paused() {
+    let (env, _admin, borrower, contract_id, token, drawn) = setup_with_utilized_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.set_protocol_paused(&true);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "paused protocol must clear can_draw");
+    assert!(caps.can_repay, "repayment must survive a protocol pause");
+
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::Paused);
+
+    let repay_amount = 500_i128;
+    token::Client::new(&env, &token).approve(&borrower, &contract_id, &repay_amount, &1_000_u32);
+    client.repay_credit(&borrower, &repay_amount);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().utilized_amount,
+        drawn - repay_amount
+    );
+}
+
+// ── Capability view agrees with the real guards ──────────────────────────────
+
+#[test]
+fn borrow_capabilities_track_each_freeze_layer() {
+    let (env, admin, borrower, contract_id, _token) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    let baseline = client.borrow_capabilities(&borrower);
+    assert!(baseline.can_draw && baseline.can_repay && baseline.can_self_suspend);
+
+    freeze_draws_globally(&client);
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "global freeze must clear can_draw");
+    assert!(caps.can_repay && caps.can_self_suspend);
+
+    freeze_borrower_temporarily(&client, &env, &admin, &borrower);
+    assert!(
+        !client.borrow_capabilities(&borrower).can_draw,
+        "temporary borrower freeze must clear can_draw"
+    );
+
+    freeze_line(&client, &borrower);
+    assert!(
+        !client.borrow_capabilities(&borrower).can_draw,
+        "line freeze must clear can_draw"
+    );
+
+    // The layers are orthogonal: lifting one does not restore `can_draw` while
+    // another is still active.
+    client.unfreeze_credit_line(&borrower);
+    assert!(!client.borrow_capabilities(&borrower).can_draw);
+    client.unfreeze_borrower(&admin, &borrower);
+    assert!(!client.borrow_capabilities(&borrower).can_draw);
+    client.unfreeze_draws();
+
+    let recovered = client.borrow_capabilities(&borrower);
+    assert!(recovered.can_draw && recovered.can_repay && recovered.can_self_suspend);
+}
+
+#[test]
+fn borrow_capabilities_match_guards_while_self_suspended() {
+    let (env, _admin, borrower, contract_id, _token, _drawn) = setup_with_utilized_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    self_suspend(&client, &borrower);
+
+    let caps = client.borrow_capabilities(&borrower);
+    assert!(!caps.can_draw, "self-suspended lines cannot draw");
+    assert!(caps.can_repay, "self-suspended lines remain repayable");
+    assert!(!caps.can_self_suspend, "already self-suspended");
+
+    assert_draw_is_blocked(&client, &borrower, 100, ContractError::CreditLineSuspended);
 }
