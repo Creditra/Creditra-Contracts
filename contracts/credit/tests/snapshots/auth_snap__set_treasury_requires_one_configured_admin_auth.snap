@@ -1,0 +1,17 @@
+---
+source: contracts/credit/tests/auth_snap.rs
+expression: auths.last().unwrap()
+---
+(
+    Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM),
+    AuthorizedInvocation {
+        function: Contract(
+            (
+                Contract(CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4),
+                Symbol(set_treasury),
+                Vec(Ok(Address(obj#115)), Ok(Address(obj#119))),
+            ),
+        ),
+        sub_invocations: [],
+    },
+)
