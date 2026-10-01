@@ -77,7 +77,7 @@ use soroban_sdk::{Address, Env, Vec};
 /// elapsed  = now - last_accrual_ts          (seconds)
 /// interest = principal * rate_bps * elapsed
 ///            ────────────────────────────────
-///                  10_000 * 31_536_000
+///                  10_000 * 31_557_600
 /// ```
 /// where `principal` is `credit_line.utilized_amount` and `rate_bps` is
 /// `credit_line.interest_rate_bps`.
@@ -109,7 +109,6 @@ use soroban_sdk::{Address, Env, Vec};
 /// // interest = 1_000_000 * 500 * 86_400 / 315_360_000_000 = 137
 /// // After call: accrued_interest += 137, last_accrual_ts = 86_400
 /// ```
-pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 /// Apply interest accrual to a credit line and return the updated line record.
 ///
@@ -143,7 +142,7 @@ pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 /// # Mathematical Principles & Invariants
 ///
 /// * **Floor Rounding**: All interest deltas round down (`Rounding::Floor`). Sub-unit fractional interest is not carried forward.
-/// * **Julian Year Denominator**: Uses [`SECONDS_PER_YEAR`] = 31,536,000 seconds.
+/// * **Julian Year Denominator**: Uses [`crate::math_utils::SECONDS_PER_YEAR`] = 31,557,600 seconds (365.25 days).
 /// * **Timestamp Invariant**: `last_accrual_ts` is advanced **only** when non-zero interest (`accrued_i > 0`) is applied,
 ///   preventing zero-delta timestamp burn on fast ledgers.
 /// * **Zero Utilization**: Returns `line` unmodified without advancing `last_accrual_ts`.
