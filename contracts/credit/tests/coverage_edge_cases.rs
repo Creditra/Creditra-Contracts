@@ -197,7 +197,7 @@ fn get_liquidity_source_returns_configured_source() {
 fn get_contract_version_returns_expected_default() {
     let (env, _admin, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
-    assert_eq!(client.get_contract_version(), (1, 0, 0));
+    assert_eq!(client.get_contract_version(), (1, 1, 0));
 }
 
 #[test]

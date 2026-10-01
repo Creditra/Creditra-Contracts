@@ -56,7 +56,7 @@ fn get_contract_version_matches_module_constant() {
 // ── get_version / get_contract_version are one version, two names ─────────────
 //
 // `get_version` predates `get_contract_version` and returned a hard-coded
-// `(1, 0, 0)` literal, so a `CONTRACT_API_VERSION` bump could silently leave the
+// `(1, 1, 0)` literal, so a `CONTRACT_API_VERSION` bump could silently leave the
 // two entrypoints disagreeing. It is now an alias of `CONTRACT_API_VERSION`, and
 // these tests are the guard against the literal coming back.
 
@@ -90,5 +90,5 @@ fn get_version_reports_the_expected_triple() {
     let client = CreditClient::new(&env, &contract_id);
     let version = client.get_version();
 
-    assert_eq!((version.0, version.1, version.2), (1, 0, 0));
+    assert_eq!((version.0, version.1, version.2), (1, 1, 0));
 }

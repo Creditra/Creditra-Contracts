@@ -159,6 +159,7 @@ use crate::events::{
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
     publish_oracle_config_set_event,
     publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
+    publish_oracle_reference_refreshed_event,
     publish_paused_event, publish_protocol_fee_bounds_set_event,
     publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
@@ -186,6 +187,9 @@ use crate::storage::{
     set_utilization_cap_bps as storage_set_utilization_cap_bps,
     get_draw_audit as storage_get_draw_audit,
     get_draw_reversed_amount as storage_get_draw_reversed_amount, DataKey,
+    get_oracle_last_price, get_oracle_last_price_ts,
+    get_oracle_reference_refresh_ts, set_oracle_last_price,
+    set_oracle_reference_refresh_ts,
     MAX_ENUMERATION_LIMIT,
 };
 use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
@@ -211,7 +215,7 @@ mod views_tests;
 mod prorate_interest_proofs;
 
 
-pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
+pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 1, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
@@ -229,6 +233,9 @@ const ACCRUE_BATCH_MAX: u32 = 50;
 
 /// Time window in seconds within which an erroneous draw can be reversed (admin only).
 const DRAW_REVERSAL_WINDOW_SECS: u64 = 3600;
+
+/// Minimum interval between admin oracle-reference recovery operations.
+const ORACLE_REFERENCE_REFRESH_COOLDOWN_SECS: u64 = 3600;
 
 /// Maximum borrowers that can be processed in a single batch close call.
 /// Prevents unbounded gas consumption. Adjust after gas profiling.
@@ -2196,7 +2203,9 @@ impl Credit {
     ///
     /// Once set, `settle_default_liquidation` requires a valid `oracle_price`
     /// that is within `max_deviation_bps` of the last accepted price and whose
-    /// stored timestamp is no older than `max_age_seconds`.
+    /// stored reference timestamp is no older than `max_age_seconds`. If that
+    /// reference becomes stale, an admin can re-anchor it with
+    /// `refresh_oracle_reference` before settlement.
     ///
     /// # Validation
     /// - `max_deviation_bps` must be in `1..=10_000`.
@@ -2228,6 +2237,61 @@ impl Credit {
     /// Return the current oracle circuit-breaker configuration, if set.
     pub fn get_oracle_config(env: Env) -> Option<OracleConfig> {
         get_oracle_config(&env)
+    }
+
+    /// Re-anchor a stale single-oracle reference price (admin only).
+    ///
+    /// This recovery path is available only when single-oracle mode is active
+    /// and the last accepted reference is stale. A successful refresh stores
+    /// the supplied positive price at the current ledger timestamp, so the
+    /// next settlement applies its normal deviation check against this new
+    /// reference. Refreshes have an independent one-hour cooldown;
+    /// settlements do not consume or reset that cooldown.
+    ///
+    /// Emits `("credit", "orc_refreshed")` with the old and new reference
+    /// values and timestamps.
+    pub fn refresh_oracle_reference(env: Env, price: i128) {
+        assert_not_paused(&env);
+        require_admin_auth(&env);
+
+        let cfg = get_oracle_config(&env).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        });
+        if get_oracle_quorum_config(&env).is_some() || oracles::is_registry_configured(&env) {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        }
+        if price <= 0 {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        }
+
+        let previous_price = get_oracle_last_price(&env).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        });
+        let previous_timestamp = get_oracle_last_price_ts(&env).unwrap_or_else(|| {
+            env.panic_with_error(ContractError::OraclePriceInvalid);
+        });
+        let now = env.ledger().timestamp();
+
+        if now.saturating_sub(previous_timestamp) <= cfg.max_age_seconds {
+            env.panic_with_error(ContractError::InvalidAmount);
+        }
+        if let Some(last_refresh_ts) = get_oracle_reference_refresh_ts(&env) {
+            if now < last_refresh_ts.saturating_add(ORACLE_REFERENCE_REFRESH_COOLDOWN_SECS) {
+                env.panic_with_error(ContractError::RiskAdminCooldownActive);
+            }
+        }
+
+        set_oracle_last_price(&env, price, now);
+        set_oracle_reference_refresh_ts(&env, now);
+        publish_oracle_reference_refreshed_event(
+            &env,
+            crate::events::OracleReferenceRefreshedEvent {
+                previous_price,
+                previous_timestamp,
+                new_price: price,
+                timestamp: now,
+            },
+        );
     }
 
     // ── Multi-oracle quorum admin ─────────────────────────────────────────────
