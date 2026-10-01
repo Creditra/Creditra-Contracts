@@ -6,7 +6,7 @@
 #   scripts/check-wasm-size.sh --check-only # check existing artifacts only
 #
 # Environment:
-#   THRESHOLD_BYTES  Override limit in bytes (default: 51200 = 100 KiB)
+#   THRESHOLD_BYTES  Override limit in bytes (default: 51200 = 50 KB)
 #   WASM_DIR         Directory to scan (default: target/wasm32-unknown-unknown/release)
 set -euo pipefail
 

@@ -5,6 +5,9 @@ on:
     branches: [main, master, develop]
   pull_request:
     branches: [main, master, develop]
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +19,23 @@ env:
   # Cargo.lock. Any drift (manifest edit without lock refresh) fails the build
   # instead of silently picking new dependency versions.
   CARGOFLAGS: --locked
+  # Pinned cargo-llvm-cov version. Bump deliberately in the same commit as any
+  # toolchain bump: a different reporter can move the measured line percentage
+  # and therefore trip the floor below.
+  CARGO_LLVM_COV_VERSION: "0.9.1"
+  # Enforced line-coverage floor, in percent, for contracts/creditra-credit.
+  #
+  # This is the single source of truth for the floor. `docs/COVERAGE.md` and
+  # `README.md` describe it in prose; this value is what CI actually enforces.
+  #
+  # 92 is a ratchet on the measured 92.93% (3777 lines, 3510 covered), leaving
+  # ~0.93pp of headroom so unrelated PRs are not blocked by fractional drift.
+  # The floor is raised as tests land — never lowered to unblock a PR.
+  #
+  # Note: the 95% figure previously advertised in README.md was measured over
+  # the root Soroban workspace, which does not compile on main and therefore
+  # cannot be measured by any tool. See docs/COVERAGE.md.
+  MIN_LINE_COVERAGE: "92"
 
 jobs:
   contract:
@@ -67,6 +87,25 @@ jobs:
           scripts/test_check_toolchain.sh
           scripts/test_check_wasm_size.sh
 
+      # Ensure the root lockfile resolves cleanly without package collisions
+      # (e.g. duplicate workspace paths causing duplicate package entries).
+      - name: Validate root lockfile metadata
+        run: cargo metadata --locked --format-version 1
+
+      - name: Prevent stale rustdoc placeholders
+        run: |
+          set -euo pipefail
+          stale="$(find contracts \( -path '*/tests/*' -o -name '*_tests.rs' -o -name 'test_*.rs' \) -prune -o -type f -name '*.rs' -exec grep -nH 'Not yet implemented' {} + || true)"
+          if [[ -n "$stale" ]]; then
+            echo "$stale"
+            echo "::error::Found stale 'Not yet implemented' placeholder in non-test Rust code"
+            exit 1
+          fi
+
+      # Every document must stay discoverable from docs/INDEX.md.
+      - name: Check documentation index
+        run: scripts/check_docs_index.sh
+
       - name: Print toolchain versions
         run: |
           rustc --version
@@ -114,3 +153,168 @@ jobs:
           name: creditra-credit-wasm
           path: target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
+
+  fuzz:
+    name: Fuzz nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      CARGO_TERM_COLOR: always
+  # Line-coverage floor. Kept as its own job so it is a distinct, independently
+  # gateable required check: a coverage regression reads as a coverage failure
+  # instead of hiding inside the contract job.
+  coverage:
+    name: Line coverage floor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same pin-reading step as the contract job. rust-toolchain.toml is the
+      # single source of truth, so coverage is measured by the exact compiler
+      # that produces the shipped WASM.
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Pinned toolchain channel: $channel"
+
+      # `llvm-tools` is required by cargo-llvm-cov; it is declared in
+      # rust-toolchain.toml so it is installed here rather than fetched ad hoc.
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build all fuzz targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in \
+            contracts/accrual/fuzz/Cargo.toml \
+            contracts/borrow/fuzz/Cargo.toml \
+            contracts/collateral/fuzz/Cargo.toml \
+            contracts/credit/fuzz/Cargo.toml \
+            contracts/lifecycle/fuzz/Cargo.toml \
+            contracts/risk/fuzz/Cargo.toml
+          do
+            echo "::group::Building $(dirname "$manifest")"
+            cargo fuzz build --manifest-path "$manifest"
+            echo "::endgroup::"
+          done
+
+      - name: Run fuzz targets with bounded time budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+
+          run_target() {
+            local manifest="$1"
+            local target="$2"
+            local dir
+            dir="$(dirname "$manifest")"
+            echo "::group::Running $dir::$target"
+            if ! cargo fuzz run --manifest-path "$manifest" "$target" -- -max_total_time=60; then
+              echo "::error::Fuzz target $dir::$target failed or produced a crash."
+              failed=1
+            fi
+            echo "::endgroup::"
+          }
+
+          run_target contracts/accrual/fuzz/Cargo.toml main
+          run_target contracts/borrow/fuzz/Cargo.toml main
+          run_target contracts/collateral/fuzz/Cargo.toml main
+          run_target contracts/credit/fuzz/Cargo.toml oracle_deviation
+          run_target contracts/credit/fuzz/Cargo.toml prorate_interest_snapshot
+          run_target contracts/lifecycle/fuzz/Cargo.toml lifecycle
+          run_target contracts/risk/fuzz/Cargo.toml main
+
+          exit "$failed"
+
+      - name: Upload fuzz crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            contracts/**/fuzz/artifacts/**
+            contracts/**/fuzz/crash-*/*
+          if-no-files-found: ignore
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy, llvm-tools
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --version "$CARGO_LLVM_COV_VERSION" --locked
+
+      # The coverage job gates on numbers, so it must also enforce the same
+      # reproducible-build policy the contract job does. A drifted toolchain or
+      # an uncommitted lock file would otherwise produce a floor verdict from a
+      # build CI would never ship.
+      - name: Verify reproducible-build policy
+        run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
+
+      # This step is the floor. `cargo llvm-cov` writes the HTML report first and
+      # then exits non-zero when measured line coverage is below
+      # MIN_LINE_COVERAGE, so the job fails the workflow while the report below
+      # is still produced for inspection.
+      - name: Measure line coverage
+        working-directory: contracts/creditra-credit
+        run: cargo llvm-cov --all-targets --html --fail-under-lines "$MIN_LINE_COVERAGE"
+
+      # `if: always()` is deliberate: the report is most valuable when the floor
+      # was breached, and a failing step would otherwise skip the upload and the
+      # summary, leaving the failure unexplained.
+      - name: Publish coverage summary
+        if: always()
+        working-directory: contracts/creditra-credit
+        env:
+          REPORT_JSON: target/llvm-cov/coverage.json
+        run: |
+          set -euo pipefail
+          if [[ ! -d target/llvm-cov/html ]]; then
+            echo "::error::No coverage report was produced; the measurement step failed before writing one."
+            exit 1
+          fi
+          cargo llvm-cov report --json > "$REPORT_JSON"
+          pct="$(jq -r '.data[0].totals.lines.percent' "$REPORT_JSON")"
+          covered="$(jq -r '.data[0].totals.lines.covered' "$REPORT_JSON")"
+          total="$(jq -r '.data[0].totals.lines.count' "$REPORT_JSON")"
+          {
+            echo "## Line coverage"
+            echo
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| Measured line coverage | ${pct}% |"
+            echo "| Enforced floor (MIN_LINE_COVERAGE) | ${MIN_LINE_COVERAGE}% |"
+            echo "| Covered / total lines | ${covered} / ${total} |"
+            echo
+            echo "Uncovered lines per file:"
+            echo
+            echo '```'
+            cargo llvm-cov report --show-missing-lines --summary-only | sed -n '/^Uncovered Lines:/,$p'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Replaces the coverage/ HTML tree that used to be committed to git. The
+      # directory is already ignored via `/coverage` in .gitignore; the report is
+      # now attached to each run so it can never go stale again.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: contracts/creditra-credit/target/llvm-cov/html
+          if-no-files-found: error
+          retention-days: 14

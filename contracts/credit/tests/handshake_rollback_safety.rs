@@ -153,6 +153,11 @@ fn setup_defaulted(utilized: i128) -> (Env, Address, Address) {
 
     c.open_credit_line(&borrower, &1_000_000, &500_u32, &50_u32);
     if utilized > 0 {
+        // `draw_credit` enforces the minimum collateral ratio (150% when the
+        // ratio is unset), so the position needs collateral before it can be
+        // drawn. Collateral is denominated in the liquidity token, which the
+        // setup above mints to the borrower and approves.
+        c.deposit_collateral(&borrower, &(utilized * 2));
         c.draw_credit(&borrower, &utilized);
     }
     c.default_credit_line(&borrower);
