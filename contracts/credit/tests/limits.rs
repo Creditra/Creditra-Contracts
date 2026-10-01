@@ -9,7 +9,7 @@
 //! Covered scenarios:
 //! - Happy path: draw succeeds when under per-borrower cap
 //! - Draw exactly at cap succeeds (boundary)
-//! - Draw that would exceed cap reverts with `BorrowerExposureCapExceeded` (#43)
+//! - Draw that would exceed cap reverts with `BorrowerExposureCapExceeded` (#66)
 //! - Cap is independent of credit limit (draw to limit but blocked by exposure cap)
 //! - Cap is admin-configurable; non-admin is rejected
 //! - Setting cap = 0 removes it (draws unrestricted again)
@@ -176,7 +176,7 @@ fn draw_succeeds_at_exact_borrower_cap_boundary() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #64)")]
+#[should_panic(expected = "Error(Contract, #66)")]
 fn draw_reverts_when_exceeding_borrower_cap_by_one() {
     let env = Env::default();
     let (client, _admin, borrower, _cid) = setup(&env);
@@ -185,7 +185,7 @@ fn draw_reverts_when_exceeding_borrower_cap_by_one() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #64)")]
+#[should_panic(expected = "Error(Contract, #66)")]
 fn draw_reverts_when_second_draw_would_exceed_borrower_cap() {
     let env = Env::default();
     let (client, _admin, borrower, _cid) = setup(&env);
@@ -335,7 +335,7 @@ fn borrower_cap_does_not_affect_other_borrowers() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #64)")]
+#[should_panic(expected = "Error(Contract, #66)")]
 fn borrower_cap_blocks_only_capped_borrower() {
     let env = Env::default();
     let (client, _admin, borrowers, _cid) = setup_multi(&env, 2);
@@ -428,6 +428,6 @@ fn borrower_cap_and_global_cap_apply_independently() {
 // ── Error discriminant stability ──────────────────────────────────────────────
 
 #[test]
-fn borrower_exposure_cap_error_discriminant_is_64() {
-    assert_eq!(ContractError::BorrowerExposureCapExceeded as u32, 64);
+fn borrower_exposure_cap_error_discriminant_is_66() {
+    assert_eq!(ContractError::BorrowerExposureCapExceeded as u32, 66);
 }

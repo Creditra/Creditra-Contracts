@@ -26,10 +26,14 @@ pub fn query_draw_audit_trail(
     deps: Deps,
     credit_line_id: u64,
     draw_id: Option<u64>,
+    start_after: Option<u64>,
+    limit: Option<u32>,
 ) -> Result<Vec<DrawAuditTrailResponse>, ContractError> {
     let _ = CREDIT_LINES
         .may_load(deps.storage, credit_line_id)?
         .ok_or(ContractError::CreditLineNotFound(credit_line_id))?;
+
+    let limit = limit.unwrap_or(30) as u64;
 
     match draw_id {
         Some(did) => {
@@ -41,8 +45,10 @@ pub fn query_draw_audit_trail(
             let draw_count = DRAW_COUNT
                 .may_load(deps.storage, credit_line_id)?
                 .unwrap_or(0);
-            let mut responses = Vec::with_capacity(draw_count as usize);
-            for did in 0..draw_count {
+            let start = start_after.map(|s| s + 1).unwrap_or(0);
+            let end = std::cmp::min(start + limit, draw_count);
+            let mut responses = Vec::with_capacity((end.saturating_sub(start)) as usize);
+            for did in start..end {
                 responses.push(build_response(deps, credit_line_id, did)?);
             }
             Ok(responses)
@@ -559,6 +565,8 @@ mod tests {
         let msg = QueryMsg::DrawAuditTrail {
             credit_line_id,
             draw_id,
+            start_after: None,
+            limit: None,
         };
         let raw = query(deps.as_ref(), env, msg).unwrap();
         from_json(&raw).unwrap()
@@ -698,7 +706,7 @@ mod tests {
         #[test]
         fn errors_on_nonexistent_credit_line() {
             let deps = mock_dependencies();
-            let err = query_draw_audit_trail(deps.as_ref(), 999, None).unwrap_err();
+            let err = query_draw_audit_trail(deps.as_ref(), 999, None, None, None).unwrap_err();
             assert_eq!(err, ContractError::CreditLineNotFound(999));
         }
 
@@ -708,7 +716,7 @@ mod tests {
             setup_contract(&mut deps);
             create_credit_line(&mut deps);
 
-            let err = query_draw_audit_trail(deps.as_ref(), 0, Some(999)).unwrap_err();
+            let err = query_draw_audit_trail(deps.as_ref(), 0, Some(999), None, None).unwrap_err();
             assert_eq!(err, ContractError::DrawNotFound(999, 0));
         }
 
