@@ -50,6 +50,8 @@ fn setup_with_token(
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(env, &contract_id);
     client.init(&admin);
+    // Unsecured draws are intentional in these unit tests.
+    client.set_min_collateral_ratio_bps(&0);
 
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_address = token_id.address();
@@ -71,6 +73,8 @@ fn setup_admin_only(env: &Env) -> (CreditClient<'_>, Address) {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(env, &contract_id);
     client.init(&admin);
+    // Unsecured draws are intentional in these unit tests.
+    client.set_min_collateral_ratio_bps(&0);
     (client, admin)
 }
 

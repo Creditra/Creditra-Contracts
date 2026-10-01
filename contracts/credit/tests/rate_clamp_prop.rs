@@ -271,3 +271,19 @@ fn degenerate_range_preserves_clamp_ordering() {
         );
     }
 }
+
+/// Verifies that an invalid formula config with `min_rate_bps > 10_000` is
+/// safely bounded and cannot panic at runtime.
+#[test]
+fn invalid_min_rate_above_cap_is_safely_clamped() {
+    let cfg = RateFormulaConfig {
+        base_rate_bps: 2_000,
+        slope_bps_per_score: 500,
+        min_rate_bps: 12_000,
+        max_rate_bps: 15_000,
+    };
+
+    let result = compute_rate_from_score(&cfg, 100);
+    assert_eq!(result, MAX_INTEREST_RATE_BPS, "formula should cap at 10_000 bps");
+    assert!(result <= MAX_INTEREST_RATE_BPS, "result must never exceed the protocol cap");
+}

@@ -188,7 +188,43 @@ if ! bash "$CHECK" \
     echo "expected check-toolchain to pass: committed lock file" >&2
     exit 1
 fi
+
+# A committed lock file that .gitignore matches must still fail: `git add`
+# silently skips it, so a regenerated lock could never be staged.
+printf 'Cargo.lock\n' > "$ROOT/gitrepo/.gitignore"
+if bash "$CHECK" \
+    --file "$ROOT/rust-toolchain.toml" \
+    --skip-workflow \
+    --lock "$ROOT/gitrepo/Cargo.lock" > /dev/null 2>&1; then
+    echo "expected check-toolchain to fail: gitignored lock file" >&2
+    exit 1
+fi
+# ...and pass again once the offending rule is removed.
+rm -f "$ROOT/gitrepo/.gitignore"
+if ! bash "$CHECK" \
+    --file "$ROOT/rust-toolchain.toml" \
+    --skip-workflow \
+    --lock "$ROOT/gitrepo/Cargo.lock" > /dev/null 2>&1; then
+    echo "expected check-toolchain to pass: ignore rule removed" >&2
+    exit 1
+fi
 truncate -s 10 "$ROOT/Cargo.lock"
+
+# --- the repository's own lock file -----------------------------------------------
+# Regression guard for the bug this check exists to catch: the root lock file
+# must stay un-ignored in the real repository, not just in fixtures.
+# `--no-index` is required — without it `git check-ignore` skips tracked paths
+# and would report "not ignored" even while an ignore rule matches.
+if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    if git check-ignore -q --no-index Cargo.lock; then
+        echo "expected the repository root Cargo.lock to be un-ignored" >&2
+        exit 1
+    fi
+    if ! bash "$CHECK" --skip-workflow --lock Cargo.lock > /dev/null 2>&1; then
+        echo "expected check-toolchain to pass on the repository's own lock file" >&2
+        exit 1
+    fi
+fi
 
 # --- --verify-active ----------------------------------------------------------------
 STUB="$ROOT/bin"
