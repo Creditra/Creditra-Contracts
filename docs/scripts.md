@@ -15,13 +15,17 @@ scripts/build_wasm.sh auction    # gateway-auction only
 ```
 
 Output lives at `target/wasm32-unknown-unknown/release/*.wasm`. The script
-prints the resulting wasm file paths on completion.
+prints the resulting wasm file paths on completion. Before building it
+asserts the release overflow policy via `scripts/check-overflow-checks.sh`,
+so a release build cannot silently disable overflow checks.
 
 > **Prerequisite:** `rustup target add wasm32-unknown-unknown`.
 
 ## `scripts/check_workspace.sh`
 
-Thin wrapper around `cargo check --workspace`. Extra arguments are forwarded:
+Thin wrapper around `cargo check --workspace`. It runs
+`scripts/check-overflow-checks.sh` first, so the release overflow policy is
+asserted before anything compiles. Extra arguments are forwarded:
 
 ```bash
 scripts/check_workspace.sh --all-targets
@@ -29,6 +33,21 @@ scripts/check_workspace.sh --release -p creditra-credit
 ```
 
 Useful as a hook target so contributors and CI invoke the same command.
+
+## `scripts/check-overflow-checks.sh`
+
+Fails when `overflow-checks` is missing or not `true` in a release profile.
+The release WASM must revert on arithmetic overflow instead of wrapping, and
+`README.md` states that guarantee, so this guard keeps the statement honest:
+
+```bash
+scripts/check-overflow-checks.sh                  # every release profile
+scripts/check-overflow-checks.sh --manifest Cargo.toml
+```
+
+Checked profiles are the root workspace `Cargo.toml` and the standalone
+`contracts/creditra-credit/Cargo.toml`. The guard is also invoked by
+`scripts/check_workspace.sh` and `scripts/build_wasm.sh`.
 
 ## `scripts/check-wasm-size.sh`
 

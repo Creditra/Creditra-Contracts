@@ -7,6 +7,9 @@ use crate::auth::require_admin_auth;
 use crate::types::ContractError;
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
+/// Maximum number of oracle price feeds accepted in registry and quorum calls.
+pub const MAX_ORACLE_FEEDS: u32 = 20;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OracleDataKey {
@@ -47,6 +50,9 @@ pub fn add_oracle(env: Env, oracle: Address, weight: u32) {
         .unwrap_or_else(|| Vec::new(&env));
 
     if !oracle_list.contains(&oracle) {
+        if oracle_list.len() >= MAX_ORACLE_FEEDS {
+            env.panic_with_error(ContractError::OverLimit);
+        }
         oracle_list.push_back(oracle.clone());
         env.storage()
             .instance()
@@ -79,6 +85,9 @@ pub fn remove_oracle(env: Env, oracle: Address) {
             .instance()
             .remove(&OracleDataKey::OracleWeight(oracle.clone()));
         env.storage()
+            .persistent()
+            .remove(&OracleDataKey::OracleReport(oracle.clone()));
+        env.storage()
             .instance()
             .remove(&OracleDataKey::OracleReport(oracle));
     } else {
@@ -95,6 +104,27 @@ pub fn set_quorum_threshold(env: Env, threshold: u32) {
         .set(&OracleDataKey::QuorumThreshold, &threshold);
 }
 
+/// Returns the configured registry quorum threshold, if any.
+///
+/// The threshold is the minimum total weight of *fresh* reports that
+/// [`get_median_value`] requires before it will return a value. When it is not
+/// set the registry is considered inactive and settlement falls back to the
+/// quorum-of-K price feed or the single-oracle circuit breaker. See
+/// [`crate::oracle_validation`] for the full precedence rules.
+pub fn get_registry_quorum_threshold(env: &Env) -> Option<u32> {
+    env.storage().instance().get(&OracleDataKey::QuorumThreshold)
+}
+
+/// Whether the weighted-median oracle registry is active.
+///
+/// Registry mode is active once an admin has configured a quorum threshold via
+/// [`set_quorum_threshold`]. It takes precedence over both the quorum-of-K
+/// price feed and the single-oracle circuit breaker during settlement — see
+/// [`crate::oracle_validation`] for the full precedence rules.
+pub fn is_registry_configured(env: &Env) -> bool {
+    get_registry_quorum_threshold(env).is_some()
+}
+
 /// Sets the reporting window.
 /// Admin only.
 pub fn set_reporting_window(env: Env, window_seconds: u64) {
@@ -108,6 +138,10 @@ pub fn set_reporting_window(env: Env, window_seconds: u64) {
 /// Requires reporting oracle's auth.
 pub fn report_value(env: Env, oracle: Address, value: u128) {
     oracle.require_auth();
+
+    if value == 0 {
+        env.panic_with_error(ContractError::OraclePriceInvalid);
+    }
 
     // Verify the oracle is registered
     let oracle_list: Vec<Address> = env
@@ -125,13 +159,15 @@ pub fn report_value(env: Env, oracle: Address, value: u128) {
         timestamp: env.ledger().timestamp(),
     };
 
+    let key = OracleDataKey::OracleReport(oracle);
     env.storage()
-        .instance()
-        .set(&OracleDataKey::OracleReport(oracle), &report);
+        .persistent()
+        .set(&key, &report);
+    crate::storage::bump_persistent_ttl(&env, &key);
 }
 
 /// Computes the weighted median of the latest fresh reports from approved oracles.
-/// Returns error if quorum threshold is not met.
+/// Returns error if quorum threshold is not met or threshold is unset/zero.
 pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     let oracle_list: Vec<Address> = env
         .storage()
@@ -139,11 +175,14 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
         .get(&OracleDataKey::OracleList)
         .unwrap_or_else(|| Vec::new(&env));
 
-    let quorum: u32 = env
+    let quorum: u32 = match env
         .storage()
         .instance()
         .get(&OracleDataKey::QuorumThreshold)
-        .unwrap_or(0);
+    {
+        Some(q) if q > 0 => q,
+        _ => return Err(ContractError::OracleQuorumNotMet),
+    };
 
     let window: u64 = env
         .storage()
@@ -156,11 +195,13 @@ pub fn get_median_value(env: Env) -> Result<u128, ContractError> {
     let mut total_weight: u32 = 0;
 
     for oracle in oracle_list.iter() {
+        let key = OracleDataKey::OracleReport(oracle.clone());
         if let Some(report) = env
             .storage()
-            .instance()
-            .get::<_, OracleReportData>(&OracleDataKey::OracleReport(oracle.clone()))
+            .persistent()
+            .get::<_, OracleReportData>(&key)
         {
+            crate::storage::bump_persistent_ttl(&env, &key);
             // Freshness check
             if now.saturating_sub(report.timestamp) <= window {
                 let weight: u32 = env
@@ -288,7 +329,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Oracle weight must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_add_oracle_zero_weight_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -305,6 +346,7 @@ mod test {
 
         let oracle = Address::generate(&env);
         client.add_oracle(&oracle, &10);
+        client.report_value(&oracle, &100);
         client.remove_oracle(&oracle);
 
         let list: Vec<Address> = env.as_contract(&client.address, || {
@@ -315,16 +357,23 @@ mod test {
         });
         assert_eq!(list.len(), 0);
 
-        let exists = env.as_contract(&client.address, || {
+        let exists_weight = env.as_contract(&client.address, || {
             env.storage()
                 .instance()
                 .has(&OracleDataKey::OracleWeight(oracle.clone()))
         });
-        assert!(!exists);
+        assert!(!exists_weight);
+
+        let exists_report = env.as_contract(&client.address, || {
+            env.storage()
+                .persistent()
+                .has(&OracleDataKey::OracleReport(oracle))
+        });
+        assert!(!exists_report);
     }
 
     #[test]
-    #[should_panic(expected = "Oracle not found in registry")]
+    #[should_panic(expected = "Error(Contract, #55)")]
     fn test_remove_nonexistent_oracle_panics() {
         let env = Env::default();
         env.mock_all_auths();
@@ -345,22 +394,142 @@ mod test {
 
         let report: OracleReportData = env.as_contract(&client.address, || {
             env.storage()
-                .instance()
-                .get(&OracleDataKey::OracleReport(oracle))
+                .persistent()
+                .get(&OracleDataKey::OracleReport(oracle.clone()))
                 .unwrap()
         });
         assert_eq!(report.value, 100);
         assert_eq!(report.timestamp, env.ledger().timestamp());
+
+        let in_instance = env.as_contract(&client.address, || {
+            env.storage()
+                .instance()
+                .has(&OracleDataKey::OracleReport(oracle))
+        });
+        assert!(!in_instance);
     }
 
     #[test]
-    #[should_panic(expected = "Oracle is not approved")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn test_report_unregistered_oracle_panics() {
         let env = Env::default();
         env.mock_all_auths();
         let (client, _admin) = setup_test(&env);
         let oracle = Address::generate(&env);
         client.report_value(&oracle, &100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn test_add_oracle_exceeding_cap_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+
+        for _ in 0..MAX_ORACLE_FEEDS {
+            let oracle = Address::generate(&env);
+            client.add_oracle(&oracle, &10);
+        }
+
+        // 21st oracle exceeds MAX_ORACLE_FEEDS (20)
+        let oracle_21 = Address::generate(&env);
+        client.add_oracle(&oracle_21, &10);
+    }
+
+    #[test]
+    fn test_add_oracle_update_existing_at_cap_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+
+        let mut first_oracle = None;
+        for i in 0..MAX_ORACLE_FEEDS {
+            let oracle = Address::generate(&env);
+            if i == 0 {
+                first_oracle = Some(oracle.clone());
+            }
+            client.add_oracle(&oracle, &10);
+        }
+
+        // Updating weight of already registered oracle at cap succeeds
+        let oracle = first_oracle.unwrap();
+        client.add_oracle(&oracle, &25);
+        let w: u32 = env.as_contract(&client.address, || {
+            env.storage()
+                .instance()
+                .get(&OracleDataKey::OracleWeight(oracle))
+                .unwrap()
+        });
+        assert_eq!(w, 25);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #36)")]
+    fn test_report_value_zero_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+        let oracle = Address::generate(&env);
+
+        client.add_oracle(&oracle, &10);
+        client.report_value(&oracle, &0);
+    }
+
+    #[test]
+    fn test_instance_storage_does_not_grow_with_reports() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+
+        let oracle1 = Address::generate(&env);
+        let oracle2 = Address::generate(&env);
+
+        client.add_oracle(&oracle1, &10);
+        client.add_oracle(&oracle2, &20);
+
+        client.report_value(&oracle1, &100);
+        client.report_value(&oracle2, &200);
+
+        // Verify neither report is in instance storage
+        env.as_contract(&client.address, || {
+            assert!(!env.storage().instance().has(&OracleDataKey::OracleReport(oracle1.clone())));
+            assert!(!env.storage().instance().has(&OracleDataKey::OracleReport(oracle2.clone())));
+            // But they do exist in persistent storage
+            assert!(env.storage().persistent().has(&OracleDataKey::OracleReport(oracle1)));
+            assert!(env.storage().persistent().has(&OracleDataKey::OracleReport(oracle2)));
+        });
+    }
+
+    #[test]
+    fn test_get_median_value_threshold_unset_errors() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+        let oracle = Address::generate(&env);
+
+        client.add_oracle(&oracle, &10);
+        client.set_reporting_window(&3600);
+        client.report_value(&oracle, &100);
+
+        // Quorum threshold is never set
+        let res = client.try_get_median_value();
+        assert_eq!(res, Err(Ok(ContractError::OracleQuorumNotMet)));
+    }
+
+    #[test]
+    fn test_get_median_value_threshold_zero_errors() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin) = setup_test(&env);
+        let oracle = Address::generate(&env);
+
+        client.add_oracle(&oracle, &10);
+        client.set_quorum_threshold(&0);
+        client.set_reporting_window(&3600);
+        client.report_value(&oracle, &100);
+
+        let res = client.try_get_median_value();
+        assert_eq!(res, Err(Ok(ContractError::OracleQuorumNotMet)));
     }
 
     #[test]
@@ -453,6 +622,212 @@ mod test {
         let val = client.get_median_value();
         assert_eq!(val, 150);
     }
+
+    // --- Proptests and Reference Implementation ---
+    use proptest::prelude::*;
+    use proptest::collection::vec as prop_vec;
+
+    /// Pure Rust reference implementation for weighted median
+    fn reference_median(reports: &[(u128, u32)]) -> Option<u128> {
+        if reports.is_empty() {
+            return None;
+        }
+        let mut total_weight = 0u64; // use u64 to avoid overflow during sum
+        let mut sorted = reports.to_vec();
+        sorted.sort_by_key(|r| r.0);
+        
+        for (_, w) in &sorted {
+            total_weight += *w as u64;
+        }
+        if total_weight == 0 {
+            return None;
+        }
+        
+        let target = (total_weight + 1) / 2; // div_ceil(2)
+        let mut cumulative = 0u64;
+        for (v, w) in sorted {
+            cumulative += w as u64;
+            if cumulative >= target {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        
+        #[test]
+        fn prop_random_inputs(
+            weights in prop_vec(1..=1_000_000u32, 1..=20),
+            values in prop_vec(1..=1_000_000_000u128, 1..=20)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+                total_weight += w;
+            }
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+        }
+
+        #[test]
+        fn prop_equal_weights(
+            values in prop_vec(1..=1_000_000_000u128, 1..=20)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = values.len();
+            let mut valid_reports = std::vec::Vec::new();
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = 100u32;
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+            }
+            
+            client.set_quorum_threshold(&(n as u32 * 100 / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+        }
+
+        #[test]
+        fn prop_single_dominant_weight(
+            mut weights in prop_vec(1..=10_000u32, 1..=10),
+            values in prop_vec(1..=1_000_000_000u128, 1..=10)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            
+            // Make the first weight dominant
+            let sum: u32 = weights.iter().skip(1).sum();
+            weights[0] = sum + 1;
+            
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                client.report_value(&addr, &v);
+                
+                valid_reports.push((v, w));
+                total_weight += w;
+            }
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            let contract_median = client.get_median_value();
+            let ref_median = reference_median(&valid_reports).unwrap();
+            
+            assert_eq!(contract_median, ref_median);
+            assert_eq!(contract_median, values[0]); // dominant weight dictates median
+        }
+
+        #[test]
+        fn prop_stale_reports_excluded(
+            weights in prop_vec(1..=10_000u32, 2..=10),
+            values in prop_vec(1..=1_000_000_000u128, 2..=10)
+        ) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (client, _) = setup_test(&env);
+            
+            let n = std::cmp::min(weights.len(), values.len());
+            let mut valid_reports = std::vec::Vec::new();
+            let mut total_weight = 0u32;
+            
+            for i in 0..n {
+                let addr = Address::generate(&env);
+                let w = weights[i];
+                let v = values[i];
+                client.add_oracle(&addr, &w);
+                
+                if i % 2 == 0 {
+                    env.ledger().with_mut(|li| li.timestamp = 0);
+                } else {
+                    env.ledger().with_mut(|li| li.timestamp = 2000);
+                    valid_reports.push((v, w));
+                    total_weight += w;
+                }
+                
+                client.report_value(&addr, &v);
+            }
+            
+            env.ledger().with_mut(|li| li.timestamp = 2500);
+            
+            client.set_quorum_threshold(&(total_weight / 2));
+            client.set_reporting_window(&1000);
+            
+            if valid_reports.is_empty() {
+                assert!(client.try_get_median_value().is_err());
+            } else {
+                let contract_median = client.get_median_value();
+                let ref_median = reference_median(&valid_reports).unwrap();
+                assert_eq!(contract_median, ref_median);
+            }
+        }
+    }
+
+    #[test]
+    fn test_removed_oracle_ignored() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _) = setup_test(&env);
+        
+        let o1 = Address::generate(&env);
+        let o2 = Address::generate(&env);
+        
+        client.add_oracle(&o1, &100);
+        client.add_oracle(&o2, &200);
+        
+        client.report_value(&o1, &10);
+        client.report_value(&o2, &50);
+        
+        client.set_quorum_threshold(&100);
+        client.set_reporting_window(&1000);
+        
+        assert_eq!(client.get_median_value(), 50);
+        
+        client.remove_oracle(&o2);
+        
+        assert_eq!(client.get_median_value(), 10);
+    }
 }
 
 // # Multi-oracle quorum price resolution
@@ -487,11 +862,6 @@ mod test {
 use crate::math_utils::compute_deviation_bps;
 use crate::types::OracleQuorumConfig;
 
-        /// Maximum number of oracle price feeds accepted per `submit_oracle_prices` call.
-        ///
-        /// Limits gas consumption and keeps the stack buffer within WASM limits.
-        /// Adjust after gas profiling if the protocol sources more feeds.
-        pub const MAX_ORACLE_FEEDS: u32 = 20;
 
         /// Resolve a single canonical price from N submitted oracle prices using
         /// the quorum-of-K sliding-window algorithm.
