@@ -8,13 +8,14 @@ they are operator-facing utilities only.
 
 | Script | Purpose |
 | ------ | ------- |
-| `build_wasm.sh` | Compile both workspace contracts to `target/wasm32-unknown-unknown/release/*.wasm`. Asserts the reproducible-build policy (pinned toolchain + `--verify-active`) and builds `--locked`. |
-| `check-wasm-size.sh` | Build (optional) and fail when any release WASM exceeds **100 KiB** (`THRESHOLD_BYTES=102400`). |
+| `build_wasm.sh` | Compile both workspace contracts to `target/wasm32-unknown-unknown/release/*.wasm`. Asserts the reproducible-build policy (pinned toolchain + `--verify-active`) and the release overflow policy, then builds `--locked`. |
+| `check-wasm-size.sh` | Build (optional) and fail when any release WASM exceeds **50 KB** (`THRESHOLD_BYTES=51200`). |
 | `test_check_wasm_size.sh` | Focused guard tests for `check-wasm-size.sh` (synthetic artifacts, no build). |
-| `check-toolchain.sh` | Enforce the reproducible-build policy: exact toolchain pin in `rust-toolchain.toml`, required targets/components, CI workflow consumes the pin, lock files committed. `--verify-active` additionally fails when the active `rustc` does not match the pin. |
+| `check-toolchain.sh` | Enforce the reproducible-build policy: exact toolchain pin in `rust-toolchain.toml`, required targets/components, CI workflow consumes the pin, lock files committed **and not matched by `.gitignore`**. `--verify-active` additionally fails when the active `rustc` does not match the pin. |
 | `test_check_toolchain.sh` | Focused guard tests for `check-toolchain.sh` (synthetic fixtures, no toolchain install). |
 | `clean_profraw.sh` | Remove stray `*.profraw` coverage files left over by `cargo llvm-cov`. |
-| `check_workspace.sh` | Convenience wrapper around `cargo check --workspace --locked`. |
+| `check_workspace.sh` | Convenience wrapper around `cargo check --workspace --locked`; runs `check-overflow-checks.sh` first. |
+| `check-overflow-checks.sh` | Fail when `overflow-checks` is missing or not `true` in a release profile (`Cargo.toml`, `contracts/creditra-credit/Cargo.toml`). |
 | `list_contract_errors.py` | Print every `ContractError` variant declared in `contracts/credit/src/types.rs` with its discriminant, or verify the canonical table (`--check`) / list categories (`--categories`). |
 | `gas-regression.sh` | Run per-entrypoint budget regression tests (or regenerate baselines with `--regen`). |
 | `regen_budget_baseline.sh` | Regenerate `contracts/credit/test_snapshots/budget.json` via the `budget_baseline` example. |

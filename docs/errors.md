@@ -64,7 +64,7 @@ discriminants — only the generated spec entry is skipped.
 
 ## Error Code Table
 
-61 variants. `Category` is the value returned by
+64 variants. `Category` is the value returned by
 [`ContractError::category()`](../contracts/credit/src/types.rs).
 
 | Code | Variant | Category | When it occurs | SDK recovery |
@@ -130,6 +130,9 @@ discriminants — only the generated spec entry is skipped.
 | `61` | `IncompatibleVersion` | Handshake | The auction contract's protocol version does not match the credit contract's. | Upgrade one side to a compatible version, then retry the settlement. |
 | `62` | `AuctionCallFailed` | Handshake | The auction CPI call failed or returned an unexpected value. | Fix the `recovered_amount` / auction issue, then retry. No credit state was mutated. |
 | `63` | `AuctionActive` | Lifecycle | A fee-configuration change was attempted while a liquidation auction was in flight. | Wait until the last active auction leaves the `Defaulted` pipeline. |
+| `64` | `MissingVrfCommitment` | Misc | Score verification ran without a prior VRF commitment for the borrower. | Commit the borrower's VRF output before verifying the score. |
+| `65` | `InsufficientTreasuryBalance` | Liquidity | `execute_treasury_withdrawal` ran when the tracked treasury balance was below the proposal snapshot. | Wait until accrued fees cover the proposal, or propose a smaller withdrawal once it clears. |
+| `66` | `BorrowerExposureCapExceeded` | Limit | `draw_credit` would push this borrower above the cap set via `set_borrower_exposure_cap`. | Draw less, repay first, or have the admin raise or clear the cap. |
 
 ---
 
@@ -144,16 +147,16 @@ hard-coding code ranges.
 | `1`  | Auth | 3 | `Unauthorized`, `NotAdmin`, `AdminNotInitialized` |
 | `2`  | Lifecycle | 8 | `CreditLineClosed`, `AlreadyInitialized`, `CreditLineSuspended`, `CreditLineDefaulted`, `AlreadySettled`, `LiquidationGraceActive`, `StaleStateTransition`, `AuctionActive` |
 | `3`  | Numeric | 6 | `InvalidAmount`, `NegativeLimit`, `Overflow`, `TimestampRegression`, `LimitOutOfBounds`, `InvalidRiskWeight` |
-| `4`  | Limit | 6 | `OverLimit`, `UtilizationNotZero`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired` |
-| `5`  | Liquidity | 9 | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet` |
+| `4`  | Limit | 7 | `OverLimit`, `UtilizationNotZero`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired`, `BorrowerExposureCapExceeded` |
+| `5`  | Liquidity | 10 | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet`, `InsufficientTreasuryBalance` |
 | `6`  | Risk | 5 | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `RiskAdminCooldownActive` |
 | `7`  | Oracle | 5 | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound` |
 | `8`  | Collateral | 3 | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance`, `AdminCollateralCooldownActive` |
 | `9`  | Block | 5 | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen`, `FreezeCooldownActive` |
 | `10` | Reentrancy | 1 | `Reentrancy` |
-| `11` | Misc | 8 | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation` |
+| `11` | Misc | 9 | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation`, `MissingVrfCommitment` |
 | `12` | Handshake | 2 | `IncompatibleVersion`, `AuctionCallFailed` |
-| | **Total** | **61** | |
+| | **Total** | **64** | |
 
 ### Category-level recovery
 

@@ -1,236 +1,212 @@
-# Credit Score VRF Commitment
+# Credit Score Pre-Commitment (the "VRF" hook)
 
-This document describes the VRF (Verifiable Random Function) commitment mechanism for credit score derivation in the Creditra protocol.
+This document describes the score commitment mechanism in the Creditra credit
+contract, and — importantly — **what it does and does not guarantee**.
 
-## Overview
+> **Terminology.** The code, entry points, and storage key keep the `Vrf` prefix
+> for ABI and storage compatibility, but the mechanism is **not** a
+> verifiable-random-function protocol. Read it as an *admin score
+> pre-commitment*. On-chain VRF verification is a tracked follow-up
+> ([#1447](https://github.com/Creditra/Creditra-Contracts/issues/1447)).
 
-The VRF commitment scheme prevents ex-post manipulation of borrower risk scores by requiring administrators to commit to a VRF output before updating a credit score. This ensures that scores are cryptographically bound to an unpredictable value chosen before any sensitive information is known.
+## What it actually is
 
-## Motivation
+1. The admin calls `commit_vrf_output(borrower, commitment_hash)` to store an
+   opaque 32-byte value for a borrower.
+2. While a commitment exists, `update_risk_parameters` will only accept a new
+   `risk_score` equal to the deterministic reduction of that stored value:
+   `score = sum(commitment_hash bytes) % 101`.
+3. `clear_vrf_commitment(borrower)` lets the admin remove the commitment and
+   start over.
 
-Without VRF commitments, an administrator could potentially manipulate risk scores after observing market conditions, borrower behavior, or other sensitive information. By committing to a VRF output first, the score becomes cryptographically bound to a value that was determined beforehand, preventing such manipulation.
+That is the entire on-chain behaviour. It gives a **pre-commitment /
+change-detection** property: after the hash is published, a score that does not
+match it is rejected, so an observer can detect a score that was changed after
+the fact.
 
-## Architecture
+## What it is *not*
 
-### Components
+- **No VRF proof is verified.** The contract does not see, and cannot check, a
+  VRF proof or public key. It stores bytes the admin supplied.
+- **No randomness is generated or verified by the protocol.** The stored hash is
+  arbitrary bytes from the admin's perspective; the contract cannot tell a real
+  VRF output from a value the admin made up.
+- **Not unpredictable and not binding.** `derive_score_from_hash` is public and
+  deterministic, so for *any* target score in `[0, 100]` the admin can construct
+  a hash that reduces to it — for example, the 32-byte value `[s, 0, …, 0]`
+  reduces to `s`. Committing therefore does not stop the admin from arriving at a
+  chosen score; it only fixes *which* hash the score must match.
+- **Not "cryptographically bound".** The reduction is a lossy arithmetic function,
+  not a hash. Many inputs collapse to the same score, and inverting the *goal*
+  (find a hash for a desired score) is trivial. Do not describe the mechanism as
+  cryptographically binding or non-invertible.
+- **Optional.** When no commitment exists, `update_risk_parameters` skips the
+  score check entirely (backward compatibility). The mechanism cannot constrain
+  an admin who never commits; making it mandatory is tracked by
+  [#1240](https://github.com/Creditra/Creditra-Contracts/issues/1240).
 
-1. **VRF Commitment Storage** (`DataKey::VrfCommitment(Address)`)
-   - Stores the hash of the VRF output per borrower
-   - Includes the timestamp when the commitment was made
-   - Stored in persistent storage with TTL auto-bump
+## Trust assumptions
 
-2. **Commitment Functions** (`contracts/credit/src/scoring.rs`)
-   - `commit_vrf_output`: Store a VRF commitment for a borrower
-   - `clear_vrf_commitment`: Remove a commitment (admin only)
-   - `get_vrf_commitment`: Query a borrower's commitment
-   - `verify_vrf_commitment`: Verify a score matches the committed VRF
+The (weaker) change-detection guarantee holds only if **all** of the following
+are true. None of them is enforced on-chain:
 
-3. **Integration Points**
-   - `update_risk_parameters`: Verifies VRF commitment when score changes
-   - Backward compatible: allows updates without commitment for existing lines
+1. **Genuine VRF origin.** The committed hash really is the output of a VRF whose
+   seed and proof the admin could not control or predict at selection time.
+2. **Commit before knowledge.** The admin commits before learning the
+   information the score is meant to be independent of, and does not grind
+   candidate hashes off-chain.
+3. **Clear is exceptional.** `clear_vrf_commitment` is used only for genuine
+   recovery (for example, an off-chain process failure), not routinely to reset
+   the commitment and re-choose a score.
+4. **Advisory presentation.** Integrators surface the commitment to users as
+   advisory evidence of a pre-committed score, never as cryptographic proof of
+   fairness or randomness.
 
-## Data Structures
+If any of (1)–(3) does not hold, the commitment constrains nothing beyond what
+the admin chooses to do. Users should therefore treat the admin as able to
+influence scores, with the commitment providing accountability rather than
+prevention.
 
-### VrfCommitment
+## Score derivation and its distribution
 
-```rust
-#[contracttype]
-pub struct VrfCommitment {
-    /// Hash of the VRF output (commitment)
-    pub commitment_hash: BytesN<32>,
-    /// Ledger timestamp when the commitment was made
-    pub committed_at: u64,
-}
+The reduction is:
+
+```text
+score = (commitment_hash[0] + commitment_hash[1] + ... + commitment_hash[31]) % 101
 ```
+
+### Distribution caveat — the output is *not* uniform
+
+The documentation previously claimed the score is "uniformly distributed". That
+is inaccurate, for two independent reasons:
+
+- **Modulo bias.** The byte sum lies in `[0, 8160]`, and `8161 = 101 * 80 + 81`.
+  So 81 of the 101 residues can be produced by 81 distinct sums while the
+  remaining 20 can be produced by 80 — a small but real bias (~1.25%) even if the
+  sum were uniformly distributed.
+- **The sum itself is not uniform.** A sum of 32 independent bytes is
+  bell-shaped, not flat, so the residue distribution is only approximately
+  uniform and the tails are slightly under-represented.
+
+Do not model `derive_score_from_hash` as a uniform draw. Measuring and
+documenting the actual distribution is tracked by
+[#1329](https://github.com/Creditra/Creditra-Contracts/issues/1329).
 
 ## Workflow
 
-### 1. Commit Phase
-
-The administrator commits to a VRF output before updating a score:
+### 1. Commit
 
 ```rust
 commit_vrf_output(env, borrower, commitment_hash)
 ```
 
-- `commitment_hash`: 256-bit hash of the VRF output (e.g., SHA-256)
-- This creates a binding commitment that cannot be changed
-- Only one commitment per borrower at a time
+- `commitment_hash`: a 32-byte value the revealed score must reduce to.
+- Write-once per borrower until cleared; a second commit reverts.
 
-### 2. Derive Score
-
-The risk score is derived from the VRF output using a deterministic formula:
-
-```text
-score = (sum of all hash bytes) % 101
-```
-
-This ensures:
-- Uniform distribution across [0, 100]
-- Deterministic mapping (same hash → same score)
-- Non-invertible (cannot recover hash from score)
-
-### 3. Reveal Phase
-
-When updating risk parameters, the contract verifies the score:
+### 2. Reveal
 
 ```rust
 update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)
 ```
 
-The contract:
-1. Checks if a VRF commitment exists for the borrower
-2. If yes, verifies the score matches the committed VRF output
-3. If no, allows the update (backward compatibility)
+If the score is changing and a commitment exists, the contract checks
+`derive_score_from_hash(commitment_hash) == risk_score`; otherwise the update is
+rejected with `Unauthorized`. Rate-only updates (score unchanged) skip the check,
+and updates with no commitment are allowed.
 
-### 4. Clear Commitment
-
-If needed, the commitment can be cleared to restart the VRF process:
+### 3. Clear (recovery only)
 
 ```rust
 clear_vrf_commitment(env, borrower)
 ```
 
-## Security Properties
+Removes the commitment so a new one can be set. Admin-only.
 
-### 1. Binding
+## API reference
 
-Once committed, the VRF output cannot be changed. The commitment is stored in persistent storage and cannot be overwritten without explicit admin action.
-
-### 2. Unpredictable
-
-The VRF output is generated by a verifiable random function, making it unpredictable before commitment.
-
-### 3. Verifiable
-
-The score derivation is deterministic and verifiable. Anyone can verify that a given score matches the committed VRF output.
-
-### 4. Backward Compatible
-
-Existing credit lines without VRF commitments continue to work. The verification only applies when a commitment exists.
-
-## API Reference
-
-### commit_vrf_output
+### `commit_vrf_output`
 
 ```rust
 pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32>)
 ```
 
-**Authorization**: Admin only
+- **Authorization**: admin only.
+- **Errors**: `Paused`; auth failure; `InvalidAmount` when a commitment already
+  exists for the borrower.
 
-**Parameters**:
-- `borrower`: Address of the borrower
-- `commitment_hash`: 256-bit hash of the VRF output
-
-**Errors**:
-- `Paused`: Protocol is paused
-- `Unauthorized`: Caller is not admin
-- `InvalidAmount`: Commitment already exists for this borrower
-
-### clear_vrf_commitment
+### `clear_vrf_commitment`
 
 ```rust
 pub fn clear_vrf_commitment(env: Env, borrower: Address)
 ```
 
-**Authorization**: Admin only
+- **Authorization**: admin only.
+- **Errors**: `Paused`; auth failure.
 
-**Parameters**:
-- `borrower`: Address of the borrower
-
-**Errors**:
-- `Paused`: Protocol is paused
-- `Unauthorized`: Caller is not admin
-
-### get_vrf_commitment
+### `get_vrf_commitment`
 
 ```rust
 pub fn get_vrf_commitment(env: Env, borrower: Address) -> Option<VrfCommitment>
 ```
 
-**Authorization**: Public
+- **Authorization**: public.
+- **Returns**: the commitment (hash plus `committed_at`), or `None`.
 
-**Parameters**:
-- `borrower`: Address of the borrower
-
-**Returns**: The VRF commitment data, or `None` if no commitment exists
-
-### verify_vrf_commitment
+### `verify_vrf_commitment`
 
 ```rust
 pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> bool
 ```
 
-**Authorization**: Internal (called by `update_risk_parameters`)
+- **Authorization**: internal (called by `update_risk_parameters`).
+- **Returns**: `true` when `risk_score` equals the reduction of the stored hash.
+  This is an equality check — it verifies **no** proof and does **not** establish
+  that the hash came from a VRF.
+- **Errors**: `CreditLineNotFound` when no commitment exists.
 
-**Parameters**:
-- `borrower`: Address of the borrower
-- `risk_score`: The risk score to verify (0-100)
-
-**Returns**: `true` if the score matches the committed VRF output
-
-**Errors**:
-- `CreditLineNotFound`: No commitment exists for this borrower
-
-## Integration with Risk Parameters
-
-The VRF commitment is integrated into `update_risk_parameters` as follows:
+## Integration with risk parameters
 
 ```rust
-// Verify VRF commitment if score is changing
+// The score check applies only when the score actually changes and a
+// commitment exists. It compares against sum(bytes) % 101 of the stored hash;
+// it does not authenticate the hash as a VRF output.
 if risk_score != credit_line.risk_score {
     if let Some(_commitment) = crate::scoring::get_vrf_commitment(&env, &borrower) {
-        // VRF commitment exists - verify the score matches
         if !crate::scoring::verify_vrf_commitment(&env, &borrower, risk_score) {
             env.panic_with_error(ContractError::Unauthorized);
         }
     }
-    // If no commitment exists, allow the update for backward compatibility
+    // No commitment → no check (backward compatibility).
 }
 ```
 
-This design ensures:
-- New scores with commitments are cryptographically bound
-- Existing lines without commitments continue to work
-- Gradual migration to VRF-based scoring is possible
+## Storage layout
+
+- **Tier**: persistent
+- **Key**: `DataKey::VrfCommitment(Address)`
+- **Value**: `VrfCommitment { commitment_hash: BytesN<32>, committed_at: u64 }`
+- **TTL**: refreshed on access alongside the borrower's credit-line entry
 
 ## Testing
 
-The implementation includes unit tests for:
+The existing tests cover deterministic derivation, range, and the commit /
+verify / clear workflow (`contracts/credit/tests/vrf_commitment.rs`). They assert
+*determinism*, not unpredictability or uniformity. A seeded distribution
+measurement is tracked separately by
+[#1329](https://github.com/Creditra/Creditra-Contracts/issues/1329).
 
-1. **Deterministic Score Derivation**: Same hash always produces same score
-2. **Score Range**: All derived scores are in [0, 100]
-3. **Distribution**: Good coverage of the score range across different hashes
+## Follow-ups (not in this change)
 
-Integration tests should cover:
-1. Full commit → verify → update workflow
-2. Attempted updates with mismatched scores
-3. Backward compatibility (updates without commitment)
-4. Commitment clearing and re-commitment
-
-## Storage Layout
-
-The VRF commitment is stored under `DataKey::VrfCommitment(Address)` in persistent storage:
-
-- **Tier**: Persistent
-- **Key**: Borrower address
-- **Value**: `VrfCommitment` struct
-- **TTL**: Auto-bumped on access (6 months)
-
-## Future Enhancements
-
-Potential improvements for future versions:
-
-1. **Time-locked Commitments**: Add a minimum delay between commit and reveal
-2. **Batch Commitments**: Support committing VRF outputs for multiple borrowers at once
-3. **Alternative Derivation Functions**: Support configurable score derivation algorithms
-4. **Commitment Expiry**: Auto-expire commitments after a configurable time period
-5. **VRF Integration**: Direct integration with on-chain VRF providers (e.g., Chainlink VRF)
+| Topic | Issue |
+| --- | --- |
+| Verify real VRF proofs / authenticated oracle output on-chain | [#1447](https://github.com/Creditra/Creditra-Contracts/issues/1447) |
+| Measure and document the score distribution | [#1329](https://github.com/Creditra/Creditra-Contracts/issues/1329) |
+| Optionally mandate commitments for score changes | [#1240](https://github.com/Creditra/Creditra-Contracts/issues/1240) |
+| Consume the commitment after a verified score change | [#1239](https://github.com/Creditra/Creditra-Contracts/issues/1239) |
 
 ## References
 
 - Implementation: `contracts/credit/src/scoring.rs`
-- Storage: `contracts/credit/src/storage.rs` (DataKey::VrfCommitment)
-- Integration: `contracts/credit/src/risk.rs` (update_risk_parameters)
-- Related: `docs/RISK_PRICING.md` (risk-based rate formula)
+- Integration: `contracts/credit/src/risk.rs` (`update_risk_parameters`)
+- Storage: `contracts/credit/src/storage.rs` (`DataKey::VrfCommitment`)
+- Related: `docs/RISK_PRICING.md`

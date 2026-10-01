@@ -5,11 +5,10 @@ concrete artifacts of execution quality — test count, coverage, CI surface,
 PR cadence, deployment checklist — that a reviewer can verify in a few
 minutes by running the commands at the bottom of each section.
 
-Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
-`TEST_COVERAGE_REPORT.md` (workspace-level coverage report at v1.0 cutoff),
-`TEST_VALIDATION.md`, `IMPLEMENTATION_STATUS.md`,
-`UNWRAP_AUDIT_REPORT.md`, `POST_AUDIT_CHECKLIST.md`,
-`AUDIT_SUMMARY.md`.
+Companion: [`docs/COVERAGE.md`](./COVERAGE.md) (workspace-level coverage report),
+[`contracts/credit/UNWRAP_AUDIT_REPORT.md`](../contracts/credit/UNWRAP_AUDIT_REPORT.md),
+[`contracts/credit/POST_AUDIT_CHECKLIST.md`](../contracts/credit/POST_AUDIT_CHECKLIST.md),
+[`contracts/credit/AUDIT_SUMMARY.md`](../contracts/credit/AUDIT_SUMMARY.md).
 
 ---
 
@@ -343,15 +342,16 @@ The pattern is visible:
 | `docs/deploy.md` | Deploy quickstart |
 | `docs/contributing-tests.md` | Test helper conventions |
 | `docs/scripts.md` | Helper script reference |
-| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design |
-| `AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history |
-| `SELF_SUSPEND_ARCHITECTURE.md`, `SELF_SUSPEND_FEATURE_SUMMARY.md` | Borrower self-suspend feature |
-| `STORAGE_KEY_ENCODING_DIAGRAMS.md`, `STORAGE_KEY_ENCODING_SUMMARY.md` | Storage key safety |
-| `UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
-| `POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
-| `AUDIT_SUMMARY.md`, `IMPLEMENTATION_STATUS.md` | Status snapshots |
-| `INTEREST_ACCRUAL_SPIKE_RESULTS.md` | Accrual model spike results |
-| `TEST_COVERAGE_REPORT.md`, `COVERAGE_REPORT.md`, `TEST_COVERAGE.md`, `TEST_VALIDATION.md` | Test-quality snapshots |
+| `docs/CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design rationale |
+| `docs/AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history and zero-bid spec |
+| `docs/SELF_SUSPEND_ARCHITECTURE.md` | Borrower self-suspend architecture and flow diagrams |
+| `docs/STORAGE_KEY_ENCODING_DIAGRAMS.md` | Storage key safety and collision resistance diagrams |
+| `docs/ORACLE_VALIDATION_DESIGN.md` | Oracle input validation before settlement |
+| `docs/VALIDATION_LAYER_DESIGN.md` | Oracle validation layer architecture |
+| `docs/CONTRIBUTING.md` | Contributing standards and PR workflow |
+| `contracts/credit/UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
+| `contracts/credit/POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
+| `contracts/credit/AUDIT_SUMMARY.md` | Status audit summary |
 
 ---
 

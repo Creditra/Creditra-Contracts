@@ -166,6 +166,81 @@ fn suspension_ts_resuspend_after_reinstate_passes() {
     assert_eq!(line.suspension_ts, 1_500);
 }
 
+/// A full suspend → unsuspend → suspend cycle must reset `suspension_ts`: the
+/// second cycle starts from the new suspension, never from the stale first one
+/// (Issue #1351).
+#[test]
+fn suspension_ts_resets_across_suspend_cycles() {
+    let (env, _admin, contract_id, _tok) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+    open_line(&client, &borrower);
+
+    // Cycle 1: suspend at t = 2_000.
+    env.ledger().with_mut(|li| li.timestamp = 2_000);
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().suspension_ts,
+        2_000
+    );
+
+    // Unsuspend zeroes the field so the next cycle cannot inherit the old base.
+    env.ledger().with_mut(|li| li.timestamp = 3_000);
+    client.unsuspend_credit_line(&borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Active);
+    assert_eq!(line.suspension_ts, 0);
+
+    // Cycle 2: re-suspend at t = 4_000. The monotonic guard is not tripped
+    // because the base is 0, and the new timestamp is recorded verbatim.
+    env.ledger().with_mut(|li| li.timestamp = 4_000);
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().suspension_ts,
+        4_000
+    );
+}
+
+/// The suspension timestamp drives the per-borrower liquidation grace base, so
+/// a stale value would either grant an already-expired window or extend one.
+/// This pins the second cycle: the grace window must run from the *second*
+/// suspension, not the first (Issue #1351).
+#[test]
+#[should_panic(expected = "Error(Contract, #59)")] // LiquidationGraceActive
+fn suspension_grace_restarts_from_second_suspension() {
+    let (env, _admin, contract_id, _tok) = setup();
+    let client = CreditClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+    open_line(&client, &borrower);
+
+    // Cycle 1: suspend at t = 2_000, then release at t = 3_000.
+    env.ledger().with_mut(|li| li.timestamp = 2_000);
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().suspension_ts,
+        2_000
+    );
+
+    env.ledger().with_mut(|li| li.timestamp = 3_000);
+    client.unsuspend_credit_line(&borrower);
+    assert_eq!(client.get_credit_line(&borrower).unwrap().suspension_ts, 0);
+
+    // Cycle 2: re-suspend at t = 5_000 with a 1_000 second liquidation grace.
+    env.ledger().with_mut(|li| li.timestamp = 5_000);
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().suspension_ts,
+        5_000
+    );
+    client.set_borrower_liq_grace(&borrower, &1_000_u64);
+
+    // t = 5_500 sits inside the second window [5_000, 6_000). Had the stale
+    // first timestamp (2_000) been reused, the window would have closed at
+    // 3_000 and this default would have been allowed to proceed.
+    env.ledger().with_mut(|li| li.timestamp = 5_500);
+    client.default_credit_line(&borrower);
+}
+
 // ── last_accrual_ts (already guarded in accrual.rs) ─────────────────────────
 
 /// Accrual with regressed timestamp is a no-op (existing guard returns early).

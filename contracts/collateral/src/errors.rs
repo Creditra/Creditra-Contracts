@@ -140,7 +140,7 @@ pub enum CollateralError {
     /// bounds.
     ///
     /// Bounds are administered via the collateral allowlist
-    /// governance path; see [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md)
+    /// governance path; see [`docs/errors.md`](../../../docs/errors.md)
     /// for the wider risk-tier table.
     CollateralRiskWeightOutOfRange = 101,
 
