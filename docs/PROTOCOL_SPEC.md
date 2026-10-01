@@ -318,15 +318,23 @@ emits `("credit","rate_form")` with `true`.
 | `set_protocol_fee_bps(bps)`       | Admin; `bps <= MAX_PROTOCOL_FEE_BPS = 1_000`. Returns `Overflow` if exceeded.                                                       |
 | `set_treasury_fee_share_bps(bps)` | Admin; treasury share of skimmed fees in `0..=10_000`. Bounty pool receives the remainder. Default unset = 10_000 (100 % treasury). |
 | `get_treasury_fee_share_bps()`    | Returns configured share or `None` when unset.                                                                                      |
-| `set_treasury(admin, treasury)`   | Double-auth (admin arg + `require_admin_auth`).                                                                                     |
-| `withdraw_treasury(admin)`        | Transfers `TreasuryBalance` from contract to `TreasuryAddress`; clears balance. Errors: `TreasuryNotSet`, `MissingLiquidityToken`.  |
-| `set_bounty(admin, bounty)`       | Double-auth; configures bounty pool withdrawal address.                                                                             |
-| `get_bounty()`                    | Returns configured bounty address, if any.                                                                                          |
-| `withdraw_bounty(admin)`          | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`.                      |
+| `set_treasury(admin, treasury)` | Supplied `admin` must match the stored admin and is authorized once; configures the treasury address. |
+| `propose_treasury_withdrawal(admin)` | Supplied `admin` must match the stored admin and is authorized once; creates a 24-hour timelocked withdrawal proposal. |
+| `execute_treasury_withdrawal(admin)` | Supplied `admin` must match the stored admin and is authorized once; executes an elapsed proposal and clears the balance. |
+| `withdraw_treasury(admin)` | Supplied `admin` must match the stored admin and is authorized once; transfers `TreasuryBalance` to `TreasuryAddress`. Errors: `TreasuryNotSet`, `MissingLiquidityToken`. |
+| `set_bounty(admin, bounty)` | Supplied `admin` must match the stored admin and is authorized once; configures the bounty pool withdrawal address. |
+| `get_bounty()` | Returns configured bounty address, if any. |
+| `withdraw_bounty(admin)` | Supplied `admin` must match the stored admin and is authorized once; transfers `BountyBalance` to `BountyAddress`. Errors: `BountyNotSet`, `MissingLiquidityToken`. |
 
 On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
-`TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
-See `contracts/credit/src/fees.rs`.
+`TreasuryBalance` and `BountyBalance` by largest-remainder apportionment
+(`math_utils::split_conserving`): both shares are floored, then the leftover base
+unit goes to the recipient with the larger fractional claim, ties broken in
+favour of treasury. The shares always sum exactly to the fee. Flat late fees are
+credited to `TreasuryBalance` only and are **not** split. See
+`contracts/credit/src/fees.rs` and [`docs/treasury.md`](./treasury.md) for the
+full lifecycle, worked examples, the `AuctionActive` freeze, and the immediate
+vs 24-hour-timelocked withdrawal paths.
 
 ### 2.8 Settlement & oracle
 
@@ -335,22 +343,43 @@ See `contracts/credit/src/fees.rs`.
 `lib.rs:953`. Admin + pause + reentrancy guard.
 
 1. `set_reentrancy_guard`
-2. If `OracleConfig` is set:
-   - `oracle_price.is_some()` and value > 0 (else `OraclePriceInvalid`)
-   - `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`)
-   - `compute_deviation_bps(new, last) <= max_deviation_bps`
-     (else `OraclePriceDeviation`)
-   - Atomically write `OracleLastPrice`, `OracleLastPriceTs`; emit
-     `("credit","orc_price")`
+2. If `AuctionContract` is set, call
+   `AuctionClient::settle_default_liquidation(settlement_id, contract, borrower) -> i128`
+   and assert returned == `recovered_amount` (else `InvalidAmount`)
+3. Delegate to `lifecycle::settle_default_liquidation`. Before any state
+   mutation it validates the settlement price via
+   `oracle_validation::validate_settlement_oracle_price`. The authoritative
+   price source is selected by the following precedence (highest first):
+
+   1. **Registry median.** If the weighted-median oracle registry has a quorum
+      threshold configured (`set_quorum_threshold`), the canonical price is the
+      weighted median of the fresh reports from the approved oracles
+      (`get_median_value`). The caller-supplied `oracle_price` is **ignored**.
+      If quorum cannot be met the call reverts `OracleQuorumNotMet = 50`
+      rather than falling back to an admin-chosen price.
+   2. **Quorum-of-K price.** Otherwise, if `OracleQuorumConfig` is set, the
+      price stored by `submit_oracle_prices` is authoritative and the
+      caller-supplied `oracle_price` is ignored. Only freshness is re-checked:
+      `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`).
+   3. **Single-oracle circuit breaker.** Otherwise, if `OracleConfig` is set:
+      - `oracle_price.is_some()` and value > 0 (else `OraclePriceInvalid`)
+      - `now - OracleLastPriceTs <= max_age_seconds` (else `OraclePriceStale`)
+      - `compute_deviation_bps(new, last) <= max_deviation_bps`
+        (else `OraclePriceDeviation`)
+   4. **Unconfigured.** With no oracle configuration, no validation runs and
+      the caller-supplied price is ignored (legacy behaviour).
+
+   In cases 1–3 the accepted price is written atomically to `OracleLastPrice`
+   / `OracleLastPriceTs` and `("credit","orc_price")` is emitted after the
+   settlement accounting commits. Registry mode short-circuits the chain, so an
+   operator can upgrade a live deployment to an independent multi-source price
+   with no migration.
 
    During an oracle outage, callers may resubmit the last accepted price to
    continue settlement operations as long as the stored price remains within the
-   configured `max_age_seconds` freshness window.
+   configured `max_age_seconds` freshness window (single-oracle mode only).
 
-3. If `AuctionContract` is set, call
-   `AuctionClient::settle_default_liquidation(settlement_id, contract, borrower) -> i128`
-   and assert returned == `recovered_amount` (else `InvalidAmount`)
-4. Delegate to `lifecycle::settle_default_liquidation` for accounting:
+   Accounting:
    - Status must be `Defaulted` (else `CreditLineDefaulted` mismatch)
    - Replay: `(Symbol("liq_seen"), borrower, settlement_id)` must be unset
      (else `AlreadyInitialized`)
@@ -365,6 +394,31 @@ See `contracts/credit/src/fees.rs`.
 `lib.rs:1055`. Admin + pause. Validates `deviation in 1..=10_000` (else
 `InvalidAmount`), `max_age_seconds > 0`. Emits `("credit","orc_cfg")`.
 
+#### Multi-oracle quorum price feed (precedence 2)
+
+| Entrypoint | Effect |
+|---|---|
+| `set_oracle_quorum_config(min_quorum_k, max_deviation_bps, max_age_seconds)` | Admin + pause. Validates `min_quorum_k >= 2`, `max_deviation_bps <= 10_000`, `max_age_seconds > 0` (else `InvalidAmount`). Emits `("credit","orc_qcfg")`. |
+| `get_oracle_quorum_config()` | `Option<OracleQuorumConfig>`. |
+| `submit_oracle_prices(prices)` | Admin + pause. Resolves the quorum-of-K price and stores it via `OracleLastPrice`/`OracleLastPriceTs`. Reverts `OracleQuorumNotMet` when no qualifying window exists, `OraclePriceInvalid` on an empty/oversized/≤ 0 price list. Emits `("credit","orc_qprc")`. |
+
+#### Weighted-median oracle registry (precedence 1)
+
+| Entrypoint | Effect |
+|---|---|
+| `add_oracle(oracle, weight)` / `remove_oracle(oracle)` | Admin only. Register/unregister an oracle and its weight (weight must be > 0). |
+| `set_quorum_threshold(threshold)` | Admin only. Setting the threshold **activates registry mode** for `settle_default_liquidation`. |
+| `set_reporting_window(window_seconds)` | Admin only. Freshness window for oracle reports. |
+| `report_value(oracle, value)` | Requires the reporting oracle's auth; the oracle must be registered. |
+| `get_median_value() -> Result<u128, ContractError>` | Read-only. Weighted median of the fresh reports; `Err(OracleQuorumNotMet)` when the total fresh weight is below the threshold or there are no fresh reports. |
+
+Registry mode short-circuits the price-source precedence chain: while a quorum
+threshold is configured, `settle_default_liquidation` uses the weighted median
+and **ignores** the caller-supplied `oracle_price`. If the registry cannot
+assemble a quorum of fresh reports the settlement reverts with
+`OracleQuorumNotMet` (fail closed) rather than falling back to an admin-chosen
+price. Clearing the threshold restores the previous precedence.
+
 ### 2.9 Operational controls
 
 | Entrypoint | Effect |
@@ -372,7 +426,8 @@ See `contracts/credit/src/fees.rs`.
 | `freeze_draws(env, reason)` / `unfreeze_draws(env)` | Global flag + [`FreezeReason`]; admin; emits `DrawsFrozenEvent` on `("credit","drw_freeze")`. |
 | `freeze_credit_line(env, borrower, reason)` / `unfreeze_credit_line(env, borrower)` | Per-line draw freeze with reason taxonomy; admin; emits `CreditLineFreezeEvent` on `("credit","line_frz")`. |
 | `is_draws_frozen() -> bool` / `get_draws_freeze_reason()` / `is_credit_line_frozen(borrower)` / `get_credit_line_freeze_reason(borrower)` | Read-only freeze state. |
-| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Admin; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `block_borrower(admin, borrower)` / `unblock_borrower` / `bulk_block_borrowers` | Supplied `admin` must equal the stored admin and is authorized once; `bulk_*` capped at `BULK_BLOCK_MAX=50`. Emits `BorrowerBlockedEvent` on `("blk_chg",)`. |
+| `freeze_borrower_until(admin, borrower, expiry_ts)` / `unfreeze_borrower(admin, borrower)` | Supplied `admin` must equal the stored admin and is authorized once; freeze operations enforce the borrow-admin cooldown. |
 | `accrue_batch(borrowers)` | No auth (pause-gated). Capped at `ACCRUE_BATCH_MAX=50`. Keeper hook. |
 | `reverse_draw(borrower, amount, original_ts, reason_code)` | Admin + pause. Time window enforced (constant `DRAW_REVERSAL_WINDOW_SECS`). Decrements utilized; emits `DrawReversedEvent` on `("credit","draw_rev")`. |
 | Pause toggles (`pause_protocol`, `unpause_protocol` — naming may differ) | Admin; flips `Symbol("paused")`; emits `("credit","paused")`/`("credit","unpaused")`. |
@@ -392,6 +447,8 @@ See `contracts/credit/src/fees.rs`.
 | `get_protocol_config()`                                          | `ProtocolConfig { liquidity_token, liquidity_source }`                                                   |
 | `get_liquidity_source()`                                         | `Address`                                                                                                |
 | `get_oracle_config()`                                            | `Option<OracleConfig>`                                                                                   |
+| `get_oracle_quorum_config()`                                     | `Option<OracleQuorumConfig>`                                                                             |
+| `get_median_value()`                                             | `Result<u128, ContractError>` (registry weighted median)                                                 |
 | `get_rate_formula_config()`                                      | `Option<RateFormulaConfig>`                                                                              |
 | `get_rate_change_limits()`                                       | `Option<RateChangeConfig>`                                                                               |
 | `get_borrower_rate_floor(borrower)`                              | `Option<u32>`                                                                                            |
@@ -405,9 +462,9 @@ See `contracts/credit/src/fees.rs`.
 | `get_treasury()`                                                 | `Option<Address>`                                                                                        |
 | `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
 | `get_collateral(borrower)`                                       | `i128`                                                                                                   |
-| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = under-collateralized advisory threshold; `default_credit_line` does not check health factor; see `query.rs:get_health_factor` and `docs/credit.md`) |
 | `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
-| `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
+| —                                                               | **Not implemented.** The `risk_capabilities` / `RiskCapabilities` surface has no entrypoint on this contract. `contracts/risk/src/views.rs` is not declared as a module of `creditra-risk` and imports `creditra-credit` internals, so it is not built or callable; see [`contracts/risk/README.md`](../contracts/risk/README.md) §8. |
 | `query_capabilities(borrower)`                                   | `QueryCapabilities { has_credit_line, has_repayment_schedule, health_factor_applicable, delinquency_applicable, is_delinquent }` — read-only query availability bitmap; see `contracts/query/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,
@@ -489,8 +546,14 @@ table is also reflected in `docs/storage-layout.md`.)
 | `DrawAudit(Address, u64)`          | Persistent | `(borrower, ts) → original draw amount` |
 | `DrawReversedAmount(Address, u64)` | Persistent | Reversed total so far                   |
 | `OracleConfig`                     | Instance   | `(max_deviation_bps, max_age_seconds)`  |
+| `OracleQuorumConfig`               | Instance   | `(min_quorum_k, max_deviation_bps, max_age_seconds)` |
 | `OracleLastPrice`                  | Instance   | Last accepted price                     |
 | `OracleLastPriceTs`                | Instance   | Last accepted ts                        |
+| `OracleDataKey::OracleList`        | Instance   | Registered oracle addresses             |
+| `OracleDataKey::OracleWeight(Address)` | Instance | Per-oracle weight                    |
+| `OracleDataKey::OracleReport(Address)` | Instance | `(value, timestamp)` of the last report |
+| `OracleDataKey::QuorumThreshold`   | Instance   | Registry quorum (activates registry mode) |
+| `OracleDataKey::ReportingWindow`   | Instance   | Registry report freshness window        |
 
 **Instance Symbol keys** (small, hot, low-allocation; see
 `storage.rs:269-302`):
@@ -658,6 +721,7 @@ for off-chain decoders.
 | 36   | `OraclePriceInvalid`             | Oracle price ≤ 0 or malformed                              |
 | 37   | `OraclePriceStale`               | Exceeds `max_age_seconds`                                  |
 | 38   | `OraclePriceDeviation`           | Exceeds `max_deviation_bps`                                |
+| 50   | `OracleQuorumNotMet`             | Registry active but quorum not met during settlement        |
 
 Auction errors (`AuctionError`, 12 variants, see
 `gateway-contract/contracts/auction_contract/src/errors.rs`):

@@ -68,6 +68,9 @@ fn open_and_default(
     );
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
     if utilized > 0 {
+        // `draw_credit` enforces the 150% minimum collateral ratio, so the
+        // borrower must post collateral before drawing.
+        client.deposit_collateral(&borrower, &(utilized * 150 / 100));
         client.draw_credit(&borrower, &utilized);
     }
     client.default_credit_line(&borrower);
@@ -290,7 +293,7 @@ fn settlement_uses_quorum_price_ignores_oracle_price_arg() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Error(Contract, #50)")] // OracleQuorumNotMet
 fn settlement_fails_when_no_quorum_price_submitted() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -302,7 +305,7 @@ fn settlement_fails_when_no_quorum_price_submitted() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Error(Contract, #37)")] // OraclePriceStale
 fn settlement_fails_on_stale_quorum_price() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -678,4 +681,73 @@ fn rejected_settlement_does_not_consume_its_settlement_id() {
         client.get_credit_line(&borrower).unwrap().status,
         CreditStatus::Closed
     );
+}
+
+// ── quorum refresh across the age boundary (#1362) ───────────────────────────
+
+#[test]
+fn resubmitting_quorum_price_resets_the_age_across_settlements() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    // Submission at t=1_000.
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    // First settlement lands exactly on the boundary and is accepted.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600);
+    let b1 = open_and_default(&client, &env, &contract_id, 300);
+    client.settle_default_liquidation(&b1, &300_i128, &sid(&env, "r1"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b1).unwrap().status,
+        CreditStatus::Closed
+    );
+
+    // One second later the submission from t=1_000 would be stale, but a fresh
+    // submission restarts the age clock for the next settlement.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
+    client.submit_oracle_prices(&vec![&env, 1_010i128, 1_030i128]);
+
+    let b2 = open_and_default(&client, &env, &contract_id, 300);
+    client.settle_default_liquidation(&b2, &300_i128, &sid(&env, "r2"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b2).unwrap().status,
+        CreditStatus::Closed
+    );
+
+    // The refreshed submission is itself subject to the same boundary.
+    env.ledger().with_mut(|l| l.timestamp = 8_201); // 1_000 + 3_601 + 3_600
+    let b3 = open_and_default(&client, &env, &contract_id, 300);
+    client.settle_default_liquidation(&b3, &300_i128, &sid(&env, "r3"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b3).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #37)")] // OraclePriceStale
+fn second_settlement_across_the_boundary_requires_a_refresh() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    // First borrower settles exactly at the boundary — accepted.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600);
+    let b1 = open_and_default(&client, &env, &contract_id, 300);
+    client.settle_default_liquidation(&b1, &300_i128, &sid(&env, "b1"), &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&b1).unwrap().status,
+        CreditStatus::Closed
+    );
+
+    // The age limit is absolute, not per borrower: the same submission is one
+    // second too old for the next settlement unless the quorum is refreshed.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
+    let b2 = open_and_default(&client, &env, &contract_id, 300);
+    client.settle_default_liquidation(&b2, &300_i128, &sid(&env, "b2"), &10_000_u32, &None);
 }

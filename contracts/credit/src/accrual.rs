@@ -360,6 +360,47 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
     line
 }
 
+/// Materialize pending interest on every indexed line other than `excluded`.
+///
+/// A global exposure cap is defined over the total debt of every credit line,
+/// not merely over the lines that have been touched most recently.  Before a
+/// capped draw, the caller's line is accrued locally and this helper accrues
+/// the remaining indexed lines so `TotalUtilized` is current for the cap
+/// decision.  The excluded line is deliberately left to the caller, which
+/// already has it loaded and will persist it after the draw succeeds.
+pub(crate) fn accrue_all_except(env: &Env, excluded: &Address) {
+    let line_count = crate::storage::get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = crate::storage::get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        if &borrower == excluded {
+            continue;
+        }
+
+        let Some(stored_line) = get_credit_line(env, &borrower) else {
+            continue;
+        };
+        let previous_utilized = stored_line.utilized_amount;
+        let previous_timestamp = stored_line.last_accrual_ts;
+        let previous_status = stored_line.status;
+        let updated_line = apply_accrual(env, stored_line);
+
+        if updated_line.utilized_amount != previous_utilized
+            || updated_line.last_accrual_ts != previous_timestamp
+        {
+            persist_credit_line(
+                env,
+                &borrower,
+                &updated_line,
+                previous_utilized,
+                Some(previous_status),
+            );
+        }
+    }
+}
+
 /// Materialize pending interest accrual across a bounded batch of borrower addresses.
 ///
 /// # Overview

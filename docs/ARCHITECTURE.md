@@ -480,7 +480,149 @@ See `docs/indexer-integration.md` for JSON decoding examples.
 
 ---
 
-## 11. References
+## 11. Custody Model — Collateral, Reserves and Fees
+
+This section answers the question an integrator or auditor asks first: **which
+on-chain balances back which obligations?** Everything below is derived from the
+transfers in `contracts/credit/src/lib.rs` and `contracts/credit/src/collateral.rs`.
+
+### 11.1 Which asset is which
+
+| Concept | Storage | Notes |
+|---|---|---|
+| Liquidity token | `DataKey::LiquidityToken`, written by the admin `set_liquidity_token` entrypoint | The single asset the protocol lends and repays in. Read inline by `draw_credit`, `repay_credit` and the withdrawal paths. |
+| Liquidity reserve | `DataKey::LiquiditySource`, written by the admin `set_liquidity_source` entrypoint (`config::set_liquidity_source`) | The account `draw_credit` pays out of. `config::init` defaults it to `env.current_contract_address()`. |
+| Collateral token | `storage::get_collateral_token()` | **Reads `DataKey::LiquidityToken`** — the canonical collateral asset *is* the liquidity token, so collateral and reserves are the same asset in the default configuration. |
+| Additional collateral tokens | `DataKey::CollateralBalanceV2(borrower, token)` | Opt-in multi-token balances handled by `deposit_collateral_token` / `withdraw_collateral_token` / `get_collateral_for_token`, gated by `DataKey::CollateralTokenAllowlist`. Tracked separately from the canonical `CollateralBalance(borrower)` entry. |
+| Treasury / bounty fees | `DataKey::TreasuryBalance`, `DataKey::BountyBalance` | **Accounting accumulators only** — the tokens themselves sit in the credit contract's own balance of the liquidity token. |
+| Protocol totals | `DataKey::TotalUtilized`, `DataKey::TotalCollateral`, `DataKey::ActiveLineCount` | Derived aggregates kept in sync by `persist_credit_line` / `adjust_total_utilized` / `adjust_total_collateral`. |
+
+Because the collateral token and the liquidity token are the same asset, the
+credit contract's single token balance is the physical custody pool for three
+logically distinct claims: the lending reserve, borrower collateral, and
+accumulated protocol fees.
+
+### 11.2 Token flows
+
+Every entrypoint that moves tokens appears below; entrypoints in *italics* only
+mutate accounting state (no token transfer).
+
+```mermaid
+flowchart TB
+    subgraph Actors
+        BOR[Borrower]
+        ADM[Admin]
+        TRS[Treasury address]
+        BNT[Bounty address]
+        AUC[Auction contract]
+    end
+
+    subgraph Reserve["Liquidity reserve (LiquiditySource)"]
+        RESBAL[(reserve token balance)]
+    end
+
+    subgraph Contract["Creditra credit contract (self-custody pool)"]
+        POOL[(contract token balance<br/>= collateral + fees + reserve, when self-sourced)]
+        LEDGER["Ledger entries<br/>CollateralBalance / CollateralBalanceV2<br/>TreasuryBalance / BountyBalance<br/>TotalUtilized / TotalCollateral"]
+    end
+
+    BOR -- "deposit_collateral / deposit_collateral_token" --> POOL
+    POOL -- "withdraw_collateral / partial_release_collateral<br/>withdraw_collateral_token" --> BOR
+
+    RESBAL -- "draw_credit (transfer reserve → borrower)" --> BOR
+    BOR -- "repay_credit (transfer_from borrower → contract, fee portion)" --> POOL
+    BOR -- "repay_credit (transfer_from borrower → reserve, principal + interest)" --> RESBAL
+
+    POOL -- "withdraw_treasury (admin)" --> TRS
+    POOL -- "withdraw_bounty (admin)" --> BNT
+    POOL -- "execute_treasury_withdrawal (admin, timelocked)" --> TRS
+
+    ADM -. "settle_default_liquidation — no token CPI in the credit contract;<br/>the auction contract returns the recovered amount" .-> AUC
+
+    POOL --- LEDGER
+```
+
+### 11.3 Reserve sourcing: default vs. recommended
+
+`config::init` sets `DataKey::LiquiditySource` to
+`env.current_contract_address()` — i.e. **the credit contract itself is the
+default reserve**. In that configuration `draw_credit` transfers from the
+contract's own token balance, so the pool is a genuinely self-custodial mix of
+reserve + collateral + fees, and the "reserve balance" read at
+`lib.rs` draw time (`token_client.balance(&reserve_address)`) is really the
+whole contract balance.
+
+`set_liquidity_source(reserve_address)` (admin, `config.rs`) points draws at an
+independent reserve account instead. Production deployments are strongly
+encouraged to use this:
+
+* **Segregated liabilities.** Collateral and fee accumulators no longer share a
+  balance with lendable principal, so a collateral shortfall cannot be silently
+  covered by reserve funds (and vice versa).
+* **Cleaner solvency accounting.** The reserve balance is a single quantity that
+  can be compared with `TotalUtilized` without subtracting collateral and fees.
+* **Smaller blast radius.** A bug or a stuck transfer in the collateral path
+  cannot drain the lending reserve.
+
+The default is retained for local/dev deployments where a single funded account
+is convenient; it is not a production recommendation.
+
+### 11.4 Relationship to `get_proof_of_reserve`
+
+`get_proof_of_reserve()` returns `{ treasury_balance, bounty_balance }` — the two
+fee accumulators from storage. It is a **pure storage read**: it does not perform
+any token balance lookup.
+
+Callers must therefore close the loop themselves by comparing the accumulators
+against the contract's real token balance. With the recommended external reserve
+the custody equation is:
+
+```text
+contract_token_balance >= treasury_balance + bounty_balance + total_collateral
+```
+
+With the default self-sourced reserve the contract also holds lendable
+principal, so the equation becomes:
+
+```text
+contract_token_balance >= treasury_balance + bounty_balance + total_collateral
+                          + (undisbursed reserve principal)
+```
+
+and `draw_credit` reduces the contract balance while increasing
+`TotalUtilized`, so an auditor should reconcile
+`contract_token_balance + TotalUtilized - total_collateral - treasury - bounty`
+against the expected reserve rather than treating the raw balance as reserves.
+
+`get_protocol_summary_view()` exposes `total_utilized`, `total_collateral` and
+`active_line_count` in a single read for exactly this reconciliation.
+
+### 11.5 Failure modes
+
+| Condition | Behaviour |
+|---|---|
+| Reserve under-funded for a draw | `draw_credit` fails on the reserve liquidity check before the CPI. |
+| Collateral token not set | `get_collateral_token()` returns `None`; collateral entrypoints that require it fail rather than defaulting to an arbitrary asset. |
+| Non-allowlisted collateral token | `deposit_collateral_token` rejects tokens outside `CollateralTokenAllowlist`. |
+| Treasury/bounty withdraw with insufficient accumulator | Withdrawal is capped by the accumulator, so fees cannot be paid out of collateral or principal. |
+| Settlement recovery shortfall | `settle_default_liquidation` asserts the auction's reported recovery against the admin-supplied `recovered_amount`; the credit contract itself transfers no tokens on this path. |
+
+---
+
+## 12. Support Crates (Test/Indexer)
+
+The `contracts/` directory contains several wrapper crates that are **not deployable smart contracts**. They exist solely to host integration tests, error stability snapshots, or to expose read-only capability bitmaps to off-chain indexers and clients without requiring them to simulate full transactions. These crates mostly re-export logic from the main `creditra-credit` contract.
+
+The wrapper crates include:
+- `creditra-accrual`: Error stability tests and gas snapshots for accrual logic.
+- `creditra-borrow`: Error stability tests for the borrow/draw/repay surface.
+- `creditra-freeze`: Authentication boundary tests for freeze operations.
+- `creditra-lifecycle`: Read-only bitmap reporting permitted lifecycle transitions.
+- `creditra-query`: Read-only bitmap reporting borrower-scoped query capabilities.
+
+---
+
+## 13. References
 
 - `contracts/credit/src/lib.rs` — all entrypoints
 - `contracts/credit/src/lifecycle.rs` — state machine implementation
