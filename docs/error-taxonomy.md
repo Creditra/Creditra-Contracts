@@ -120,6 +120,7 @@ where the contract can observe it. |
 | 30   | `TreasuryNotSet` | Treasury address is not configured when attempting a treasury withdrawal. |
 | 31   | `ExposureCapExceeded` | Draw would push global `TotalUtilized` above `MaxTotalExposure`. |
 | 41   | `BountyNotSet` | Bounty pool address is not configured. |
+| 65   | `InsufficientTreasuryBalance` | Tracked treasury balance fell below the pending withdrawal snapshot at execution. |
 
 **Recovery action:**
 - `MissingLiquidityToken` / `MissingLiquiditySource`: Inform the admin to
@@ -234,7 +235,7 @@ state before submitting a new call.
 
 ---
 
-## Misc (codes 3, 15, 42, 43, 44, 48, 49)
+## Misc (codes 3, 15, 42, 43, 44, 48, 49, 64)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -246,6 +247,7 @@ state before submitting a new call.
 | 48   | `OriginalDrawNotFound` | Original draw audit record not found for reversal. |
 | 49   | `AttestationBatchNotFound` | No attestation batch has been committed for this borrower. |
 | 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed. |
+| 64   | `MissingVrfCommitment` | No VRF commitment exists for the borrower whose score is being verified. |
 
 **Recovery action:**
 - `CreditLineNotFound`: Create a credit line first via `open_credit_line`.
@@ -255,6 +257,7 @@ state before submitting a new call.
 - `TreasuryProposalExists`: Execute or cancel the existing proposal first.
 - `OriginalDrawNotFound`: No reversal possible — no matching draw record.
 - `AttestationBatchNotFound`: Admin must commit a batch first.
+- `MissingVrfCommitment`: Commit the borrower's VRF output before score verification.
 
 ---
 
@@ -272,5 +275,5 @@ state before submitting a new call.
 | Collateral | 35, 39 | 2 | Reduce withdrawal amount |
 | Block | 16, 19, 40, 46 | 4 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
-| Misc | 3, 15, 42, 43, 44, 48, 49 | 7 | Create line first / wait for delay |
+| Misc | 3, 15, 42, 43, 44, 48, 49, 64 | 8 | Create line first / wait for delay |
 | **Total** | 1–52 | **52** | — |

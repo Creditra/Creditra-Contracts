@@ -129,6 +129,7 @@ Liquidity configuration is missing or a reserve/allowance/balance check fails.
 | 30   | `TreasuryNotSet` | Treasury not configured | `propose_treasury_withdrawal` without treasury |
 | 31   | `ExposureCapExceeded` | Global exposure cap exceeded | `draw_credit` when total_utilized + amount > cap |
 | 41   | `BountyNotSet` | Bounty address not configured | `withdraw_bounty` without bounty set |
+| 65   | `InsufficientTreasuryBalance` | Treasury balance below pending withdrawal | `execute_treasury_withdrawal` when the tracked balance < proposal amount |
 | 56   | `InsufficientReserve` | Reserve balance below draw amount | `draw_credit` when token reserve < amount |
 | 57   | `InsufficientAllowance` | Borrower token allowance insufficient | `repay_credit` when allowance < repayment |
 | 58   | `InsufficientBalance` | Borrower token balance insufficient | `repay_credit` when balance < repayment |
@@ -234,7 +235,7 @@ Draw-block conditions — the borrower, line, or protocol prevents draws.
 
 ---
 
-## 11. Misc (codes 3, 15, 42, 43, 44, 48, 49)
+## 11. Misc (codes 3, 15, 42, 43, 44, 48, 49, 64)
 
 Errors that do not fit into other categories — entity-not-found, timelock, and treasury proposal conflicts.
 
@@ -251,6 +252,7 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 | 51   | `AlreadySettled` | Liquidation settlement already processed | Replay of the same `(borrower, settlement_id)` pair |
 | 52   | `InvalidRiskWeight` | Collateral risk weight exceeds 10 000 bps | `set_collateral_risk_weight` |
 | 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed | `verify_attestation_proof` with an invalid proof or missing batch |
+| 64   | `MissingVrfCommitment` | No VRF commitment exists for the borrower | Score verification without a prior VRF commitment |
 | 55   | `LiquidationGraceActive` | Per-borrower liquidation grace window active | `default_credit_line` called before grace period expiry |
 
 **SDK recovery:**
@@ -261,6 +263,7 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 - `TreasuryProposalExists`: Execute or cancel existing proposal first.
 - `OriginalDrawNotFound`: No reversal possible — no matching draw record.
 - `AttestationBatchNotFound`: Admin must commit a batch first.
+- `MissingVrfCommitment`: Commit the borrower's VRF output before score verification.
 
 ---
 

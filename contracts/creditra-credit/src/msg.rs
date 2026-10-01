@@ -102,10 +102,12 @@ pub enum ExecuteMsg {
 #[cw_serde]
 #[derive(QueryResponses)]
 pub enum QueryMsg {
-    #[returns(DrawAuditTrailResponse)]
+    #[returns(Vec<DrawAuditTrailResponse>)]
     DrawAuditTrail {
         credit_line_id: u64,
         draw_id: Option<u64>,
+        start_after: Option<u64>,
+        limit: Option<u32>,
     },
     #[returns(ProofOfReserveResponse)]
     ProofOfReserve { denom: Option<String> },
