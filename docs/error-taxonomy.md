@@ -120,6 +120,7 @@ where the contract can observe it. |
 | 30   | `TreasuryNotSet` | Treasury address is not configured when attempting a treasury withdrawal. |
 | 31   | `ExposureCapExceeded` | Draw would push global `TotalUtilized` above `MaxTotalExposure`. |
 | 41   | `BountyNotSet` | Bounty pool address is not configured. |
+| 65   | `InsufficientTreasuryBalance` | Tracked treasury balance fell below the pending withdrawal snapshot at execution. |
 
 **Recovery action:**
 - `MissingLiquidityToken` / `MissingLiquiditySource`: Inform the admin to
@@ -167,7 +168,7 @@ where the contract can observe it. |
 | 36   | `OraclePriceInvalid` | Oracle price is zero, negative, or malformed. |
 | 37   | `OraclePriceStale` | Oracle price exceeds `max_age_seconds` since last update. |
 | 38   | `OraclePriceDeviation` | Oracle price deviation exceeds `max_deviation_bps` relative to prior. |
-| 50   | `OracleQuorumNotMet` | Fewer than `min_quorum_k` prices agree within the deviation bound. |
+| 50   | `OracleQuorumNotMet` | Fewer than `min_quorum_k` prices agree within the deviation bound, or the weighted-median registry is active but cannot assemble a quorum of fresh reports during settlement. |
 
 **Recovery action:**
 - `OraclePriceInvalid`: Ensure the oracle is returning a valid positive price.
@@ -175,7 +176,11 @@ where the contract can observe it. |
   oracle's push mechanism.
 - `OraclePriceDeviation`: Circuit-breaker tripped; await a new price within the
   deviation bound. Do **not** retry with the same price.
-- `OracleQuorumNotMet`: Submit prices from more independent oracle feeds.
+- `OracleQuorumNotMet`: Submit prices from more independent oracle feeds, or
+  (registry mode) ensure enough weighted oracles have reported within the
+  reporting window. Registry mode ignores the caller-supplied `oracle_price`,
+  so there is no admin-price fallback — clear the registry quorum threshold to
+  return to the quorum-of-K or single-oracle precedence.
 
 ---
 
@@ -230,7 +235,7 @@ state before submitting a new call.
 
 ---
 
-## Misc (codes 3, 15, 42, 43, 44, 48, 49)
+## Misc (codes 3, 15, 42, 43, 44, 48, 49, 64)
 
 | Code | Variant | When raised |
 | ---- | ------- | ----------- |
@@ -242,6 +247,7 @@ state before submitting a new call.
 | 48   | `OriginalDrawNotFound` | Original draw audit record not found for reversal. |
 | 49   | `AttestationBatchNotFound` | No attestation batch has been committed for this borrower. |
 | 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed. |
+| 64   | `MissingVrfCommitment` | No VRF commitment exists for the borrower whose score is being verified. |
 
 **Recovery action:**
 - `CreditLineNotFound`: Create a credit line first via `open_credit_line`.
@@ -251,6 +257,7 @@ state before submitting a new call.
 - `TreasuryProposalExists`: Execute or cancel the existing proposal first.
 - `OriginalDrawNotFound`: No reversal possible — no matching draw record.
 - `AttestationBatchNotFound`: Admin must commit a batch first.
+- `MissingVrfCommitment`: Commit the borrower's VRF output before score verification.
 
 ---
 
@@ -268,5 +275,5 @@ state before submitting a new call.
 | Collateral | 35, 39 | 2 | Reduce withdrawal amount |
 | Block | 16, 19, 40, 46 | 4 | Contact admin or wait for unfreeze / expiry |
 | Reentrancy | 11 | 1 | Do not retry; inspect on-chain state |
-| Misc | 3, 15, 42, 43, 44, 48, 49 | 7 | Create line first / wait for delay |
+| Misc | 3, 15, 42, 43, 44, 48, 49, 64 | 8 | Create line first / wait for delay |
 | **Total** | 1–52 | **52** | — |

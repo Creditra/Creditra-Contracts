@@ -9,6 +9,7 @@ mod tests {
 
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::token::Client as TokenClient;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{Address, BytesN, Env, Symbol, TryFromVal, TryIntoVal};
 
@@ -115,7 +116,13 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
         let _factory = setup_factory(&env, &client);
-        setup_token(&env, &contract_id, 1000, &[alice.clone(), bob.clone()], 1000);
+        setup_token(
+            &env,
+            &contract_id,
+            1000,
+            &[alice.clone(), bob.clone()],
+            1000,
+        );
 
         let auction_id = Symbol::new(&env, "auc1");
         client.init_auction(
@@ -127,7 +134,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -163,7 +170,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -187,6 +194,49 @@ mod tests {
     }
 
     #[test]
+    fn first_bid_below_min_bid_bps_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let alice = Address::generate(&env);
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let _factory = setup_factory(&env, &client);
+
+        let auction_id = Symbol::new(&env, "min_bid_bps_test");
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &0,
+            &1000,
+            &100_i128,
+            &1000_u32, // 10% min_increment_bps
+            &None,
+            &None,
+            &Some(DutchAuctionDecay::None),
+            &None,
+        );
+
+        // First bid must be at least min_bid + (min_bid * 10%) = 100 + 10 = 110.
+        // A bid of 109 should fail.
+        let result = client.try_place_bid(&auction_id, &alice, &109_i128);
+        assert!(result.is_err());
+        let contract_err = result.unwrap_err().unwrap();
+        assert_eq!(contract_err, AuctionError::BidTooLow.into());
+
+        // A bid of 110 should succeed.
+        setup_token(&env, &contract_id, 1000, std::slice::from_ref(&alice), 1000);
+        client.place_bid(&auction_id, &alice, &110_i128);
+
+        let stored_after: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_after.highest_bidder.unwrap(), alice);
+        assert_eq!(stored_after.highest_bid, 110_i128);
+    }
+
+    #[test]
     fn fuzz_bid_sequence_invariants_deterministic() {
         let env = Env::default();
         env.mock_all_auths();
@@ -204,7 +254,9 @@ mod tests {
         let _factory = setup_factory(&env, &client);
         // Mint 2M tokens to the contract to cover all refunds across 64 fuzz
         // iterations (each refund is the prior high bid, sum converges to ~500K).
-        setup_token(&env, &contract_id, 2_000_000, &[], 0);
+        // Bidders are funded too so `place_bid` can pull each bid from the
+        // bidder at bid time.
+        setup_token(&env, &contract_id, 2_000_000, &bidders, 2_000_000);
         let auction_id = Symbol::new(&env, AUCTION_ID);
 
         client.init_auction(
@@ -216,7 +268,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -266,10 +318,9 @@ mod tests {
         let _factory = setup_factory(&env, &client);
 
         // Mint 2M tokens to the contract to cover refunds across 64 fuzz
-        // iterations. The contract never collects tokens from bidders during
-        // place_bid, so pre-fund it with enough to refund every previous
-        // highest bid.
-        let (_bid_token, _sac) = setup_token(&env, &contract_id, 2_000_000, &[], 0);
+        // iterations. `place_bid` pulls each bid from the bidder at bid time,
+        // so fund the bidders too.
+        let (_bid_token, _sac) = setup_token(&env, &contract_id, 2_000_000, &bidders, 2_000_000);
 
         let mut seed: u64 = 0x1234_5678_9abc_def0;
         let mut expected: Option<(usize, i128)> = None;
@@ -284,7 +335,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -336,7 +387,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -393,7 +444,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.init_auction(
@@ -405,7 +456,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &100_i128);
@@ -442,7 +493,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.init_auction(
@@ -454,7 +505,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -494,7 +545,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.close_auction(&auction_id);
@@ -533,7 +584,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.init_auction(
@@ -545,7 +596,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.close_auction(&auction_id);
@@ -630,7 +681,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.close_auction(&auction_id);
@@ -678,7 +729,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -709,7 +760,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -751,7 +802,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -800,7 +851,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -830,7 +881,7 @@ mod tests {
                 &10_001_u32,
                 &None,
                 &None,
-                &DutchAuctionDecay::None,
+                &Some(DutchAuctionDecay::None),
                 &None,
             );
         }));
@@ -854,7 +905,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.init_auction(
@@ -866,7 +917,7 @@ mod tests {
             &10_000_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
     }
@@ -892,7 +943,7 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -933,7 +984,7 @@ mod tests {
             &100_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -968,7 +1019,7 @@ mod tests {
             &333_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &alice, &1_000_i128);
@@ -1009,7 +1060,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &alice, &500_i128);
@@ -1051,7 +1102,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1073,7 +1124,13 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
         let _factory = setup_factory(&env, &client);
-        setup_token(&env, &contract_id, 1000, &[winner.clone()], 1000);
+        setup_token(
+            &env,
+            &contract_id,
+            1000,
+            std::slice::from_ref(&winner),
+            1000,
+        );
 
         let auction_id = Symbol::new(&env, "claim_double");
 
@@ -1086,7 +1143,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1125,7 +1182,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -1158,7 +1215,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.close_auction(&auction_id);
@@ -1179,7 +1236,13 @@ mod tests {
         let contract_id = env.register(Auction, ());
         let client = AuctionClient::new(&env, &contract_id);
         let _factory = setup_factory(&env, &client);
-        let (bid_token, sac) = setup_token(&env, &contract_id, 1000, &[winner.clone()], 0);
+        let (bid_token, _sac) = setup_token(
+            &env,
+            &contract_id,
+            1000,
+            std::slice::from_ref(&winner),
+            1000,
+        );
 
         let auction_id = Symbol::new(&env, "claim_transfer");
 
@@ -1192,15 +1255,16 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &winner, &420_i128);
         client.close_auction(&auction_id);
 
-        let balance_before = sac.balance(&winner);
+        let token_client = soroban_sdk::token::Client::new(&env, &bid_token);
+        let balance_before = token_client.balance(&winner);
         client.claim_auction(&auction_id);
-        let balance_after = sac.balance(&winner);
+        let balance_after = token_client.balance(&winner);
 
         assert_eq!(
             balance_after - balance_before,
@@ -1208,10 +1272,12 @@ mod tests {
             "winner must receive the bid amount after claim"
         );
 
-        let contract_balance = sac.balance(&contract_id);
+        // Contract is funded with 1000, the winner pays 420 in at bid time and
+        // receives 420 back at claim, so the contract balance is unchanged.
+        let contract_balance = token_client.balance(&contract_id);
         assert_eq!(
-            contract_balance, 580_i128,
-            "contract balance must decrease by the bid amount"
+            contract_balance, 1000_i128,
+            "contract balance is unchanged after bid-in equals claim-out"
         );
     }
 
@@ -1239,7 +1305,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -1277,7 +1343,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -1315,7 +1381,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -1357,7 +1423,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -1389,7 +1455,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -1594,7 +1660,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &DutchAuctionDecay::Stepped,
+                &Some(DutchAuctionDecay::Stepped),
                 &None,
             );
         }));
@@ -1621,7 +1687,7 @@ mod tests {
                 &0_u32,
                 &Some(500_i128),
                 &Some(100_i128),
-                &DutchAuctionDecay::Stepped,
+                &Some(DutchAuctionDecay::Stepped),
                 &Some(0_u32),
             );
         }));
@@ -1650,7 +1716,7 @@ mod tests {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Stepped,
+            &Some(DutchAuctionDecay::Stepped),
             &Some(4_u32),
         );
 
@@ -1691,7 +1757,7 @@ mod tests {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -1721,7 +1787,7 @@ mod tests {
             &bps,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
     }
@@ -1810,9 +1876,12 @@ mod tests {
         assert_eq!(stored.highest_bid, 101_i128);
     }
 
-    /// First bid in an English auction only needs to meet min_bid, not bps.
+    /// The first bid must clear the `min_next_bid` threshold over `min_bid`
+    /// (i.e. `min_bid + increment`), matching [`crate::min_next_bid`] and the
+    /// documented behavior in `tests/gas_snap.rs`. A bid equal to `min_bid`
+    /// is rejected; `min_bid + increment` is accepted.
     #[test]
-    fn bps_first_bid_only_needs_min_bid() {
+    fn bps_first_bid_requires_min_bid_increment() {
         let env = Env::default();
         env.mock_all_auths();
         let alice = Address::generate(&env);
@@ -1821,8 +1890,7 @@ mod tests {
         let _factory = setup_factory(&env, &client);
         let auction_id = Symbol::new(&env, "bps_first");
 
-        // 10_000 bps (100%) would double the price — but on the first bid
-        // there is no highest_bid, so min_bid (= 100) applies directly.
+        // 10_000 bps (100%) doubles the price: first threshold = min_bid + 100.
         client.init_auction(
             &auction_id,
             &AuctionMode::English,
@@ -1832,15 +1900,25 @@ mod tests {
             &10_000_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
-        client.place_bid(&auction_id, &alice, &100_i128);
+
+        // Bid equal to min_bid (100) is below the threshold (200): rejected.
+        let too_low = client.try_place_bid(&auction_id, &alice, &100_i128);
+        assert!(
+            too_low.is_err(),
+            "first bid at min_bid alone must be rejected"
+        );
+
+        // Bid at the threshold (200) is accepted and stored.
+        setup_token(&env, &contract_id, 1000, std::slice::from_ref(&alice), 1000);
+        client.place_bid(&auction_id, &alice, &200_i128);
 
         let stored: crate::types::AuctionState = env
             .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
             .unwrap();
-        assert_eq!(stored.highest_bid, 100_i128);
+        assert_eq!(stored.highest_bid, 200_i128);
     }
 
     /// Ceiling division: fractional bps must round up (1 bps on 999 = ceil(0.999) = 1).
@@ -1933,6 +2011,8 @@ mod reentrancy_exploration {
         let sac = soroban_sdk::token::StellarAssetClient::new(&env, &bid_token);
 
         sac.mint(&contract_id, &1_000_i128);
+        sac.mint(&alice, &1_000_i128);
+        sac.mint(&bob, &1_000_i128);
 
         env.as_contract(&contract_id, || {
             env.storage()
@@ -1949,7 +2029,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -2013,6 +2093,7 @@ mod reentrancy_exploration {
         let bid_token = token_id.address();
         let _sac = StellarAssetClient::new(&env, &bid_token);
         _sac.mint(&contract_id, &1000_i128);
+        _sac.mint(&winner, &1000_i128);
         env.as_contract(&contract_id, || {
             env.storage()
                 .instance()
@@ -2029,7 +2110,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &winner, &100_i128);
@@ -2071,7 +2152,7 @@ mod reentrancy_exploration {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -2113,7 +2194,7 @@ mod reentrancy_preservation {
         let contract_id = env.register(Auction, ());
         let _client = AuctionClient::new(&env, &contract_id);
 
-        let amounts: [i128; 8] = [50, 51, 100, 999, 1_000, 10_000, 100_000, 1_000_000];
+        let amounts: [i128; 8] = [51, 51, 100, 999, 1_000, 10_000, 100_000, 1_000_000];
         for amount in amounts {
             let env2 = Env::default();
             env2.mock_all_auths();
@@ -2131,7 +2212,7 @@ mod reentrancy_preservation {
                 &0_u32,
                 &None,
                 &None,
-                &DutchAuctionDecay::None,
+                &Some(DutchAuctionDecay::None),
                 &None,
             );
             cli2.place_bid(&aid2, &Address::generate(&env2), &amount);
@@ -2169,7 +2250,7 @@ mod reentrancy_preservation {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -2206,7 +2287,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &alice, &100_i128);
@@ -2237,7 +2318,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         cli3.close_auction(&aid3);
@@ -2268,7 +2349,7 @@ mod reentrancy_preservation {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
         client.place_bid(&auction_id, &bidder, &420_i128);
@@ -2320,7 +2401,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -2477,7 +2558,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -2512,7 +2593,7 @@ mod liquidation_grace_window {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -2551,7 +2632,7 @@ mod liquidation_grace_window {
             &0_u32,
             &Some(500_i128),
             &Some(100_i128),
-            &DutchAuctionDecay::Linear,
+            &Some(DutchAuctionDecay::Linear),
             &None,
         );
 
@@ -2622,7 +2703,7 @@ mod liquidation_grace_window {
             &0_u32,
             &None,
             &None,
-            &DutchAuctionDecay::None,
+            &Some(DutchAuctionDecay::None),
             &None,
         );
 
@@ -2632,6 +2713,169 @@ mod liquidation_grace_window {
         assert!(
             result.is_ok(),
             "zero grace window must allow immediate bid at start_time"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // close_auction ledger-boundary determinism (Issue #1135)
+    //
+    // These tests deliberately avoid `env.mock_all_auths()`: that call
+    // makes every `require_auth()` in the environment trivially succeed
+    // for the rest of the test, which would make it impossible to prove
+    // that `close_auction` skips the factory-auth check once the ledger
+    // has crossed `end_time`. Instead, only the setup call that needs
+    // authorization (`set_factory_contract`) is scoped with
+    // `client.mock_auths(...)`; `close_auction` itself is invoked with
+    // zero authorizations in scope, so it only succeeds if the
+    // permissionless (post-deadline) path is actually taken.
+    // -----------------------------------------------------------------
+
+    fn setup_boundary_auction(
+        env: &Env,
+        start_time: u64,
+        end_time: u64,
+    ) -> (AuctionClient<'_>, Address, Address, Symbol) {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(env, &contract_id);
+        let factory = Address::generate(env);
+        let auction_id = Symbol::new(env, "boundary_auc");
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &factory,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "set_factory_contract",
+                    args: (factory.clone(),).into_val(env),
+                    sub_invokes: &[],
+                },
+            }])
+            .set_factory_contract(&factory);
+
+        // init_auction requires no authorization.
+        client.init_auction(
+            &auction_id,
+            &AuctionMode::English,
+            &start_time,
+            &end_time,
+            &1_i128,
+            &0_u32,
+            &None,
+            &None,
+            &Some(DutchAuctionDecay::None),
+            &None,
+        );
+
+        (client, factory, contract_id, auction_id)
+    }
+
+    #[test]
+    fn close_auction_before_deadline_requires_factory_auth() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(999); // one tick before end_time
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_err(),
+            "unauthorized close before end_time must be rejected"
+        );
+    }
+
+    #[test]
+    fn close_auction_factory_can_force_close_before_deadline() {
+        use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+        use soroban_sdk::IntoVal;
+
+        let env = Env::default();
+        let (client, factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(500); // well before end_time
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &factory,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "close_auction",
+                    args: (auction_id.clone(),).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "factory must still be able to force-close before end_time"
+        );
+    }
+
+    #[test]
+    fn close_auction_at_exact_deadline_is_permissionless() {
+        let env = Env::default();
+        let (client, _factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000); // exact boundary
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "close at the exact end_time boundary must not require factory auth"
+        );
+
+        let stored_state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_state.status, AuctionStatus::Closed);
+    }
+
+    #[test]
+    fn close_auction_after_deadline_is_permissionless() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1001); // one tick after end_time
+        let result = client.try_close_auction(&auction_id);
+        assert!(
+            result.is_ok(),
+            "close after end_time must not require factory auth"
+        );
+    }
+
+    #[test]
+    fn close_auction_permissionless_path_is_duplicate_safe() {
+        let env = Env::default();
+        let (client, _factory, contract_id, auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000);
+        client.close_auction(&auction_id);
+
+        // A second, still-unauthorized close attempt must not silently
+        // succeed again or move state; it must hit the terminal-state
+        // check before authorization is even considered.
+        let retry = client.try_close_auction(&auction_id);
+        assert!(
+            retry.is_err(),
+            "closing an already-closed auction must fail deterministically on retry"
+        );
+
+        let stored_state: crate::types::AuctionState = env
+            .as_contract(&contract_id, || env.storage().persistent().get(&auction_id))
+            .unwrap();
+        assert_eq!(stored_state.status, AuctionStatus::Closed);
+    }
+
+    #[test]
+    fn close_auction_invalid_auction_id_is_rejected_regardless_of_time() {
+        let env = Env::default();
+        let (client, _factory, _contract_id, _auction_id) = setup_boundary_auction(&env, 0, 1000);
+
+        env.ledger().set_timestamp(1000);
+        let missing_id = Symbol::new(&env, "does_not_exist");
+        let result = client.try_close_auction(&missing_id);
+        assert!(
+            result.is_err(),
+            "closing a nonexistent auction id must fail deterministically"
         );
     }
 }

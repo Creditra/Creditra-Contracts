@@ -155,6 +155,9 @@ fn prorate_interest_rounding_bounds() {
 fn prorate_interest_zero_short_circuit() {
     let (principal, rate_bps, time_delta) = bounded();
     assert_eq!(prorate_interest(0, rate_bps, time_delta, Rounding::Ceil), 0);
-    assert_eq!(prorate_interest(principal, 0, time_delta, Rounding::Ceil), 0);
+    assert_eq!(
+        prorate_interest(principal, 0, time_delta, Rounding::Ceil),
+        0
+    );
     assert_eq!(prorate_interest(principal, rate_bps, 0, Rounding::Ceil), 0);
 }

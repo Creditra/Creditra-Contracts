@@ -1,6 +1,9 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Storage, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map};
+
+use crate::error::ContractError;
+use crate::penalties::LateFeeConfig;
 
 #[cw_serde]
 pub struct Config {
@@ -88,6 +91,29 @@ pub const DRAWS: Map<(u64, u64), Draw> = Map::new("dr");
 pub const DRAW_AUDIT_COUNT: Map<(u64, u64), u64> = Map::new("dacnt");
 pub const DRAW_AUDIT: Map<(u64, u64, u64), DrawAuditEntry> = Map::new("da");
 
+/// Sum of unrepaid draw amounts on a credit line.
+///
+/// Missing `DRAW_COUNT` is treated as zero draws. Missing individual draw
+/// records are skipped. Overflow on the running sum returns
+/// [`ContractError::Overflow`].
+pub fn outstanding_utilization(
+    storage: &dyn Storage,
+    credit_line_id: u64,
+) -> Result<Uint128, ContractError> {
+    let draw_count = DRAW_COUNT.may_load(storage, credit_line_id)?.unwrap_or(0);
+    let mut utilized = Uint128::zero();
+    for did in 0..draw_count {
+        if let Some(draw) = DRAWS.may_load(storage, (credit_line_id, did))? {
+            if !draw.repaid {
+                utilized = utilized
+                    .checked_add(draw.amount)
+                    .map_err(|_| ContractError::Overflow)?;
+            }
+        }
+    }
+    Ok(utilized)
+}
+
 /// Deterministic, collision-free mapping from borrower address to their
 /// stable credit-line id.  Every `open_credit_line` call for a new borrower
 /// creates a unique id; subsequent look-ups are O(1) with no collision risk
@@ -108,6 +134,12 @@ pub struct OracleQuorumConfig {
     pub max_age_seconds: u64,
 }
 
+#[cw_serde]
+pub struct OracleReportData {
+    pub value: i128,
+    pub timestamp: u64,
+}
+
 /// Stored quorum-resolved canonical price and its ledger timestamp.
 #[cw_serde]
 pub struct OraclePriceRecord {
@@ -123,8 +155,63 @@ pub struct OraclePriceRecord {
 /// Adjust after gas profiling if the protocol sources more feeds.
 pub const MAX_ORACLE_FEEDS: usize = 20;
 
+/// Maximum number of collateral denominations allowed in the allowlist.
+///
+/// Bounds storage growth and keeps the per-deposit allowlist membership scan
+/// (`is_collateral_token_allowed`, O(n)) inside predictable transaction
+/// resource limits. The allowlist is also returned wholesale by
+/// [`crate::collateral::query_collateral_allowlist`], so an unbounded list
+/// would make that query unbounded too. Adjust after gas profiling if the
+/// protocol lists more assets.
+pub const MAX_COLLATERAL_TOKENS: usize = 50;
+
 /// Storage key for the oracle quorum configuration.
 pub const ORACLE_QUORUM_CONFIG: Item<OracleQuorumConfig> = Item::new("orc_qcfg");
 
 /// Storage key for the last resolved oracle price record.
 pub const ORACLE_PRICE_RECORD: Item<OraclePriceRecord> = Item::new("orc_prc");
+
+pub const ORACLE_LIST: Item<Vec<Addr>> = Item::new("orc_lst");
+pub const ORACLE_WEIGHT: Map<Addr, u32> = Map::new("orc_w");
+pub const ORACLE_REPORT: Map<Addr, OracleReportData> = Map::new("orc_rpt");
+
+/// Storage key for the structured late-fee configuration.
+///
+/// When absent the contract has no late-fee penalty configured.
+pub const LATE_FEE_CONFIG: Item<LateFeeConfig> = Item::new("lfc");
+
+// ── Multi-collateral storage ────────────────────────────────────────────────
+
+/// Tokens currently posted by each borrower.
+pub const BORROWER_COLLATERAL_TOKENS: Map<&Addr, Vec<String>> = Map::new("bct");
+
+/// Raw collateral balance keyed by borrower and denomination.
+pub const COLLATERAL_BALANCES: Map<(&Addr, &str), Uint128> = Map::new("cb");
+
+/// Optional risk-weight overrides, in basis points.
+pub const COLLATERAL_RISK_WEIGHTS: Map<&str, u32> = Map::new("crw");
+
+/// Admin-managed list of accepted collateral denominations.
+pub const COLLATERAL_TOKEN_ALLOWLIST: Item<Vec<String>> = Item::new("cta");
+
+/// Default collateral risk weight: 100%.
+pub const DEFAULT_COLLATERAL_RISK_WEIGHT_BPS: u32 = 10_000;
+
+// ── Per-market fee split storage ─────────────────────────────────────────────
+
+/// Default treasury fee share in basis points (0..=10_000).
+/// When unset, defaults to 10_000 (100% treasury, backward compatible).
+pub const DEFAULT_FEE_SHARE_BPS: Item<u32> = Item::new("default_fee_share");
+
+/// Per-market treasury fee share override in basis points (0..=10_000).
+/// Keyed by market denomination (the `credit_denom` of a credit line).
+/// When absent for a market, the [`DEFAULT_FEE_SHARE_BPS`] applies.
+pub const MARKET_FEE_SHARE_BPS: Map<&str, u32> = Map::new("mkt_fee_share");
+
+/// Per-market accumulated treasury balance held in contract (fees collected).
+/// Keyed by market denomination.
+pub const TREASURY_BALANCE: Map<&str, Uint128> = Map::new("treasury_bal");
+
+/// Per-market accumulated bounty pool balance held in contract (fee share).
+/// Keyed by market denomination.
+pub const BOUNTY_BALANCE: Map<&str, Uint128> = Map::new("bounty_bal");

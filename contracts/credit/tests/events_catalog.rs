@@ -46,7 +46,7 @@ fn second_topic(env: &Env, index: u32) -> Symbol {
 fn credit_line_event_shape() {
     let (env, borrower, _admin) = env_and_addresses();
 
-    for suffix in ["opened", "suspend", "closed", "default", "reinstate"] {
+    for suffix in ["opened", "suspend", "closed", "defaulted", "reinstate"] {
         let ev = CreditLineEvent {
             borrower: borrower.clone(),
             status: CreditStatus::Active,
@@ -321,6 +321,7 @@ fn treasury_withdrawal_executed_shape() {
             amount: 500,
             executor: admin.clone(),
             executed_at: 200,
+            remaining_balance: 25,
         },
     );
 
@@ -438,6 +439,8 @@ fn default_liquidation_settled_shape() {
             borrower: borrower.clone(),
             settlement_id: Symbol::new(&env, "auction-1"),
             recovered_amount: 500,
+            interest_recovered: 500,
+            principal_recovered: 0,
             remaining_utilized_amount: 500,
             status: CreditStatus::Closed,
             close_factor_bps: 5000,
@@ -625,6 +628,8 @@ fn all_credit_event_structs_instantiate() {
         borrower: borrower.clone(),
         settlement_id: Symbol::new(&env, "s1"),
         recovered_amount: 20,
+        interest_recovered: 20,
+        principal_recovered: 0,
         remaining_utilized_amount: 80,
         status: CreditStatus::Defaulted,
         close_factor_bps: 5000,
@@ -738,6 +743,7 @@ fn all_credit_event_structs_instantiate() {
         amount: 500,
         executor: admin.clone(),
         executed_at: 200,
+        remaining_balance: 25,
     };
     let _ = AttestationBatchCommittedEvent {
         borrower: borrower.clone(),

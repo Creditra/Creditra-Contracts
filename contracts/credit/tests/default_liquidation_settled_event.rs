@@ -108,6 +108,8 @@ fn settle_full_recovery_closes_line_and_event_matches_state() {
     assert_eq!(event.borrower, borrower);
     assert_eq!(event.settlement_id, settlement_id);
     assert_eq!(event.recovered_amount, 1_000_i128);
+    assert_eq!(event.interest_recovered, 0_i128);
+    assert_eq!(event.principal_recovered, 1_000_i128);
     assert_eq!(event.remaining_utilized_amount, 0_i128);
     assert_eq!(event.status, CreditStatus::Closed);
 
@@ -128,6 +130,7 @@ fn settle_full_recovery_closes_line_and_event_matches_state() {
     assert_eq!(line.utilized_amount, 0);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
+    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
 }
 
 #[test]
@@ -143,6 +146,8 @@ fn settle_partial_recovery_keeps_line_defaulted_and_event_matches_state() {
     assert_eq!(event.borrower, borrower);
     assert_eq!(event.settlement_id, settlement_id);
     assert_eq!(event.recovered_amount, 300_i128);
+    assert_eq!(event.interest_recovered, 0_i128);
+    assert_eq!(event.principal_recovered, 300_i128);
     assert_eq!(event.remaining_utilized_amount, 700_i128);
     assert_eq!(event.status, CreditStatus::Defaulted);
 
@@ -163,6 +168,7 @@ fn settle_partial_recovery_keeps_line_defaulted_and_event_matches_state() {
     assert_eq!(line.utilized_amount, 700_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
+    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
 }
 
 #[test]
@@ -176,6 +182,8 @@ fn settle_minimal_partial_recovery_event_matches_state() {
     // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.recovered_amount, 1_i128);
+    assert_eq!(event.interest_recovered, 0_i128);
+    assert_eq!(event.principal_recovered, 1_i128);
     assert_eq!(event.remaining_utilized_amount, 499_i128);
     assert_eq!(event.status, CreditStatus::Defaulted);
     assert_liq_setl_topic_ordering(&env);
@@ -185,6 +193,7 @@ fn settle_minimal_partial_recovery_event_matches_state() {
     assert_eq!(line.utilized_amount, 499_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
+    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
 }
 
 #[test]
@@ -198,6 +207,8 @@ fn settle_near_full_recovery_event_matches_state() {
     // Check events before the next invocation resets the buffer.
     let event = get_last_liq_setl_event(&env);
     assert_eq!(event.recovered_amount, 999_i128);
+    assert_eq!(event.interest_recovered, 0_i128);
+    assert_eq!(event.principal_recovered, 999_i128);
     assert_eq!(event.remaining_utilized_amount, 1_i128);
     assert_eq!(event.status, CreditStatus::Defaulted);
     assert_liq_setl_topic_ordering(&env);
@@ -207,6 +218,7 @@ fn settle_near_full_recovery_event_matches_state() {
     assert_eq!(line.utilized_amount, 1_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
+    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
 }
 
 #[test]
@@ -222,12 +234,16 @@ fn liq_setl_event_field_ordering_is_stable() {
     assert_eq!(event.borrower, borrower);
     assert_eq!(event.settlement_id, settlement_id);
     assert_eq!(event.recovered_amount, 200_i128);
+    assert_eq!(event.interest_recovered, 0_i128);
+    assert_eq!(event.principal_recovered, 200_i128);
     assert_eq!(event.remaining_utilized_amount, 600_i128);
     assert_eq!(event.status, CreditStatus::Defaulted);
 
     let _ = event.borrower;
     let _ = event.settlement_id;
     let _ = event.recovered_amount;
+    let _ = event.interest_recovered;
+    let _ = event.principal_recovered;
     let _ = event.remaining_utilized_amount;
     let _ = event.status;
 }
@@ -243,6 +259,8 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     // Check first event immediately (before next invocation resets the buffer).
     let event1 = get_last_liq_setl_event(&env);
     assert_eq!(event1.recovered_amount, 400_i128);
+    assert_eq!(event1.interest_recovered, 0_i128);
+    assert_eq!(event1.principal_recovered, 400_i128);
     assert_eq!(event1.remaining_utilized_amount, 600_i128);
     assert_eq!(event1.settlement_id, sid1);
     assert_eq!(event1.status, CreditStatus::Defaulted);
@@ -257,6 +275,8 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     // Check second event immediately.
     let event2 = get_last_liq_setl_event(&env);
     assert_eq!(event2.recovered_amount, 600_i128);
+    assert_eq!(event2.interest_recovered, 0_i128);
+    assert_eq!(event2.principal_recovered, 600_i128);
     assert_eq!(event2.remaining_utilized_amount, 0_i128);
     assert_eq!(event2.settlement_id, sid2);
     assert_eq!(event2.status, CreditStatus::Closed);
@@ -266,6 +286,7 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     let line2 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line2.utilized_amount, 0_i128);
     assert_eq!(line2.status, CreditStatus::Closed);
+    assert_eq!(event2.interest_recovered + event2.principal_recovered, event2.recovered_amount);
 }
 
 #[test]
@@ -295,6 +316,7 @@ fn settle_zero_recovered_amount_panics() {
             &borrower,
             &0_i128,
             &Symbol::new(&env, "auc_zero"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -314,6 +336,7 @@ fn settle_negative_recovered_amount_panics() {
             &borrower,
             &(-100_i128),
             &Symbol::new(&env, "auc_neg"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -333,6 +356,7 @@ fn settle_over_recovery_panics() {
             &borrower,
             &600_i128,
             &Symbol::new(&env, "auc_over"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -374,6 +398,7 @@ fn settle_on_active_line_panics() {
             &borrower,
             &500_i128,
             &Symbol::new(&env, "auc_active"),
+            &10_000_u32,
             &None,
         );
     }));
@@ -401,6 +426,7 @@ fn settle_on_nonexistent_line_panics() {
             &borrower,
             &100_i128,
             &Symbol::new(&env, "auc_nonex"),
+            &10_000_u32,
             &None,
         );
     }));

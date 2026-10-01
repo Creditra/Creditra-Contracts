@@ -24,8 +24,8 @@
 //! Rewrites the snapshot file with freshly computed values.
 
 use std::fs;
-use std::path::PathBuf;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 
 use creditra_credit::math_utils::{mul_div, Rounding};
 use serde::{Deserialize, Serialize};
@@ -35,9 +35,7 @@ use serde::{Deserialize, Serialize};
 /// Resolves the snapshot path relative to the workspace root.
 fn snapshot_path() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .join("test_snapshots")
-        .join("safe_mul_div.json")
+    manifest.join("test_snapshots").join("safe_mul_div.json")
 }
 
 // ─── Snapshot schema ──────────────────────────────────────────────────────────
@@ -229,7 +227,10 @@ fn verify_safe_mul_div_snapshot() {
         );
     }
 
-    println!("✓ All {} snapshot entries verified against mul_div", entries.len());
+    println!(
+        "✓ All {} snapshot entries verified against mul_div",
+        entries.len()
+    );
 }
 
 #[test]

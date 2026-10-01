@@ -6,14 +6,14 @@
 //! These entries must have their TTL extended on frequently-invoked read/write
 //! paths so that active credit lines are not silently archived by the network.
 
-use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
+use creditra_credit::storage::{DataKey, DrawAuditKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
 use creditra_credit::types::{CreditLineData, CreditStatus, GracePeriodConfig, GraceWaiverMode};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Symbol};
 
-fn setup(env: &Env) -> (Address, CreditClient, Address) {
+fn setup(env: &Env) -> (Address, CreditClient<'_>, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(Credit, ());
@@ -41,7 +41,10 @@ fn instance_ttl_for_key<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
     contract_id: &Address,
     key: &K,
 ) -> u32 {
-    env.as_contract(contract_id, || env.storage().instance().get_ttl(key))
+    // SDK 22 exposes a single TTL for the whole instance entry, shared by every
+    // key; the key is kept in the signature so the helper mirrors `ttl_for_key`.
+    let _ = key;
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 #[test]
@@ -194,7 +197,10 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
         reduced_rate_bps: 0,
     };
     env.as_contract(&contract_id, || {
-        env.storage().instance().set(&creditra_credit::storage::grace_period_key(&env), &grace_cfg);
+        env.storage().instance().set(
+            &creditra_credit::storage::grace_period_key(&env),
+            &grace_cfg,
+        );
     });
 
     let grace_key = creditra_credit::storage::grace_period_key(&env);
@@ -203,6 +209,8 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
     let delta = initial_ttl.saturating_sub(target_remaining);
     advance_ledgers(&env, delta);
 
+    // `update_risk_parameters` is an accrual path: it reads the line (and the
+    // grace-period config) before mutating the debt buckets.
     env.as_contract(&contract_id, || {
         let line = CreditLineData {
             borrower: borrower.clone(),
@@ -227,4 +235,324 @@ fn accrual_path_bumps_instance_ttl_for_accrual_reads() {
         ttl_after >= LEDGER_BUMP_AMOUNT,
         "instance TTL not extended for accrual reads: initial={initial_ttl} after={ttl_after}"
     );
+}
+
+// ── Lifecycle entrypoints that load a credit line ahead of `apply_accrual` ──
+//
+// Each of these previously read the credit line via a raw
+// `env.storage().persistent().get(&borrower)` call, bypassing
+// `storage::get_credit_line`'s TTL bump. A borrower who only ever interacts
+// through one of these paths (e.g. is suspended, defaulted, or reinstated but
+// never draws or repays) would have their entry silently drift toward
+// archival. These regression tests drain the entry's TTL below the refresh
+// threshold and assert that invoking each path bumps it back up.
+
+/// Drain `borrower`'s credit-line TTL down to just below the refresh
+/// threshold so the next accrual read must perform a real bump.
+fn drain_credit_line_ttl(env: &Env, contract_id: &Address, borrower: &Address) {
+    let ttl_initial = ttl_for_key(env, contract_id, borrower);
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(env, ttl_initial.saturating_sub(target_remaining));
+}
+
+#[test]
+fn self_suspend_bumps_credit_line_ttl_on_accrual_read() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.self_suspend_credit_line(&borrower);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on self_suspend_credit_line: {ttl_after}"
+    );
+}
+
+#[test]
+fn default_credit_line_bumps_credit_line_ttl_on_accrual_read() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.default_credit_line(&borrower);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on default_credit_line: {ttl_after}"
+    );
+}
+
+#[test]
+fn reinstate_credit_line_bumps_credit_line_ttl_on_accrual_read() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+    client.default_credit_line(&borrower);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on reinstate_credit_line: {ttl_after}"
+    );
+}
+
+#[test]
+fn settle_default_liquidation_bumps_credit_line_ttl_on_accrual_read() {
+    let env = Env::default();
+    let (contract_id, client, borrower) = setup_with_debt(&env, 500);
+
+    // The line carries 500 of debt and no collateral, so it is eligible for
+    // default and a 10_000 bps close factor can recover against the full debt.
+    client.default_credit_line(&borrower);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    let settlement_id = Symbol::new(&env, "settle1");
+    client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on settle_default_liquidation: {ttl_after}"
+    );
+}
+
+#[test]
+fn reverse_draw_bumps_credit_line_ttl_on_accrual_read() {
+    let env = Env::default();
+    // 200 of debt so the 100 reversed below has something to come out of.
+    let (contract_id, client, borrower) = setup_with_debt(&env, 200);
+
+    // Drain the credit line's TTL below the refresh threshold so the bump is
+    // observable, and only then record the draw-audit entry directly (bypassing
+    // the token-transfer machinery, which is irrelevant to this TTL regression
+    // test). The audit entry is created at the network minimum TTL, so it has to
+    // be written *after* the drain for `reverse_draw` to find it.
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    let original_ts = env.ledger().timestamp();
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(
+            &DataKey::DrawAudit(DrawAuditKey {
+                borrower: borrower.clone(),
+                timestamp: original_ts,
+            }),
+            &200_i128,
+        );
+    });
+
+    client.reverse_draw(&borrower, &100_i128, &original_ts, &1_u32);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on reverse_draw: {ttl_after}"
+    );
+}
+
+// ── #1273: every borrower-line read goes through the TTL-bumping getter ───────
+//
+// `default_credit_line`, `forgive_debt`, `set_per_borrower_liquidation_grace`
+// and `set_repayment_schedule` previously loaded the borrower's
+// `CreditLineData` with a raw `env.storage().persistent().get(&borrower)` call
+// (or a raw `has`), bypassing `storage::get_credit_line`'s TTL bump.
+// `enumerate_credit_lines` did the same for every page entry. Each path now
+// reads through `storage::get_credit_line`, so the bump happens on read —
+// independently of whether the call goes on to mutate (or persist) the line.
+//
+// The tests below drain the entry's TTL below the refresh threshold and assert
+// the bump happens for each path.
+
+/// Open a credit line carrying `utilized` of debt.
+///
+/// The debt is written straight to storage, together with the matching
+/// `TotalUtilized` accumulator, instead of going through `draw_credit`:
+/// drawing requires a liquidity token, a funded reserve *and* 1.5× collateral,
+/// none of which matter for a TTL regression test. Returns
+/// `(contract_id, client, borrower)`.
+fn setup_with_debt(env: &Env, utilized: i128) -> (Address, CreditClient<'_>, Address) {
+    let (contract_id, client, _admin) = setup(env);
+
+    let borrower = Address::generate(env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    env.as_contract(&contract_id, || {
+        let mut line: CreditLineData = env
+            .storage()
+            .persistent()
+            .get(&borrower)
+            .expect("credit line must exist after open_credit_line");
+        line.utilized_amount = utilized;
+        env.storage().persistent().set(&borrower, &line);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalUtilized, &utilized);
+    });
+
+    (contract_id, client, borrower)
+}
+
+#[test]
+fn forgive_debt_bumps_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, borrower) = setup_with_debt(&env, 500);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.forgive_debt(&borrower, &100_i128);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on forgive_debt: {ttl_after}"
+    );
+}
+
+/// Admin grace configuration only writes the grace key, so this test isolates
+/// the read-path bump: the credit-line entry's TTL can only be refreshed by
+/// `storage::get_credit_line` inside `set_per_borrower_liquidation_grace`.
+#[test]
+fn set_borrower_liq_grace_bumps_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.set_borrower_liq_grace(&borrower, &3_600_u64);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on set_borrower_liq_grace: {ttl_after}"
+    );
+}
+
+#[test]
+fn default_credit_line_bumps_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.default_credit_line(&borrower);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on default_credit_line: {ttl_after}"
+    );
+}
+
+/// `set_repayment_schedule` performs its existence check through the
+/// TTL-bumping getter, so installing a schedule also refreshes the
+/// credit-line entry it validates against.
+#[test]
+fn set_repayment_schedule_bumps_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &borrower);
+
+    client.set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+
+    let ttl_after = ttl_for_key(&env, &contract_id, &borrower);
+    assert!(
+        ttl_after >= LEDGER_BUMP_AMOUNT,
+        "credit-line TTL not bumped on set_repayment_schedule: {ttl_after}"
+    );
+}
+
+/// The `set_repayment_schedule` existence check now reads through the
+/// TTL-bumping getter — it must still reject an unknown borrower.
+#[test]
+fn set_repayment_schedule_rejects_unknown_borrower() {
+    let env = Env::default();
+    let (_contract_id, client, _admin) = setup(&env);
+    let borrower = Address::generate(&env);
+
+    let result = client.try_set_repayment_schedule(&borrower, &100_i128, &86_400_u64, &1_000_u64);
+    assert!(
+        result.is_err(),
+        "set_repayment_schedule must revert CreditLineNotFound for an unknown borrower"
+    );
+}
+
+#[test]
+fn enumerate_credit_lines_bumps_credit_line_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+    client.open_credit_line(&first, &1_000_i128, &300_u32, &70_u32);
+    client.open_credit_line(&second, &2_000_i128, &300_u32, &70_u32);
+
+    drain_credit_line_ttl(&env, &contract_id, &first);
+    drain_credit_line_ttl(&env, &contract_id, &second);
+
+    let page = client.enumerate_credit_lines(&Option::<u32>::None, &10_u32);
+    assert_eq!(page.len(), 2, "both credit lines should be enumerated");
+
+    for borrower in [&first, &second] {
+        let ttl_after = ttl_for_key(&env, &contract_id, borrower);
+        assert!(
+            ttl_after >= LEDGER_BUMP_AMOUNT,
+            "credit-line TTL not bumped on enumerate_credit_lines: {ttl_after}"
+        );
+    }
+}
+
+/// Lint: `lifecycle.rs` must never read a borrower's credit line with raw
+/// persistent storage — every borrower-line read has to go through
+/// `storage::get_credit_line` so the TTL bump cannot be bypassed (Issue #1273).
+///
+/// The source is whitespace-stripped before matching so multi-line method
+/// chains (`.persistent()` on one line, `.get(&borrower)` on the next) are
+/// caught too.
+#[test]
+fn lifecycle_source_has_no_raw_credit_line_reads() {
+    let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lifecycle.rs"));
+    let compact: String = source.chars().filter(|c| !c.is_whitespace()).collect();
+
+    let raw_reads = [
+        ".persistent().get(&borrower)",
+        ".persistent().get(borrower)",
+        ".persistent().has(&borrower)",
+        ".persistent().has(borrower)",
+        ".persistent().get::<Address,CreditLineData>(&borrower)",
+    ];
+
+    for needle in raw_reads {
+        assert!(
+            !compact.contains(needle),
+            "src/lifecycle.rs bypasses storage::get_credit_line via `{needle}`; \
+             use the TTL-bumping getter so borrower entries are refreshed on read"
+        );
+    }
 }

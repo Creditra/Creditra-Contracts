@@ -210,7 +210,7 @@ pub fn verify_attestation_proof(
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::InvalidAttestation));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::AttestationBatchNotFound));
 
     // Bump TTL on read.
     env.storage()
@@ -265,6 +265,7 @@ pub fn clear_attestation_batch(env: Env, borrower: Address) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CreditClient;
     use soroban_sdk::{testutils::Address as _, vec, Env};
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -273,7 +274,7 @@ mod tests {
     fn leaf(env: &Env, pattern: u8) -> BytesN<32> {
         let mut data = Bytes::new(env);
         data.push_back(pattern);
-        env.crypto().sha256(&data)
+        env.crypto().sha256(&data).into()
     }
 
     /// Merkle root of two leaves via `hash_pair` (which sorts internally).
@@ -281,11 +282,13 @@ mod tests {
         hash_pair(env, &l0, &l1)
     }
 
-    fn setup_admin(env: &Env) {
+    fn setup(env: &Env) -> (CreditClient<'static>, Address, Address) {
         let admin = Address::generate(env);
-        env.storage()
-            .instance()
-            .set(&crate::storage::admin_key(env), &admin);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(crate::Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        (client, admin, borrower)
     }
 
     // ── compute_root ─────────────────────────────────────────────────────────
@@ -349,14 +352,12 @@ mod tests {
     fn commit_and_get_attestation_batch() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
-
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let root = leaf(&env, 0xAA);
 
-        commit_attestation_batch(env.clone(), borrower.clone(), root.clone(), 3);
+        client.commit_attestation_batch(&borrower, &root, &3);
 
-        let batch = get_attestation_batch(env, borrower).expect("batch should exist");
+        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
         assert_eq!(batch.merkle_root, root);
         assert_eq!(batch.count, 3);
     }
@@ -365,16 +366,14 @@ mod tests {
     fn commit_overwrites_previous_batch() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
-
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let root1 = leaf(&env, 0x11);
         let root2 = leaf(&env, 0x22);
 
-        commit_attestation_batch(env.clone(), borrower.clone(), root1, 1);
-        commit_attestation_batch(env.clone(), borrower.clone(), root2.clone(), 2);
+        client.commit_attestation_batch(&borrower, &root1, &1);
+        client.commit_attestation_batch(&borrower, &root2, &2);
 
-        let batch = get_attestation_batch(env, borrower).expect("batch should exist");
+        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
         assert_eq!(batch.merkle_root, root2);
         assert_eq!(batch.count, 2);
     }
@@ -383,20 +382,19 @@ mod tests {
     fn clear_attestation_batch_removes_entry() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
+        let (client, _admin, borrower) = setup(&env);
 
-        let borrower = Address::generate(&env);
-        commit_attestation_batch(env.clone(), borrower.clone(), leaf(&env, 0xBB), 1);
-        clear_attestation_batch(env.clone(), borrower.clone());
+        client.commit_attestation_batch(&borrower, &leaf(&env, 0xBB), &1);
+        client.clear_attestation_batch(&borrower);
 
-        assert!(get_attestation_batch(env, borrower).is_none());
+        assert!(client.get_attestation_batch(&borrower).is_none());
     }
 
     #[test]
     fn get_nonexistent_batch_returns_none() {
         let env = Env::default();
-        let borrower = Address::generate(&env);
-        assert!(get_attestation_batch(env, borrower).is_none());
+        let (client, _admin, borrower) = setup(&env);
+        assert!(client.get_attestation_batch(&borrower).is_none());
     }
 
     // ── verify_attestation_proof ──────────────────────────────────────────────
@@ -405,78 +403,167 @@ mod tests {
     fn verify_single_leaf_batch() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
-
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let l = leaf(&env, 0xCC);
 
-        // Single-leaf tree: root == leaf, proof is empty.
-        commit_attestation_batch(env.clone(), borrower.clone(), l.clone(), 1);
+        client.commit_attestation_batch(&borrower, &l, &1);
 
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower,
-            l,
-            vec![&env]
-        ));
+        assert!(client.verify_attestation_proof(&borrower, &l, &vec![&env]));
     }
 
     #[test]
     fn verify_two_leaf_batch_both_leaves() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
-
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let l0 = leaf(&env, 0x01);
         let l1 = leaf(&env, 0x02);
         let root = two_leaf_root(&env, l0.clone(), l1.clone());
 
-        commit_attestation_batch(env.clone(), borrower.clone(), root, 2);
+        client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower.clone(),
-            l0.clone(),
-            vec![&env, l1.clone()]
-        ));
-        assert!(verify_attestation_proof(
-            env.clone(),
-            borrower,
-            l1,
-            vec![&env, l0]
-        ));
+        assert!(client.verify_attestation_proof(&borrower, &l0, &vec![&env, l1.clone()]));
+        assert!(client.verify_attestation_proof(&borrower, &l1, &vec![&env, l0]));
     }
 
     #[test]
     fn verify_wrong_leaf_returns_false() {
         let env = Env::default();
         env.mock_all_auths();
-        setup_admin(&env);
-
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let l0 = leaf(&env, 0x01);
         let l1 = leaf(&env, 0x02);
         let wrong_leaf = leaf(&env, 0xFF);
         let root = two_leaf_root(&env, l0, l1.clone());
 
-        commit_attestation_batch(env.clone(), borrower.clone(), root, 2);
+        client.commit_attestation_batch(&borrower, &root, &2);
 
-        assert!(!verify_attestation_proof(
-            env.clone(),
-            borrower,
-            wrong_leaf,
-            vec![&env, l1]
-        ));
+        assert!(!client.verify_attestation_proof(&borrower, &wrong_leaf, &vec![&env, l1]));
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #53)")]
+    #[should_panic(expected = "Error(Contract, #49)")]
     fn verify_no_batch_panics() {
         let env = Env::default();
-        let borrower = Address::generate(&env);
+        let (client, _admin, borrower) = setup(&env);
         let l = leaf(&env, 0xDD);
         // No batch committed — must panic with InvalidAttestation.
         verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+    }
+    #[test]
+    #[should_panic(expected = "Error(Contract, #49)")]
+    fn verify_cleared_batch_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
+        let l = leaf(&env, 0xEE);
+
+        client.commit_attestation_batch(&borrower, &l, &1);
+        client.clear_attestation_batch(&borrower);
+
+        // Batch cleared - must panic with AttestationBatchNotFound (49)
+        verify_attestation_proof(env.clone(), borrower, l, vec![&env]);
+    }
+
+    struct MerkleTree {
+        levels: std::vec::Vec<std::vec::Vec<BytesN<32>>>,
+    }
+
+    impl MerkleTree {
+        fn new(env: &Env, leaves: std::vec::Vec<BytesN<32>>) -> Self {
+            let mut levels = std::vec::Vec::new();
+            levels.push(leaves.clone());
+            let mut current_level = leaves;
+
+            while current_level.len() > 1 {
+                let mut next_level = std::vec::Vec::new();
+                for chunk in current_level.chunks(2) {
+                    if chunk.len() == 2 {
+                        next_level.push(hash_pair(env, &chunk[0], &chunk[1]));
+                    } else {
+                        next_level.push(chunk[0].clone());
+                    }
+                }
+                levels.push(next_level.clone());
+                current_level = next_level;
+            }
+            Self { levels }
+        }
+
+        fn root(&self) -> BytesN<32> {
+            self.levels.last().unwrap()[0].clone()
+        }
+
+        fn proof(&self, env: &Env, leaf_index: usize) -> Vec<BytesN<32>> {
+            let mut proof = std::vec::Vec::new();
+            let mut current_idx = leaf_index;
+
+            for level in self.levels.iter().take(self.levels.len() - 1) {
+                let is_right_node = current_idx % 2 == 1;
+                let sibling_idx = if is_right_node { current_idx - 1 } else { current_idx + 1 };
+                
+                if sibling_idx < level.len() {
+                    proof.push(level[sibling_idx].clone());
+                }
+                current_idx /= 2;
+            }
+
+            Vec::from_slice(env, &proof)
+        }
+    }
+
+    fn test_tree_size(size: usize) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _admin, borrower) = setup(&env);
+
+        let mut leaves = std::vec::Vec::new();
+        for i in 0..size {
+            leaves.push(leaf(&env, i as u8));
+        }
+
+        let tree = MerkleTree::new(&env, leaves.clone());
+        let root = tree.root();
+
+        client.commit_attestation_batch(&borrower, &root, &(size as u32));
+
+        for i in 0..size {
+            let proof = tree.proof(&env, i);
+            assert!(
+                client.verify_attestation_proof(&borrower, &leaves[i], &proof),
+                "Failed to verify leaf {} for tree size {}", i, size
+            );
+
+            // Tampered leaf should fail
+            let tampered_leaf = leaf(&env, 0xFF);
+            assert!(
+                !client.verify_attestation_proof(&borrower, &tampered_leaf, &proof),
+                "Tampered leaf verified for tree size {}", size
+            );
+
+            // Tampered proof should fail (only if proof is not empty)
+            if proof.len() > 0 {
+                let mut tampered_proof_vec = std::vec::Vec::new();
+                for j in 0..proof.len() {
+                    tampered_proof_vec.push(proof.get(j).unwrap());
+                }
+                tampered_proof_vec[0] = leaf(&env, 0xFF);
+                let tampered_proof = Vec::from_slice(&env, &tampered_proof_vec);
+                
+                assert!(
+                    !client.verify_attestation_proof(&borrower, &leaves[i], &tampered_proof),
+                    "Tampered proof verified for tree size {}", size
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn verify_odd_and_even_trees() {
+        test_tree_size(1);
+        test_tree_size(2);
+        test_tree_size(3);
+        test_tree_size(7);
+        test_tree_size(8);
     }
 }

@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "update_risk_parameters_all_guardrails",
+    cpu_instructions: 239037,
+    memory_bytes: 37340,
+}

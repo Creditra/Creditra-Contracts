@@ -5,11 +5,10 @@ concrete artifacts of execution quality — test count, coverage, CI surface,
 PR cadence, deployment checklist — that a reviewer can verify in a few
 minutes by running the commands at the bottom of each section.
 
-Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
-`TEST_COVERAGE_REPORT.md` (workspace-level coverage report at v1.0 cutoff),
-`TEST_VALIDATION.md`, `IMPLEMENTATION_STATUS.md`,
-`UNWRAP_AUDIT_REPORT.md`, `POST_AUDIT_CHECKLIST.md`,
-`AUDIT_SUMMARY.md`.
+Companion: [`docs/COVERAGE.md`](./COVERAGE.md) (workspace-level coverage report),
+[`contracts/credit/UNWRAP_AUDIT_REPORT.md`](../contracts/credit/UNWRAP_AUDIT_REPORT.md),
+[`contracts/credit/POST_AUDIT_CHECKLIST.md`](../contracts/credit/POST_AUDIT_CHECKLIST.md),
+[`contracts/credit/AUDIT_SUMMARY.md`](../contracts/credit/AUDIT_SUMMARY.md).
 
 ---
 
@@ -78,7 +77,19 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 | `lib.rs` (inline) | Contract-level integration scaffolding tests |
 | `lifecycle.rs` (inline) | State-transition unit tests |
 
-### 1.3 Auction tests — `gateway-contract/contracts/auction_contract/src/test.rs`
+### 1.3 CosmWasm tests — `contracts/creditra-credit/tests/`
+
+| File | Concern |
+|---|---|
+| `proptest_monotonic.rs` | `accrued_interest` monotone-in-time/principal/rate; zero boundary; total / panic-free; overflow upward-closed |
+| `proptest_total.rs` | `net_outstanding` conservation across random draw/repay sequences |
+| `repay_inv.rs` | Repayment invariants |
+| `borrower_key.rs` | Borrower key encoding and collision resistance |
+| `borrower_id.rs` | Borrower ID stability |
+| `e2e_outage.rs` | End-to-end oracle-outage simulation |
+| `snap_prorate.rs` | **Snapshot-fuzz for `accrued_interest`**: 4 096-entry pinned JSON; floor/overflow; monotonicity; proptest suite (see §3) |
+
+### 1.4 Auction tests — `gateway-contract/contracts/auction_contract/src/test.rs`
 
 1 934 lines of tests covering:
 
@@ -91,7 +102,7 @@ Companion: `COVERAGE_REPORT.md` (per-issue coverage snapshots),
 - `claim_auction` (winner-only, post-settlement)
 - Reentrancy guard around refund + claim
 
-### 1.4 Total test surface
+### 1.5 Total test surface
 
 The workspace has **~817 `#[test]` annotations** across source and tests
 (reproduce with `grep -r '#\[test\]' contracts/ gateway-contract/ | wc -l`).
@@ -143,6 +154,10 @@ harness. Concrete property tests:
 - `tests/accrual_overflow_audit.rs` — sweeps `(u, r, Δt)` over wide ranges
   for overflow safety
 - `tests/borrower_key_encoding.rs` — property-style key isolation
+- `contracts/creditra-credit/tests/snap_prorate.rs` — 4 096-entry pinned
+  JSON snapshot + 8 proptest properties for `accrued_interest` (the CosmWasm
+  accrual primitive); mirrors the Soroban `snapshot_prorate_interest.rs`
+  suite. See `docs/contributing-tests.md` for the regeneration workflow.
 
 A `cargo fuzz` harness for `apply_accrual` and `compute_rate_from_score` is
 listed as a follow-up in `POST_AUDIT_CHECKLIST.md` — the targets are simple
@@ -327,15 +342,16 @@ The pattern is visible:
 | `docs/deploy.md` | Deploy quickstart |
 | `docs/contributing-tests.md` | Test helper conventions |
 | `docs/scripts.md` | Helper script reference |
-| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design |
-| `AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history |
-| `SELF_SUSPEND_ARCHITECTURE.md`, `SELF_SUSPEND_FEATURE_SUMMARY.md` | Borrower self-suspend feature |
-| `STORAGE_KEY_ENCODING_DIAGRAMS.md`, `STORAGE_KEY_ENCODING_SUMMARY.md` | Storage key safety |
-| `UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
-| `POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
-| `AUDIT_SUMMARY.md`, `IMPLEMENTATION_STATUS.md` | Status snapshots |
-| `INTEREST_ACCRUAL_SPIKE_RESULTS.md` | Accrual model spike results |
-| `TEST_COVERAGE_REPORT.md`, `COVERAGE_REPORT.md`, `TEST_COVERAGE.md`, `TEST_VALIDATION.md` | Test-quality snapshots |
+| `docs/CIRCUIT_BREAKER_IMPLEMENTATION.md` | Pause design rationale |
+| `docs/AUCTION_CLOSE_TIME_FIX.md` | Close-time off-by-one fix history and zero-bid spec |
+| `docs/SELF_SUSPEND_ARCHITECTURE.md` | Borrower self-suspend architecture and flow diagrams |
+| `docs/STORAGE_KEY_ENCODING_DIAGRAMS.md` | Storage key safety and collision resistance diagrams |
+| `docs/ORACLE_VALIDATION_DESIGN.md` | Oracle input validation before settlement |
+| `docs/VALIDATION_LAYER_DESIGN.md` | Oracle validation layer architecture |
+| `docs/CONTRIBUTING.md` | Contributing standards and PR workflow |
+| `contracts/credit/UNWRAP_AUDIT_REPORT.md` | Production unwrap removal |
+| `contracts/credit/POST_AUDIT_CHECKLIST.md` | Post-audit follow-ups |
+| `contracts/credit/AUDIT_SUMMARY.md` | Status audit summary |
 
 ---
 

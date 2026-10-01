@@ -36,6 +36,7 @@ fn test_event_topics_stability() {
             borrower: borrower.clone(),
             amount: 100,
             new_utilized_amount: 100,
+            timestamp: 0_u64,
         },
     );
     publish_repayment_event(
@@ -60,6 +61,8 @@ fn test_event_topics_stability() {
             borrower: borrower.clone(),
             settlement_id: Symbol::new(&env, "setl1"),
             recovered_amount: 20,
+            interest_recovered: 10,
+            principal_recovered: 10,
             remaining_utilized_amount: 35,
             status: CreditStatus::Active,
             close_factor_bps: 0,

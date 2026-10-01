@@ -8,7 +8,7 @@
 //! - Reflects collateral balance when collateral is deposited.
 //! - Reports `health_factor_bps == u32::MAX` with zero utilization.
 //! - Reports correct health factor with outstanding debt and collateral.
-//! - Returns the configured `repayment_schedule` when set.
+//! - Returns the configured `repayment_schedule` (single-element Vec) when set.
 //! - `is_delinquent` is `false` without a schedule.
 //! - `is_delinquent` is `true` when past the grace window.
 //! - `is_delinquent` is `false` within the grace window.
@@ -159,7 +159,7 @@ fn repayment_schedule_is_none_when_not_set() {
 
     let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
 
-    assert!(snap.repayment_schedule.is_none());
+    assert!(snap.repayment_schedule.is_empty());
 }
 
 #[test]
@@ -173,7 +173,8 @@ fn repayment_schedule_present_when_set() {
     client.set_repayment_schedule(&borrower, &500_i128, &86_400_u64, &100_000_u64);
 
     let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
-    let sched = snap.repayment_schedule.expect("schedule must be Some");
+    assert_eq!(snap.repayment_schedule.len(), 1);
+    let sched = snap.repayment_schedule.get(0).expect("schedule must be present");
 
     assert_eq!(sched.amount_per_period, 500);
     assert_eq!(sched.period_seconds, 86_400);
@@ -275,7 +276,7 @@ fn snapshot_reflects_closed_status_after_close() {
     assert_eq!(snap.line.status, CreditStatus::Closed);
     assert_eq!(snap.collateral_balance, 0);
     assert_eq!(snap.health_factor_bps, u32::MAX); // zero utilization
-    assert!(snap.repayment_schedule.is_none());
+    assert!(snap.repayment_schedule.is_empty());
     assert!(!snap.is_delinquent); // Closed → never delinquent
 }
 

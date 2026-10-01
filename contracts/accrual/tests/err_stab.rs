@@ -162,10 +162,22 @@ fn accrual_v7_category_mappings_are_pinned() {
     // Liquidity bucket (discriminant 5)
     assert_eq!(ContractError::MissingLiquidityToken.category(), Liquidity);
     assert_eq!(ContractError::MissingLiquiditySource.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientLiquidityReserve.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentAllowance.category(), Liquidity);
-    assert_eq!(ContractError::InsufficientRepaymentBalance.category(), Liquidity);
-    assert_eq!(ContractError::LiquidityTokenCallFailed.category(), Liquidity);
+    assert_eq!(
+        ContractError::InsufficientLiquidityReserve.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentAllowance.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::InsufficientRepaymentBalance.category(),
+        Liquidity
+    );
+    assert_eq!(
+        ContractError::LiquidityTokenCallFailed.category(),
+        Liquidity
+    );
     assert_eq!(ContractError::ExposureCapExceeded.category(), Liquidity);
 
     // Limit bucket (discriminant 4)
@@ -173,7 +185,10 @@ fn accrual_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::DrawExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::RepayExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::UtilizationNotZero.category(), Limit);
-    assert_eq!(ContractError::LimitDecreaseRequiresRepayment.category(), Limit);
+    assert_eq!(
+        ContractError::LimitDecreaseRequiresRepayment.category(),
+        Limit
+    );
 
     // Auth / Reentrancy / Misc buckets
     assert_eq!(ContractError::Unauthorized.category(), Auth);

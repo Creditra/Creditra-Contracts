@@ -1,0 +1,177 @@
+﻿[
+  {
+    "credit_line_id": 0,
+    "draw_id": 0,
+    "draw_amount": "100",
+    "draw_denom": "ucredit",
+    "drawn_at": "1571797419879305533",
+    "drawn_by": "alice",
+    "repaid": false,
+    "events": [
+      {
+        "seq": 0,
+        "action": "draw_created",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "alice",
+        "memo": ""
+      },
+      {
+        "seq": 1,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo A for 0"
+      },
+      {
+        "seq": 2,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo B for 0"
+      }
+    ]
+  },
+  {
+    "credit_line_id": 0,
+    "draw_id": 1,
+    "draw_amount": "100",
+    "draw_denom": "ucredit",
+    "drawn_at": "1571797419879305533",
+    "drawn_by": "alice",
+    "repaid": false,
+    "events": [
+      {
+        "seq": 0,
+        "action": "draw_created",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "alice",
+        "memo": ""
+      },
+      {
+        "seq": 1,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo A for 1"
+      },
+      {
+        "seq": 2,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo B for 1"
+      }
+    ]
+  },
+  {
+    "credit_line_id": 0,
+    "draw_id": 2,
+    "draw_amount": "100",
+    "draw_denom": "ucredit",
+    "drawn_at": "1571797419879305533",
+    "drawn_by": "alice",
+    "repaid": false,
+    "events": [
+      {
+        "seq": 0,
+        "action": "draw_created",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "alice",
+        "memo": ""
+      },
+      {
+        "seq": 1,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo A for 2"
+      },
+      {
+        "seq": 2,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo B for 2"
+      }
+    ]
+  },
+  {
+    "credit_line_id": 0,
+    "draw_id": 3,
+    "draw_amount": "100",
+    "draw_denom": "ucredit",
+    "drawn_at": "1571797419879305533",
+    "drawn_by": "alice",
+    "repaid": false,
+    "events": [
+      {
+        "seq": 0,
+        "action": "draw_created",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "alice",
+        "memo": ""
+      },
+      {
+        "seq": 1,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo A for 3"
+      },
+      {
+        "seq": 2,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo B for 3"
+      }
+    ]
+  },
+  {
+    "credit_line_id": 0,
+    "draw_id": 4,
+    "draw_amount": "100",
+    "draw_denom": "ucredit",
+    "drawn_at": "1571797419879305533",
+    "drawn_by": "alice",
+    "repaid": false,
+    "events": [
+      {
+        "seq": 0,
+        "action": "draw_created",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "alice",
+        "memo": ""
+      },
+      {
+        "seq": 1,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo A for 4"
+      },
+      {
+        "seq": 2,
+        "action": "memo_added",
+        "timestamp": "1571797419879305533",
+        "block_height": 12345,
+        "by": "admin",
+        "memo": "Memo B for 4"
+      }
+    ]
+  }
+]

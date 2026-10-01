@@ -170,8 +170,7 @@ pub fn compute_late_fee(
             if amount == 0 {
                 return Ok(0);
             }
-            let count =
-                i128::try_from(missed_installments).map_err(|_| ContractError::Overflow)?;
+            let count = i128::try_from(missed_installments).map_err(|_| ContractError::Overflow)?;
             amount.checked_mul(count).ok_or(ContractError::Overflow)
         }
         LateFeeConfig::AprBased(_) => {

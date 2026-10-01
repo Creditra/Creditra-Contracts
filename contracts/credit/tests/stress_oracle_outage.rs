@@ -61,7 +61,7 @@ fn oracle_outage_recovers_across_many_ledgers() {
     env.ledger().with_mut(|l| l.timestamp = 1_000);
 
     let first = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &Some(1_000_i128));
+    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &10_000_u32, &Some(1_000_i128));
     assert_eq!(
         client.get_credit_line(&first).unwrap().status,
         CreditStatus::Closed
@@ -77,6 +77,7 @@ fn oracle_outage_recovers_across_many_ledgers() {
             &borrower,
             &500_i128,
             &sid(&env, &format!("s{}", cycle)),
+            &10_000_u32,
             &Some(1_000_i128),
         );
         assert_eq!(
@@ -95,11 +96,11 @@ fn oracle_outage_rejects_price_after_stale_window() {
 
     env.ledger().with_mut(|l| l.timestamp = 1_000);
     let first = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &Some(1_000_i128));
+    client.settle_default_liquidation(&first, &500_i128, &sid(&env, "s0"), &10_000_u32, &Some(1_000_i128));
 
     // Advance beyond the configured oracle freshness window without a price update.
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 10_001);
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &Some(1_000_i128));
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &Some(1_000_i128));
 }

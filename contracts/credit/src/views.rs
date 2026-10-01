@@ -1,21 +1,103 @@
 // SPDX-License-Identifier: MIT
 
-//! Read-only query views for the Creditra credit contract.
+//! Read-only query views for specialized campaign indexing.
 //!
-//! Each function is a pure storage read — no state mutations, no token CPIs,
-//! no authentication required. TTL may be bumped by `get_credit_line` via the
-//! storage layer when the persistent entry nears expiry.
+//! Provides the protocol summary view requested for the GrantFox campaign.
 
-use crate::storage::{get_borrower_by_credit_line_id, get_credit_line, MAX_ENUMERATION_LIMIT};
-use crate::types::{CreditLinesPage, ProofOfReserve, ProtocolSummaryView};
-use soroban_sdk::{Env, Vec};
+use crate::storage::{
+    get_borrower_by_credit_line_id, get_credit_line, is_borrower_blocked, is_borrower_frozen,
+    is_paused, MAX_ENUMERATION_LIMIT,
+};
+use crate::types::{
+    BorrowCapabilities, BorrowStateSnapshot, CreditLineSnapshot, CreditLinesPage, ProofOfReserve,
+    ProtocolSummaryView,
+};
+use soroban_sdk::{Address, Env, Vec};
 
-// ── Protocol-level views ─────────────────────────────────────────────────────
+// ── Borrow capabilities view ─────────────────────────────────────────────────
 
-/// Return protocol-level dashboard aggregates including `active_line_count`.
+/// Return a borrower's current capabilities bitmap.
 ///
-/// Reads aggregate instance-storage slots only; does not touch per-borrower
-/// records and does not bump persistent-entry TTL.
+/// This is a read-only, no-auth view that reports which operations are
+/// currently permitted for a given borrower. It evaluates the same
+/// pre-flight checks that `draw_credit`, `repay_credit`, and
+/// `self_suspend_credit_line` perform, EXCEPT for amount-dependent
+/// checks (credit limit, collateral ratio, cooldown, exposure caps)
+/// because this view does not know the intended draw/repay amount.
+///
+/// # Parameters
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+/// A [`BorrowCapabilities`] struct with three bool fields:
+/// - `can_draw` — draw pre-flight checks pass
+/// - `can_repay` — repay pre-flight checks pass
+/// - `can_self_suspend` — self-suspend pre-flight checks pass
+///
+/// # Security
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state.
+pub fn borrow_capabilities(env: Env, borrower: Address) -> BorrowCapabilities {
+    let credit_line = get_credit_line(&env, &borrower);
+
+    let can_draw = credit_line
+        .as_ref()
+        .map(|line| {
+            crate::borrow::draw_status_error(line.status).is_none()
+                && !is_paused(&env)
+                && !crate::freeze::is_draws_frozen(&env)
+                && !is_borrower_blocked(&env, &borrower)
+                && !is_borrower_frozen(&env, &borrower)
+                && !crate::freeze::is_credit_line_frozen(&env, &borrower)
+        })
+        .unwrap_or(false);
+
+    let can_repay = credit_line
+        .as_ref()
+        .map(|line| line.status != crate::types::CreditStatus::Closed)
+        .unwrap_or(false);
+
+    let can_self_suspend = credit_line
+        .as_ref()
+        .map(|line| line.status == crate::types::CreditStatus::Active)
+        .unwrap_or(false);
+
+    BorrowCapabilities {
+        can_draw,
+        can_repay,
+        can_self_suspend,
+    }
+}
+
+/// Assemble a full read-only snapshot of `borrower`'s credit line.
+///
+/// Returns `None` when no credit line has been opened for `borrower`.
+/// See [`CreditLineSnapshot`] for the aggregated fields.
+pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<CreditLineSnapshot> {
+    let line = get_credit_line(&env, &borrower)?;
+    let collateral_balance = crate::collateral::get_collateral(&env, &borrower);
+    let health_factor_bps = crate::query::get_health_factor(env.clone(), borrower.clone());
+    let mut repayment_schedule = Vec::new(&env);
+    if let Some(schedule) = crate::query::get_repayment_schedule(env.clone(), borrower.clone()) {
+        repayment_schedule.push_back(schedule);
+    }
+    let is_delinquent = crate::query::is_delinquent(env.clone(), borrower);
+
+    Some(CreditLineSnapshot {
+        line,
+        collateral_balance,
+        health_factor_bps,
+        repayment_schedule,
+        is_delinquent,
+    })
+}
+
+// ── Borrow capabilities view ─────────────────────────────────────────────────
+
+/// Return a borrower's current capabilities bitmap.
+///
+/// This reads aggregate storage slots to return TotalUtilized, TotalCollateral,
+/// and ActiveLineCount without iterating through individual borrower records.
 pub fn get_protocol_summary_view(env: Env) -> ProtocolSummaryView {
     ProtocolSummaryView {
         total_utilized: crate::storage::get_total_utilized(&env),
@@ -97,8 +179,9 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
     // Clamp start_id to valid range
     if start_id >= total_count {
         return CreditLinesPage {
-            credit_lines: Vec::new(&env),
+            lines: Vec::new(&env),
             next_cursor: None,
+            has_more: false,
         };
     }
 
@@ -131,8 +214,52 @@ pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> 
         next_cursor = None;
     }
 
+    let has_more = next_cursor.is_some();
     CreditLinesPage {
-        credit_lines,
+        lines: credit_lines,
         next_cursor,
+        has_more,
+    }
+}
+
+// ── Borrow state snapshot view ───────────────────────────────────────────────
+
+/// Return a full state snapshot for a borrower's credit line.
+///
+/// This is a read-only, no-auth view that returns a comprehensive snapshot
+/// of the borrower's current state including credit line data, collateral
+/// balance, and borrow capabilities. This is useful for off-chain monitoring,
+/// risk dashboards, and debugging.
+///
+/// # Parameters
+///
+/// - `borrower`: The borrower address to query.
+///
+/// # Returns
+///
+/// A [`BorrowStateSnapshot`] struct containing:
+/// - `credit_line`: The full [`CreditLineData`] if it exists, or `None`.
+/// - `collateral_balance`: The borrower's collateral balance.
+/// - `capabilities`: The borrower's current [`BorrowCapabilities`].
+///
+/// # Security
+///
+/// This is a pure read-only query. It does not require authentication
+/// and does not mutate any state. TTL may be bumped if the borrower's
+/// persistent entry is near expiry, but this does not change logical state.
+pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
+    let credit_line_opt = get_credit_line(&env, &borrower);
+    let collateral_balance = crate::storage::get_collateral_balance(&env, &borrower);
+    let capabilities = borrow_capabilities(env.clone(), borrower.clone());
+
+    let mut credit_line_vec = soroban_sdk::Vec::new(&env);
+    if let Some(line) = credit_line_opt {
+        credit_line_vec.push_back(line);
+    }
+
+    BorrowStateSnapshot {
+        credit_line: credit_line_vec,
+        collateral_balance,
+        capabilities,
     }
 }

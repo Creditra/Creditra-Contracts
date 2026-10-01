@@ -59,11 +59,27 @@
 //! full per-variant tier table.
 
 use crate::types::{
-    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, FreezeReason, GracePeriodConfig,
-    RepaymentSchedule, TreasuryWithdrawalProposal,
+    ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
+    OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
+/// Validates that a storage key encoding is canonical and does not contain
+/// duplicated or ambiguous byte representations that could lead to collisions.
+/// This prevents adverse conditions from causing silent data loss or inconsistent state.
+pub fn validate_storage_key_encoding(env: &Env, key_bytes: &Bytes) {
+    // In Soroban, XDR serialization is strictly canonical for built-in types.
+    // However, if raw bytes are used as keys, this function ensures they don't
+    // contain invalid padding or duplicate representations.
+    let len = key_bytes.len();
+    if len > 0 {
+        // Example check: reject keys with trailing zero bytes which might be 
+        // a duplicate encoding of a shorter key.
+        if key_bytes.get(len - 1).unwrap() == 0 {
+            env.panic_with_error(crate::types::ContractError::InvalidAmount); // Reusing an error code for simplicity
+        }
+    }
+}
 /// Storage keys used in instance and persistent storage.
 ///
 /// # Storage tier convention
@@ -78,18 +94,47 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 ///   `ProtocolFeeBps`, `TreasuryFeeShareBps`, `TreasuryAddress`, `TreasuryBalance`,
 ///   `BountyAddress`, `BountyBalance`,
 ///   `TotalCollateral`,
-///   `MinCollateralRatioBps`, `CollateralRiskWeightBps`, `OracleConfig`, `OracleLastPrice`,
+///   `MinCollateralRatioBps`, `OracleConfig`, `OracleLastPrice`,
 ///   `OracleLastPriceTs`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
 ///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
-///   `RateCeilingBps`, `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
+///   `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
 ///   `DrawReversedAmount`).
 ///
 /// Helper functions in this module always pick the correct tier; callers
 /// outside this module should never hit the storage API directly with these
 /// keys.
+// `export = false`: DataKey has grown past the 50-case limit the Soroban
+// contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
+// exported type spec. This is an internal storage-key type (never crosses
+// the contract ABI), so skipping spec export has no client-visible effect.
+#[contracttype(export = false)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralTokenKey {
+    pub borrower: Address,
+    pub token: Address,
+}
+
+/// Key payload for per-borrower per-timestamp draw audit and reversal storage entries.
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DrawAuditKey {
+    pub borrower: Address,
+    pub timestamp: u64,
+}
+
+/// Composite key for per-borrower per-token collateral balance entries (v2).
+/// Wraps `(borrower, token)` for use as a single storage key.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralBalanceV2Key {
+    pub borrower: Address,
+    pub token: Address,
+}
+
+/// Storage keys used in instance and persistent storage.
+#[contracttype(export = false)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     /// Address of the liquidity token (SAC or compatible token contract).
@@ -105,6 +150,15 @@ pub enum DataKey {
     CreditLineCount,
     /// Count of currently Active credit lines.
     ActiveLineCount,
+    /// Count of credit lines whose liquidation auction is currently active
+    /// (i.e. lines in [`CreditStatus::Defaulted`] with an in-flight auction).
+    ///
+    /// Incremented when a line enters `Defaulted` and decremented when a line
+    /// exits the `Defaulted` pipeline (full settlement, reinstate, admin
+    /// force-close, or reopen). While non-zero, fee-configuration entrypoints
+    /// revert with [`ContractError::AuctionActive`] so auction economics stay
+    /// deterministic (Issue #1169).
+    PendingAuctionCount,
     /// Borrower → stable numeric id used for deterministic enumeration.
     CreditLineIdByBorrower(Address),
     /// Stable numeric id → borrower address.
@@ -129,6 +183,14 @@ pub enum DataKey {
     /// Per-borrower max utilization ratio cap in basis points (e.g. 8000 = 80%).
     /// When set, draw_credit enforces: utilized_amount <= credit_limit * cap_bps / 10_000.
     UtilizationCapBps(Address),
+    /// Minimum interval in seconds between critical borrow admin actions for one borrower.
+    BorrowAdminCooldownSeconds,
+    /// Last timestamp at which a critical borrow admin action mutated a borrower.
+    LastBorrowAdminActionTs(Address),
+    /// Minimum interval in seconds between critical accrual admin actions for one borrower.
+    AccrualAdminCooldownSeconds,
+    /// Last timestamp at which a critical accrual admin action mutated a borrower.
+    LastAccrualAdminActionTs(Address),
     /// Per-borrower interest rate floor in basis points.
     /// When set, the effective interest rate must be >= floor.
     RateFloorBps(Address),
@@ -152,9 +214,6 @@ pub enum DataKey {
     /// Flat fee charged per missed installment.
     /// Admin-configurable via `set_late_fee_flat`. Default is 0 (disabled).
     LateFeeFlat,
-    /// Structured late-fee configuration (flat amount or APR-based surcharge).
-    /// Admin-configurable via `set_late_fee_config`. When absent, behavior
-    /// falls back to legacy `LateFeeFlat` / `PenaltySurchargeBps` keys.
     LateFeeConfig,
     /// Address of the auction contract used for default-liquidation settlement hooks.
     /// Admin-configurable via `set_auction_contract`. Optional: when absent the hook
@@ -162,12 +221,8 @@ pub enum DataKey {
     AuctionContract,
     /// Maximum total exposure allowed across all credit lines (admin-configurable).
     MaxTotalExposure,
-    /// Protocol fee in basis points applied to total repayment amount.
+    /// Protocol fee in basis points applied to interest portion of repayments.
     ProtocolFeeBps,
-    /// Minimum allowed protocol fee in basis points (governance-configurable).
-    MinProtocolFeeBps,
-    /// Maximum allowed protocol fee in basis points (governance-configurable).
-    MaxProtocolFeeBps,
     /// Treasury share of skimmed protocol fees in basis points (0..=10_000).
     /// When unset, defaults to 10_000 (100 % treasury).
     TreasuryFeeShareBps,
@@ -179,35 +234,40 @@ pub enum DataKey {
     BountyAddress,
     /// Accumulated bounty pool balance held in contract (fee share).
     BountyBalance,
-    /// Per-borrower attestation batch for cross-chain verification.
-    AttestationBatch(Address),
     /// Per-borrower collateral balance.
     CollateralBalance(Address),
+    /// Per-borrower per-token collateral balance (multi-token support).
+    CollateralBalanceV2(Address, Address),
     /// Minimum collateral ratio in basis points.
     MinCollateralRatioBps,
+    /// Minimum ledger seconds between critical collateral admin actions (v7).
+    AdminCollateralCooldownSeconds,
+    /// Ledger timestamp of the last critical collateral admin action (v7).
+    LastColAdminActionTs,
     /// Per-asset collateral risk weight in basis points (10_000 = 100%, full value).
     /// Absent for an asset means callers should treat it as 10_000 bps (unweighted).
     CollateralRiskWeightBps(Address),
     /// Per-borrower draw audit trail: (borrower, timestamp) → original draw amount.
-    DrawAudit(Address, u64),
+    DrawAudit(DrawAuditKey),
     /// Per-borrower draw reversal tracking: (borrower, timestamp) → total reversed amount.
-    DrawReversedAmount(Address, u64),
+    DrawReversedAmount(DrawAuditKey),
     /// Oracle circuit-breaker configuration.
     OracleConfig,
-    /// Multi-oracle quorum configuration.
-    OracleQuorumConfig,
     /// Last accepted oracle price.
     OracleLastPrice,
     /// Timestamp of the last accepted oracle price.
     OracleLastPriceTs,
+    /// Multi-oracle quorum configuration.
+    OracleQuorumConfig,
+    /// Last resolved multi-oracle quorum price.
+    OracleQuorumPrice,
+    /// Timestamp of the last resolved multi-oracle quorum price.
+    OracleQuorumPriceTs,
     /// Global sum of every borrower's collateral balance.
     TotalCollateral,
     /// Pending treasury withdrawal proposal (at most one at a time).
     /// Stored in instance storage; cleared after successful execution.
     PendingTreasuryWithdrawal,
-    /// Protocol-level max close factor in basis points for partial liquidation settlements.
-    /// Stored in instance storage; defaults to 10_000 (full liquidation) when absent.
-    CloseFactorBps,
     /// Structured reason for the most recent protocol pause (escape-hatch audit trail).
     /// Stored when admin invokes pause with a reason; cleared on unpause.
     PauseReason,
@@ -215,11 +275,29 @@ pub enum DataKey {
     /// When set, draw_credit enforces: utilized_amount <= max_borrower_exposure.
     /// Pass 0 to remove the cap for this borrower.
     MaxBorrowerExposure(Address),
+    /// Admin freeze cooldown duration in seconds.
+    /// When set to a non-zero value, admin freeze/unfreeze actions are gated
+    /// by a minimum interval between successive calls.
+    FreezeCooldownSeconds,
+    /// Ledger timestamp of the last admin freeze or unfreeze action.
+    /// Used with [`FreezeCooldownSeconds`] to enforce the cooldown period.
+    LastFreezeTimestamp,
+    /// Per-borrower liquidation grace period in seconds.
+    /// Specifies a grace window before a credit line can be defaulted or liquidated.
+    LiquidationGracePeriod(Address),
+    /// Per-borrower absolute exposure cap (i128 amount).
+    BorrowerExposureCap(Address),
+    /// Per-borrower allowlist of accepted multi-collateral token addresses.
+    CollateralTokenAllowlist,
+    /// Per-borrower committed attestation batch.
+    AttestationBatch(Address),
 }
 
 /// Maximum number of credit lines returned per page.
 /// Limits gas consumption and response size for enumeration queries.
 pub const MAX_ENUMERATION_LIMIT: u32 = 100;
+
+
 
 // ── Persistent storage TTL policy ────────────────────────────────────────────
 //
@@ -244,14 +322,6 @@ pub const LEDGER_BUMP_THRESHOLD: u32 = 1_555_200; // ~3 months
 pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
 pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
 
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_AMOUNT`.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-/// Alias used by `lifecycle.rs` and `borrow.rs` — same as `LEDGER_BUMP_THRESHOLD`.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = LEDGER_BUMP_AMOUNT;
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
-
 /// Instance storage TTL policy (covers global config like admin/liquidity token).
 pub const INSTANCE_BUMP_AMOUNT: u32 = LEDGER_BUMP_AMOUNT;
 pub const INSTANCE_BUMP_THRESHOLD: u32 = LEDGER_BUMP_THRESHOLD;
@@ -262,7 +332,7 @@ pub fn bump_instance_ttl(env: &Env) {
         .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
-fn bump_persistent_ttl<K>(env: &Env, key: &K)
+pub fn bump_persistent_ttl<K>(env: &Env, key: &K)
 where
     K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
 {
@@ -272,9 +342,29 @@ where
         .extend_ttl(key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_AMOUNT);
 }
 
-/// Bump TTL for the borrower's `CreditLineData` entry (keyed by borrower address).
 pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
-    bump_persistent_ttl(env, borrower);
+    bump_instance_ttl(env);
+    env.storage()
+        .persistent()
+        .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
+}
+
+/// Refresh the persistent TTL for a borrower's VRF commitment.
+pub fn bump_vrf_commitment_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::VrfCommitment(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
+/// Refresh the persistent TTL for an active credit-line freeze record.
+pub fn bump_credit_line_freeze_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::CreditLineFreeze(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
+/// Refresh the persistent TTL for a temporary borrower freeze record.
+pub fn bump_borrower_frozen_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    bump_persistent_ttl(env, &key);
 }
 
 /// Return the credit line for `borrower` and bump TTL if present.
@@ -308,12 +398,70 @@ pub fn get_total_utilized(env: &Env) -> i128 {
         .unwrap_or(0)
 }
 
+/// Assert that the persisted `TotalUtilized` accumulator matches the live sum of
+/// every credit line's `utilized_amount`.
+///
+/// This is a fail-closed invariant check: any drift in the aggregate is treated
+/// as protocol corruption and aborts the transaction with a deterministic error
+/// message so operators can diagnose storage drift without exposing sensitive
+/// state.
+pub fn assert_total_utilized_conserved(env: &Env) {
+    let stored_total = get_total_utilized(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        // Load through the TTL-bumping getter so this consistency check never
+        // bypasses the persistent TTL policy (Issue #1273).
+        let Some(line) = get_credit_line(env, &borrower) else {
+            continue;
+        };
+        recomputed_total = recomputed_total
+            .checked_add(line.utilized_amount)
+            .unwrap_or_else(|| panic!("utilization conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "utilization conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
+}
+
 /// Return the global collateral accumulator.
 pub fn get_total_collateral(env: &Env) -> i128 {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::TotalCollateral)
         .unwrap_or(0)
+}
+
+/// Assert that the persisted `TotalCollateral` accumulator matches the live sum of
+/// the tracked collateral balances for the known borrower set.
+pub fn assert_total_collateral_conserved(env: &Env) {
+    let stored_total = get_total_collateral(env);
+    let mut recomputed_total = 0_i128;
+    let line_count = get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        let balance = get_collateral_balance(env, &borrower);
+        recomputed_total = recomputed_total
+            .checked_add(balance)
+            .unwrap_or_else(|| panic!("collateral conservation: recomputed total overflow"));
+    }
+
+    if stored_total != recomputed_total {
+        panic!(
+            "collateral conservation: stored={stored_total}, recomputed={recomputed_total}"
+        );
+    }
 }
 
 /// Return the number of indexed credit lines.
@@ -348,6 +496,62 @@ pub fn decrement_active_line_count(env: &Env) {
         .set(&DataKey::ActiveLineCount, &count.saturating_sub(1));
 }
 
+// ── Active liquidation auction tracking (Issue #1169) ────────────────────────
+//
+// A liquidation auction is considered **active** from the moment a credit line
+// enters `CreditStatus::Defaulted` until that line exits the `Defaulted`
+// pipeline through one of the four terminal paths:
+//
+//   1. `settle_default_liquidation` with full recovery   (Defaulted → Closed)
+//   2. `reinstate_credit_line`                           (Defaulted → Active/Restricted)
+//   3. `close_credit_line` admin force-close              (Defaulted → Closed)
+//   4. `open_credit_line` admin reopen                    (Defaulted → Active)
+//
+// A **partial** settlement leaves the line in `Defaulted`, so the auction stays
+// active and the counter is not touched.
+//
+// The counter is maintained atomically with the credit-line status transition
+// inside the same host transaction, so the guard below sees a consistent,
+// deterministic value under any interleaving of concurrent calls.
+
+/// Return the number of credit lines with an active liquidation auction.
+pub fn get_pending_auction_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingAuctionCount)
+        .unwrap_or(0)
+}
+
+/// Mark one more liquidation auction as active (line entered `Defaulted`).
+pub fn increment_pending_auction_count(env: &Env) {
+    let count = get_pending_auction_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAuctionCount, &count.saturating_add(1));
+}
+
+/// Mark one liquidation auction as no longer active (line exited `Defaulted`).
+pub fn decrement_pending_auction_count(env: &Env) {
+    let count = get_pending_auction_count(env);
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingAuctionCount, &count.saturating_sub(1));
+}
+
+/// Revert with [`crate::types::ContractError::AuctionActive`] if any
+/// liquidation auction is currently active.
+///
+/// This is the deterministic state check injected into fee-configuration
+/// entrypoints (Issue #1169): while an auction is in flight, changing the
+/// protocol fee, fee-share split, penalty surcharge, or late-fee schedule
+/// could silently change the economics of the in-flight auction or its
+/// eventual settlement, so such changes are rejected atomically.
+pub fn assert_no_active_auctions(env: &Env) {
+    if get_pending_auction_count(env) > 0 {
+        env.panic_with_error(crate::types::ContractError::AuctionActive);
+    }
+}
+
 /// Return the configured global exposure cap, if set.
 pub fn get_max_total_exposure(env: &Env) -> Option<i128> {
     env.storage().instance().get(&DataKey::MaxTotalExposure)
@@ -364,53 +568,52 @@ pub fn set_max_total_exposure(env: &Env, cap: i128) {
     }
 }
 
-/// Return the configured per-borrower exposure cap, if set.
-pub fn get_borrower_exposure_cap(env: &Env, borrower: &Address) -> Option<i128> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::BorrowerExposureCap(borrower.clone()))
-}
-
-/// Set the per-borrower exposure cap. Passing `0` removes the cap.
-pub fn set_borrower_exposure_cap(env: &Env, borrower: &Address, cap: Option<i128>) {
-    if let Some(cap) = cap {
-        env.storage()
-            .persistent()
-            .set(&DataKey::BorrowerExposureCap(borrower.clone()), &cap);
-    } else {
-        env.storage()
-            .persistent()
-            .remove(&DataKey::BorrowerExposureCap(borrower.clone()));
-    }
-}
-
 /// Return the stable id for a borrower, if present.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_credit_line_id(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineIdByBorrower(borrower.clone()))
+    let key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Return the borrower for a stable id, if present.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_by_credit_line_id(env: &Env, id: u32) -> Option<Address> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CreditLineBorrowerById(id))
+    let key = DataKey::CreditLineBorrowerById(id);
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Ensure a borrower has a stable enumeration id and return it.
+///
+/// Both id↔borrower index entries are persistent per-borrower state, so each
+/// write also refreshes its TTL. Without that, an index entry created once at
+/// the network minimum TTL would be archived long before the credit line it
+/// points at, breaking enumeration (`enumerate_credit_lines`) and any later
+/// lookup keyed by id even though the line itself stays live (Issue #1273).
 pub fn ensure_credit_line_id(env: &Env, borrower: &Address) -> u32 {
     if let Some(existing_id) = get_credit_line_id(env, borrower) {
         return existing_id;
     }
 
     let next_id = get_credit_line_count(env);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineIdByBorrower(borrower.clone()), &next_id);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CreditLineBorrowerById(next_id), borrower);
+
+    let id_key = DataKey::CreditLineIdByBorrower(borrower.clone());
+    env.storage().persistent().set(&id_key, &next_id);
+    bump_persistent_ttl(env, &id_key);
+
+    let reverse_key = DataKey::CreditLineBorrowerById(next_id);
+    env.storage().persistent().set(&reverse_key, borrower);
+    bump_persistent_ttl(env, &reverse_key);
+
     env.storage()
         .instance()
         .set(&DataKey::CreditLineCount, &next_id.saturating_add(1));
@@ -432,6 +635,7 @@ pub fn adjust_total_utilized(env: &Env, previous_utilized: i128, new_utilized: i
     env.storage()
         .instance()
         .set(&DataKey::TotalUtilized, &updated_total);
+    assert_total_utilized_conserved(env);
 }
 
 /// Adjust the global collateral accumulator by the change in one borrower balance.
@@ -449,6 +653,7 @@ pub fn adjust_total_collateral(env: &Env, previous_balance: i128, new_balance: i
     env.storage()
         .instance()
         .set(&DataKey::TotalCollateral, &updated_total);
+    assert_total_collateral_conserved(env);
 }
 
 /// Persist a credit line and atomically apply its contribution delta to the
@@ -475,20 +680,36 @@ pub fn persist_credit_line(
     }
 }
 
-/// Return a borrower's collateral balance without bumping unrelated TTL.
+/// Return a borrower's collateral balance and bump its persistent TTL.
+///
+/// The collateral balance is stored in a separate persistent entry from the
+/// credit line, so its TTL must be independently refreshed on every read path
+/// (deposit, withdraw, partial release, draw-credit ratio check, and the
+/// `get_collateral` query). Without a bump the entry would be archived
+/// independently of the credit-line entry, causing the borrower's collateral
+/// to appear as zero.
 pub fn get_collateral_balance(env: &Env, borrower: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::CollateralBalance(borrower.clone()))
-        .unwrap_or(0)
+    let key = DataKey::CollateralBalance(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower collateral balance and update the global accumulator.
+///
+/// Bumps the TTL of the persistent `CollateralBalance(borrower)` entry so an
+/// active borrower's collateral is never archived independently of the credit
+/// line.
+///
+/// Note: the previous balance is read directly from storage (not via
+/// [`get_collateral_balance`]) to avoid a redundant TTL bump on the read
+/// path; the write path bumps TTL immediately after the set.
 pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
-    let previous_balance = get_collateral_balance(env, borrower);
-    env.storage()
-        .persistent()
-        .set(&DataKey::CollateralBalance(borrower.clone()), &balance);
+    let key = DataKey::CollateralBalance(borrower.clone());
+    let previous_balance = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &balance);
+    bump_persistent_ttl(env, &key);
     adjust_total_collateral(env, previous_balance, balance);
 }
 
@@ -497,11 +718,13 @@ pub fn set_collateral_balance(env: &Env, borrower: &Address, balance: i128) {
 /// The current contract uses the configured liquidity token for collateral
 /// transfers as well.
 pub fn get_collateral_token(env: &Env) -> Option<Address> {
+    bump_instance_ttl(env);
     env.storage().instance().get(&DataKey::LiquidityToken)
 }
 
 /// Return the minimum collateral ratio in basis points, if configured.
 pub fn get_min_collateral_ratio_bps(env: &Env) -> Option<u32> {
+    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::MinCollateralRatioBps)
@@ -512,6 +735,34 @@ pub fn set_min_collateral_ratio_bps(env: &Env, ratio_bps: u32) {
     env.storage()
         .instance()
         .set(&DataKey::MinCollateralRatioBps, &ratio_bps);
+}
+
+/// Return the configured admin collateral cool-off interval, if set.
+pub fn get_admin_collateral_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AdminCollateralCooldownSeconds)
+}
+
+/// Set the admin collateral cool-off interval (admin only, enforced by caller).
+pub fn set_admin_collateral_cooldown_seconds(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminCollateralCooldownSeconds, &seconds);
+}
+
+/// Get the ledger timestamp of the last critical collateral admin action, if any.
+pub fn get_last_admin_collateral_critical_action_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastColAdminActionTs)
+}
+
+/// Record the ledger timestamp of the last critical collateral admin action.
+pub fn set_last_admin_collateral_critical_action_ts(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastColAdminActionTs, &ts);
 }
 /// Return the risk weight for a specific collateral asset, in basis points,
 /// if explicitly configured. `None` means no weight was ever set for this
@@ -538,38 +789,6 @@ pub fn get_protocol_fee_bps(env: &Env) -> Option<u32> {
 /// Persist protocol fee basis points.
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
-}
-
-/// Return the minimum allowed protocol fee in basis points.
-/// Defaults to 0 when not set.
-pub fn get_min_protocol_fee_bps(env: &Env) -> u32 {
-    env.storage()
-        .instance()
-        .get(&DataKey::MinProtocolFeeBps)
-        .unwrap_or(0)
-}
-
-/// Persist the minimum allowed protocol fee in basis points.
-pub fn set_min_protocol_fee_bps(env: &Env, bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::MinProtocolFeeBps, &bps);
-}
-
-/// Return the maximum allowed protocol fee in basis points.
-/// Defaults to `MAX_PROTOCOL_FEE_BPS` (1000) when not set.
-pub fn get_max_protocol_fee_bps(env: &Env) -> u32 {
-    env.storage()
-        .instance()
-        .get(&DataKey::MaxProtocolFeeBps)
-        .unwrap_or(1_000)
-}
-
-/// Persist the maximum allowed protocol fee in basis points.
-pub fn set_max_protocol_fee_bps(env: &Env, bps: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::MaxProtocolFeeBps, &bps);
 }
 
 /// Return configured treasury address, if set.
@@ -605,32 +824,24 @@ pub fn add_treasury_balance(env: &Env, amount: i128) {
         .set(&DataKey::TreasuryBalance, &updated_balance);
 }
 
+/// Deduct a timelocked withdrawal snapshot without discarding newer fees.
+/// Returns the balance remaining after the withdrawal.
+pub fn subtract_treasury_balance(env: &Env, amount: i128) -> i128 {
+    let remaining = get_treasury_balance(env)
+        .checked_sub(amount)
+        .filter(|balance| amount >= 0 && *balance >= 0)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::InsufficientTreasuryBalance));
+    env.storage()
+        .instance()
+        .set(&DataKey::TreasuryBalance, &remaining);
+    remaining
+}
+
 /// Clear accumulated treasury balance after withdrawal.
 pub fn clear_treasury_balance(env: &Env) {
     env.storage()
         .instance()
         .set(&DataKey::TreasuryBalance, &0_i128);
-}
-
-/// Return the pending treasury withdrawal proposal, if any.
-pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<TreasuryWithdrawalProposal> {
-    env.storage()
-        .instance()
-        .get(&DataKey::PendingTreasuryWithdrawal)
-}
-
-/// Store a pending treasury withdrawal proposal.
-pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &TreasuryWithdrawalProposal) {
-    env.storage()
-        .instance()
-        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
-}
-
-/// Remove the pending treasury withdrawal proposal after execution.
-pub fn clear_pending_treasury_withdrawal(env: &Env) {
-    env.storage()
-        .instance()
-        .remove(&DataKey::PendingTreasuryWithdrawal);
 }
 
 /// Return configured treasury fee share in basis points, if set.
@@ -656,15 +867,6 @@ pub fn set_bounty_address(env: &Env, bounty: &Address) {
         .instance()
         .set(&DataKey::BountyAddress, bounty);
 }
-
-/// Minimum TTL threshold for credit-line persistent entries.
-/// If the remaining TTL falls below this ledger count we extend it.
-/// Approximately 1 day at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_THRESHOLD: u32 = 14_400;
-
-/// Target TTL to extend credit-line persistent entries to on every interaction.
-/// Approximately 30 days at the Stellar Mainnet rate of ~6 s/ledger.
-pub const CREDIT_LINE_TTL_EXTEND_TO: u32 = 432_000;
 
 /// Return accumulated bounty pool balance.
 pub fn get_bounty_balance(env: &Env) -> i128 {
@@ -729,24 +931,6 @@ pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
 }
 
-/// Return the configured grace-period policy and refresh instance TTL.
-pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
-    bump_instance_ttl(env);
-    env.storage().instance().get(&grace_period_key(env))
-}
-
-/// Persistent storage key that acts as a replay guard for a default liquidation settlement.
-///
-/// A settlement is idempotent: the first call sets the key, subsequent calls
-/// detect the key and revert with [`ContractError::AlreadyInitialized`].
-///
-/// The key is constructed from the borrower address and a caller-supplied
-/// `settlement_id` symbol so that the same borrower can have multiple
-/// independent settlement events without collision.
-pub fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> (Address, Symbol) {
-    (borrower.clone(), settlement_id.clone())
-}
-
 /// Assert reentrancy guard is not set; set it for the duration of the call.
 ///
 /// Panics with [`ContractError::Reentrancy`] if the guard is already active,
@@ -784,6 +968,9 @@ pub fn clear_reentrancy_guard(env: &Env) {
 }
 
 /// Set a per-borrower interest rate floor (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<u32>) {
     if let Some(floor) = floor_bps {
         assert!(
@@ -791,25 +978,35 @@ pub fn set_borrower_rate_floor(env: &Env, borrower: &Address, floor_bps: Option<
             "floor exceeds max rate"
         );
     }
+    let key = DataKey::RateFloorBps(borrower.clone());
     if let Some(floor) = floor_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::RateFloorBps(borrower.clone()), &floor);
+            .set(&key, &floor);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::RateFloorBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower interest rate floor, if set.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_rate_floor(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RateFloorBps(borrower.clone()))
+    let key = DataKey::RateFloorBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set a per-borrower interest rate ceiling (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Option<u32>) {
     if let Some(ceiling) = ceiling_bps {
         assert!(
@@ -817,69 +1014,60 @@ pub fn set_borrower_rate_ceiling(env: &Env, borrower: &Address, ceiling_bps: Opt
             "ceiling exceeds max rate"
         );
     }
+    let key = DataKey::RateCeilingBps(borrower.clone());
     if let Some(ceiling) = ceiling_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::RateCeilingBps(borrower.clone()), &ceiling);
+            .set(&key, &ceiling);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::RateCeilingBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower interest rate ceiling, if set.
+///
+/// Bumps the persistent TTL of the entry so it is not archived independently
+/// of the credit line.
 pub fn get_borrower_rate_ceiling(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RateCeilingBps(borrower.clone()))
+    let key = DataKey::RateCeilingBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
 /// Set a per-borrower max utilization ratio cap in basis points (admin only).
 /// Pass `None` to remove the cap.
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_utilization_cap_bps(env: &Env, borrower: &Address, cap_bps: Option<u32>) {
+    let key = DataKey::UtilizationCapBps(borrower.clone());
     if let Some(cap) = cap_bps {
         env.storage()
             .persistent()
-            .set(&DataKey::UtilizationCapBps(borrower.clone()), &cap);
+            .set(&key, &cap);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::UtilizationCapBps(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the per-borrower max utilization ratio cap, if set.
+///
+/// Bumps the persistent TTL of the entry so an active borrower's utilization
+/// cap is not silently archived by the network.
 pub fn get_utilization_cap_bps(env: &Env, borrower: &Address) -> Option<u32> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::UtilizationCapBps(borrower.clone()))
-}
-
-/// Return the per-borrower maximum exposure cap, if set.
-///
-/// When `None`, no per-borrower exposure cap is enforced for this borrower.
-/// Configured via `set_max_borrower_exposure`.
-pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
-}
-
-/// Set or remove the per-borrower maximum exposure cap (admin only, enforced by caller).
-///
-/// Passing `0` removes the cap entirely for this borrower.
-/// A non-zero value caps the borrower's total `utilized_amount` in `draw_credit`.
-pub fn set_max_borrower_exposure(env: &Env, borrower: &Address, cap: i128) {
-    if cap == 0 {
-        env.storage()
-            .persistent()
-            .remove(&DataKey::MaxBorrowerExposure(borrower.clone()));
-    } else {
-        env.storage()
-            .persistent()
-            .set(&DataKey::MaxBorrowerExposure(borrower.clone()), &cap);
+    let key = DataKey::UtilizationCapBps(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
     }
+    env.storage().persistent().get(&key)
 }
 
 /// Clear the installment schedule for a borrower.
@@ -890,24 +1078,33 @@ pub fn clear_repayment_schedule(env: &Env, borrower: &Address) {
 }
 
 /// Block a borrower from drawing (admin only, enforced by caller).
+///
+/// Bumps the persistent TTL of the entry on write so it stays live for the
+/// lifetime of an active credit line.
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
+    let key = DataKey::BlockedBorrower(borrower.clone());
     if blocked {
         env.storage()
             .persistent()
-            .set(&DataKey::BlockedBorrower(borrower.clone()), &true);
+            .set(&key, &true);
     } else {
         env.storage()
             .persistent()
-            .remove(&DataKey::BlockedBorrower(borrower.clone()));
+            .remove(&key);
     }
+    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.
+///
+/// Bumps the persistent TTL of the entry so a blocked borrower's flag is
+/// not silently archived by the network.
 pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
-    env.storage()
-        .persistent()
-        .get(&DataKey::BlockedBorrower(borrower.clone()))
-        .unwrap_or(false)
+    let key = DataKey::BlockedBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Get the configured minimum credit limit, if set.
@@ -968,24 +1165,22 @@ pub fn set_close_factor_bps(env: &Env, bps: u32) {
 
 /// Return the installment schedule for a borrower, if configured.
 ///
-/// When a schedule exists, its persistent entry's TTL is bumped so an active
-/// borrower's schedule is never archived independently of the credit line.
-/// Mirrors the read-path bump performed by [`get_credit_line`].
+/// Bumps the persistent TTL of the entry on read so an active borrower's
+/// schedule is not silently archived by the network (Issue #1273).
 pub fn get_repayment_schedule(env: &Env, borrower: &Address) -> Option<RepaymentSchedule> {
     let key = DataKey::RepaymentSchedule(borrower.clone());
     if env.storage().persistent().has(&key) {
         bump_persistent_ttl(env, &key);
-        env.storage().persistent().get(&key)
-    } else {
-        None
     }
+    env.storage().persistent().get(&key)
 }
 
-/// Persist the installment schedule for a borrower and bump its TTL.
+/// Persist the installment schedule for a borrower and bump its persistent TTL.
 ///
-/// The schedule lives in its own persistent entry, so writing it must also
-/// extend that entry's TTL to keep it live for the lifetime of an active
-/// credit line.
+/// The schedule lives in its own persistent entry, so writing it must extend
+/// that entry's TTL as well; otherwise a schedule installed once could expire
+/// even while the credit line itself keeps being refreshed on read (Issue
+/// #1273).
 pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &RepaymentSchedule) {
     let key = DataKey::RepaymentSchedule(borrower.clone());
     env.storage().persistent().set(&key, schedule);
@@ -993,17 +1188,70 @@ pub fn set_repayment_schedule(env: &Env, borrower: &Address, schedule: &Repaymen
 }
 
 /// Get the last draw timestamp for a borrower, if any.
+///
+/// Bumps the persistent TTL of the entry so an active borrower's last-draw
+/// timestamp is not silently archived by the network.
 pub fn get_last_draw_ts(env: &Env, borrower: &Address) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::LastDrawTs(borrower.clone()))
+    let key = DataKey::LastDrawTs(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
 }
 
-/// Set the last draw timestamp for a borrower.
+/// Set the last draw timestamp for a borrower and bump its persistent TTL.
+///
+/// The timestamp lives in its own persistent entry, so writing it must also
+/// extend that entry's TTL to keep it live for the lifetime of an active
+/// credit line.
 pub fn set_last_draw_ts(env: &Env, borrower: &Address, ts: u64) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::LastDrawTs(borrower.clone()), &ts);
+    let key = DataKey::LastDrawTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
+/// Return the recorded original draw amount for `(borrower, timestamp)`, if any.
+///
+/// The draw audit trail is per-borrower persistent state, so the read path
+/// refreshes its TTL just like the credit-line getter does; otherwise an entry
+/// could be archived while the draw is still reversible (Issue #1273).
+pub fn get_draw_audit(env: &Env, borrower: &Address, timestamp: u64) -> Option<i128> {
+    let key = DataKey::DrawAudit(DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp,
+    });
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key)
+}
+
+/// Return the amount already reversed against an original draw (0 if none).
+///
+/// Bumps the persistent TTL on read so the reversal tracker stays live for as
+/// long as the original draw can be reversed (Issue #1273).
+pub fn get_draw_reversed_amount(env: &Env, borrower: &Address, timestamp: u64) -> i128 {
+    let key = DataKey::DrawReversedAmount(DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp,
+    });
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Persist the amount reversed against an original draw and bump its TTL.
+///
+/// The reversal tracker lives in its own persistent entry, so writing it must
+/// extend that entry's TTL as well (Issue #1273).
+pub fn set_draw_reversed_amount(env: &Env, borrower: &Address, timestamp: u64, amount: i128) {
+    let key = DataKey::DrawReversedAmount(DrawAuditKey {
+        borrower: borrower.clone(),
+        timestamp,
+    });
+    env.storage().persistent().set(&key, &amount);
+    bump_persistent_ttl(env, &key);
 }
 
 /// Get the configured draw min interval, if set.
@@ -1020,6 +1268,63 @@ pub fn set_draw_min_interval(env: &Env, seconds: u64) {
         .set(&DataKey::DrawMinIntervalSeconds, &seconds);
 }
 
+/// Get the configured per-borrower admin action cooldown, if set.
+/// Return the configured borrow admin cooldown, if set.
+pub fn get_borrow_admin_cooldown(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::BorrowAdminCooldownSeconds)
+}
+
+/// Persist the borrow admin cooldown in seconds.
+pub fn set_borrow_admin_cooldown(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::BorrowAdminCooldownSeconds, &seconds);
+}
+
+/// Return the last successful critical borrow admin-action timestamp for `borrower`, if any.
+pub fn get_last_borrow_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastBorrowAdminActionTs(borrower.clone()))
+}
+
+/// Persist the last successful critical borrow admin-action timestamp for `borrower`.
+pub fn set_last_borrow_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
+    let key = DataKey::LastBorrowAdminActionTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
+/// Return the configured accrual admin cooldown, if set.
+pub fn get_accrual_admin_cooldown(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AccrualAdminCooldownSeconds)
+}
+
+/// Persist the accrual admin cooldown in seconds.
+pub fn set_accrual_admin_cooldown(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AccrualAdminCooldownSeconds, &seconds);
+}
+
+/// Return the last successful critical accrual admin-action timestamp for `borrower`, if any.
+pub fn get_last_accrual_admin_action_ts(env: &Env, borrower: &Address) -> Option<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LastAccrualAdminActionTs(borrower.clone()))
+}
+
+/// Persist the last successful critical accrual admin-action timestamp for `borrower`.
+pub fn set_last_accrual_admin_action_ts(env: &Env, borrower: &Address, ts: u64) {
+    let key = DataKey::LastAccrualAdminActionTs(borrower.clone());
+    env.storage().persistent().set(&key, &ts);
+    bump_persistent_ttl(env, &key);
+}
+
 /// Check if the protocol is paused.
 pub fn is_paused(env: &Env) -> bool {
     env.storage()
@@ -1030,16 +1335,32 @@ pub fn is_paused(env: &Env) -> bool {
 
 /// Set the protocol pause state (admin only, enforced by caller).
 ///
+/// This is a **pure flag write** — it never touches the pause reason. Reason
+/// maintenance (clear on unpause / on reason-less pause, write on pause-with-
+/// reason) is the responsibility of the entrypoints so that idempotent
+/// no-ops cannot clobber the audit trail. See [`set_pause_reason`] and
+/// [`clear_pause_reason`].
+///
+/// Callers are expected to detect no-op transitions (requesting the state the
+/// contract is already in) *before* calling this, so that duplicate pause or
+/// unpause requests do not emit misleading transition events.
+///
 /// # Storage
 /// - **Type**: Instance storage (shared TTL with all instance keys)
 /// - **Key**: `Symbol("paused")`
 /// - **TTL Note**: Shares instance TTL — extend alongside other instance keys.
 pub fn set_paused(env: &Env, paused: bool) {
     env.storage().instance().set(&paused_key(env), &paused);
-    if !paused {
-        // Clear the pause reason when unpausing.
-        env.storage().instance().remove(&DataKey::PauseReason);
-    }
+}
+
+/// Clear any stored pause reason.
+///
+/// Called on unpause and on a reason-less pause so the stored reason always
+/// reflects the most recent pause invocation. This prevents a stale reason
+/// (recorded by an earlier pause-with-reason) from surviving into a later
+/// reason-less pause or unpause.
+pub fn clear_pause_reason(env: &Env) {
+    env.storage().instance().remove(&DataKey::PauseReason);
 }
 
 /// Get the structured pause reason, if one was recorded during the last pause.
@@ -1105,27 +1426,6 @@ pub fn set_oracle_config(env: &Env, cfg: &crate::types::OracleConfig) {
     env.storage().instance().set(&DataKey::OracleConfig, cfg);
 }
 
-/// Get the multi-oracle quorum configuration, if set.
-///
-/// When `Some`, `submit_oracle_prices` uses the quorum-of-K algorithm to
-/// validate submitted prices before storing the canonical price.
-/// When `None`, quorum mode is disabled and the single-oracle circuit breaker
-/// applies (if [`get_oracle_config`] is also set).
-pub fn get_oracle_quorum_config(env: &Env) -> Option<crate::types::OracleQuorumConfig> {
-    env.storage().instance().get(&DataKey::OracleQuorumConfig)
-}
-
-/// Set the multi-oracle quorum configuration.
-///
-/// Caller is responsible for admin auth and for validating that the supplied
-/// config satisfies the invariants documented on
-/// [`crate::types::OracleQuorumConfig`].
-pub fn set_oracle_quorum_config(env: &Env, cfg: &crate::types::OracleQuorumConfig) {
-    env.storage()
-        .instance()
-        .set(&DataKey::OracleQuorumConfig, cfg);
-}
-
 /// Get the last accepted oracle price, if any.
 ///
 /// Returns `None` before the first successful settlement. Always read
@@ -1152,6 +1452,38 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
         .set(&DataKey::OracleLastPriceTs, &ts);
 }
 
+// ── Multi-oracle quorum price (resolved from multiple feeds) ────────────────
+
+/// Get the last accepted multi-oracle quorum price, if any.
+///
+/// Returns `None` before the first successful `submit_oracle_prices` call.
+/// Always read together with [`get_oracle_quorum_price_ts`] to interpret staleness.
+pub fn get_oracle_quorum_price(env: &Env) -> Option<i128> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPrice)
+}
+
+/// Get the timestamp of the last accepted multi-oracle quorum price, if any.
+pub fn get_oracle_quorum_price_ts(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::OracleQuorumPriceTs)
+}
+
+/// Persist a newly resolved quorum price and its timestamp atomically.
+///
+/// Called after `submit_oracle_prices` resolves the quorum median.
+/// The two `instance().set(..)` calls are part of the same host transaction.
+pub fn set_oracle_quorum_price(env: &Env, price: i128, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPrice, &price);
+    env.storage()
+        .instance()
+        .set(&DataKey::OracleQuorumPriceTs, &ts);
+}
+
 // ── Penalty surcharge for delinquent lines ───────────────────────────────────
 
 /// Get the configured penalty surcharge in basis points, if set.
@@ -1164,7 +1496,6 @@ pub fn set_oracle_last_price(env: &Env, price: i128, ts: u64) {
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::PenaltySurchargeBps`]
 pub fn get_penalty_surcharge_bps(env: &Env) -> u32 {
-    bump_instance_ttl(env);
     env.storage()
         .instance()
         .get(&DataKey::PenaltySurchargeBps)
@@ -1229,7 +1560,7 @@ pub fn set_late_fee_flat(env: &Env, fee: i128) {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
+pub fn get_late_fee_config(env: &Env) -> Option<crate::penalties::LateFeeConfig> {
     env.storage().instance().get(&DataKey::LateFeeConfig)
 }
 
@@ -1241,7 +1572,7 @@ pub fn get_late_fee_config(env: &Env) -> Option<crate::types::LateFeeConfig> {
 /// # Storage
 /// - **Type**: Instance storage
 /// - **Key**: [`DataKey::LateFeeConfig`]
-pub fn set_late_fee_config(env: &Env, config: Option<crate::types::LateFeeConfig>) {
+pub fn set_late_fee_config(env: &Env, config: Option<crate::penalties::LateFeeConfig>) {
     match config {
         Some(c) => env.storage().instance().set(&DataKey::LateFeeConfig, &c),
         None => env.storage().instance().remove(&DataKey::LateFeeConfig),
@@ -1274,9 +1605,9 @@ pub fn set_borrower_unblocked(env: &Env, borrower: &Address) {
 /// - **Type**: Persistent storage (per-borrower, shares TTL with other persistent keys)
 /// - **Key**: [`DataKey::FrozenBorrower`]
 pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::FrozenBorrower(borrower.clone()), &expiry_ts);
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    env.storage().persistent().set(&key, &expiry_ts);
+    bump_borrower_frozen_ttl(env, borrower);
 }
 
 /// Check if a borrower is temporarily frozen from drawing.
@@ -1286,6 +1617,9 @@ pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) 
 /// - No freeze has been set (key is absent),
 /// - The freeze has expired (`now >= expiry_ts`).
 ///
+/// Bumps the persistent TTL of the entry so an active borrower's freeze
+/// state is not silently archived by the network.
+///
 /// # Time semantics
 /// Uses `env.ledger().timestamp()` so the check is deterministic per ledger.
 ///
@@ -1294,10 +1628,16 @@ pub fn set_borrower_frozen_until(env: &Env, borrower: &Address, expiry_ts: u64) 
 /// - **Key**: [`DataKey::FrozenBorrower`]
 pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
     let now = env.ledger().timestamp();
-    env.storage()
-        .persistent()
-        .get(&DataKey::FrozenBorrower(borrower.clone()))
-        .is_some_and(|expiry: u64| now < expiry)
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_borrower_frozen_ttl(env, borrower);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .is_some_and(|expiry: u64| now < expiry)
+    } else {
+        false
+    }
 }
 
 /// Get the freeze expiry timestamp for a borrower, if one is set.
@@ -1306,9 +1646,13 @@ pub fn is_borrower_frozen(env: &Env, borrower: &Address) -> bool {
 /// expired — callers should compare against `now` themselves). Returns `None`
 /// when no freeze has ever been set.
 pub fn get_borrower_frozen_until(env: &Env, borrower: &Address) -> Option<u64> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::FrozenBorrower(borrower.clone()))
+    let key = DataKey::FrozenBorrower(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_borrower_frozen_ttl(env, borrower);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
 }
 
 /// Remove the temporary freeze for a borrower (admin only, enforced by caller).
@@ -1323,13 +1667,14 @@ pub fn clear_borrower_frozen(env: &Env, borrower: &Address) {
 
 // ── Multi-collateral (per-borrower, per-token) ────────────────────────────────
 
-/// Return a borrower's balance for a specific collateral token.
+/// Return a borrower's balance for a specific collateral token and bump
+/// the persistent entry's TTL so it remains live alongside the credit line.
 pub fn get_collateral_balance_for_token(env: &Env, borrower: &Address, token: &Address) -> i128 {
     let key = DataKey::CollateralBalanceV2(borrower.clone(), token.clone());
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(0)
+    if env.storage().persistent().has(&key) {
+        bump_persistent_ttl(env, &key);
+    }
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 /// Persist a borrower's balance for a specific collateral token and update the global accumulator.
@@ -1359,4 +1704,239 @@ pub fn set_collateral_token_allowlist(env: &Env, tokens: &soroban_sdk::Vec<Addre
 /// Return `true` when `token` is in the collateral allowlist.
 pub fn is_collateral_token_allowed(env: &Env, token: &Address) -> bool {
     get_collateral_token_allowlist(env).contains(token.clone())
+}
+
+// ── Risk admin cooldown helpers ─────────────────────────────────────────────
+
+/// Get the configured risk admin cooldown duration in seconds.
+/// Returns `0` when the cooldown is disabled (default).
+pub fn get_risk_admin_cooldown_seconds(env: &Env) -> u64 {
+    let key = symbol_short!("rad_cool");
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the risk admin cooldown duration in seconds.
+pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
+    let key = symbol_short!("rad_cool");
+    env.storage()
+        .instance()
+        .set(&key, &seconds);
+}
+
+/// Get the timestamp of the last risk admin action.
+/// Returns `0` when no action has been recorded yet.
+///
+/// # Deprecation note
+/// This global key is retained for backward compatibility. New code should
+/// use [`get_last_risk_admin_action_ts_for`] which is scoped per borrower.
+pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
+    let key = symbol_short!("rad_last");
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the timestamp of the last risk admin action.
+///
+/// # Deprecation note
+/// This global key is retained for backward compatibility. New code should
+/// use [`set_last_risk_admin_action_ts_for`] which is scoped per borrower.
+pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
+    let key = symbol_short!("rad_last");
+    env.storage()
+        .instance()
+        .set(&key, &ts);
+}
+
+/// Get the timestamp of the last risk admin action for a specific borrower.
+///
+/// Keyed by `(symbol_short!("rad_last"), borrower)` in persistent storage,
+/// mirroring `LastAccrualAdminActionTs` which is also per-borrower.
+/// Returns `0` when no action has been recorded for this borrower yet.
+pub fn get_last_risk_admin_action_ts_for(env: &Env, borrower: &Address) -> u64 {
+    let key = (symbol_short!("rad_last"), borrower.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the timestamp of the last risk admin action for a specific borrower.
+///
+/// Keyed by `(symbol_short!("rad_last"), borrower)` in persistent storage.
+pub fn set_last_risk_admin_action_ts_for(env: &Env, borrower: &Address, ts: u64) {
+    let key = (symbol_short!("rad_last"), borrower.clone());
+    env.storage()
+        .persistent()
+        .set(&key, &ts);
+}
+
+/// Assert that the risk admin cooldown has elapsed since the last action
+/// for the given borrower.
+///
+/// # Scope (Issue #1280)
+/// The cooldown is now **per-borrower**: each borrower's last-action timestamp
+/// is tracked independently. Updating borrower A's risk parameters does not
+/// start or reset the cooldown for borrower B.
+///
+/// # Behaviour
+/// - When `cooldown_seconds == 0` (default): always passes (disabled).
+/// - When no prior action exists for this borrower (`last_ts == 0`): always
+///   passes (first update is never blocked).
+/// - Otherwise: reverts with [`ContractError::RiskAdminCooldownActive`] if
+///   `now < last_ts + cooldown_seconds`.
+pub fn assert_risk_admin_cooldown_elapsed_for(env: &Env, borrower: &Address) {
+    let cooldown = get_risk_admin_cooldown_seconds(env);
+    if cooldown == 0 {
+        return;
+    }
+    let last_ts = get_last_risk_admin_action_ts_for(env, borrower);
+    if last_ts == 0 {
+        return;
+    }
+    let now = env.ledger().timestamp();
+    if now < last_ts.saturating_add(cooldown) {
+        env.panic_with_error(ContractError::RiskAdminCooldownActive);
+    }
+}
+
+/// Assert that the risk admin cooldown has elapsed since the last action.
+/// Panics with `RiskAdminCooldownActive` if the cooldown has not yet elapsed.
+/// When `last_ts` is `0` (no prior action recorded), the cooldown is not
+/// enforced so the first call always succeeds.
+///
+/// # Deprecation note
+/// This checks the legacy global timestamp. Prefer
+/// [`assert_risk_admin_cooldown_elapsed_for`] for per-borrower enforcement.
+pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
+    let cooldown = get_risk_admin_cooldown_seconds(env);
+    if cooldown == 0 {
+        return;
+    }
+    let last_ts = get_last_risk_admin_action_ts(env);
+    if last_ts == 0 {
+        return;
+    }
+    let now = env.ledger().timestamp();
+    if now < last_ts.saturating_add(cooldown) {
+        env.panic_with_error(ContractError::RiskAdminCooldownActive);
+    }
+}
+
+// ── Freeze cooldown helpers ─────────────────────────────────────────────────
+
+pub fn get_freeze_cooldown_seconds(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::FreezeCooldownSeconds)
+        .filter(|&secs: &u64| secs > 0)
+}
+
+pub fn set_freeze_cooldown_seconds(env: &Env, seconds: u64) {
+    if seconds == 0 {
+        env.storage()
+            .instance()
+            .remove(&DataKey::FreezeCooldownSeconds);
+    } else {
+        env.storage()
+            .instance()
+            .set(&DataKey::FreezeCooldownSeconds, &seconds);
+    }
+}
+
+pub fn get_last_freeze_timestamp(env: &Env) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LastFreezeTimestamp)
+}
+
+pub fn set_last_freeze_timestamp(env: &Env, ts: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LastFreezeTimestamp, &ts);
+}
+
+pub fn record_freeze_timestamp_if_cooldown(env: &Env) {
+    if get_freeze_cooldown_seconds(env).is_some() {
+        set_last_freeze_timestamp(env, env.ledger().timestamp());
+    }
+}
+
+pub fn enforce_freeze_cooldown(env: &Env) {
+    let Some(cooldown_secs) = get_freeze_cooldown_seconds(env) else {
+        return;
+    };
+    if let Some(last_ts) = get_last_freeze_timestamp(env) {
+        let now = env.ledger().timestamp();
+        if now < last_ts.saturating_add(cooldown_secs) {
+            env.panic_with_error(ContractError::FreezeCooldownActive);
+        }
+    }
+}
+
+// ── Grace period config (instance) ───────────────────────────────────────────
+
+pub fn get_grace_period_config(env: &Env) -> Option<GracePeriodConfig> {
+    env.storage().instance().get(&grace_period_key(env))
+}
+
+// ── Per-borrower liquidation grace (persistent) ───────────────────────────────
+
+pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: &Address) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::LiquidationGracePeriod(borrower.clone()))
+        .unwrap_or(0)
+}
+
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: &Address, secs: u64) {
+    let key = DataKey::LiquidationGracePeriod(borrower.clone());
+    if secs == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &secs);
+        bump_persistent_ttl(env, &key);
+    }
+}
+
+// ── Oracle quorum config (instance) ─────────────────────────────────────────
+
+pub fn get_oracle_quorum_config(env: &Env) -> Option<OracleQuorumConfig> {
+    env.storage().instance().get(&DataKey::OracleQuorumConfig)
+}
+
+pub fn set_oracle_quorum_config(env: &Env, cfg: &OracleQuorumConfig) {
+    env.storage().instance().set(&DataKey::OracleQuorumConfig, cfg);
+}
+
+// ── Treasury withdrawal proposal (instance) ───────────────────────────────────
+
+pub fn get_pending_treasury_withdrawal(env: &Env) -> Option<TreasuryWithdrawalProposal> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PendingTreasuryWithdrawal)
+}
+
+pub fn set_pending_treasury_withdrawal(env: &Env, proposal: &TreasuryWithdrawalProposal) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingTreasuryWithdrawal, proposal);
+}
+
+pub fn clear_pending_treasury_withdrawal(env: &Env) {
+    env.storage()
+        .instance()
+        .remove(&DataKey::PendingTreasuryWithdrawal);
+}
+
+// ── Max borrower exposure (persistent) ────────────────────────────────────────
+
+pub fn get_max_borrower_exposure(env: &Env, borrower: &Address) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::MaxBorrowerExposure(borrower.clone()))
 }

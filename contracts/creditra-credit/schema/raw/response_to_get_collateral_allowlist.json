@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CollateralAllowlistResponse",
+  "description": "Response for the collateral allowlist query.",
+  "type": "object",
+  "required": [
+    "denoms"
+  ],
+  "properties": {
+    "denoms": {
+      "description": "Allowed token denominations.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

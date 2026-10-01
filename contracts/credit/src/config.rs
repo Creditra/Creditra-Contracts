@@ -36,8 +36,16 @@
 //! parameters. The admin then dials in the rate formula, exposure caps,
 //! and so on before opening the first credit line.
 //!
+//! A full working deployment requires:
+//! 1. `init`
+//! 2. `set_liquidity_token` (required for drawing)
+//! 3. `set_liquidity_source` (unsafe default uses contract's own address)
+//! 4. `set_min_collateral_ratio_bps` (optional)
+//! 5. `set_auction_contract` (wiring credit to auction)
+//! 6. `set_factory_contract` (on auction side, wiring back to credit)
+//!
 //! See [`docs/deploy.md`](../../../docs/deploy.md) for the required
-//! deployment sequence and
+//! deployment sequence, CLI commands, and a smoke test sequence, and
 //! [`docs/EXECUTION_QUALITY.md`](../../../docs/EXECUTION_QUALITY.md) §6
 //! for the full testnet / mainnet checklist.
 
@@ -64,15 +72,27 @@ pub fn init(env: Env, admin: Address) {
         .instance()
         .set(&DataKey::TotalUtilized, &0_i128);
     set_schema_version(&env, crate::SCHEMA_VERSION);
-    // Set default minimum collateral ratio to 150% (15000 bps)
+    // Ship a conservative 150 % (15 000 bps) collateral floor on every build.
+    //
+    // This used to be gated behind `cfg(not(test))`, which meant in-crate unit
+    // tests ran with the key unset while integration tests (compiled against the
+    // non-test lib) observed 150 %. The same scenario then behaved differently
+    // depending on where the test lived. The default is now unconditional and
+    // tests that want unsecured draws opt out explicitly with
+    // `set_min_collateral_ratio_bps(0)`.
     crate::storage::set_min_collateral_ratio_bps(&env, 15000);
-    // Set default protocol fee bounds: 0 – 1000 bps (10%)
-    crate::storage::set_min_protocol_fee_bps(&env, 0);
-    crate::storage::set_max_protocol_fee_bps(&env, 1000);
 }
 
-/// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
-/// @dev Admin-only.
+/// Sets the token contract used for reserve/liquidity checks and draw transfers.
+///
+/// # Authorization
+/// Requires the configured admin to authorize this call. This setter does not
+/// gate on the global pause flag; pause enforcement happens in the draw/repay
+/// entrypoints that consume the configured token.
+///
+/// # Storage
+/// Writes `token_address` to instance storage under [`DataKey::LiquidityToken`].
+/// Repeated calls overwrite the previous address.
 #[allow(dead_code)]
 pub fn set_liquidity_token(env: Env, token_address: Address) {
     require_admin_auth(&env);
@@ -81,8 +101,14 @@ pub fn set_liquidity_token(env: Env, token_address: Address) {
         .set(&DataKey::LiquidityToken, &token_address);
 }
 
-/// @notice Sets the address that provides liquidity for draw operations.
-/// @dev Admin-only. If unset, init config uses the contract address.
+/// Sets the address that provides liquidity for draw operations.
+///
+/// # Authorization
+/// Requires the configured admin to authorize this call.
+///
+/// # Behavior
+/// If unset, the contract falls back to its own address as configured during
+/// [`init`]. Repeated calls overwrite the prior reserve address.
 #[allow(dead_code)]
 pub fn set_liquidity_source(env: Env, reserve_address: Address) {
     require_admin_auth(&env);

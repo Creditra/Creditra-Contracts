@@ -1,0 +1,9 @@
+---
+source: contracts/credit/tests/risk_gas_snap.rs
+expression: sample
+---
+RiskGasSample {
+    entrypoint: "update_risk_parameters_with_rate_change_limits",
+    cpu_instructions: 206207,
+    memory_bytes: 31419,
+}

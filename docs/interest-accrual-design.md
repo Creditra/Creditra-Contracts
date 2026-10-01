@@ -17,7 +17,7 @@ This document provides a comprehensive design specification for on-chain interes
 
 ### Current Implementation Formula
 ```rust
-accrued = floor(utilized_amount * interest_rate_bps * elapsed_seconds / (10_000 * 31_536_000))
+accrued = floor(utilized_amount * interest_rate_bps * elapsed_seconds / (10_000 * 31_557_600))
 ```
 
 ## Design Requirements
@@ -47,11 +47,11 @@ accrued_interest = floor(principal * secondly_rate * elapsed_seconds)
 
 **Simplified Integer Implementation:**
 ```
-accrued = floor(principal * interest_rate_bps * elapsed_seconds / (10_000 * 31_536_000))
+accrued = floor(principal * interest_rate_bps * elapsed_seconds / (10_000 * 31_557_600))
 ```
 
 ### Constants
-- `SECONDS_PER_YEAR = 31_536_000` (365 days, non-leap year)
+- `SECONDS_PER_YEAR = 31_557_600` (Julian year, 365.25 days × 86 400 s/day)
 - `BASIS_POINTS_DIVISOR = 10_000`
 - `ROUNDING_MODE = floor` (always round down, favor borrower)
 
