@@ -15,9 +15,15 @@
 //! - Settlement rejects a stale quorum price (`OraclePriceStale`).
 //! - Settlement rejects when no quorum price has been submitted yet.
 //! - Quorum mode takes precedence over the single-oracle circuit breaker.
+//! - Settlement at exactly `max_age_seconds` is accepted; one second later it
+//!   reverts `OraclePriceStale` (#37).
+//! - A missing quorum submission reverts `OracleQuorumNotMet` (#50), and a
+//!   caller-supplied `oracle_price` cannot stand in for it.
+//! - A caller-supplied `oracle_price` cannot refresh a stale quorum price.
+//! - A rejected settlement mutates no state and does not consume its settlement id.
 //! - `orc_qcfg` and `orc_qprc` events are emitted correctly.
 
-use creditra_credit::types::{CreditStatus, OracleQuorumConfig};
+use creditra_credit::types::{ContractError, CreditStatus, OracleQuorumConfig};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::{token, vec, Address, Env, Symbol, TryFromVal};
@@ -41,6 +47,14 @@ fn open_and_default(
     utilized: i128,
 ) -> Address {
     let borrower = Address::generate(env);
+    // `config::init` intends a 0 bps floor in tests ("0 in tests" in the comment
+    // there) but guards the 15000 bps production floor with `#[cfg(not(test))]`,
+    // which is not set for the library when an integration test links it. The
+    // floor therefore applies here and any uncollateralized `draw_credit` below
+    // would abort with `CollateralRatioBelowMinimum` (#35). These tests exercise
+    // oracle aging, not collateral policy, so the test-environment floor is set
+    // explicitly instead of depending on that `cfg` semantics.
+    client.set_min_collateral_ratio_bps(&0_u32);
     let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_addr = token_id.address();
     client.set_liquidity_token(&token_addr);
@@ -54,11 +68,9 @@ fn open_and_default(
     );
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
     if utilized > 0 {
-        // `draw_credit` enforces the collateral ratio, so the borrower needs a
-        // collateral position before drawing; 3x covers the default 15_000 bps
-        // floor. Without this the draw reverts with #35 and no settlement test
-        // can reach its oracle assertions.
-        client.deposit_collateral(&borrower, &utilized.saturating_mul(3));
+        // `draw_credit` enforces the 150% minimum collateral ratio, so the
+        // borrower must post collateral before drawing.
+        client.deposit_collateral(&borrower, &(utilized * 150 / 100));
         client.draw_credit(&borrower, &utilized);
     }
     client.default_credit_line(&borrower);
@@ -430,26 +442,248 @@ fn multiple_settlements_reuse_same_quorum_price() {
     );
 }
 
-// ── age boundary: one second past the limit, and refresh across settlements ───
+// ── age boundary and typed error identity ────────────────────────────────────
+//
+// The rejection tests above use a bare `#[should_panic]`, which also passes when
+// settlement fails for an unrelated reason. `try_settle_default_liquidation`
+// returns the typed error, so the tests below pin the exact error — the
+// `OraclePriceStale` (#37) and `OracleQuorumNotMet` (#50) required by the
+// acceptance criteria — check both sides of the `now - submitted_at <=
+// max_age_seconds` boundary one second apart, and assert that a rejected
+// settlement mutates no state.
+
+/// `ContractError::OraclePriceStale` — stale price, see `docs/ERROR_CODES.md`.
+const ORACLE_PRICE_STALE_CODE: u32 = 37;
+/// `ContractError::OracleQuorumNotMet` — no qualifying quorum price.
+const ORACLE_QUORUM_NOT_MET_CODE: u32 = 50;
 
 #[test]
-#[should_panic(expected = "Error(Contract, #37)")] // OraclePriceStale
-fn settlement_one_second_past_max_age_reverts_stale() {
+fn settlement_exactly_at_max_age_is_accepted_without_error() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
-    // max_age = 1 hour
     client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
 
-    // Submit the quorum price at t=1_000
     env.ledger().with_mut(|l| l.timestamp = 1_000);
     client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
 
-    // age == max_age_seconds + 1 — exactly one second past the boundary
-    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
+    // age == max_age_seconds: the check is `>` (not `>=`), so this must not revert.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600);
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+
+    let result = client.try_settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "boundary_ok"),
+        &10_000_u32,
+        &None,
+    );
+    assert!(
+        result.is_ok(),
+        "settlement at exactly max_age_seconds must be accepted"
+    );
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+#[test]
+fn settlement_one_second_past_max_age_reverts_with_error_37() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    // age == max_age_seconds + 1: one second past the accepted boundary.
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_600 + 1);
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+
+    let result = client.try_settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "boundary_stale"),
+        &10_000_u32,
+        &None,
+    );
+    assert!(
+        result.is_err(),
+        "one second past max_age_seconds must revert"
+    );
+
+    assert_eq!(
+        ContractError::OraclePriceStale as u32,
+        ORACLE_PRICE_STALE_CODE,
+        "OraclePriceStale must keep discriminant 37"
+    );
+    let err = result.err().unwrap();
+    assert_eq!(
+        err.unwrap(),
+        ContractError::OraclePriceStale.into(),
+        "stale quorum price must revert with #37 OraclePriceStale"
+    );
+
+    // Rejection happens before any state mutation.
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 500_i128);
+}
+
+#[test]
+fn settlement_with_quorum_config_but_no_submission_reverts_with_error_50() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
 
     let borrower = open_and_default(&client, &env, &contract_id, 500);
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
+    let result = client.try_settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "no_price"),
+        &10_000_u32,
+        &None,
+    );
+    assert!(
+        result.is_err(),
+        "quorum config without a submission must revert"
+    );
+
+    assert_eq!(
+        ContractError::OracleQuorumNotMet as u32,
+        ORACLE_QUORUM_NOT_MET_CODE,
+        "OracleQuorumNotMet must keep discriminant 50"
+    );
+    let err = result.err().unwrap();
+    assert_eq!(
+        err.unwrap(),
+        ContractError::OracleQuorumNotMet.into(),
+        "missing quorum price must revert with #50 OracleQuorumNotMet"
+    );
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 500_i128);
 }
+
+#[test]
+fn caller_oracle_price_cannot_replace_a_missing_quorum_price() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    // A plausible caller-supplied price must not stand in for a quorum submission.
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    let result = client.try_settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "caller_only"),
+        &10_000_u32,
+        &Some(1_000_i128),
+    );
+    assert!(
+        result.is_err(),
+        "a caller-supplied oracle_price must not satisfy the quorum requirement"
+    );
+    let err = result.err().unwrap();
+    assert_eq!(err.unwrap(), ContractError::OracleQuorumNotMet.into());
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Defaulted
+    );
+}
+
+#[test]
+fn caller_oracle_price_cannot_rescue_a_stale_quorum_price() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+
+    // A fresh-looking caller price must not refresh the stored quorum price.
+    let result = client.try_settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "stale_caller"),
+        &10_000_u32,
+        &Some(1_020_i128),
+    );
+    assert!(
+        result.is_err(),
+        "a caller-supplied oracle_price must not refresh a stale quorum price"
+    );
+    let err = result.err().unwrap();
+    assert_eq!(err.unwrap(), ContractError::OraclePriceStale.into());
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Defaulted
+    );
+}
+
+#[test]
+fn valid_quorum_price_settles_despite_a_nonsense_caller_price() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_100);
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+
+    // Quorum mode ignores the argument entirely: a price far outside the quorum
+    // window must neither reject the settlement nor replace the stored price.
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "ignored_arg"),
+        &10_000_u32,
+        &Some(999_999_i128),
+    );
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+#[test]
+fn rejected_settlement_does_not_consume_its_settlement_id() {
+    let env = Env::default();
+    let (client, contract_id, _) = setup(&env);
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+
+    let id = sid(&env, "reuse_id");
+    let rejected =
+        client.try_settle_default_liquidation(&borrower, &500_i128, &id, &10_000_u32, &None);
+    assert!(rejected.is_err(), "stale quorum price must revert");
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Defaulted
+    );
+
+    // Refresh the quorum price and reuse the same settlement id: the rejected
+    // attempt must not have recorded it as already settled.
+    client.submit_oracle_prices(&vec![&env, 1_020i128, 1_040i128]);
+    client.settle_default_liquidation(&borrower, &500_i128, &id, &10_000_u32, &None);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+// ── quorum refresh across the age boundary (#1362) ───────────────────────────
 
 #[test]
 fn resubmitting_quorum_price_resets_the_age_across_settlements() {
@@ -516,51 +750,4 @@ fn second_settlement_across_the_boundary_requires_a_refresh() {
     env.ledger().with_mut(|l| l.timestamp = 1_000 + 3_601);
     let b2 = open_and_default(&client, &env, &contract_id, 300);
     client.settle_default_liquidation(&b2, &300_i128, &sid(&env, "b2"), &10_000_u32, &None);
-}
-
-// ── the caller-supplied oracle_price is ignored in quorum mode ───────────────
-
-#[test]
-fn caller_oracle_price_ignored_in_quorum_mode() {
-    let env = Env::default();
-    let (client, contract_id, _) = setup(&env);
-    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
-
-    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
-
-    let borrower = open_and_default(&client, &env, &contract_id, 500);
-    // A price far outside the quorum band — and one that is not the stored
-    // quorum price — must not affect settlement.
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "q1"),
-        &10_000_u32,
-        &Some(9_999_999_i128),
-    );
-    assert_eq!(
-        client.get_credit_line(&borrower).unwrap().status,
-        CreditStatus::Closed
-    );
-}
-
-#[test]
-fn caller_oracle_price_ignored_when_quorum_and_single_oracle_are_both_configured() {
-    let env = Env::default();
-    let (client, contract_id, _) = setup(&env);
-    // Single-oracle circuit breaker configured alongside quorum mode: quorum
-    // takes precedence, so the single-oracle band must not gate settlement.
-    client.set_oracle_config(&500_u32, &3_600_u64);
-    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
-
-    env.ledger().with_mut(|l| l.timestamp = 1_000);
-    client.submit_oracle_prices(&vec![&env, 1_000i128, 1_020i128]);
-
-    let borrower = open_and_default(&client, &env, &contract_id, 500);
-    // No caller price at all: quorum mode supplies the stored quorum price.
-    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "q1"), &10_000_u32, &None);
-    assert_eq!(
-        client.get_credit_line(&borrower).unwrap().status,
-        CreditStatus::Closed
-    );
 }

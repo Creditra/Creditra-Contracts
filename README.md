@@ -1,5 +1,7 @@
 # Creditra Contracts
 
+[![CI](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Creditra/Creditra-Contracts/actions/workflows/ci.yml)
+
 **Decentralized, risk-priced credit on Stellar / Soroban — without
 overcollateralization.** Credit lines whose limit and interest rate evolve
 continuously from on-chain behavioral signals, financial attestations, and a
@@ -8,8 +10,11 @@ separate auction contract using a one-shot, replay-protected cross-contract
 handoff.
 
 This is the **Creditra-Contracts** workspace: two Soroban WebAssembly contracts,
-about 14.5 KLOC of Rust, current line coverage **98.94 %**, release WASM under
-a **50 KB hard CI budget**.
+about 14.5 KLOC of Rust, release WASM under a **50 KB hard CI budget**. Line
+coverage is **not** claimed as a number here: CI measures it on every run and
+fails the build below the enforced floor — see
+[`docs/COVERAGE.md`](./docs/COVERAGE.md) for the current floor and measured
+value.
 
 | Doc | What it answers |
 |---|---|
@@ -99,10 +104,15 @@ cargo build --release --target wasm32-unknown-unknown -p creditra-credit
 # Output: target/wasm32-unknown-unknown/release/creditra_credit.wasm (< 50 KB)
 ```
 
-The release profile (`Cargo.toml`) is tuned for contract size:
-`opt-level = "z"`, `lto = true`, `strip = "symbols"`, `codegen-units = 1`,
-`panic = "abort"`, and — unusually — `overflow-checks = true` even in release,
-so the entire `i128` accounting layer reverts on overflow instead of wrapping.
+The release profile (`Cargo.toml` for workspace members and
+`contracts/creditra-credit/Cargo.toml` for the standalone credit crate) is
+tuned for contract size: `opt-level = "z"`, `lto = true`,
+`strip = "symbols"`, `codegen-units = 1`, `panic = "abort"`, and — unusually —
+`overflow-checks = true` even in release, so the entire `i128` accounting
+layer reverts on overflow instead of wrapping. `scripts/check-overflow-checks.sh`
+fails the build if either release profile loses that setting, and both
+`scripts/check_workspace.sh` and `scripts/build_wasm.sh` run it before
+compiling.
 
 #### Reproducible builds
 
@@ -125,19 +135,51 @@ cargo test --workspace
 
 ### Coverage
 
+Measured and enforced in CI by the `coverage` job in
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml), over
+`contracts/creditra-credit` — the crate that job actually builds and tests.
+The job fails below `MIN_LINE_COVERAGE`, publishes the HTML report as the
+`coverage-report` artifact, and writes the measured numbers to its job summary.
+
 ```bash
-cargo llvm-cov --workspace --all-targets --fail-under-lines 95
-# Current: 99.51 % regions, 98.94 % lines
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cd contracts/creditra-credit
+
+# Reproduce the CI gate
+cargo llvm-cov --all-targets --html --fail-under-lines 92
 ```
+
+The floor, the measured value, and the reason the root Soroban workspace is not
+yet included are documented in [`docs/COVERAGE.md`](./docs/COVERAGE.md).
 
 ### Deploy (testnet)
 
+A full working deployment requires initializing the credit contract and wiring it to the auction contract.
+
 ```bash
+# 1. Deploy the contract
 soroban contract deploy \
   --wasm target/wasm32-unknown-unknown/release/creditra_credit.wasm \
   --source <identity> --network testnet
+
+# 2. Initialize
 soroban contract invoke --id <addr> --source <identity> --network testnet -- init --admin <admin-addr>
+
+# 3. Set liquidity token (required for drawing)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_liquidity_token --token_address <token-addr>
+
+# 4. Set liquidity source (WARNING: Unsafe default uses contract's own address)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_liquidity_source --reserve_address <reserve-addr>
+
+# 5. Set minimum collateral ratio (optional)
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_min_collateral_ratio_bps --ratio_bps 15000
+
+# 6. Wire auction contract
+soroban contract invoke --id <addr> --source <admin-identity> --network testnet -- set_auction_contract --auction_contract <auction-addr>
+soroban contract invoke --id <auction-addr> --source <auction-admin-identity> --network testnet -- set_factory_contract --factory <addr>
 ```
+
+For a comprehensive guide on the deployment sequence and invariants, see [`docs/deploy.md`](./docs/deploy.md).
 
 Full testnet + mainnet checklists are in
 [`docs/EXECUTION_QUALITY.md`](./docs/EXECUTION_QUALITY.md) §6.
@@ -169,6 +211,12 @@ Creditra-Contracts/
 │       ├── query.rs           # read-only helpers, is_delinquent
 │       └── events.rs          # 25+ #[contracttype] payload structs
 │   └── tests/                 # 42 integration test files
+├── contracts/accrual/       # Test/indexer support wrapper crates
+├── contracts/borrow/        # (Re-export credit contract for testing and indexing)
+├── contracts/collateral/
+├── contracts/freeze/
+├── contracts/lifecycle/
+├── contracts/query/
 ├── contracts/risk/
 │   ├── Cargo.toml
 │   └── src/
@@ -267,8 +315,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 - Collateral as an *optional* (default-on) floor.
 - Borrower self-suspend.
 - Storage TTL hygiene with automatic bump on access.
-- 42 integration test files, ~817 `#[test]` annotations, 98.94 % line
-  coverage in CI.
+- 42 integration test files, ~817 `#[test]` annotations, line coverage measured
+  and floor-enforced in CI on every run.
 
 ### Next milestones
 
@@ -278,10 +326,10 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   (signed attestation, signer set, nonce replay protection).
 - **Build-clean main** — resolve the merge-artifact duplicates in
   `lifecycle.rs` and `risk.rs` that produce the current `cargo check`
-  errors (tracked in `IMPLEMENTATION_STATUS.md`).
+  errors.
 - **Property-fuzz harness** (`cargo fuzz`) over `apply_accrual` and
   `compute_rate_from_score`.
-- **External audit** (see `AUDIT_SUMMARY.md`).
+- **External audit** (see `contracts/credit/AUDIT_SUMMARY.md`).
 - **Decentralized scorer pipeline** — move the off-chain scoring function
   to a stake-weighted committee or zk-attested compute.
 
@@ -302,6 +350,9 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
   `chore:`, `test:`).
 - Branching: feature branches off `main`, PRs reviewed and merged via
   GitHub.
+- Contributing: See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for contribution
+  guidelines. PR descriptions, checklists, and temporary write-ups belong in GitHub PRs,
+  not committed to the repository root.
 
 ---
 
@@ -310,7 +361,8 @@ Per-entrypoint signatures, validation order, storage keys, and error returns:
 | Script | Use |
 |---|---|
 | `scripts/build_wasm.sh [all\|credit\|auction]` | Build release-mode WASM artifacts (toolchain-pin asserted, `--locked`) |
-| `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper |
+| `scripts/check_workspace.sh [args]` | `cargo check --workspace --locked` wrapper; asserts the release overflow policy first |
+| `scripts/check-overflow-checks.sh` | Fail when a release profile drops `overflow-checks = true` |
 | `scripts/check-toolchain.sh [--verify-active]` | Enforce the reproducible-build policy (exact toolchain pin, committed locks, CI workflow consumes the pin) |
 | `scripts/clean_profraw.sh [--dry-run]` | Remove stray `*.profraw` coverage profiles outside `target/` |
 | `scripts/list_contract_errors.py [--json]` | Print every `ContractError` variant with its discriminant |
@@ -336,8 +388,10 @@ ls contracts/credit/tests/*.rs | wc -l                # 42 integration files
 grep -r '#\[test\]' contracts/ gateway-contract/ | wc -l   # ~817 tests
 git log --oneline | grep -c Merge                     # ~332 merged PRs
 
-# Coverage
-cargo llvm-cov --workspace --all-targets --fail-under-lines 95
+# Coverage (the gate CI enforces, from the crate CI actually builds)
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+(cd contracts/creditra-credit \
+  && cargo llvm-cov --all-targets --html --fail-under-lines 92)
 
 # Size budget
 cargo build --release --target wasm32-unknown-unknown -p creditra-credit \
