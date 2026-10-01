@@ -9,7 +9,7 @@ categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "../../README.md"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }

@@ -126,12 +126,67 @@ mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
 mod risk;
-mod views;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
-mod scoring;
-mod storage;
+pub mod scoring;
+/// Storage layout, TTL policy and typed accessors (see also
+/// [`storage`] docs and `docs/STORAGE_LAYOUT.md`).
+///
+/// Public so integration tests can assert on the exact storage keys and TTL
+/// constants the contract uses (e.g. `tests/storage_ttl.rs`).
+pub mod storage;
 pub mod types;
+mod views;
+
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+};
+
+use crate::auth::{require_admin, require_admin_auth};
+use crate::attestation::AttestationBatch;
+use crate::events::{
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
+    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
+    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
+    publish_contract_upgraded_event, publish_credit_line_event,
+    publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
+    publish_oracle_config_set_event,
+    publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
+    publish_paused_event, publish_protocol_fee_bounds_set_event,
+    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
+    publish_repayment_event, publish_token_rescued_event,
+    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
+    CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
+    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+};
+use crate::math_utils::{mul_div, safe_mul_div, Rounding};
+use crate::penalties::LateFeeConfig;
+use crate::storage::{
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
+    clear_pending_treasury_withdrawal, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
+    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
+    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
+    is_borrower_blocked as storage_is_borrower_blocked,
+    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
+    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_draw_reversed_amount as storage_set_draw_reversed_amount,
+    set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
+    set_pending_treasury_withdrawal, set_reentrancy_guard,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps,
+    get_draw_audit as storage_get_draw_audit,
+    get_draw_reversed_amount as storage_get_draw_reversed_amount, DataKey,
+    MAX_ENUMERATION_LIMIT,
+};
+use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
+use crate::types::{
+    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
+    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
+    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+};
 
 #[cfg(test)]
 mod boundary_tests;
@@ -147,57 +202,11 @@ mod views_tests;
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
 
-use crate::auth::{require_admin, require_admin_auth};
-use crate::attestation::AttestationBatch;
-use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
-    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event, publish_draw_reversed_event,
-    publish_drawn_event, publish_interest_accrued_event, publish_oracle_config_set_event,
-    publish_oracle_price_accepted_event, publish_oracle_quorum_config_set_event,
-    publish_oracle_quorum_price_set_event, publish_paused_event,
-    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
-    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
-    publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
-    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
-    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
-};
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
-use crate::penalties::LateFeeConfig;
-use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
-    clear_reentrancy_guard, enforce_freeze_cooldown, get_borrower_by_credit_line_id,
-    get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
-    get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
-    get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
-    is_borrower_blocked as storage_is_borrower_blocked,
-    is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
-    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
-    set_borrower_unblocked, set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config,
-    set_oracle_quorum_config, set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, DrawAuditKey,
-    MAX_ENUMERATION_LIMIT,
-};
-use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
-};
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
-
-#[allow(dead_code)]
-const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 #[allow(dead_code)]
 const SCHEMA_VERSION: u32 = 1;
@@ -283,14 +292,20 @@ impl Credit {
         config::init(env, admin)
     }
 
+    /// Return the contract API version as `(major, minor, patch)`.
+    ///
+    /// Backward-compatible alias of [`Credit::get_contract_version`]. Both
+    /// entrypoints report the single [`CONTRACT_API_VERSION`] constant, so a
+    /// version bump cannot leave the two names disagreeing.
     pub fn get_version() -> (u32, u32, u32) {
-        (1, 0, 0)
+        CONTRACT_API_VERSION
     }
 
-    pub fn init(env: Env, admin: Address) {
-        config::init(env, admin)
-    }
-
+    /// Return the contract API version as `(major, minor, patch)`.
+    ///
+    /// Canonical entrypoint. [`Credit::get_version`] is retained as an alias for
+    /// clients and the auction handshake that were written against the original
+    /// name; see also [`crate::handshake::ProtocolVersion`].
     pub fn get_contract_version() -> (u32, u32, u32) {
         CONTRACT_API_VERSION
     }
@@ -399,20 +414,21 @@ impl Credit {
 
     /// Draws credit by transferring liquidity tokens to the borrower.
     ///
-    /// Enforces status, limit, and liquidity checks before executing the transfer.
-    /// A reentrancy guard is set on entry and cleared on every exit path (success
-    /// and failure). If this function is re-entered while the guard is active,
-    /// the call reverts with [`ContractError::Reentrancy`].
+    /// This entrypoint authenticates the borrower, rejects zero or negative
+    /// amounts, applies pause/freeze status checks, accrues any outstanding
+    /// interest, verifies the draw fits within the active limits and token
+    /// liquidity, and then settles the transfer with a reentrancy guard.
     ///
     /// # Parameters
-    /// - `borrower`: The address drawing credit; must authorize this call.
-    /// - `amount`: The amount to draw; must be positive and within available limit.
+    /// - `borrower`: The address drawing credit; it must authorize this call.
+    /// - `amount`: The draw amount in the configured liquidity token units;
+    ///   it must be positive and remain within the credit line's available limit.
     ///
-    /// # Note
-    /// Not yet implemented. Planned logic: load existing record, update fields,
-    /// persist updated [`CreditLineData`].
-    /// @notice Draws credit by transferring liquidity tokens to the borrower.
-    /// @dev Enforces status/limit/liquidity checks and uses a reentrancy guard.
+    /// # Errors
+    /// Reverts with the relevant protocol error for invalid amounts, paused
+    /// state, frozen lines, over-limit draws, or reentrancy attempts. On a
+    /// successful execution, the credit line is updated in-place and the draw is
+    /// emitted in the protocol event stream.
     pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         assert_not_paused(&env);
         set_reentrancy_guard(&env);
@@ -440,6 +456,18 @@ impl Credit {
         if freeze::is_credit_line_frozen(&env, &borrower) {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineFrozen);
+        }
+
+        // Compliance blocklist: the flag is a hard stop for outbound funds.
+        // `views::borrow_capabilities` already reports `can_draw == false`
+        // for a blocked borrower, so the draw path has to agree with it.
+        // Repayment (see `repay_credit`) stays allowed so a blocked borrower
+        // can still deleverage; the check is ordered with the other
+        // pre-flight blockers, before any amount-dependent limit, so the
+        // error surfaced here is deterministic (#1215).
+        if storage_is_borrower_blocked(&env, &borrower) {
+            clear_reentrancy_guard(&env);
+            env.panic_with_error(ContractError::BorrowerBlocked);
         }
 
         // Enforce per-transaction draw cap when configured.
@@ -501,7 +529,10 @@ impl Credit {
 
         // Enforce minimum collateral ratio
         let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15000);
-        let current_collateral = crate::storage::get_collateral_balance(&env, &borrower);
+        // Value the borrower's collateral through the shared helper so balances
+        // deposited via `deposit_collateral_token` back the draw and per-asset
+        // risk weights are applied (Floor) to every unit.
+        let current_collateral = crate::collateral::effective_collateral_value(&env, &borrower);
         let required_collateral = (updated_utilized as i128)
             .checked_mul(min_ratio_bps as i128)
             .unwrap_or_else(|| {
@@ -538,13 +569,29 @@ impl Credit {
         }
 
         // Global protocol exposure cap: block draws that would push total
-        // utilization across all lines above the configured maximum.
+        // utilization across all lines above the configured maximum.  Interest
+        // on otherwise idle lines must be included in this decision as well.
         if let Some(max_exposure) = crate::storage::get_max_total_exposure(&env) {
+            // `credit_line` is already accrued above but has not yet been
+            // persisted. Accrue every other line first so the stored aggregate
+            // includes their pending interest, then add this line's pending
+            // accrual to the projection below.
+            accrual::accrue_all_except(&env, &borrower);
             let current_total = crate::storage::get_total_utilized(&env);
-            let projected = current_total.checked_add(amount).unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::Overflow)
-            });
+            let pending_current_accrual = credit_line
+                .utilized_amount
+                .checked_sub(previous_utilized)
+                .unwrap_or_else(|| {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::Overflow)
+                });
+            let projected = current_total
+                .checked_add(pending_current_accrual)
+                .and_then(|total| total.checked_add(amount))
+                .unwrap_or_else(|| {
+                    clear_reentrancy_guard(&env);
+                    env.panic_with_error(ContractError::Overflow)
+                });
             if projected > max_exposure {
                 clear_reentrancy_guard(&env);
                 env.panic_with_error(ContractError::ExposureCapExceeded);
@@ -668,51 +715,64 @@ impl Credit {
         let (effective_repay, interest_repaid, _principal_repaid) =
             lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
 
+        // Repayment moves real tokens into the protocol, so the liquidity
+        // token has to be configured. The transfer block used to be skipped
+        // entirely when `LiquidityToken` was unset, while `utilized_amount`
+        // and `accrued_interest` were still reduced and `RepaymentEvent` was
+        // still emitted: a deployment without a token let borrowers
+        // extinguish debt for free. `draw_credit` already fails the same way,
+        // and the check runs before any state mutation, so a failed repay
+        // leaves the credit line untouched (#1221).
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityToken)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::MissingLiquidityToken)
+            });
+
         if effective_repay > 0 {
-            let maybe_token: Option<Address> =
-                env.storage().instance().get(&DataKey::LiquidityToken);
-            if let Some(token_address) = maybe_token {
-                let reserve_address: Address = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::LiquiditySource)
-                    .unwrap_or_else(|| env.current_contract_address());
+            let reserve_address: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::LiquiditySource)
+                .unwrap_or_else(|| env.current_contract_address());
 
-                let token_client = token::Client::new(&env, &token_address);
-                let contract_address = env.current_contract_address();
+            let token_client = token::Client::new(&env, &token_address);
+            let contract_address = env.current_contract_address();
 
-                // Compute protocol fee only on the interest component.
-                let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
-                let mut fee: i128 = 0;
-                if fee_bps > 0 && interest_repaid > 0 {
-                    fee = crate::math_utils::apply_bps(
-                        interest_repaid as u128,
-                        fee_bps,
-                        Rounding::Floor,
-                    ) as i128;
-                }
+            // Compute protocol fee only on the interest component.
+            let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let mut fee: i128 = 0;
+            if fee_bps > 0 && interest_repaid > 0 {
+                fee = crate::math_utils::apply_bps(
+                    interest_repaid as u128,
+                    fee_bps,
+                    Rounding::Floor,
+                ) as i128;
+            }
 
-                // Transfer fee portion into contract (treasury accumulator), then
-                // transfer remaining amount into the reserve.
-                if fee > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &contract_address,
-                        &fee,
-                    );
-                    crate::fees::accrue_protocol_fee(&env, &borrower, fee);
-                }
+            // Transfer fee portion into contract (treasury accumulator), then
+            // transfer remaining amount into the reserve.
+            if fee > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &contract_address,
+                    &fee,
+                );
+                crate::fees::accrue_protocol_fee(&env, &borrower, fee);
+            }
 
-                let reserve_amount = effective_repay.saturating_sub(fee);
-                if reserve_amount > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &reserve_address,
-                        &reserve_amount,
-                    );
-                }
+            let reserve_amount = effective_repay.saturating_sub(fee);
+            if reserve_amount > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &reserve_address,
+                    &reserve_amount,
+                );
             }
         }
 
@@ -738,14 +798,7 @@ impl Credit {
         lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
 
         let _timestamp = env.ledger().timestamp();
-        publish_interest_accrued_event(
-            &env,
-            InterestAccruedEvent {
-                borrower: borrower.clone(),
-                accrued_amount: 0,
-                new_utilized_amount: new_utilized,
-            },
-        );
+
         publish_repayment_event(
             &env,
             RepaymentEvent {
@@ -1106,22 +1159,29 @@ impl Credit {
     /// Return the collateral-aware health factor for a borrower, expressed in
     /// basis points (bps).
     ///
-    /// Off-chain keepers use this single query to decide whether a borrower is
-    /// under-collateralized and eligible for `default_credit_line`.
+    /// # Keeper notice & excluded inputs
     ///
-    /// # Interpretation
+    /// Off-chain keepers must **not** rely on this metric alone or assume the contract
+    /// enforces it during defaults. Key limitations:
+    /// - **Excluded inputs**: Ignores multi-token collateral, risk weights / haircuts,
+    ///   oracle prices (assumes 1:1 nominal unit parity), installment delinquency
+    ///   ([`is_delinquent`]), and uncheckpointed pending interest.
+    /// - **Default does not check health factor**: `default_credit_line` is admin-discretionary
+    ///   and does **not** inspect `get_health_factor`. The contract permits defaults on any
+    ///   eligible line (`Active`, `Suspended`, `SelfSuspended`, `Restricted`) outside
+    ///   liquidation grace, regardless of the health factor value.
     ///
-    /// - Returns `u32::MAX` when `utilized_amount == 0` (no debt → infinitely
-    ///   healthy).
-    /// - A value below `10_000` means the position is under-collateralized and
-    ///   eligible for liquidation (`default_credit_line`).
-    /// - A value of `10_000` means the collateral exactly covers the minimum
-    ///   required amount.
-    /// - A value above `10_000` means the position is over-collateralized
-    ///   relative to the minimum ratio.
+    /// # Recommended keeper thresholds
+    /// - `u32::MAX`: No outstanding debt (`utilized <= 0`) — healthy.
+    /// - `≥ 12_000` (≥ 120%): Healthy buffer — no action.
+    /// - `10_000..11_999` (100%–120%): Caution / monitor — nearing minimum required ratio.
+    /// - `< 10_000` (< 100%): Under-collateralized advisory threshold — default candidate.
+    /// - `< 8_000` (< 80%): Critically under-collateralized — urgent liquidation candidate.
+    /// - Delinquency: When [`is_delinquent`] is `true` past grace, the line is default-eligible
+    ///   independent of health factor.
     ///
-    /// See [`query::get_health_factor`] for the full formula and edge-case
-    /// documentation.
+    /// See [`query::get_health_factor`] and `docs/credit.md` for the full formula,
+    /// blind-spot analysis, and recommended keeper orchestration logic.
     pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         query::get_health_factor(env, borrower)
     }
@@ -1280,6 +1340,11 @@ impl Credit {
             env.panic_with_error(ContractError::TreasuryTimelockActive);
         }
 
+        // Check and consume the proposal before the external token call.
+        // Soroban rolls both storage writes back if that transfer fails.
+        let remaining_balance = crate::storage::subtract_treasury_balance(&env, proposal.amount);
+        clear_pending_treasury_withdrawal(&env);
+
         if proposal.amount > 0 {
             let token_address: Address = env
                 .storage()
@@ -1294,9 +1359,6 @@ impl Credit {
             token_client.transfer(&contract_address, &proposal.recipient, &proposal.amount);
         }
 
-        clear_pending_treasury_withdrawal(&env);
-        crate::storage::clear_treasury_balance(&env);
-
         publish_treasury_withdrawal_executed(
             &env,
             TreasuryWithdrawalExecutedEvent {
@@ -1304,6 +1366,7 @@ impl Credit {
                 amount: proposal.amount,
                 executor: admin,
                 executed_at: now,
+                remaining_balance,
             },
         );
     }
@@ -1315,9 +1378,12 @@ impl Credit {
 
     /// Set the treasury share of skimmed protocol fees in basis points (admin only).
     ///
-    /// `treasury_share_bps` must be in `0..=10_000`. The bounty pool receives the
-    /// remainder of each fee after the treasury portion is floored. When unset,
-    /// the default is `10_000` (100 % treasury, backward compatible).
+    /// `treasury_share_bps` must be in `0..=10_000`. The fee is apportioned by
+    /// [`crate::math_utils::split_conserving`] (largest remainder): each side is
+    /// floored, then the leftover base unit goes to the recipient with the larger
+    /// fractional claim, ties broken in favour of treasury, so the shares always
+    /// sum exactly to the fee. When unset, the default is `10_000` (100 %
+    /// treasury, backward compatible). See `docs/treasury.md` §3.
     ///
     /// Reverts with [`ContractError::AuctionActive`] while any liquidation
     /// auction is in flight (Issue #1169): the split is frozen until the last
@@ -1350,10 +1416,24 @@ impl Credit {
         crate::storage::get_bounty_address(&env)
     }
 
-    /// Withdraw accumulated bounty pool balance to configured bounty address (admin only).
+    /// Withdraw accumulated bounty pool balance to the configured bounty
+    /// address (admin only).
+    ///
+    /// # Withdrawal policy: direct sweep, explicitly exempt from the treasury
+    /// timelock
+    ///
+    /// Unlike `withdraw_treasury`, which requires a matured 24-hour proposal,
+    /// this sweep is immediate. The exemption is deliberate and documented in
+    /// `docs/SECURITY.md` §2.1: the call can only move the already-accrued
+    /// `BountyBalance` accumulator, to the address chosen by
+    /// `set_bounty(admin, bounty)`, and it can never reach the liquidity
+    /// reserve or borrower collateral. Admin-gated via `require_admin_auth`;
+    /// `set_bounty` is the privileged operation to monitor.
     pub fn withdraw_bounty(env: Env, admin: Address) {
-        admin.require_auth();
-        require_admin_auth(&env);
+        let configured_admin = require_admin_auth(&env);
+        if admin != configured_admin {
+            env.panic_with_error(ContractError::NotAdmin);
+        }
 
         let bounty_addr = crate::storage::get_bounty_address(&env)
             .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::BountyNotSet));
@@ -1378,32 +1458,27 @@ impl Credit {
         crate::storage::clear_bounty_balance(&env);
     }
 
-    /// Withdraw accumulated treasury balance to configured treasury address (admin only).
+    /// Withdraw accumulated treasury balance to the configured treasury address
+    /// (admin only) -- timelocked.
+    ///
+    /// The 24-hour propose/execute timelock is the only path that can move
+    /// treasury funds. This entrypoint is kept for backward compatibility with
+    /// existing SDK callers but no longer performs an instant sweep: it reverts
+    /// unless a matured proposal is pending, in which case it simply delegates
+    /// to [`Self::execute_treasury_withdrawal`].
     pub fn withdraw_treasury(env: Env, admin: Address) {
         admin.require_auth();
         require_admin_auth(&env);
 
-        let treasury_addr = crate::storage::get_treasury_address(&env)
-            .unwrap_or_else(|| env.panic_with_error(crate::types::ContractError::TreasuryNotSet));
-
-        let amount = crate::storage::get_treasury_balance(&env);
-        if amount == 0 {
-            return;
+        // Require a pending proposal that has passed its unlock timestamp.
+        let proposal = get_pending_treasury_withdrawal(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::NoPendingTreasuryWithdrawal));
+        if env.ledger().timestamp() < proposal.execute_after {
+            env.panic_with_error(ContractError::TreasuryTimelockActive);
         }
 
-        let token_address: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::LiquidityToken)
-            .unwrap_or_else(|| {
-                env.panic_with_error(crate::types::ContractError::MissingLiquidityToken)
-            });
-
-        let token_client = token::Client::new(&env, &token_address);
-        let contract_address = env.current_contract_address();
-        token_client.transfer(&contract_address, &treasury_addr, &amount);
-
-        crate::storage::clear_treasury_balance(&env);
+        // Delegate so there is exactly one implementation that transfers funds.
+        Self::execute_treasury_withdrawal(env, admin);
     }
 
     /// Get the current storage schema version.
@@ -1545,26 +1620,35 @@ impl Credit {
         crate::collateral::get_collateral(&env, &borrower)
     }
 
+    /// Return a full collateral state snapshot for `borrower`.
+    ///
+    /// Reads balance, minimum collateral ratio, collateral token, and computed
+    /// health factor in a single read-only call. No authentication required.
+    ///
+    /// # Returns
+    /// [`crate::types::CollateralState`] — see field docs for semantics.
+    pub fn get_collateral_state(
+        env: Env,
+        borrower: Address,
+    ) -> crate::types::CollateralState {
+        crate::collateral::get_collateral_state(&env, &borrower)
+    }
+
     /// Set the risk weight for a collateral asset, in basis points (admin only).
     ///
     /// Risk weight scales how much a unit of this asset counts toward the
     /// collateral ratio check. 10_000 bps (100%) means full value; lower
     /// values discount the asset.
     ///
-    /// # Errors
-    /// - Reverts with [`ContractError::InvalidRiskWeight`] if `weight_bps > 10_000`.
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed since the last
-    ///   critical collateral admin action.
-    /// - Reverts if caller is not the configured admin.
-    /// Set the risk weight for a collateral asset (admin only).
-    ///
     /// # Arguments
     /// * `asset` - The collateral asset address
     /// * `weight_bps` - Risk weight in basis points
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::InvalidRiskWeight` if `weight_bps > 10_000`.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_collateral_risk_weight(env: Env, asset: Address, weight_bps: u32) {
         collateral_admin::set_collateral_risk_weight(&env, &asset, weight_bps);
     }
@@ -1573,17 +1657,13 @@ impl Credit {
     ///
     /// Dial down to `0` to disable the ratio check on draws and withdrawals.
     ///
-    /// # Errors
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed.
-    /// Set the minimum collateral ratio required for borrowing (admin only).
-    ///
     /// # Arguments
     /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
-    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
         collateral_admin::set_min_collateral_ratio_bps(&env, ratio_bps);
     }
@@ -1644,42 +1724,31 @@ impl Credit {
     /// | [`ContractError::CollateralRatioBelowMinimum`] (35) | post-release HF < threshold |
     /// | [`ContractError::MissingLiquidityToken`] (22) | no token configured |
     /// | [`ContractError::Overflow`] (12) | arithmetic overflow |
+    /// | Auth panic | caller is not `borrower` |
     ///
     /// # Events
     ///
     /// Emits `("credit", "col_prel")` → [`crate::events::CollateralPartialReleasedEvent`]
     /// carrying `amount_released`, `new_balance`, and `health_factor_bps`.
-    /// Allow a borrower to release a portion of their collateral while keeping health factor above threshold.
-    ///
-    /// # Authorization
-    /// Requires `borrower.require_auth()`.
-    ///
-    /// # Errors
-    /// * `ContractError::InvalidAmount` if `amount <= 0`
-    /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
-    /// * `ContractError::CollateralRatioBelowMinimum` if release would violate ratio
     pub fn partial_release_collateral(env: Env, borrower: Address, amount: i128) {
         crate::collateral::partial_release_collateral(&env, &borrower, amount);
     }
 
     // ── Multi-collateral entrypoints ─────────────────────────────────────────
 
-    /// Admin: add a token to the collateral allowlist.
+    /// Admin: set the list of allowed collateral tokens.
     ///
-    /// The token must be a valid SAC-compatible contract address. Once listed
+    /// The tokens must be valid SAC-compatible contract addresses. Once listed
     /// borrowers can call [`deposit_collateral_token`] / [`withdraw_collateral_token`]
-    /// using this token.
-    ///
-    /// # Errors
-    /// - Reverts with [`ContractError::AdminCollateralCooldownActive`] when the
-    ///   configured admin collateral cool-off has not elapsed.
-    /// Set the list of allowed collateral tokens (admin only).
+    /// using these tokens.
     ///
     /// # Arguments
     /// * `tokens` - Vector of token addresses to allow
     ///
     /// # Errors
-    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * `ContractError::Paused` if the protocol is paused.
+    /// * `ContractError::AdminCollateralCooldownActive` if cool-off has not elapsed.
+    /// * Auth panic if caller is not the configured admin.
     pub fn set_collateral_token_allowlist(env: Env, tokens: soroban_sdk::Vec<Address>) {
         collateral_admin::set_collateral_token_allowlist(&env, &tokens);
     }
@@ -1693,11 +1762,10 @@ impl Credit {
         crate::storage::get_collateral_token_allowlist(&env)
     }
 
-    /// Deposit a specific allowlisted collateral token from the borrower.
-    ///
-    /// Requires borrower `require_auth`. Reverts with `MissingLiquidityToken` if
-    /// `token` is not on the allowlist.
     /// Deposit a specific allowed collateral token into the contract.
+    ///
+    /// Requires borrower authentication. Reverts with `MissingLiquidityToken` if
+    /// `token` is not on the allowlist.
     ///
     /// # Authorization
     /// Requires `borrower.require_auth()`.
@@ -1706,15 +1774,15 @@ impl Credit {
     /// * `ContractError::InvalidAmount` if `amount <= 0`
     /// * `ContractError::MissingLiquidityToken` if token not allowed
     /// * `ContractError::Overflow` on arithmetic overflow
+    /// * Auth panic if caller is not `borrower`
     pub fn deposit_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::deposit_collateral_token(&env, &borrower, &token, amount);
     }
 
-    /// Withdraw a specific allowlisted collateral token to the borrower.
-    ///
-    /// Requires borrower `require_auth`. Reverts with `InsufficientCollateralBalance`
-    /// if the borrower's balance for `token` is below `amount`.
     /// Withdraw a specific allowed collateral token to the borrower.
+    ///
+    /// Requires borrower authentication. Reverts with `InsufficientCollateralBalance`
+    /// if the borrower's balance for `token` is below `amount`.
     ///
     /// # Authorization
     /// Requires `borrower.require_auth()`.
@@ -1723,6 +1791,7 @@ impl Credit {
     /// * `ContractError::InvalidAmount` if `amount <= 0`
     /// * `ContractError::MissingLiquidityToken` if token not allowed
     /// * `ContractError::InsufficientCollateralBalance` if insufficient balance
+    /// * Auth panic if caller is not `borrower`
     pub fn withdraw_collateral_token(env: Env, borrower: Address, token: Address, amount: i128) {
         crate::collateral::withdraw_collateral_token(&env, &borrower, &token, amount);
     }
@@ -1804,6 +1873,11 @@ impl Credit {
     ///
     /// `start_after` is an exclusive cursor over the stable numeric id.
     /// Results are capped by `MAX_ENUMERATION_LIMIT` for predictable cost.
+    ///
+    /// # Storage
+    /// Every visited line is loaded through [`crate::storage::get_credit_line`],
+    /// so enumeration refreshes the persistent TTL of each borrower entry it
+    /// touches instead of relying on a raw storage read.
     pub fn enumerate_credit_lines(
         env: Env,
         start_after: Option<u32>,
@@ -1821,11 +1895,10 @@ impl Credit {
         let mut returned = 0_u32;
         while next_id < count && returned < capped_limit {
             if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
-                if let Some(line) = env
-                    .storage()
-                    .persistent()
-                    .get::<Address, CreditLineData>(&borrower)
-                {
+                // TTL bump on read: this is a paginated read over live credit
+                // lines, so each visited entry is refreshed through the same
+                // getter used by the rest of the contract.
+                if let Some(line) = crate::storage::get_credit_line(&env, &borrower) {
                     out.push_back((next_id, line));
                     returned = returned.saturating_add(1);
                 }
@@ -1944,42 +2017,13 @@ impl Credit {
         require_admin_auth(&env);
         set_reentrancy_guard(&env);
 
-        // Oracle price-feed circuit breaker: validate price before settlement.
-        if let Some(cfg) = crate::storage::get_oracle_config(&env) {
-            let price = oracle_price.unwrap_or_else(|| {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::OraclePriceInvalid)
-            });
-
-            if price <= 0 {
-                clear_reentrancy_guard(&env);
-                env.panic_with_error(ContractError::OraclePriceInvalid);
-            }
-
-            let now = env.ledger().timestamp();
-
-            if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
-                let age = now.saturating_sub(last_ts);
-                if age > cfg.max_age_seconds {
-                    clear_reentrancy_guard(&env);
-                    env.panic_with_error(ContractError::OraclePriceStale);
-                }
-
-                if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
-                    let deviation = compute_deviation_bps(price, last_price).unwrap_or_else(|| {
-                        clear_reentrancy_guard(&env);
-                        env.panic_with_error(ContractError::OraclePriceInvalid)
-                    });
-                    if deviation > cfg.max_deviation_bps {
-                        clear_reentrancy_guard(&env);
-                        env.panic_with_error(ContractError::OraclePriceDeviation);
-                    }
-                }
-            }
-
-            crate::storage::set_oracle_last_price(&env, price, now);
-            publish_oracle_price_accepted_event(&env, price, now);
-        }
+        // Oracle price validation lives in `oracle_validation` and runs inside
+        // `lifecycle::settle_default_liquidation` (Step 4), before any state
+        // mutation. Precedence, highest first:
+        //   1. weighted-median registry (`add_oracle` / `report_value`)
+        //   2. quorum-of-K price feed (`submit_oracle_prices`)
+        //   3. single-oracle circuit breaker (`set_oracle_config`)
+        // See the `oracle_validation` module for the full rules.
 
         // Cross-contract auction settlement hook (when configured).
         //
@@ -2251,6 +2295,14 @@ impl Credit {
 
         let canonical_price = oracles::resolve_quorum_price(&env, &prices, &qcfg);
         let now = env.ledger().timestamp();
+        // Quorum-mode settlement reads the resolved price from its own keys
+        // (`DataKey::OracleQuorumPrice` / `OracleQuorumPriceTs`), so the median
+        // must be persisted there. Storing it under the single-oracle key
+        // instead left quorum mode with no price at all, and every settlement
+        // reverted `OracleQuorumNotMet` (#50) regardless of age. The
+        // single-oracle key is still written: it is the "last accepted price"
+        // read by the deviation circuit breaker and by collateral release.
+        crate::storage::set_oracle_quorum_price(&env, canonical_price, now);
         crate::storage::set_oracle_last_price(&env, canonical_price, now);
         publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
@@ -2403,22 +2455,12 @@ impl Credit {
             .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
         credit_line = accrual::apply_accrual(&env, credit_line);
 
-        let original_draw: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::DrawAudit(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }))
+        // Load the audit trail through TTL-bumping accessors as well: these are
+        // per-borrower persistent entries, so a reverse-draw path must refresh
+        // them instead of letting them drift to archival (Issue #1273).
+        let original_draw: i128 = storage_get_draw_audit(&env, &borrower, original_ts)
             .unwrap_or_else(|| env.panic_with_error(ContractError::OriginalDrawNotFound));
-        let already_reversed: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::DrawReversedAmount(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }))
-            .unwrap_or(0);
+        let already_reversed: i128 = storage_get_draw_reversed_amount(&env, &borrower, original_ts);
         let remaining_reversible = original_draw.saturating_sub(already_reversed);
         if amount > remaining_reversible {
             env.panic_with_error(ContractError::OverLimit);
@@ -2431,13 +2473,7 @@ impl Credit {
 
         credit_line.utilized_amount = new_utilized_amount;
         env.storage().persistent().set(&borrower, &credit_line);
-        env.storage().persistent().set(
-            &DataKey::DrawReversedAmount(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }),
-            &(already_reversed + amount),
-        );
+        storage_set_draw_reversed_amount(&env, &borrower, original_ts, already_reversed + amount);
 
         publish_draw_reversed_event(
             &env,
@@ -3075,6 +3111,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3099,6 +3137,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3117,6 +3157,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3190,6 +3232,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3208,6 +3252,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // set_liquidity_source works -> init stored admin correctly
         let new_source = Address::generate(&env);
         client.set_liquidity_source(&new_source);
@@ -3221,6 +3267,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token.address());
     }
@@ -3234,6 +3282,8 @@ pub mod test_coverage {
         let client = CreditClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // drop auths
         let env2 = Env::default();
         let client2 = CreditClient::new(&env2, &contract_id);
@@ -3251,6 +3301,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         // Set an initial token address.
         let token_a = env
@@ -3283,6 +3335,8 @@ pub mod test_coverage {
         let client = CreditClient::new(&env, &contract_id);
         env.mock_all_auths();
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let env2 = Env::default();
         let client2 = CreditClient::new(&env2, &contract_id);
         client2.set_liquidity_source(&Address::generate(&env));
@@ -3311,6 +3365,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // Intentionally do NOT configure liquidity token.
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         client.draw_credit(&borrower, &200_i128);
@@ -3413,6 +3469,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token_id.address());
         // mint nothing -> reserve = 0
@@ -3460,6 +3518,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &0_i128, &300_u32, &70_u32);
     }
 
@@ -3472,6 +3532,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1_000_i128, &10_001_u32, &70_u32);
     }
 
@@ -3484,6 +3546,8 @@ pub mod test_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1_000_i128, &300_u32, &101_u32);
     }
 
@@ -3510,6 +3574,8 @@ mod test_smoke_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let borrower = Address::generate(env);
         (client, admin, borrower)
     }
@@ -3526,6 +3592,8 @@ mod test_smoke_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -3577,6 +3645,8 @@ mod test_smoke_coverage {
         let borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
     }
@@ -3590,6 +3660,8 @@ mod test_smoke_coverage {
         let _borrower = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.suspend_credit_line(&Address::generate(&env));
     }
 
@@ -3600,6 +3672,8 @@ mod test_smoke_coverage {
         let admin = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&Address::generate(&env), &1000_i128, &500_u32, &101_u32);
     }
 
@@ -3613,6 +3687,8 @@ mod test_smoke_coverage {
         let impostor = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         client.set_liquidity_token(&token_id.address());
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
@@ -3628,6 +3704,8 @@ mod test_smoke_coverage {
         let _borrower_two = Address::generate(&env);
         let client = CreditClient::new(&env, &env.register(Credit, ()));
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &60_u32);
         client.default_credit_line(&borrower);
         client.reinstate_credit_line(&borrower, &CreditStatus::Active);
@@ -4047,6 +4125,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let liquidity = MockLiquidityToken::deploy(env);
         client.set_liquidity_token(&liquidity.address());
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
@@ -4068,6 +4148,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         (client, admin, borrower)
     }
@@ -4213,6 +4295,8 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -4406,7 +4490,7 @@ mod test_mock_liquidity_token {
 
         // Advance ledger timestamp by exactly one year
         env.ledger()
-            .set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
+            .set_timestamp(checkpoint + crate::math_utils::SECONDS_PER_YEAR as u64);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
@@ -4502,6 +4586,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let liquidity = MockLiquidityToken::deploy(env);
         client.set_liquidity_token(&liquidity.address());
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
@@ -4521,6 +4607,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(borrower, &credit_limit, &interest_rate_bps, &70_u32);
         (client, admin)
     }
@@ -4537,6 +4625,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(borrower, &credit_limit, &300_u32, &70_u32);
         if utilized_amount > 0 {
             client.draw_credit(borrower, &utilized_amount);
@@ -4551,6 +4641,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         (client, admin, borrower)
     }
@@ -4568,6 +4660,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token_address = token_id.address();
         client.set_liquidity_token(&token_address);
@@ -4742,6 +4836,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -4784,6 +4880,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_rate_change_limits(&250_u32, &3600_u64);
 
         let cfg = client.get_rate_change_limits().unwrap();
@@ -4806,6 +4904,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &1000_i128, &10001_u32, &70_u32);
     }
@@ -4823,6 +4923,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.update_risk_parameters(&borrower, &1000_i128, &300_u32, &101_u32);
     }
@@ -4837,6 +4939,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.draw_credit(&borrower, &0);
     }
@@ -4879,6 +4983,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
         client.suspend_credit_line(&borrower);
 
@@ -4895,6 +5001,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
 
         client.draw_credit(&borrower, &1001);
@@ -4910,6 +5018,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000, &300, &70);
 
         client.draw_credit(&borrower, &-100);
@@ -4928,6 +5038,8 @@ mod test_mock_liquidity_token_extended {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_liquidity_token(&token_id.address());
         StellarAssetClient::new(&env, &token_id.address()).mint(&contract_id, &1_000);
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
@@ -4948,6 +5060,8 @@ mod test_mock_liquidity_token_extended {
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.set_liquidity_token(&token_id.address());
         client.open_credit_line(&borrower, &1_000, &500_u32, &60_u32);
         client.close_credit_line(&borrower, &admin);
@@ -5126,6 +5240,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
         let token_admin = Address::generate(&env);
@@ -5157,6 +5273,8 @@ mod test_mock_liquidity_token_extended {
         let _token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
         let token = env.register_stellar_asset_contract_v2(token_admin);
@@ -5201,6 +5319,8 @@ mod test_mock_liquidity_token_extended {
 
         // Open with i128::MAX credit limit so the limit check won't fire first.
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &i128::MAX, &300_u32, &70_u32);
 
         // Manually set utilized_amount to i128::MAX so the next draw overflows.
@@ -5231,6 +5351,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5250,6 +5372,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -5283,6 +5407,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.close_credit_line(&borrower, &admin);
 
@@ -5305,6 +5431,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5327,6 +5455,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
 
@@ -5348,6 +5478,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
 
@@ -5369,6 +5501,8 @@ mod test_mock_liquidity_token_extended {
         let client = CreditClient::new(&env, &contract_id);
 
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.suspend_credit_line(&borrower);
 
@@ -5477,6 +5611,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         client.set_rate_change_limits(&200_u32, &7200_u64);
         let cfg = client.get_rate_change_limits().unwrap();
@@ -5535,6 +5671,8 @@ mod test_mock_liquidity_token_extended {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
 
         client.set_rate_change_limits(&100_u32, &0_u64);
     }
@@ -5559,6 +5697,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
         let token = token_id.address();
         client.set_liquidity_token(&token);
@@ -5609,6 +5749,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // Set up token so draw works before freeze
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
@@ -5673,6 +5815,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         // No auth mocked → should panic
         client.freeze_draws(&FreezeReason::LiquidityReserve);
     }
@@ -5686,6 +5830,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.unfreeze_draws();
     }
 
@@ -5744,6 +5890,8 @@ mod test_draw_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower_a, &1_000_i128, &300_u32, &70_u32);
         client.open_credit_line(&borrower_b, &2_000_i128, &300_u32, &70_u32);
         client.freeze_draws(&FreezeReason::LiquidityReserve);
@@ -5766,7 +5914,11 @@ mod test_draw_freeze {
         let client_b = CreditClient::new(&env, &contract_b);
 
         client_a.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client_a.set_min_collateral_ratio_bps(&0);
         client_b.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client_b.set_min_collateral_ratio_bps(&0);
         client_a.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         client_b.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
@@ -5793,6 +5945,8 @@ mod test_borrower_freeze {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
         (client, admin, borrower, contract_id)
     }
@@ -5971,6 +6125,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token_address = token_id.address();
@@ -6108,6 +6264,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token_address = token_id.address();
@@ -6131,6 +6289,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(&env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
             client.open_credit_line(&borrower, &1_000, &300_u32, &70_u32);
 
             client.draw_credit(&borrower, &100);
@@ -6192,6 +6352,8 @@ mod test_max_draw_amount {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
         client.init(&admin);
+        // Unit tests exercise unsecured draws; opt out of the default floor.
+        client.set_min_collateral_ratio_bps(&0);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
         // Per behavior notes: draw_credit reverts when status is Defaulted.
@@ -6211,6 +6373,8 @@ mod test_max_draw_amount {
             let contract_id = env.register(Credit, ());
             let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
+            // Unit tests exercise unsecured draws; opt out of the default floor.
+            client.set_min_collateral_ratio_bps(&0);
 
             let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
             let token = token_id.address();
@@ -6482,5 +6646,284 @@ mod test_max_draw_amount {
             assert!(hf > 10_000, "health factor {} should be above 10_000", hf);
             assert_eq!(hf, 66_666);
         }
+
+        // ── default_credit_line does not consult health factor on-chain ───────
+
+        #[test]
+        fn default_credit_line_does_not_check_health_factor_on_chain() {
+            let env = Env::default();
+            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+            // Generous collateral: 10_000 collateral for 1_000 debt => hf = 66_666 (well above 10_000)
+            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+            collateral::deposit_collateral(&env, &borrower, 10_000);
+            client.draw_credit(&borrower, &1_000);
+
+            let hf = client.get_health_factor(&borrower);
+            assert!(hf >= 12_000, "expected healthy buffer (hf >= 12_000), got {}", hf);
+
+            // default_credit_line is an administrative transition and does not check health factor;
+            // it succeeds without revert despite the healthy collateral ratio.
+            client.default_credit_line(&borrower);
+            let line = client.get_credit_line(&borrower).unwrap();
+            assert_eq!(line.status, CreditStatus::Defaulted);
+        }
+
+        // ── keeper-style: delinquency allows default despite high collateral ──
+
+        #[test]
+        fn delinquent_borrower_can_be_defaulted_despite_high_health_factor() {
+            let env = Env::default();
+            let (client, _contract, borrower, token) = setup(&env, 5_000, 10_000);
+
+            StellarAssetClient::new(&env, &token).mint(&borrower, &10_000);
+            collateral::deposit_collateral(&env, &borrower, 10_000);
+            client.draw_credit(&borrower, &1_000);
+
+            // Set repayment schedule: due at ts=100
+            client.set_repayment_schedule(&borrower, &500, &86400, &100);
+
+            // Advance ledger timestamp past due date
+            env.ledger().set_timestamp(200);
+
+            // Borrower is delinquent according to the schedule
+            assert!(client.is_delinquent(&borrower));
+
+            // Health factor remains well above healthy threshold
+            let hf = client.get_health_factor(&borrower);
+            assert!(hf >= 12_000);
+
+            // Keeper defaults borrower based on delinquency signal
+            client.default_credit_line(&borrower);
+            let line = client.get_credit_line(&borrower).unwrap();
+            assert_eq!(line.status, CreditStatus::Defaulted);
+        }
+    }
+}
+
+
+/// Regression coverage for the draw-side blocklist enforcement (#1215).
+///
+/// `views::borrow_capabilities` already reported `can_draw == false` for a
+/// blocked borrower while `draw_credit` happily moved funds; these tests pin
+/// the two together and cover the unaffected-borrower and repay paths.
+///
+/// `unblock_borrower` is deliberately not exercised: on this revision it
+/// panics with `Storage, MissingValue` because it bumps the persistent TTL of
+/// the entry it has just removed (`storage::set_borrower_blocked(.., false)`
+/// then `bump_persistent_ttl`). That is a separate pre-existing bug.
+#[cfg(test)]
+mod test_issue_1215_blocklist_draw {
+    use super::*;
+    use crate::types::ContractError;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env};
+
+    /// Contract, liquidity token with a funded reserve, and an open credit
+    /// line for `borrower`. Returns `(client, contract_id, admin, borrower, token)`.
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(env, &token).mint(&contract_id, &10_000_i128);
+        StellarAssetClient::new(env, &token).mint(&borrower, &10_000_i128);
+        TokenClient::new(env, &token).approve(
+            &borrower,
+            &contract_id,
+            &10_000_i128,
+            &1_000_000_u32,
+        );
+
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // These cases are about the blocklist gate, not about collateral, so
+        // remove the collateral requirement instead of funding a position.
+        client.set_min_collateral_ratio_bps(&0_u32);
+        (client, contract_id, admin, borrower, token)
+    }
+
+    /// A blocked borrower cannot draw, and no state or funds move.
+    #[test]
+    fn blocked_borrower_draw_reverts_with_borrower_blocked() {
+        let env = Env::default();
+        let (client, contract_id, admin, borrower, token) = setup(&env);
+
+        client.block_borrower(&admin, &borrower);
+        assert!(client.is_borrower_blocked(&borrower));
+
+        let outcome = client.try_draw_credit(&borrower, &100_i128);
+        assert_eq!(outcome, Err(Ok(ContractError::BorrowerBlocked.into())));
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.utilized_amount, 0);
+        assert_eq!(TokenClient::new(&env, &token).balance(&borrower), 10_000);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contract_id), 10_000);
+    }
+
+    /// A borrower who is not on the blocklist is unaffected: the new gate must
+    /// not turn into a blanket freeze, and blocking one borrower must not
+    /// block another.
+    #[test]
+    fn borrower_off_the_blocklist_still_draws() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+        assert!(!client.is_borrower_blocked(&borrower));
+
+        client.draw_credit(&borrower, &100_i128);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            100
+        );
+
+        let other = Address::generate(&env);
+        client.open_credit_line(&other, &1_000_i128, &300_u32, &70_u32);
+        client.block_borrower(&admin, &borrower);
+
+        assert!(client.try_draw_credit(&borrower, &100_i128).is_err());
+        client.draw_credit(&other, &100_i128);
+        assert_eq!(client.get_credit_line(&other).unwrap().utilized_amount, 100);
+    }
+
+    /// Repayment stays allowed so a blocked borrower can deleverage.
+    #[test]
+    fn blocked_borrower_can_still_repay() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+
+        client.draw_credit(&borrower, &400_i128);
+        client.block_borrower(&admin, &borrower);
+
+        client.repay_credit(&borrower, &200_i128);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            200
+        );
+    }
+
+    /// The `can_draw` capability bit and the real draw outcome agree for both
+    /// blocked and unblocked borrowers.
+    #[test]
+    fn borrow_capabilities_can_draw_matches_the_draw_outcome() {
+        let env = Env::default();
+        let (client, _contract_id, admin, borrower, _token) = setup(&env);
+
+        assert!(client.borrow_capabilities(&borrower).can_draw);
+        client.draw_credit(&borrower, &10_i128);
+
+        client.block_borrower(&admin, &borrower);
+        let blocked = client.borrow_capabilities(&borrower);
+        assert!(!blocked.can_draw);
+        assert!(blocked.can_repay);
+        assert_eq!(
+            client.try_draw_credit(&borrower, &10_i128),
+            Err(Ok(ContractError::BorrowerBlocked.into()))
+        );
+    }
+}
+
+
+/// Regression coverage for the repay-side liquidity token requirement (#1221).
+///
+/// `repay_credit` used to skip the token transfer entirely when
+/// `LiquidityToken` was unset while still reducing `utilized_amount`, which
+/// let a deployment with an unconfigured token extinguish debt for free.
+#[cfg(test)]
+mod test_issue_1221_repay_requires_liquidity_token {
+    use super::*;
+    use crate::types::ContractError;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env};
+
+    /// Contract and an open credit line, with **no** liquidity token set.
+    fn setup_without_token(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        (client, contract_id, borrower)
+    }
+
+    /// Seed real debt on the line without a token. This is the state a
+    /// deployment lands in when the token was never configured (or was
+    /// unset later), and it is exactly what the old repay path let borrowers
+    /// wipe out for free.
+    fn seed_debt(env: &Env, contract_id: &Address, borrower: &Address, amount: i128) {
+        env.as_contract(contract_id, || {
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get::<Address, CreditLineData>(borrower)
+                .unwrap();
+            line.utilized_amount = amount;
+            env.storage().persistent().set(borrower, &line);
+        });
+    }
+
+    /// Repaying without `set_liquidity_token` reverts with #22 and leaves the
+    /// credit line untouched.
+    #[test]
+    fn repay_without_liquidity_token_reverts_with_missing_token() {
+        let env = Env::default();
+        let (client, contract_id, borrower) = setup_without_token(&env);
+        seed_debt(&env, &contract_id, &borrower, 500);
+
+        let outcome = client.try_repay_credit(&borrower, &200_i128);
+        assert_eq!(outcome, Err(Ok(ContractError::MissingLiquidityToken.into())));
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            500
+        );
+    }
+
+    /// With a token configured, repay still moves `effective_repay` into the
+    /// reserve and reduces the debt.
+    #[test]
+    fn repay_with_liquidity_token_still_reduces_debt() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &10_000_i128);
+        StellarAssetClient::new(&env, &token).mint(&borrower, &10_000_i128);
+        TokenClient::new(&env, &token).approve(
+            &borrower,
+            &contract_id,
+            &10_000_i128,
+            &1_000_000_u32,
+        );
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // This case is about the repay path, not about collateral, so remove
+        // the collateral requirement instead of funding a position.
+        client.set_min_collateral_ratio_bps(&0_u32);
+
+        client.draw_credit(&borrower, &500_i128);
+        client.repay_credit(&borrower, &200_i128);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            300
+        );
+        assert_eq!(TokenClient::new(&env, &token).balance(&borrower), 10_300);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contract_id), 9_700);
     }
 }

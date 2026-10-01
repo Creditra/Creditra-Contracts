@@ -29,7 +29,7 @@
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused, bump_credit_line_ttl, DataKey};
+use crate::storage::{assert_not_paused, bump_vrf_commitment_ttl, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, BytesN, Env};
 
@@ -83,8 +83,7 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     };
 
     env.storage().persistent().set(&key, &commitment);
-    env.storage().persistent().set(&key, &commitment);
-    bump_credit_line_ttl(&env, &borrower);
+    bump_vrf_commitment_ttl(&env, &borrower);
 }
 
 /// Verify that a risk score matches the committed VRF output.
@@ -102,24 +101,26 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
 /// `true` if the score matches the committed VRF output, `false` otherwise.
 ///
 /// # Errors
-/// - Panics with [`ContractError::CreditLineNotFound`] if no commitment exists.
+/// - Panics with [`ContractError::MissingVrfCommitment`] if no commitment exists.
 ///
 /// # Score derivation
 /// The score is derived from the commitment hash using a deterministic formula:
 /// ```text
 /// score = (hash_bytes[0] + hash_bytes[1] + ... + hash_bytes[31]) % 101
 /// ```
-/// This ensures the score is uniformly distributed in [0, 100] while being
-/// cryptographically bound to the VRF output.
+/// The mapping is deterministic and bound to the committed hash. Its
+/// distribution is characterised — and measured — for
+/// [`derive_score_from_hash`]; see the `# Distribution` section there and the
+/// fixed-seed distribution test in `contracts/credit/tests/vrf_commitment.rs`.
 pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> bool {
     let key = DataKey::VrfCommitment(borrower.clone());
     let commitment: VrfCommitment = env
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingVrfCommitment));
 
-    bump_credit_line_ttl(env, borrower);
+    bump_vrf_commitment_ttl(env, borrower);
 
     // Derive expected score from commitment hash
     let expected_score = derive_score_from_hash(&commitment.commitment_hash);
@@ -131,7 +132,8 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 ///
 /// This is a deterministic, non-invertible function that maps a 256-bit hash
 /// to a score in the range [0, 100]. The function is designed to be:
-/// - Uniform: Each score has approximately equal probability
+/// - Approximately uniform: the byte sum is folded modulo 101, which averages
+///   the underlying bell curve out — see `# Distribution` below
 /// - Deterministic: Same hash always produces same score
 /// - Non-invertible: Cannot recover the hash from the score
 ///
@@ -145,6 +147,24 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 /// ```text
 /// score = (sum of all bytes) % 101
 /// ```
+///
+/// # Distribution
+///
+/// The score is approximately uniform over `[0, 100]`, but not because the
+/// byte sum is: the sum of 32 uniform bytes is bell-shaped (mean 4080,
+/// standard deviation ~418), and folding that shape modulo 101 averages it
+/// out because the deviation is more than four times the modulus.
+///
+/// This is measured rather than assumed. The fixed-seed distribution test in
+/// `contracts/credit/tests/vrf_commitment.rs`
+/// (`test_derive_score_distribution_uniformity_result_with_fixed_seed`) draws
+/// 20 000 hashes, verifies the byte sum really is bell-shaped, and applies a
+/// chi-square goodness-of-fit test against the uniform hypothesis, which it
+/// does not reject. Boundary hashes are pinned by
+/// `test_derive_score_boundary_hashes_are_pinned` in the same file.
+///
+/// Those tests reach this private helper through
+/// [`derive_score_from_hash_test_helper`].
 fn derive_score_from_hash(hash: &BytesN<32>) -> u32 {
     let mut sum: u32 = 0;
     for i in 0u32..32 {
@@ -203,7 +223,7 @@ pub fn clear_vrf_commitment(env: Env, borrower: Address) {
 pub fn get_vrf_commitment(env: &Env, borrower: &Address) -> Option<VrfCommitment> {
     let key = DataKey::VrfCommitment(borrower.clone());
     if env.storage().persistent().has(&key) {
-        bump_credit_line_ttl(env, borrower);
+        bump_vrf_commitment_ttl(env, borrower);
         env.storage().persistent().get(&key)
     } else {
         None
