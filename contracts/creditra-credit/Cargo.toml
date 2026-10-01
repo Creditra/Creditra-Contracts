@@ -1,8 +1,8 @@
 [package]
-name = "creditra-credit"
+name = "creditra-credit-legacy"
 version = "0.1.0"
 edition = "2021"
-description = "Credit line management contract with draw audit trail"
+description = "Legacy duplicate of the credit contract; not part of the active workspace"
 
 # Standalone package; not a member of the Soroban root workspace.
 [workspace]

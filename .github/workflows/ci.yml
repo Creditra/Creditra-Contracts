@@ -3,8 +3,23 @@ name: CI
 on:
   push:
     branches: [main, master, develop]
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'contracts/credit/src/math_utils.rs'
+      - 'contracts/credit/proofs/**'
+      - 'gateway-contract/contracts/auction_contract/src/curves.rs'
+      - 'gateway-contract/contracts/auction_contract/proofs/**'
   pull_request:
     branches: [main, master, develop]
+    paths:
+      - '.github/workflows/ci.yml'
+      - 'contracts/credit/src/math_utils.rs'
+      - 'contracts/credit/proofs/**'
+      - 'gateway-contract/contracts/auction_contract/src/curves.rs'
+      - 'gateway-contract/contracts/auction_contract/proofs/**'
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -69,7 +84,7 @@ jobs:
       # lock files, or the workflow itself drift from the reproducible-build
       # policy (e.g. a stray rustup override or an uncommitted Cargo.lock).
       - name: Verify reproducible-build policy
-        run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
+        run: scripts/check-toolchain.sh --verify-active --lock Cargo.lock
 
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
@@ -91,23 +106,23 @@ jobs:
           rustup target list --installed
 
       - name: Check formatting
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo fmt -- --check
 
       - name: Run clippy
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo clippy $CARGOFLAGS --all-targets -- -D warnings
 
       - name: Run tests
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo test $CARGOFLAGS --no-fail-fast
 
       - name: Build native release
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         run: cargo build $CARGOFLAGS --release
 
       - name: Build WASM release
-        working-directory: contracts/creditra-credit
+        working-directory: contracts/credit
         env:
           RUSTFLAGS: -C link-arg=--allow-undefined
         # Build only the library for the wasm target so host-side binaries
@@ -122,16 +137,45 @@ jobs:
       - name: Verify WASM artifact
         env:
           THRESHOLD_BYTES: "614400"
-          WASM_DIR: contracts/creditra-credit/target/wasm32-unknown-unknown/release
+          WASM_DIR: contracts/credit/target/wasm32-unknown-unknown/release
         run: scripts/check-wasm-size.sh --check-only
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: creditra-credit-wasm
-          path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          path: contracts/credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
 
+  kani:
+    name: Kani formal proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Kani verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked kani-verifier
+
+      - name: Run credit prorate proof harnesses
+        working-directory: contracts/credit
+        run: cargo kani -p creditra-credit
+
+      - name: Run auction Dutch-price proof harnesses
+        working-directory: gateway-contract/contracts/auction_contract
+        run: cargo kani -p gateway-auction
+
+  fuzz:
+    name: Fuzz nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      CARGO_TERM_COLOR: always
   # Line-coverage floor. Kept as its own job so it is a distinct, independently
   # gateable required check: a coverage regression reads as a coverage failure
   # instead of hiding inside the contract job.
@@ -163,6 +207,66 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build all fuzz targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in \
+            contracts/accrual/fuzz/Cargo.toml \
+            contracts/borrow/fuzz/Cargo.toml \
+            contracts/collateral/fuzz/Cargo.toml \
+            contracts/credit/fuzz/Cargo.toml \
+            contracts/lifecycle/fuzz/Cargo.toml \
+            contracts/risk/fuzz/Cargo.toml
+          do
+            echo "::group::Building $(dirname "$manifest")"
+            cargo fuzz build --manifest-path "$manifest"
+            echo "::endgroup::"
+          done
+
+      - name: Run fuzz targets with bounded time budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+
+          run_target() {
+            local manifest="$1"
+            local target="$2"
+            local dir
+            dir="$(dirname "$manifest")"
+            echo "::group::Running $dir::$target"
+            if ! cargo fuzz run --manifest-path "$manifest" "$target" -- -max_total_time=60; then
+              echo "::error::Fuzz target $dir::$target failed or produced a crash."
+              failed=1
+            fi
+            echo "::endgroup::"
+          }
+
+          run_target contracts/accrual/fuzz/Cargo.toml main
+          run_target contracts/borrow/fuzz/Cargo.toml main
+          run_target contracts/collateral/fuzz/Cargo.toml main
+          run_target contracts/credit/fuzz/Cargo.toml oracle_deviation
+          run_target contracts/credit/fuzz/Cargo.toml prorate_interest_snapshot
+          run_target contracts/lifecycle/fuzz/Cargo.toml lifecycle
+          run_target contracts/risk/fuzz/Cargo.toml main
+
+          exit "$failed"
+
+      - name: Upload fuzz crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            contracts/**/fuzz/artifacts/**
+            contracts/**/fuzz/crash-*/*
+          if-no-files-found: ignore
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy, llvm-tools
 
