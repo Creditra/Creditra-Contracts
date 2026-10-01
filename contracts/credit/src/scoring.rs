@@ -50,13 +50,13 @@
 //! On-chain verification of an actual VRF proof (or of an authenticated oracle
 //! output) is not implemented; see issue #1447
 //! (<https://github.com/Creditra/Creditra-Contracts/issues/1447>). The score
-//! distribution caveats on [`derive_score_from_hash`] are tracked by issue
-//! #1329.
+//! distribution of [`derive_score_from_hash`] is measured by the fixed-seed
+//! test in `contracts/credit/tests/vrf_commitment.rs` (issue #1329).
 
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused, bump_credit_line_ttl, DataKey};
+use crate::storage::{assert_not_paused, bump_vrf_commitment_ttl, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, BytesN, Env};
 
@@ -119,7 +119,7 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     };
 
     env.storage().persistent().set(&key, &commitment);
-    bump_credit_line_ttl(&env, &borrower);
+    bump_vrf_commitment_ttl(&env, &borrower);
 }
 
 /// Return whether `risk_score` equals the reduction of the committed hash.
@@ -138,23 +138,25 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
 /// `true` if `risk_score` equals the derived score, `false` otherwise.
 ///
 /// # Errors
-/// - Panics with [`ContractError::CreditLineNotFound`] if no commitment exists.
+/// - Panics with [`ContractError::MissingVrfCommitment`] if no commitment exists.
 ///
 /// # Score derivation
 /// ```text
 /// score = (hash_bytes[0] + hash_bytes[1] + ... + hash_bytes[31]) % 101
 /// ```
-/// The reduction is deterministic but **not uniform** and carries no
-/// cryptographic binding; see [`derive_score_from_hash`].
+/// The reduction is deterministic but carries no cryptographic binding. Its
+/// distribution is characterised — and measured — for
+/// [`derive_score_from_hash`]; see the `# Distribution` section there and the
+/// fixed-seed distribution test in `contracts/credit/tests/vrf_commitment.rs`.
 pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> bool {
     let key = DataKey::VrfCommitment(borrower.clone());
     let commitment: VrfCommitment = env
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingVrfCommitment));
 
-    bump_credit_line_ttl(env, borrower);
+    bump_vrf_commitment_ttl(env, borrower);
 
     // Derive expected score from commitment hash
     let expected_score = derive_score_from_hash(&commitment.commitment_hash);
@@ -169,16 +171,27 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 /// score = (sum of all 32 bytes) % 101
 /// ```
 ///
+/// # Distribution
+///
+/// The score is approximately uniform over `[0, 100]`, but not because the
+/// byte sum is: the sum of 32 uniform bytes is bell-shaped (mean 4080,
+/// standard deviation ~418), and folding that shape modulo 101 averages it
+/// out because the deviation is more than four times the modulus.
+///
+/// This is measured rather than assumed. The fixed-seed distribution test in
+/// `contracts/credit/tests/vrf_commitment.rs`
+/// (`test_derive_score_distribution_uniformity_result_with_fixed_seed`) draws
+/// 20 000 hashes, verifies the byte sum really is bell-shaped, and applies a
+/// chi-square goodness-of-fit test against the uniform hypothesis, which it
+/// does not reject. Boundary hashes are pinned by
+/// `test_derive_score_boundary_hashes_are_pinned` in the same file.
+///
+/// Those tests reach this private helper through
+/// [`derive_score_from_hash_test_helper`].
+///
 /// # Properties
 /// - **Deterministic**: the same hash always maps to the same score.
 /// - **Public and cheap**: there is no secret input, so anyone can compute it.
-/// - **Not uniform**: the byte sum lies in `[0, 8160]` and
-///   `8161 = 101 * 80 + 81`, so 81 of the 101 residues occur 81 times while the
-///   remaining 20 occur 80 times (a ~1.25% bias even if the sum were uniform).
-///   The sum of 32 independent bytes is also bell-shaped rather than uniform, so
-///   the residue distribution is only approximately flat and the tails are
-///   slightly under-represented. Do not model the output as a uniform draw; the
-///   measurement task is tracked by issue #1329.
 /// - **Not a cryptographic function**: this is a lossy reduction with no
 ///   preimage resistance. Many hashes collapse to the same score, and a hash
 ///   reducing to any chosen score is trivial to construct. It must not be
@@ -250,7 +263,7 @@ pub fn clear_vrf_commitment(env: Env, borrower: Address) {
 pub fn get_vrf_commitment(env: &Env, borrower: &Address) -> Option<VrfCommitment> {
     let key = DataKey::VrfCommitment(borrower.clone());
     if env.storage().persistent().has(&key) {
-        bump_credit_line_ttl(env, borrower);
+        bump_vrf_commitment_ttl(env, borrower);
         env.storage().persistent().get(&key)
     } else {
         None

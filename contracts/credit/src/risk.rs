@@ -61,7 +61,7 @@
 use crate::auth::require_admin_auth;
 use crate::events::{publish_risk_parameters_updated, publish_risk_admin_cooldown_configured};
 use crate::storage::{assert_not_paused, rate_cfg_key, rate_formula_key, persist_credit_line, CREDIT_LINE_TTL_EXTEND_TO, CREDIT_LINE_TTL_THRESHOLD,
-    assert_risk_admin_cooldown_elapsed, set_last_risk_admin_action_ts, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
+    assert_risk_admin_cooldown_elapsed_for, set_last_risk_admin_action_ts_for, set_risk_admin_cooldown_seconds, get_risk_admin_cooldown_seconds};
 use crate::types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig, RateFormulaConfig};
 use soroban_sdk::{Address, Env};
 
@@ -87,7 +87,10 @@ pub fn compute_rate_from_score(cfg: &RateFormulaConfig, risk_score: u32) -> u32 
         .base_rate_bps
         .saturating_add(risk_score.saturating_mul(cfg.slope_bps_per_score));
     let upper = cfg.max_rate_bps.min(MAX_INTEREST_RATE_BPS);
-    raw.clamp(cfg.min_rate_bps, upper)
+    // Bound the floor by the effective ceiling so `clamp` can never panic on
+    // an inverted range (e.g. a stored `min_rate_bps` above the protocol cap).
+    let lower = cfg.min_rate_bps.min(upper);
+    raw.clamp(lower, upper)
 }
 
 /// Set optional global rate-change caps (admin only).
@@ -246,12 +249,11 @@ pub fn update_risk_parameters(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
-    // Admin auth is enforced by the `lib.rs` wrapper (`require_admin_auth`).
-    // Re-checking it here would issue a second `require_auth` for the same admin
-    // address inside one invocation, which the Soroban host rejects with
-    // `Error(Auth, ExistingValue)` ("frame is already authorized"). This matches
-    // the single-auth convention documented on `lifecycle::suspend_credit_line`.
-    assert_risk_admin_cooldown_elapsed(&env);
+    // Admin-only, enforced by the `lib.rs` wrapper (`require_admin_auth`); not
+    // re-checked here because a second `require_auth` for the already-authorized
+    // admin address within one invocation is rejected by the Soroban auth frame
+    // as `Error(Auth, ExistingValue)`.
+    assert_risk_admin_cooldown_elapsed_for(&env, &borrower);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
@@ -266,18 +268,16 @@ pub fn update_risk_parameters(
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
-    // Admin score pre-commitment check, applied only when the score changes.
-    // This compares the score against `sum(hash bytes) % 101` of the hash the
-    // admin previously committed. It verifies no VRF proof and does not
-    // authenticate the stored bytes as a VRF output — see `crate::scoring` for
-    // the trust assumptions.
+    // Verify VRF commitment if score is changing
     if risk_score != credit_line.risk_score {
         if let Some(_commitment) = crate::scoring::get_vrf_commitment(&env, &borrower) {
+            // VRF commitment exists - verify the score matches
             if !crate::scoring::verify_vrf_commitment(&env, &borrower, risk_score) {
                 env.panic_with_error(ContractError::Unauthorized);
             }
         }
-        // No commitment → no check (backward compatibility for existing lines).
+        // If no commitment exists, allow the update for backward compatibility
+        // (existing credit lines without VRF commitments)
     }
 
     // Validate credit limit is within configured bounds
@@ -361,7 +361,7 @@ pub fn update_risk_parameters(
         credit_line.risk_score,
     );
 
-    set_last_risk_admin_action_ts(&env, env.ledger().timestamp());
+    set_last_risk_admin_action_ts_for(&env, &borrower, env.ledger().timestamp());
 }
 
 /// Get the configured rate-change limits, if any.
