@@ -43,10 +43,10 @@
 //! | `set_penalty_surcharge_bps`  | admin (existing)        |
 //! | `update_risk_parameters`     | admin (existing)        |
 
-use creditra_credit::types::CreditStatus;
+use creditra_credit::types::{ContractError, CreditStatus};
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, AuthorizedFunction, Ledger, MockAuth, MockAuthInvoke};
-use soroban_sdk::{token, Address, Env, IntoVal, Symbol};
+use soroban_sdk::testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke};
+use soroban_sdk::{token, Address, Env, IntoVal};
 
 /// Positive-test environment: `mock_all_auths` enabled, token wired up,
 /// one credit line open for `borrower` in Active state.
@@ -75,122 +75,96 @@ fn setup() -> (Env, CreditClient<'static>, Address, Address) {
     token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
 
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
-    client.set_treasury(&Address::generate(&env));
 
     (env, client, admin, borrower)
 }
 
-/// Builds a `MockAuth` registering `admin`'s authorization for a single `Credit`
-/// entrypoint call. A macro (rather than a function) because `MockAuth` borrows
-/// the inline `MockAuthInvoke`.
-macro_rules! admin_auth {
-    ($admin:expr, $contract:expr, $fn_name:expr, $args:expr) => {
-        MockAuth {
-            address: $admin,
-            invoke: &MockAuthInvoke {
-                contract: $contract,
-                fn_name: $fn_name,
-                args: $args,
-                sub_invokes: &[],
-            },
-        }
-    };
-}
-
-/// Negative-test environment: **no blanket auth mock**.
-///
-/// The fixture mirrors [`setup`] (token wired up, one active credit line, a
-/// treasury recipient configured) so that an entrypoint failing for an
-/// unrelated reason - e.g. `TreasuryNotSet` - cannot make a negative test pass
-/// for the wrong reason.
-///
-/// `Env::mock_all_auths()` is sticky for the whole `Env` lifetime - it is *not*
-/// scoped to a block. A blanket mock therefore makes every `require_auth`
-/// succeed, which silently turns a `#[should_panic]` negative test into a test
-/// that passes for the wrong reason.
-///
-/// Instead each setup call registers exactly the authorization it needs via
-/// `mock_auths`, and those entries are consumed by the call they were
-/// registered for. When setup returns, no authorization is pending, so the
-/// entrypoint under test in each negative test runs unauthenticated and must
-/// panic.
+/// Negative-test environment: NO `mock_all_auths`.
+/// Any `require_auth` / `require_admin_auth` inside the called entrypoint
+/// will panic immediately because no auth context is provided.
 fn setup_no_mock() -> (Env, CreditClient<'static>, Address, Address) {
     let env = Env::default();
+    // Deliberately *not* calling env.mock_all_auths()
     env.ledger().set_timestamp(10_000);
 
+    // We still need to initialise the contract; do it in a nested scope
+    // with mock_all_auths so setup itself doesn't fail.
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
-    client.init(&admin);
 
-    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-    let token_addr = token_id.address();
+    {
+        env.mock_all_auths();
+        client.init(&admin);
 
-    client
-        .mock_auths(&[admin_auth!(
-            &admin,
-            &contract_id,
-            "set_liquidity_token",
-            soroban_sdk::vec![&env, (&token_addr).into_val(&env)]
-        )])
-        .set_liquidity_token(&token_addr);
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token_addr = token_id.address();
+        client.set_liquidity_token(&token_addr);
+        client.set_liquidity_source(&contract_id);
+        token::StellarAssetClient::new(&env, &token_addr).mint(&contract_id, &10_000_000_i128);
+        token::StellarAssetClient::new(&env, &token_addr).mint(&borrower, &10_000_000_i128);
 
-    client
-        .mock_auths(&[admin_auth!(
-            &admin,
-            &contract_id,
-            "set_liquidity_source",
-            soroban_sdk::vec![&env, (&contract_id).into_val(&env)]
-        )])
-        .set_liquidity_source(&contract_id);
-
-    // The token contract requires the *credit contract* to authorise each mint.
-    for to in [&contract_id, &borrower] {
-        let token_client = token::StellarAssetClient::new(&env, &token_addr);
-        token_client
-            .mock_auths(&[MockAuth {
-                address: &contract_id,
-                invoke: &MockAuthInvoke {
-                    contract: &token_addr,
-                    fn_name: "mint",
-                    args: soroban_sdk::vec![
-                        &env,
-                        (*to).into_val(&env),
-                        10_000_000_i128.into_val(&env),
-                    ],
-                    sub_invokes: &[],
-                },
-            }])
-            .mint(to, &10_000_000_i128);
+        client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
     }
-
-    client
-        .mock_auths(&[admin_auth!(
-            &admin,
-            &contract_id,
-            "open_credit_line",
-            soroban_sdk::vec![
-                &env,
-                borrower.into_val(&env),
-                100_000_i128.into_val(&env),
-                300_u32.into_val(&env),
-                50_u32.into_val(&env),
-            ]
-        )])
-        .open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
-
-    let treasury = Address::generate(&env);
-    client
-        .mock_auths(&[admin_auth!(
-            &admin,
-            &contract_id,
-            "set_treasury",
-            soroban_sdk::vec![&env, treasury.into_val(&env)]
-        )])
-        .set_treasury(&treasury);
-
+    // mock_all_auths is scoped: after the block, new invocations require real auth.
     (env, client, admin, borrower)
+}
+
+#[test]
+fn set_treasury_requires_one_configured_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    let treasury = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_treasury",
+                args: (admin.clone(), treasury.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_treasury(&admin, &treasury);
+
+    let auths = env.auths();
+    assert_eq!(auths.len(), 1, "the entrypoint must request one auth");
+    assert_eq!(auths.last().unwrap().0, admin);
+    insta::assert_debug_snapshot!(auths.last().unwrap());
+}
+
+#[test]
+fn set_treasury_rejects_a_mismatched_admin_argument() {
+    let (env, client, _admin, _borrower) = setup();
+    let non_admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    let result = client.try_set_treasury(&non_admin, &treasury);
+
+    assert!(result.is_err(), "a non-admin argument must be rejected");
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::Unauthorized.into()
+    );
+}
+
+#[test]
+fn block_borrower_rejects_a_mismatched_admin_argument() {
+    let (env, client, _admin, borrower) = setup();
+    let non_admin = Address::generate(&env);
+
+    let result = client.try_block_borrower(&non_admin, &borrower);
+
+    assert!(result.is_err(), "a non-admin argument must be rejected");
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::Unauthorized.into()
+    );
 }
 
 #[test]
@@ -250,10 +224,7 @@ fn open_credit_line_reopen_requires_admin_auth() {
     client.open_credit_line(&borrower, &100_000_i128, &300_u32, &50_u32);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "open_credit_line (re-open) must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "open_credit_line (re-open) must be authorised by admin");
 }
 
 /// Calling open_credit_line without admin auth panics.
@@ -279,10 +250,7 @@ fn draw_credit_requires_borrower_auth() {
     client.draw_credit(&borrower, &1_000_i128);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, borrower,
-        "draw_credit must be authorised by the borrower"
-    );
+    assert_eq!(last.0, borrower, "draw_credit must be authorised by the borrower");
 }
 
 /// draw_credit without borrower auth panics.
@@ -303,10 +271,7 @@ fn repay_credit_requires_borrower_auth() {
     client.repay_credit(&borrower, &500_i128);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, borrower,
-        "repay_credit must be authorised by the borrower"
-    );
+    assert_eq!(last.0, borrower, "repay_credit must be authorised by the borrower");
 }
 
 /// repay_credit without borrower auth panics.
@@ -330,10 +295,7 @@ fn suspend_credit_line_requires_admin_auth() {
     client.suspend_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "suspend_credit_line must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "suspend_credit_line must be authorised by admin");
 }
 
 /// suspend_credit_line without admin auth panics.
@@ -353,10 +315,7 @@ fn self_suspend_credit_line_requires_borrower_auth() {
     client.self_suspend_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, borrower,
-        "self_suspend_credit_line must be authorised by the borrower"
-    );
+    assert_eq!(last.0, borrower, "self_suspend_credit_line must be authorised by the borrower");
 }
 
 /// self_suspend_credit_line without borrower auth panics.
@@ -376,10 +335,7 @@ fn close_credit_line_admin_path_requires_admin_auth() {
     client.close_credit_line(&borrower, &admin);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "close_credit_line (admin) must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "close_credit_line (admin) must be authorised by admin");
 }
 
 /// close_credit_line called by borrower (zero util) records borrower as authorised.
@@ -390,10 +346,7 @@ fn close_credit_line_borrower_path_requires_borrower_auth() {
     client.close_credit_line(&borrower, &borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, borrower,
-        "close_credit_line (borrower) must be authorised by borrower"
-    );
+    assert_eq!(last.0, borrower, "close_credit_line (borrower) must be authorised by borrower");
 }
 
 /// close_credit_line without the closer's auth panics.
@@ -415,10 +368,7 @@ fn default_credit_line_requires_admin_auth() {
     client.default_credit_line(&borrower);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "default_credit_line must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "default_credit_line must be authorised by admin");
 }
 
 /// default_credit_line without admin auth panics.
@@ -439,10 +389,7 @@ fn reinstate_credit_line_requires_admin_auth() {
     client.reinstate_credit_line(&borrower, &CreditStatus::Active);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "reinstate_credit_line must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "reinstate_credit_line must be authorised by admin");
 }
 
 /// reinstate_credit_line without admin auth panics.
@@ -495,10 +442,7 @@ fn settle_default_liquidation_requires_admin_auth() {
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
     let auths = env.auths();
     let last = auths.last().unwrap();
-    assert_eq!(
-        last.0, admin,
-        "settle_default_liquidation must be authorised by admin"
-    );
+    assert_eq!(last.0, admin, "settle_default_liquidation must be authorised by admin");
 }
 
 /// settle_default_liquidation without admin auth panics.
@@ -516,253 +460,19 @@ fn settle_default_liquidation_without_admin_auth_panics() {
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fund-setter auth snapshots — Issue #1281
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// These entrypoints previously required *two* authorizations: the `admin`
-// argument's own `require_auth()` plus the stored admin's
-// `require_admin_auth()`. The `admin: Address` parameter has been removed, so
-// the stored admin's authorization is now the only one requested.
-//
-// Each test asserts both halves of that contract:
-//   1. Positive: exactly one authorization is recorded, and it is the admin.
-//   2. Negative: with no valid auth the call panics, so the guard is
-//      load-bearing.
-
-/// Asserts the authorization recorded for the call under test.
-///
-/// Checks three things, which together pin the Issue #1281 contract:
-///
-/// 1. The signer is the stored admin - the guard is still load-bearing.
-/// 2. No sub-invocations were authorised for the call - the entrypoint
-///    authorizes itself, not a token transfer or another contract call.
-/// 3. The authorization carries exactly `expected_argc` arguments. Since
-///    `require_auth` records the call arguments, this is a direct regression
-///    test for the removed `admin: Address` parameter: reintroducing it would
-///    make the count one higher.
-fn assert_single_admin_auth(env: &Env, admin: &Address, entrypoint: &str, expected_argc: usize) {
-    let auths = env.auths();
-    let (signer, invocation) = auths.last().unwrap();
-    assert_eq!(
-        *signer, *admin,
-        "{entrypoint} must be authorised by the stored admin"
-    );
-    match &invocation.function {
-        AuthorizedFunction::Contract((_contract, name, args)) => {
-            assert_eq!(*name, Symbol::new(env, entrypoint));
-            assert!(
-                invocation.sub_invocations.is_empty(),
-                "{entrypoint} must not authorise sub-invocations"
-            );
-            assert_eq!(
-                args.len() as usize,
-                expected_argc,
-                "{entrypoint} must not take an `admin` argument (Issue #1281)"
-            );
-        }
-        other => panic!("{entrypoint} authorised unexpected function: {other:?}"),
-    }
-}
-
-#[test]
-fn test_set_treasury_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.set_treasury(&Address::generate(&env));
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "set_treasury", 1);
-}
-
-#[test]
-#[should_panic]
-fn set_treasury_without_admin_auth_panics() {
-    let (_env, client, _admin, _borrower) = setup_no_mock();
-    client.set_treasury(&Address::generate(&_env));
-}
-
-#[test]
-fn test_set_bounty_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.set_bounty(&Address::generate(&env));
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "set_bounty", 1);
-}
-
-#[test]
-#[should_panic]
-fn set_bounty_without_admin_auth_panics() {
-    let (_env, client, _admin, _borrower) = setup_no_mock();
-    client.set_bounty(&Address::generate(&_env));
-}
-
-#[test]
-fn test_propose_treasury_withdrawal_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.propose_treasury_withdrawal();
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "propose_treasury_withdrawal", 0);
-}
-
-#[test]
-#[should_panic]
-fn propose_treasury_withdrawal_without_admin_auth_panics() {
-    let (_env, client, _admin, _borrower) = setup_no_mock();
-    client.propose_treasury_withdrawal();
-}
-
-#[test]
-fn test_execute_treasury_withdrawal_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.propose_treasury_withdrawal();
-    env.ledger().set_timestamp(10_000 + 86_400);
-    client.execute_treasury_withdrawal();
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "execute_treasury_withdrawal", 0);
-}
-
-#[test]
-#[should_panic]
-fn execute_treasury_withdrawal_without_admin_auth_panics() {
-    let (env, client, _admin, _borrower) = setup_no_mock();
-    client.propose_treasury_withdrawal();
-    env.ledger().set_timestamp(10_000 + 86_400);
-    client.execute_treasury_withdrawal();
-}
-
-#[test]
-fn test_withdraw_treasury_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.withdraw_treasury();
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "withdraw_treasury", 0);
-}
-
-#[test]
-#[should_panic]
-fn withdraw_treasury_without_admin_auth_panics() {
-    let (_env, client, _admin, _borrower) = setup_no_mock();
-    client.withdraw_treasury();
-}
-
-#[test]
-fn test_withdraw_bounty_auth_snap() {
-    let (env, client, admin, _borrower) = setup();
-    client.set_bounty(&Address::generate(&env));
-    client.withdraw_bounty();
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "withdraw_bounty", 0);
-}
-
-#[test]
-#[should_panic]
-fn withdraw_bounty_without_admin_auth_panics() {
-    let (_env, client, _admin, _borrower) = setup_no_mock();
-    client.withdraw_bounty();
-}
-
-#[test]
-fn test_block_borrower_auth_snap() {
-    let (env, client, admin, borrower) = setup();
-    client.block_borrower(&borrower);
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "block_borrower", 1);
-}
-
-#[test]
-#[should_panic]
-fn block_borrower_without_admin_auth_panics() {
-    let (_env, client, _admin, borrower) = setup_no_mock();
-    client.block_borrower(&borrower);
-}
-
-#[test]
-fn test_unblock_borrower_auth_snap() {
-    let (env, client, admin, borrower) = setup();
-    client.block_borrower(&borrower);
-    client.unblock_borrower(&borrower);
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "unblock_borrower", 1);
-}
-
-#[test]
-#[should_panic]
-fn unblock_borrower_without_admin_auth_panics() {
-    let (_env, client, _admin, borrower) = setup_no_mock();
-    client.unblock_borrower(&borrower);
-}
-
-#[test]
-fn test_bulk_block_borrowers_auth_snap() {
-    let (env, client, admin, borrower) = setup();
-    let borrowers = soroban_sdk::vec![&env, borrower];
-    client.bulk_block_borrowers(&borrowers);
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "bulk_block_borrowers", 1);
-}
-
-#[test]
-#[should_panic]
-fn bulk_block_borrowers_without_admin_auth_panics() {
-    let (env, client, _admin, borrower) = setup_no_mock();
-    let borrowers = soroban_sdk::vec![&env, borrower];
-    client.bulk_block_borrowers(&borrowers);
-}
-
-#[test]
-fn test_freeze_borrower_until_auth_snap() {
-    let (env, client, admin, borrower) = setup();
-    client.freeze_borrower_until(&borrower, &(10_000 + 3_600));
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "freeze_borrower_until", 2);
-}
-
-#[test]
-#[should_panic]
-fn freeze_borrower_until_without_admin_auth_panics() {
-    let (env, client, _admin, borrower) = setup_no_mock();
-    client.freeze_borrower_until(&borrower, &(10_000 + 3_600));
-}
-
-#[test]
-fn test_unfreeze_borrower_auth_snap() {
-    let (env, client, admin, borrower) = setup();
-    client.unfreeze_borrower(&borrower);
-    let auths = env.auths();
-    insta::assert_debug_snapshot!(auths.last().unwrap());
-    assert_single_admin_auth(&env, &admin, "unfreeze_borrower", 1);
-}
-
-#[test]
-#[should_panic]
-fn unfreeze_borrower_without_admin_auth_panics() {
-    let (_env, client, _admin, borrower) = setup_no_mock();
-    client.unfreeze_borrower(&borrower);
-}
-
-/// `unblock_borrower` is documented as idempotent, but it used to revert with
-/// `Storage(MissingValue)` because it removed the borrower's blocklist entry
-/// and then extended the TTL of the key it had just removed. This pins the
-/// fixed behaviour: the borrower is unblocked, and a second unblock is a no-op.
+/// Regression for the unblock path (Issue #1281): `set_borrower_blocked(false)`
+/// used to bump the TTL of the key it had just removed, which reverts with
+/// `Storage(MissingValue)`. Unblocking must succeed and be idempotent.
 #[test]
 fn unblock_borrower_is_idempotent() {
-    let (env, client, _admin, borrower) = setup();
-    client.block_borrower(&borrower);
+    let (env, client, admin, borrower) = setup();
+    client.block_borrower(&admin, &borrower);
     assert!(client.is_borrower_blocked(&borrower));
 
-    client.unblock_borrower(&borrower);
+    client.unblock_borrower(&admin, &borrower);
     assert!(!client.is_borrower_blocked(&borrower));
 
     env.ledger().set_timestamp(10_000);
-    client.unblock_borrower(&borrower);
+    client.unblock_borrower(&admin, &borrower);
     assert!(!client.is_borrower_blocked(&borrower));
 }

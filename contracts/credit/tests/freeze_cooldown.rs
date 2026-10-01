@@ -167,11 +167,11 @@ fn freeze_borrower_until_blocked_within_cooldown() {
     let future = now + 86_400; // 24 hours from now
 
     // First freeze succeeds
-    client.freeze_borrower_until(&borrower, &future);
+    client.freeze_borrower_until(&admin, &borrower, &future);
 
     // Second freeze within cooldown fails
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.freeze_borrower_until(&borrower2, &future);
+        client.freeze_borrower_until(&admin, &borrower2, &future);
     }));
     assert!(
         result.is_err(),
@@ -188,16 +188,16 @@ fn unfreeze_borrower_blocked_within_cooldown() {
 
     let now = env.ledger().timestamp();
     let future = now + 86_400;
-    client.freeze_borrower_until(&borrower, &future);
+    client.freeze_borrower_until(&admin, &borrower, &future);
 
     client.set_freeze_cooldown(&3600);
 
     // First unfreeze succeeds
-    client.unfreeze_borrower(&borrower);
+    client.unfreeze_borrower(&admin, &borrower);
 
     // Second unfreeze within cooldown fails
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.unfreeze_borrower(&borrower);
+        client.unfreeze_borrower(&admin, &borrower);
     }));
     assert!(
         result.is_err(),
@@ -234,7 +234,7 @@ fn cooldown_is_shared_across_freeze_types() {
     let now = env.ledger().timestamp();
     let future = now + 86_400;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.freeze_borrower_until(&borrower, &future);
+        client.freeze_borrower_until(&admin, &borrower, &future);
     }));
     assert!(
         result.is_err(),

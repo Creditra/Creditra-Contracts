@@ -1,5 +1,7 @@
 # Borrow error stability (v7)
 
+**Notice:** This is a test/indexer support crate for the Creditra protocol. It is **not a deployable smart contract**.
+
 CI guard that freezes client-facing `ContractError` discriminants for the
 borrow / draw / repay surface (`draw_credit`, `repay_credit`,
 `repay_and_release_collateral`, `reverse_draw`, and related gates).

@@ -25,7 +25,7 @@ thiserror = "2"
 
 [profile.release]
 opt-level = "z"
-overflow-checks = false
+overflow-checks = true   # Revert on i128 overflow instead of wrapping
 debug = 0
 strip = "symbols"
 debug-assertions = false

@@ -163,7 +163,7 @@ fn freeze_borrower_until_auth_snapshot() {
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
 
-    client.freeze_borrower_until(&borrower, &expiry);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
 
     let auths = env.auths();
     assert!(
@@ -181,9 +181,9 @@ fn unfreeze_borrower_auth_snapshot() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
-    client.freeze_borrower_until(&borrower, &expiry);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
 
-    client.unfreeze_borrower(&borrower);
+    client.unfreeze_borrower(&admin, &borrower);
 
     let auths = env.auths();
     assert!(
@@ -213,8 +213,8 @@ fn freeze_draws_reverts_without_auth() {
 fn unfreeze_draws_reverts_without_auth() {
     let env = Env::default();
     let (client, contract_id, admin, _borrower) = setup_no_mock(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -222,8 +222,9 @@ fn unfreeze_draws_reverts_without_auth() {
                 args: ().into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_draws();
+        }],
+    )
+    .freeze_draws();
     client.unfreeze_draws();
 }
 
@@ -240,8 +241,8 @@ fn freeze_credit_line_reverts_without_auth() {
 fn unfreeze_credit_line_reverts_without_auth() {
     let env = Env::default();
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -249,8 +250,9 @@ fn unfreeze_credit_line_reverts_without_auth() {
                 args: (borrower.clone(), FreezeReason::Compliance).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        }],
+    )
+    .freeze_credit_line(&borrower, &FreezeReason::Compliance);
     client.unfreeze_credit_line(&borrower);
 }
 
@@ -259,7 +261,7 @@ fn unfreeze_credit_line_reverts_without_auth() {
 fn freeze_borrower_until_reverts_without_auth() {
     let env = Env::default();
     let (client, _contract_id, admin, borrower) = setup_no_mock(&env);
-    client.freeze_borrower_until(&borrower, &(START_TS + 3_600));
+    client.freeze_borrower_until(&admin, &borrower, &(START_TS + 3_600));
 }
 
 #[test]
@@ -268,8 +270,8 @@ fn unfreeze_borrower_reverts_without_auth() {
     let env = Env::default();
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
     let expiry = START_TS + 3_600;
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -277,9 +279,10 @@ fn unfreeze_borrower_reverts_without_auth() {
                 args: (admin.clone(), borrower.clone(), expiry).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_borrower_until(&borrower, &expiry);
-    client.unfreeze_borrower(&borrower);
+        }],
+    )
+    .freeze_borrower_until(&admin, &borrower, &expiry);
+    client.unfreeze_borrower(&admin, &borrower);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -292,8 +295,8 @@ fn freeze_draws_wrong_signer_reverts() {
     let env = Env::default();
     let (client, contract_id, _admin, _borrower) = setup_no_mock(&env);
     let attacker = Address::generate(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -301,8 +304,9 @@ fn freeze_draws_wrong_signer_reverts() {
                 args: ().into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_draws();
+        }],
+    )
+    .freeze_draws();
 }
 
 #[test]
@@ -310,8 +314,8 @@ fn freeze_draws_wrong_signer_reverts() {
 fn unfreeze_draws_wrong_signer_reverts() {
     let env = Env::default();
     let (client, contract_id, admin, _borrower) = setup_no_mock(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -319,11 +323,12 @@ fn unfreeze_draws_wrong_signer_reverts() {
                 args: ().into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_draws();
+        }],
+    )
+    .freeze_draws();
     let attacker = Address::generate(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -331,8 +336,9 @@ fn unfreeze_draws_wrong_signer_reverts() {
                 args: ().into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .unfreeze_draws();
+        }],
+    )
+    .unfreeze_draws();
 }
 
 #[test]
@@ -341,8 +347,8 @@ fn freeze_credit_line_wrong_signer_reverts() {
     let env = Env::default();
     let (client, contract_id, _admin, borrower) = setup_no_mock(&env);
     let attacker = Address::generate(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -350,8 +356,9 @@ fn freeze_credit_line_wrong_signer_reverts() {
                 args: (borrower.clone(), FreezeReason::Compliance).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        }],
+    )
+    .freeze_credit_line(&borrower, &FreezeReason::Compliance);
 }
 
 #[test]
@@ -359,8 +366,8 @@ fn freeze_credit_line_wrong_signer_reverts() {
 fn unfreeze_credit_line_wrong_signer_reverts() {
     let env = Env::default();
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -368,11 +375,12 @@ fn unfreeze_credit_line_wrong_signer_reverts() {
                 args: (borrower.clone(), FreezeReason::Compliance).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_credit_line(&borrower, &FreezeReason::Compliance);
+        }],
+    )
+    .freeze_credit_line(&borrower, &FreezeReason::Compliance);
     let attacker = Address::generate(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -380,8 +388,9 @@ fn unfreeze_credit_line_wrong_signer_reverts() {
                 args: (borrower.clone(),).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .unfreeze_credit_line(&borrower);
+        }],
+    )
+    .unfreeze_credit_line(&borrower);
 }
 
 #[test]
@@ -391,8 +400,8 @@ fn freeze_borrower_until_wrong_signer_reverts() {
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
     let attacker = Address::generate(&env);
     let expiry = START_TS + 3_600;
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -400,8 +409,9 @@ fn freeze_borrower_until_wrong_signer_reverts() {
                 args: (admin.clone(), borrower.clone(), expiry).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_borrower_until(&borrower, &expiry);
+        }],
+    )
+    .freeze_borrower_until(&admin, &borrower, &expiry);
 }
 
 #[test]
@@ -410,8 +420,8 @@ fn unfreeze_borrower_wrong_signer_reverts() {
     let env = Env::default();
     let (client, contract_id, admin, borrower) = setup_no_mock(&env);
     let expiry = START_TS + 3_600;
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &admin,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -419,11 +429,12 @@ fn unfreeze_borrower_wrong_signer_reverts() {
                 args: (admin.clone(), borrower.clone(), expiry).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .freeze_borrower_until(&borrower, &expiry);
+        }],
+    )
+    .freeze_borrower_until(&admin, &borrower, &expiry);
     let attacker = Address::generate(&env);
-    client
-        .mock_auths(&[soroban_sdk::testutils::MockAuth {
+    client.mock_auths(
+        &[soroban_sdk::testutils::MockAuth {
             address: &attacker,
             invoke: &soroban_sdk::testutils::MockAuthInvoke {
                 contract: &contract_id,
@@ -431,8 +442,9 @@ fn unfreeze_borrower_wrong_signer_reverts() {
                 args: (admin.clone(), borrower.clone()).into_val(&env),
                 sub_invokes: &[],
             },
-        }])
-        .unfreeze_borrower(&borrower);
+        }],
+    )
+    .unfreeze_borrower(&admin, &borrower);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -499,7 +511,7 @@ fn get_credit_line_freeze_reason_requires_no_auth() {
 fn is_borrower_frozen_requires_no_auth() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
-    client.freeze_borrower_until(&borrower, &(START_TS + 3_600));
+    client.freeze_borrower_until(&admin, &borrower, &(START_TS + 3_600));
 
     let _ = client.is_borrower_frozen(&borrower);
 
@@ -514,7 +526,7 @@ fn get_borrower_frozen_until_requires_no_auth() {
     let env = Env::default();
     let (client, admin, borrower) = setup(&env);
     let expiry = START_TS + 3_600;
-    client.freeze_borrower_until(&borrower, &expiry);
+    client.freeze_borrower_until(&admin, &borrower, &expiry);
 
     let _ = client.get_borrower_frozen_until(&borrower);
 

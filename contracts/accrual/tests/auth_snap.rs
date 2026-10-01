@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: MIT
-#![cfg(test)]
-extern crate std;
-
 //! Per-entrypoint authorization snapshots for the accrual (v7) subsystem.
 //!
 //! # What
@@ -43,6 +40,8 @@ extern crate std;
 //!
 //! - [`creditra_credit::auth::require_admin_auth`] — the admin-gating primitive.
 //! - `docs/threat-model.md` — the normative authorization matrix.
+#![cfg(test)]
+extern crate std;
 
 use creditra_credit::{Credit, CreditClient};
 use creditra_credit::types::{CreditStatus, GraceWaiverMode, LateFeeConfig};

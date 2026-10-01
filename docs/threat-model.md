@@ -46,9 +46,9 @@
 | `forgive_debt` | Admin | `require_admin_auth` | Also checks `assert_not_paused`. |
 | `settle_default_liquidation` | Admin | `require_admin_auth` | Auth is first call in function body. |
 | `close_credit_line` | Closer | `closer.require_auth()` | Closer must be admin or borrower (enforced by business logic). |
-| `block_borrower` | Admin | `require_admin_auth` | Single auth against the stored admin slot; no admin parameter (Issue #1281). |
-| `unblock_borrower` | Admin | `require_admin_auth` | Same single auth as `block_borrower`. |
-| `bulk_block_borrowers` | Admin | `require_admin_auth` | Same single auth; batch capped at 50. |
+| `block_borrower` | Admin | `require_admin_auth_with_argument` | Supplied admin must match the stored admin; that address is authorized once. |
+| `unblock_borrower` | Admin | `require_admin_auth_with_argument` | Supplied admin must match the stored admin; that address is authorized once. |
+| `bulk_block_borrowers` | Admin | `require_admin_auth_with_argument` | Supplied admin must match the stored admin and is authorized once; batch capped at 50. |
 | `draw_credit` | Borrower | `borrower.require_auth()` | Auth after reentrancy guard, before any state read. |
 | `repay_credit` | Borrower | `borrower.require_auth()` | Auth after reentrancy guard, before any state read. |
 | `get_credit_line` | None | — | Pure storage read; no side effects. |
