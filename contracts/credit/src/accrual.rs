@@ -77,7 +77,7 @@ use soroban_sdk::{Address, Env, Vec};
 /// elapsed  = now - last_accrual_ts          (seconds)
 /// interest = principal * rate_bps * elapsed
 ///            ────────────────────────────────
-///                  10_000 * 31_536_000
+///                  10_000 * 31_557_600
 /// ```
 /// where `principal` is `credit_line.utilized_amount` and `rate_bps` is
 /// `credit_line.interest_rate_bps`.
@@ -109,7 +109,6 @@ use soroban_sdk::{Address, Env, Vec};
 /// // interest = 1_000_000 * 500 * 86_400 / 315_360_000_000 = 137
 /// // After call: accrued_interest += 137, last_accrual_ts = 86_400
 /// ```
-pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 /// Apply interest accrual to a credit line and return the updated line record.
 ///
@@ -143,7 +142,7 @@ pub(crate) const SECONDS_PER_YEAR: u64 = 31_536_000;
 /// # Mathematical Principles & Invariants
 ///
 /// * **Floor Rounding**: All interest deltas round down (`Rounding::Floor`). Sub-unit fractional interest is not carried forward.
-/// * **Julian Year Denominator**: Uses [`SECONDS_PER_YEAR`] = 31,536,000 seconds.
+/// * **Julian Year Denominator**: Uses [`crate::math_utils::SECONDS_PER_YEAR`] = 31,557,600 seconds (365.25 days).
 /// * **Timestamp Invariant**: `last_accrual_ts` is advanced **only** when non-zero interest (`accrued_i > 0`) is applied,
 ///   preventing zero-delta timestamp burn on fast ledgers.
 /// * **Zero Utilization**: Returns `line` unmodified without advancing `last_accrual_ts`.
@@ -359,6 +358,47 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
     }
 
     line
+}
+
+/// Materialize pending interest on every indexed line other than `excluded`.
+///
+/// A global exposure cap is defined over the total debt of every credit line,
+/// not merely over the lines that have been touched most recently.  Before a
+/// capped draw, the caller's line is accrued locally and this helper accrues
+/// the remaining indexed lines so `TotalUtilized` is current for the cap
+/// decision.  The excluded line is deliberately left to the caller, which
+/// already has it loaded and will persist it after the draw succeeds.
+pub(crate) fn accrue_all_except(env: &Env, excluded: &Address) {
+    let line_count = crate::storage::get_credit_line_count(env);
+
+    for id in 0..line_count {
+        let Some(borrower) = crate::storage::get_borrower_by_credit_line_id(env, id) else {
+            continue;
+        };
+        if &borrower == excluded {
+            continue;
+        }
+
+        let Some(stored_line) = get_credit_line(env, &borrower) else {
+            continue;
+        };
+        let previous_utilized = stored_line.utilized_amount;
+        let previous_timestamp = stored_line.last_accrual_ts;
+        let previous_status = stored_line.status;
+        let updated_line = apply_accrual(env, stored_line);
+
+        if updated_line.utilized_amount != previous_utilized
+            || updated_line.last_accrual_ts != previous_timestamp
+        {
+            persist_credit_line(
+                env,
+                &borrower,
+                &updated_line,
+                previous_utilized,
+                Some(previous_status),
+            );
+        }
+    }
 }
 
 /// Materialize pending interest accrual across a bounded batch of borrower addresses.
