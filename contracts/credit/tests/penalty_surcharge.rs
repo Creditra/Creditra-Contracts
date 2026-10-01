@@ -216,3 +216,44 @@ fn structured_flat_rejects_negative_amount_without_changing_config() {
         .is_err());
     assert_eq!(ctx.client().get_late_fee_config(), Some(valid));
 }
+
+fn has_credit_event(ctx: &Ctx, kind: &str) -> bool {
+    ctx.env.events().all().iter().any(|event| {
+        event.1.len() >= 2
+            && Symbol::try_from_val(&ctx.env, &event.1.get(0).unwrap()).ok()
+                == Some(Symbol::new(&ctx.env, "credit"))
+            && Symbol::try_from_val(&ctx.env, &event.1.get(1).unwrap()).ok()
+                == Some(Symbol::new(&ctx.env, kind))
+    })
+}
+
+#[test]
+fn test_zero_legacy_surcharge_emits_no_penalty_event() {
+    let ctx = setup(500);
+    ctx.client().set_penalty_surcharge_bps(&0);
+    ctx.env.ledger().set_timestamp(T0 + YEAR);
+    ctx.accrue();
+    assert_eq!(ctx.interest(), 5_000);
+    assert!(
+        !has_credit_event(&ctx, "pen_enter"),
+        "a zero surcharge must never emit a penalty-rate-entered event"
+    );
+}
+
+#[test]
+fn test_penalty_rate_exited_event_emitted() {
+    let ctx = setup(500);
+    ctx.client().set_penalty_surcharge_bps(&200);
+    ctx.env.ledger().set_timestamp(T0 + YEAR);
+    ctx.accrue();
+
+    // Catch up: interest plus one installment moves the due date out two years.
+    ctx.fund_repay(8_000);
+    ctx.client().repay_credit(&ctx.borrower, &8_000);
+    ctx.env.ledger().set_timestamp(T0 + 2 * YEAR);
+    ctx.accrue();
+    assert!(
+        has_credit_event(&ctx, "pen_exit"),
+        "leaving delinquency must emit a penalty-rate-exited event"
+    );
+}
