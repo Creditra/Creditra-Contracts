@@ -228,3 +228,36 @@ fn test_multi_token_deposit_does_not_affect_legacy_collateral_balance() {
         2_000
     );
 }
+
+#[test]
+fn test_mixed_legacy_and_allowlisted_collateral_conserves_total() {
+    let env = Env::default();
+    let (client, _, contract_id) = setup(&env);
+    let borrower_a = Address::generate(&env);
+    let borrower_b = Address::generate(&env);
+
+    let legacy = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let legacy_addr = legacy.address();
+    client.set_liquidity_token(&legacy_addr);
+    client.set_liquidity_source(&legacy_addr);
+    StellarAssetClient::new(&env, &legacy_addr).mint(&borrower_a, &10_000);
+    StellarAssetClient::new(&env, &legacy_addr).mint(&borrower_b, &10_000);
+    StellarAssetClient::new(&env, &legacy_addr).mint(&contract_id, &10_000);
+
+    let token = mint_token(&env, &borrower_a, 10_000);
+    StellarAssetClient::new(&env, &token).mint(&borrower_b, &10_000);
+    StellarAssetClient::new(&env, &token).mint(&contract_id, &10_000);
+    client.set_collateral_token_allowlist(&vec![&env, token.clone()]);
+
+    client.deposit_collateral(&borrower_a, &3_000);
+    client.deposit_collateral(&borrower_b, &2_000);
+    client.deposit_collateral_token(&borrower_a, &token, &4_000);
+    client.deposit_collateral_token(&borrower_b, &token, &1_000);
+
+    assert_eq!(client.get_protocol_summary_view().total_collateral, 10_000);
+    client.withdraw_collateral(&borrower_a, &1_000);
+    client.withdraw_collateral_token(&borrower_a, &token, &2_000);
+    client.withdraw_collateral(&borrower_b, &2_000);
+    client.withdraw_collateral_token(&borrower_b, &token, &1_000);
+    assert_eq!(client.get_protocol_summary_view().total_collateral, 4_000);
+}
