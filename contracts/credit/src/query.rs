@@ -65,9 +65,7 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
 /// [`crate::storage::get_repayment_schedule`], which bumps the schedule
 /// entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&crate::storage::DataKey::RepaymentSchedule(borrower))
+    crate::storage::get_repayment_schedule(&env, &borrower)
 }
 
 /// Return the collateral-aware health factor for a borrower, expressed in basis
@@ -85,12 +83,77 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 /// health_bps = collateral_value * 100_000_000 / (utilized_amount * min_ratio_bps)
 /// ```
 ///
+/// # What this metric includes
+///
+/// - **Single-token collateral balance**: Reads the single on-chain collateral balance
+///   deposited for `borrower` via [`crate::storage::get_collateral_balance`].
+/// - **Recorded debt utilization**: Reads `utilized_amount` currently stored in the
+///   borrower's [`CreditLineData`].
+/// - **Configured minimum collateral ratio**: Reads global `MinCollateralRatioBps`
+///   (defaults to `15_000` bps / 150% if unset).
+///
+/// # Excluded inputs & blind spots (WARNING for off-chain keepers)
+///
+/// Keepers and integrators must **not** rely on `get_health_factor` as a complete,
+/// autonomous liquidation signal. The metric has significant blind spots:
+///
+/// 1. **No multi-token collateral support**: Only the single configured collateral
+///    token balance is evaluated. Any multi-asset collateral deposits, external tokens,
+///    or cross-asset portfolios are excluded.
+/// 2. **No risk weights or haircuts**: Collateral units are weighted 1:1 without
+///    haircuts, risk tiers, or asset-specific collateral factors.
+/// 3. **No oracle prices or exchange rates**: The calculation assumes a 1:1 nominal
+///    parity between the collateral token and the borrowed liquidity token. It does
+///    not consult oracle price feeds, ignoring price volatility, exchange-rate swings,
+///    and stablecoin depeg events.
+/// 4. **Ignores delinquency and missed installments**: The health factor measures
+///    collateralization only; it does **not** evaluate whether the borrower is delinquent
+///    on repayment installments. Keepers must inspect [`is_delinquent`] separately.
+/// 5. **Excludes uncheckpointed pending interest**: Stored `utilized_amount` reflects
+///    debt as of the last mutating transaction; accrued interest elapsed since
+///    `last_accrual_ts` is not applied by this read-only query.
+///
+/// # Default eligibility & on-chain enforcement
+///
+/// **Important**: `default_credit_line` does **NOT** consult or enforce `get_health_factor`.
+/// On-chain default is an **admin-discretionary** lifecycle transition (`require_admin_auth`).
+/// The contract validates only that the protocol is not paused, the credit line is in an
+/// eligible status (`Active`, `Suspended`, `SelfSuspended`, or `Restricted`), and any active
+/// liquidation grace period has expired. The contract will **not** revert a default call
+/// simply because `get_health_factor >= 10_000`, nor does it automatically trigger default
+/// when `get_health_factor < 10_000`.
+///
+/// # Recommended keeper evaluation logic
+///
+/// Off-chain keepers should combine both financial health and payment behavior before
+/// initiating or proposing a default:
+///
+/// 1. **Check delinquency**: Call [`is_delinquent`]. If `true` and the grace period
+///    has elapsed, the borrower has missed a scheduled installment and may be defaulted
+///    regardless of collateral backing.
+/// 2. **Check health factor with off-chain pricing**: Evaluate `get_health_factor` alongside
+///    real-time oracle prices and effective risk weights.
+/// 3. **Check liquidation grace**: Verify whether the borrower is within an active
+///    per-borrower liquidation grace window (`get_per_borrower_liquidation_grace`).
+///
+/// # Example thresholds
+///
+/// | Health Factor (bps) | Collateral Status | Recommended Keeper Action |
+/// |---|---|---|
+/// | `u32::MAX` | No outstanding debt (`utilized <= 0`) | Safe — no liquidation possible |
+/// | `≥ 12_000` (≥ 120%) | Well-collateralized buffer | Healthy — no action required |
+/// | `10_000..11_999` (100%–120%) | Nearing minimum required ratio | Caution — monitor closely for price volatility |
+/// | `< 10_000` (< 100%) | Under-collateralized advisory threshold | Liquidation candidate — trigger off-chain review / default |
+/// | `< 8_000` (< 80%) | Critically under-collateralized | Urgent liquidation candidate — immediate action recommended |
+///
+/// *(Note: A borrower with `is_delinquent == true` past grace is default-eligible even if `health_factor >= 10_000`.)*
+///
 /// # Interpretation
 ///
 /// - Returns `u32::MAX` when `utilized_amount == 0` (no debt → infinitely
 ///   healthy).
-/// - A value below `10_000` means the position is under-collateralized and
-///   eligible for liquidation (`default_credit_line`).
+/// - A value below `10_000` indicates nominal under-collateralization relative to
+///   the minimum collateral ratio.
 /// - A value of `10_000` means the collateral exactly covers the minimum
 ///   required amount.
 /// - A value above `10_000` means the position is over-collateralized relative
@@ -116,6 +179,7 @@ pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSc
 /// - `utilized_amount` is negative (should never happen): returns `u32::MAX`
 ///   via the zero-utilised short-circuit since the storage invariant enforces
 ///   `utilized_amount >= 0`.
+///
 /// # Authentication
 /// No authentication required. This is a pure read — it computes the health
 /// ratio from on-chain data without modifying any storage.
@@ -132,42 +196,45 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         return u32::MAX;
     }
 
-    // Fetch collateral balance.  Defaults to 0 if no collateral has been
-    // deposited.
-    let collateral = crate::storage::get_collateral_balance(&env, &borrower);
+    // Fetch the borrower's *effective* collateral value: the legacy balance plus
+    // every allowlisted token balance, each discounted by its configured risk
+    // weight. This is the same helper the draw-time ratio check uses, so the
+    // query can never disagree with the enforcement path.
+    let collateral = crate::collateral::effective_collateral_value(&env, &borrower);
 
     // Fetch the global minimum collateral ratio.  When unset the draw-time
     // default of 15_000 bps (150 %) applies.
     let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15_000);
 
-    // Convert to u128 for overflow-safe multiplication.
+    // When min_ratio_bps is 0 the position is infinitely healthy (no ratio
+    // requirement).
+    if min_ratio_bps == 0 {
+        return u32::MAX;
+    }
+
+    // Use the same ceiling-based required_collateral that draw, withdraw, and
+    // partial-release all use.  This guarantees:
+    //   health_bps == 10_000  ⟺  collateral == required_collateral
+    //   health_bps  < 10_000  ⟺  collateral  < required_collateral (liquidatable)
+    //   health_bps  > 10_000  ⟺  collateral  > required_collateral (healthy)
+    let required =
+        crate::collateral::required_collateral(&env, utilized, min_ratio_bps);
+
+    if required == 0 {
+        // Pathological: utilized > 0 but ceiling rounds to 0 (impossible with
+        // non-zero ratio_bps, but guard against it defensively).
+        return u32::MAX;
+    }
+
+    // health_bps = collateral * 10_000 / required
+    // Convert to u128 to avoid overflow on large collateral values.
     let collateral_u128 = collateral.max(0) as u128;
-    let utilized_u128 = utilized.max(0) as u128;
-    let min_ratio_u128 = min_ratio_bps as u128;
+    let required_u128 = required.max(0) as u128;
 
-    // health_bps = collateral * 100_000_000 / (utilized * min_ratio)
-    //
-    // The intermediate numerator is `collateral * 10_000` scaled up by another
-    // `10_000` to preserve precision before the final division:
-    //
-    //   collateral * 10_000                 collateral * 100_000_000
-    //   ───────────────────────    =    ─────────────────────────────
-    //   utilized * min_ratio / 10_000        utilized * min_ratio
-    let numerator = collateral_u128
-        .checked_mul(100_000_000)
-        .unwrap_or(u128::MAX);
-
-    let denominator = utilized_u128
-        .checked_mul(min_ratio_u128)
-        .unwrap_or(u128::MAX);
-
-    // If the denominator is 0 (due to min_ratio_bps = 0), the position is infinitely healthy.
-    // We also guard against division-by-zero.
-    let health_bps = if denominator == 0 {
-        u128::from(u32::MAX)
-    } else {
-        numerator / denominator
-    };
+    let health_bps = collateral_u128
+        .checked_mul(10_000)
+        .unwrap_or(u128::MAX)
+        / required_u128;
 
     // Clamp to u32 range.  Values beyond u32::MAX are theoretically possible
     // with extreme collateral-to-debt ratios but serve the same keeper

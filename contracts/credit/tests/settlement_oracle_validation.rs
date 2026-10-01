@@ -7,6 +7,13 @@
 //! - Settlement with no oracle config (backward compatible)
 //! - Settlement with single-oracle config (price validation)
 //! - Settlement with quorum config (quorum mode takes precedence)
+//! - Settlement with an active weighted-median oracle registry:
+//!   - a settlement driven by three oracle reports resolves and succeeds
+//!   - the caller-supplied `oracle_price` is ignored while registry mode is on
+//!   - registry mode rejects with `OracleQuorumNotMet` when the configured
+//!     quorum is not reached, and stale reports do not count towards quorum
+//!   - the registry median takes precedence over both the quorum-of-K price
+//!     feed and the single-oracle circuit breaker
 //! - Multiple settlements reusing last accepted price
 //! - Oracle outage scenarios and recovery
 //! - Price recording and boundary conditions
@@ -50,6 +57,9 @@ fn open_and_default(
 
     client.open_credit_line(&borrower, &10_000_i128, &300_u32, &60_u32);
     if utilized > 0 {
+        // `draw_credit` enforces the 150% minimum collateral ratio, so the
+        // borrower must post collateral before drawing.
+        client.deposit_collateral(&borrower, &(utilized * 150 / 100));
         client.draw_credit(&borrower, &utilized);
     }
     client.default_credit_line(&borrower);
@@ -58,6 +68,24 @@ fn open_and_default(
 
 fn sid(env: &Env, s: &str) -> Symbol {
     Symbol::new(env, s)
+}
+
+/// Register three oracles (weights 10/20/30) and configure a 60-weight quorum
+/// with a one-hour freshness window. Returns the three oracle addresses so a
+/// test can drive their reports.
+fn configure_three_oracle_registry(
+    env: &Env,
+    client: &CreditClient,
+) -> (Address, Address, Address) {
+    let o1 = Address::generate(env);
+    let o2 = Address::generate(env);
+    let o3 = Address::generate(env);
+    client.add_oracle(&o1, &10_u32);
+    client.add_oracle(&o2, &20_u32);
+    client.add_oracle(&o3, &30_u32);
+    client.set_quorum_threshold(&60_u32);
+    client.set_reporting_window(&3_600_u64);
+    (o1, o2, o3)
 }
 
 // ── backward compatibility — no oracle config ────────────────────────────────
@@ -161,7 +189,7 @@ fn settlement_single_oracle_second_price_within_deviation() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceDeviation")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn settlement_single_oracle_over_deviation_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -190,7 +218,7 @@ fn settlement_single_oracle_over_deviation_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceStale")]
+#[should_panic(expected = "Error(Contract, #37)")]
 fn settlement_single_oracle_stale_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -219,7 +247,7 @@ fn settlement_single_oracle_stale_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceInvalid")]
+#[should_panic(expected = "Error(Contract, #36)")]
 fn settlement_single_oracle_missing_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -232,7 +260,7 @@ fn settlement_single_oracle_missing_price_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceInvalid")]
+#[should_panic(expected = "Error(Contract, #36)")]
 fn settlement_single_oracle_zero_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -309,7 +337,7 @@ fn settlement_quorum_fresh_price_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "OracleQuorumNotMet")]
+#[should_panic(expected = "Error(Contract, #50)")]
 fn settlement_quorum_missing_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -321,7 +349,7 @@ fn settlement_quorum_missing_price_fails() {
 }
 
 #[test]
-#[should_panic(expected = "OraclePriceStale")]
+#[should_panic(expected = "Error(Contract, #37)")]
 fn settlement_quorum_stale_price_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -340,7 +368,7 @@ fn settlement_quorum_stale_price_fails() {
 // ── replay protection ────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "AlreadyInitialized")]
+#[should_panic(expected = "Error(Contract, #14)")]
 fn settlement_replay_attempt_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -357,8 +385,16 @@ fn settlement_replay_attempt_fails() {
         &None,
     );
 
-    // Line is now closed, but even if we re-open, same settlement_id is blocked
-    // (In practice, line would be closed, so this is more of a contract invariant check)
+    // Replaying the same `(borrower, settlement_id)` pair is rejected by the
+    // replay guard, which runs before the credit-line read, so the closed line
+    // cannot mask the expected `AlreadyInitialized` (#14).
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &settlement_id,
+        &10_000_u32,
+        &None,
+    );
 }
 
 #[test]
@@ -434,12 +470,14 @@ fn settlement_multiple_close_factors() {
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 700);
 
-    // Second settlement: recover 400 more (close_factor ~57% of remaining)
+    // Second settlement: recover 400 more (close_factor ~58% of remaining).
+    // `max_recoverable` floors `utilized * close_factor / 10_000`, so 5_700
+    // would only allow 399 of the 700 still outstanding.
     client.settle_default_liquidation(
         &borrower,
         &400_i128,
         &sid(&env, "s2"),
-        &5_700_u32,
+        &5_800_u32,
         &None,
     );
     let line = client.get_credit_line(&borrower).unwrap();
@@ -479,7 +517,7 @@ fn settlement_recovered_amount_equals_max_recoverable() {
 }
 
 #[test]
-#[should_panic(expected = "OverLimit")]
+#[should_panic(expected = "Error(Contract, #6)")]
 fn settlement_recovered_amount_exceeds_max_recoverable() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -496,7 +534,7 @@ fn settlement_recovered_amount_exceeds_max_recoverable() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn settlement_zero_recovered_amount_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -512,7 +550,7 @@ fn settlement_zero_recovered_amount_fails() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn settlement_negative_recovered_amount_fails() {
     let env = Env::default();
     let (client, contract_id, _) = setup(&env);
@@ -608,5 +646,170 @@ fn settlement_no_oracle_config_does_not_record_price() {
     assert_eq!(
         client.get_credit_line(&b2).unwrap().status,
         CreditStatus::Closed
+    );
+}
+
+// ── registry mode — weighted median drives settlement ────────────────────────
+
+#[test]
+fn settlement_uses_registry_median_with_three_oracles() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+    let (o1, o2, o3) = configure_three_oracle_registry(&env, &client);
+
+    // Sorted: (1000, w10), (1100, w20), (1200, w30). Total weight 60,
+    // target = ceil(60 / 2) = 30; cumulative weight reaches 30 at 1100.
+    client.report_value(&o1, &1_000_u128);
+    client.report_value(&o2, &1_100_u128);
+    client.report_value(&o3, &1_200_u128);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    // No caller-supplied price: the registry median is authoritative.
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+#[test]
+fn weighted_median_respects_oracle_weights() {
+    let env = Env::default();
+    let (client, _contract_id, _admin) = setup(&env);
+    let (o1, o2, o3) = configure_three_oracle_registry(&env, &client);
+
+    // Sorted: (100, w30), (500, w10), (900, w20). Target = 30; the heaviest
+    // *lowest* report (weight 30) is reached first, so the median is 100.
+    client.report_value(&o1, &500_u128);
+    client.report_value(&o2, &900_u128);
+    client.report_value(&o3, &100_u128);
+
+    assert_eq!(client.get_median_value(), 100);
+}
+
+// ── registry mode — caller-supplied price is ignored ─────────────────────────
+
+#[test]
+fn settlement_ignores_caller_supplied_price_in_registry_mode() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+    let (o1, o2, o3) = configure_three_oracle_registry(&env, &client);
+
+    client.report_value(&o1, &1_000_u128);
+    client.report_value(&o2, &1_100_u128);
+    client.report_value(&o3, &1_200_u128);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    // A wildly off caller price must not be consulted (no deviation check, no
+    // rejection): the registry median wins.
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(999_999_i128),
+    );
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Closed
+    );
+}
+
+// ── registry mode — quorum failures ──────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn settlement_rejects_when_registry_quorum_not_met() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+    let (o1, _o2, _o3) = configure_three_oracle_registry(&env, &client);
+
+    // Only one of the three oracles reports: 10 of the required 60 weight.
+    client.report_value(&o1, &1_000_u128);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn settlement_rejects_stale_registry_reports() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+
+    let o1 = Address::generate(&env);
+    client.add_oracle(&o1, &10_u32);
+    client.set_quorum_threshold(&10_u32);
+    client.set_reporting_window(&60_u64); // one-minute freshness window
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.report_value(&o1, &1_000_u128);
+
+    // The only report ages out of the freshness window.
+    env.ledger().with_mut(|l| l.timestamp = 1_061);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn settlement_rejects_when_registry_has_no_reports() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+
+    // Quorum configured but the oracle list is empty.
+    client.set_quorum_threshold(&10_u32);
+    client.set_reporting_window(&3_600_u64);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
+}
+
+// ── registry mode — precedence ────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn registry_mode_takes_precedence_over_quorum_price_feed() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+
+    // Quorum-of-K price feed is configured and a valid price is stored …
+    client.set_oracle_quorum_config(&2_u32, &500_u32, &3_600_u64);
+    let prices = soroban_sdk::vec![&env, 1_000_i128, 1_020_i128];
+    client.submit_oracle_prices(&prices);
+
+    // … but the registry is now active and cannot reach quorum, so settlement
+    // must fail closed instead of falling back to the stored quorum price.
+    client.set_quorum_threshold(&10_u32);
+    client.set_reporting_window(&3_600_u64);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #50)")]
+fn registry_mode_takes_precedence_over_single_oracle_config() {
+    let env = Env::default();
+    let (client, contract_id, _admin) = setup(&env);
+
+    // Single-oracle circuit breaker is configured and a valid price is supplied …
+    client.set_oracle_config(&500_u32, &3_600_u64);
+
+    // … but the registry is active and cannot reach quorum: reject rather than
+    // validate the caller-supplied price.
+    client.set_quorum_threshold(&10_u32);
+    client.set_reporting_window(&3_600_u64);
+
+    let borrower = open_and_default(&client, &env, &contract_id, 500);
+    client.settle_default_liquidation(
+        &borrower,
+        &500_i128,
+        &sid(&env, "s1"),
+        &10_000_u32,
+        &Some(1_000_i128),
     );
 }

@@ -7,6 +7,11 @@
 
 **CI guard: In-module tests pin every discriminant.**
 
+**Canonical credit-contract table:** [`docs/errors.md`](../errors.md). Together
+with [`docs/errors/collateral.md`](./collateral.md) this is the only other
+error table in the repository; every other error document is a redirect to
+`docs/errors.md`.
+
 This document is the canonical reference for the `FreezeError` catalog
 emitted by the Creditra freeze domain. Integrators (TypeScript SDK, Rust
 SDK, indexers) match against the integer codes here when decoding an error
@@ -27,7 +32,7 @@ Rules enforced by CI (`contracts/freeze/src/errors.rs`):
 - Every variant has an explicit `= N` assignment in `errors.rs`.
 - No two variants share the same integer (`no_duplicate_discriminants`).
 - New variants are always appended at the end with the next available integer.
-- The `mirror_discriminants_match_canonical_credit_contract` test pins every mirror discriminant against the canonical credit contract `ContractError` table at [`docs/ERROR_CODES.md`](../ERROR_CODES.md).
+- The `mirror_discriminants_match_canonical_credit_contract` test pins every mirror discriminant against the canonical credit contract `ContractError` table at [`docs/errors.md`](../errors.md).
 
 ---
 
@@ -38,8 +43,8 @@ distinct role:
 
 | Tier | Codes | Purpose |
 |------|-------|---------|
-| **Mirror** | `3`, `16`, `19`, `40`, `46` | Semantically identical to canonical `ContractError` codes published by `contracts/credit/src/types.rs`. SDK consumers can map these integers directly to the canonical table at [`docs/ERROR_CODES.md`](../ERROR_CODES.md). |
-| **Freeze-specific** | `100+` | Errors that have no canonical counterpart in the credit contract's `ContractError`. Reserved namespace with a `50`-slot buffer above the credit contract's `1..=49` range. |
+| **Mirror** | `3`, `16`, `19`, `40`, `46` | Semantically identical to canonical `ContractError` codes published by `contracts/credit/src/types.rs`. SDK consumers can map these integers directly to the canonical table at [`docs/errors.md`](../errors.md). |
+| **Freeze-specific** | `100+` | Errors that have no canonical counterpart in the credit contract's `ContractError`. Reserved namespace, far above the credit contract's current `1..=63` range. |
 
 The `100+` gap is intentional. It defends against accidental collisions if a
 future PR appends either catalog, and it gives front-end integrators an
@@ -75,7 +80,7 @@ their telemetry.
 The mirror tier overlaps the credit contract's `ContractError` codes. SDK
 clients should be able to decode these without needing to look up a
 per-contract table — the canonical reference at
-[`docs/ERROR_CODES.md`](../ERROR_CODES.md) covers both the credit contract and the
+[`docs/errors.md`](../errors.md) covers both the credit contract and the
 mirror tier of this catalog.
 
 | Mirror code | Same-named variant in `ContractError`? | Identical meaning? |
@@ -101,9 +106,8 @@ The freeze domain groups its mirror errors into the same top-level categories as
 
 ## Related Documents
 
-- [`docs/ERROR_CODES.md`](../ERROR_CODES.md) — canonical flat code table for the
-  credit contract.
-- [`docs/error-taxonomy.md`](../error-taxonomy.md) — error categories with
-  SDK recovery actions.
-- [`docs/errors.md`](../errors.md) — canonical reference for the credit
-  contract's `ContractError`.
+- [`docs/errors.md`](../errors.md) — **canonical** error reference for the
+  credit contract's `ContractError`; all other error docs redirect here.
+- [`docs/errors/collateral.md`](./collateral.md) — `CollateralError` catalog.
+- [`docs/ERROR_MIGRATION.md`](../ERROR_MIGRATION.md) — V1 → V2 error-encoding
+  migration log.

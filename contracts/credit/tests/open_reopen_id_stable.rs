@@ -76,3 +76,48 @@ fn reopen_closed_line_reuses_existing_nonzero_id() {
     assert_eq!(client.get_credit_line_count(), original_count);
     assert_eq!(credit_line_id_for(&client, &borrower), original_id);
 }
+
+#[test]
+fn reopen_suspended_line_with_debt_carries_forward() {
+    let env = Env::default();
+    let (client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    
+    // Open a line
+    client.open_credit_line(&borrower, &1_000_i128, &350_u32, &60_u32);
+    
+    // We mock the storage directly for the test to simulate debt
+    let mut line = env.as_contract(&client.address, || {
+        creditra_credit::storage::get_credit_line(&env, &borrower).unwrap()
+    });
+    
+    line.utilized_amount = 500;
+    line.accrued_interest = 50;
+    line.status = CreditStatus::Suspended;
+    line.last_accrual_ts = env.ledger().timestamp();
+    
+    env.as_contract(&client.address, || {
+        // manually set TotalUtilized so we can test that it remains unchanged
+        creditra_credit::storage::adjust_total_utilized(&env, 0, 500);
+        creditra_credit::storage::persist_credit_line(
+            &env,
+            &borrower,
+            &line,
+            0,
+            Some(CreditStatus::Active)
+        );
+    });
+
+    let total_before = client.get_total_utilized();
+    assert_eq!(total_before, 500);
+
+    // Reopen the line
+    client.open_credit_line(&borrower, &2_000_i128, &425_u32, &70_u32);
+
+    let reopened = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(reopened.status, CreditStatus::Active);
+    assert_eq!(reopened.utilized_amount, 500);
+    assert_eq!(reopened.accrued_interest, 50);
+    assert_eq!(client.get_total_utilized(), 500, "total utilized should be unchanged");
+}
