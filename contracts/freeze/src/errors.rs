@@ -33,7 +33,7 @@
 //!
 //! SDK clients decoding an error code emitted from the freeze contract
 //! can map the integer directly to the canonical table at
-//! [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md).
+//! [`docs/errors.md`](../../../docs/errors.md).
 //!
 //! # Freeze-specific tier semantics
 //!
@@ -61,9 +61,9 @@ use soroban_sdk::contracterror;
 ///
 /// - **Mirror tier** (`3`, `16`, `19`, `40`, `46`) — semantic twins of the
 ///   canonical `ContractError` codes; SDK clients can match them against
-///   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md).
+///   [`docs/errors.md`](../../../docs/errors.md).
 /// - **Freeze-specific tier** (`100+`) — namespaced to leave a clear gap
-///   from the credit contract's `1..49` range, defending against accidental
+///   from the credit contract's `1..=63` range, defending against accidental
 ///   collisions if either contract appends to its enum in the future.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -73,7 +73,7 @@ pub enum FreezeError {
     //
     // Each mirror variant carries the same discriminant *and* the same
     // semantic meaning as its canonical counterpart, so SDK consumers
-    // can map an emitted integer against docs/ERROR_CODES.md directly.
+    // can map an emitted integer against docs/errors.md directly.
 
     /// The requested borrower does not have an open credit line.
     ///
@@ -103,8 +103,8 @@ pub enum FreezeError {
     // ── Freeze-specific tier (codes 100+) ───────────────────────────────
     //
     // These discriminants are exclusive to the freeze domain and
-    // start at 100 to leave a 50-slot buffer above the credit contract's
-    // range. New variants MUST be appended at the end of this
+    // start at 100 to leave a wide buffer above the credit contract's
+    // 1..=63 range. New variants MUST be appended at the end of this
     // block.
 }
 

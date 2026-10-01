@@ -35,7 +35,7 @@
 //!
 //! - `contracts/accrual/src/events.rs` — accrual event pattern.
 //! - `contracts/credit/src/events.rs` — credit contract internal events.
-//! - `docs/EVENTS_CATALOG.md` — canonical cross-contract event catalog.
+//! - `docs/EVENT_CATALOG.md` — canonical cross-contract event catalog.
 
 use soroban_sdk::{contracttype, symbol_short, Address, Env};
 
