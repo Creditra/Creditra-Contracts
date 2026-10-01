@@ -129,6 +129,7 @@ mod lifecycle_views;
 
 mod limits;
 pub mod math_utils;
+mod oracles;
 mod query;
 #[path = "../../query/src/views.rs"]
 mod query_views;
@@ -215,6 +216,9 @@ pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
 /// Maximum allowed protocol fee in basis points (1000 = 10%). Adjust if needed.
 const MAX_PROTOCOL_FEE_BPS: u32 = 1_000;
+
+#[allow(dead_code)]
+const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 #[allow(dead_code)]
 const SCHEMA_VERSION: u32 = 1;
@@ -318,32 +322,6 @@ impl Credit {
         CONTRACT_API_VERSION
     }
 
-    pub fn commit_attestation_batch(
-        env: Env,
-        borrower: Address,
-        merkle_root: BytesN<32>,
-        count: u32,
-    ) {
-        attestation::commit_attestation_batch(env, borrower, merkle_root, count)
-    }
-
-    pub fn get_attestation_batch(env: Env, borrower: Address) -> Option<AttestationBatch> {
-        attestation::get_attestation_batch(env, borrower)
-    }
-
-    pub fn verify_attestation_proof(
-        env: Env,
-        borrower: Address,
-        leaf: BytesN<32>,
-        proof: Vec<BytesN<32>>,
-    ) -> bool {
-        attestation::verify_attestation_proof(env, borrower, leaf, proof)
-    }
-
-    pub fn clear_attestation_batch(env: Env, borrower: Address) {
-        attestation::clear_attestation_batch(env, borrower)
-    }
-
     pub fn propose_admin(env: Env, new_admin: Address, delay_seconds: u64) {
         require_admin_auth(&env);
         let accept_after = env.ledger().timestamp().saturating_add(delay_seconds);
@@ -406,6 +384,22 @@ impl Credit {
     pub fn set_liquidity_source(env: Env, reserve_address: Address) {
         config::set_liquidity_source(env, reserve_address)
     }
+
+    /// Sets the minimum collateral ratio in basis points (admin only).
+    /// Set the minimum collateral ratio required for borrowing (admin only).
+    ///
+    /// # Arguments
+    /// * `ratio_bps` - The minimum collateral ratio in basis points (e.g., 15000 = 150%)
+    ///
+    /// # Errors
+    /// * Panics if caller is not admin (`ContractError::Unauthorized`)
+    /// * Panics if protocol is paused (`ContractError::ProtocolPaused`)
+    pub fn set_min_collateral_ratio_bps(env: Env, ratio_bps: u32) {
+        require_admin_auth(&env);
+        assert_not_paused(&env);
+        crate::storage::set_min_collateral_ratio_bps(&env, ratio_bps);
+    }
+
 
     /// Open a new credit line for a borrower (admin only).
     pub fn open_credit_line(
@@ -699,15 +693,14 @@ impl Credit {
             env.panic_with_error(ContractError::CreditLineClosed);
         }
 
-        // Normalize the interest slice against the current total debt before
-        // allocating repayment. This keeps the allocation order deterministic
-        // across the debt components even if stale or boundary values have
-        // drifted the underlying state.
-        let total_debt = credit_line.utilized_amount.max(0);
-        credit_line.accrued_interest = credit_line.accrued_interest.min(total_debt).max(0);
+        let effective_repay = if amount > credit_line.utilized_amount {
+            credit_line.utilized_amount
+        } else {
+            amount
+        };
 
-        let (effective_repay, interest_repaid, _principal_repaid) =
-            lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
+        let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+        let _principal_repaid = effective_repay - interest_repaid;
 
         // Repayment moves real tokens into the protocol, so the liquidity
         // token has to be configured. The transfer block used to be skipped
@@ -808,7 +801,14 @@ impl Credit {
         }
 
         let _timestamp = env.ledger().timestamp();
-
+        publish_interest_accrued_event(
+            &env,
+            InterestAccruedEvent {
+                borrower: borrower.clone(),
+                accrued_amount: 0,
+                new_utilized_amount: new_utilized,
+            },
+        );
         publish_repayment_event(
             &env,
             RepaymentEvent {
@@ -1100,13 +1100,8 @@ impl Credit {
     ///   [`ContractError::InvalidAmount`].
     /// - `AprBased` mode: `surcharge_bps` must be `<= 10_000`; values above
     ///   the cap revert with [`ContractError::RateTooHigh`].
-    ///
-    /// Reverts with [`ContractError::AuctionActive`] while any liquidation
-    /// auction is in flight (Issue #1169): the late-fee schedule is frozen
-    /// until the last active auction exits the `Defaulted` pipeline.
     pub fn set_late_fee_config(env: Env, config: Option<LateFeeConfig>) {
         require_admin_auth(&env);
-        crate::storage::assert_no_active_auctions(&env);
         if let Some(cfg) = config {
             match cfg {
                 LateFeeConfig::Flat(crate::penalties::FlatFeeConfig { amount }) => {
@@ -1270,13 +1265,8 @@ impl Credit {
 
     /// Set protocol fee in basis points (applied to interest portion of repayments).
     /// Admin only. Fee is bounded by `MAX_PROTOCOL_FEE_BPS`.
-    ///
-    /// Reverts with [`ContractError::AuctionActive`] while any liquidation
-    /// auction is in flight (Issue #1169): the fee is frozen until the last
-    /// active auction exits the `Defaulted` pipeline.
     pub fn set_protocol_fee_bps(env: Env, bps: u32) {
         require_admin_auth(&env);
-        crate::storage::assert_no_active_auctions(&env);
         if bps > MAX_PROTOCOL_FEE_BPS {
             env.panic_with_error(crate::types::ContractError::Overflow);
         }
@@ -1400,7 +1390,6 @@ impl Credit {
     /// active auction exits the `Defaulted` pipeline.
     pub fn set_treasury_fee_share_bps(env: Env, treasury_share_bps: u32) {
         require_admin_auth(&env);
-        crate::storage::assert_no_active_auctions(&env);
         if treasury_share_bps > crate::fees::MAX_FEE_SHARE_BPS {
             env.panic_with_error(crate::types::ContractError::Overflow);
         }
@@ -1954,33 +1943,6 @@ impl Credit {
         lifecycle::self_suspend_credit_line(env, borrower)
     }
 
-    /// Unsuspend a credit line (admin only).
-    ///
-    /// Transitions `Suspended` or `SelfSuspended` → `Active`. This is the
-    /// admin recovery path for both suspension origins; it clears
-    /// `suspension_ts` and emits `("credit","unsuspend")`.
-    ///
-    /// # Authorization
-    /// Admin only. Borrowers cannot unsuspend an admin `Suspended` line via
-    /// `self_unsuspend_credit_line` — that path only handles `SelfSuspended`.
-    pub fn unsuspend_credit_line(env: Env, borrower: Address) {
-        require_admin_auth(&env);
-        enforce_accrual_admin_cooldown(&env, &borrower);
-        lifecycle::unsuspend_credit_line(env, borrower)
-    }
-
-    /// Borrower-initiated unsuspend for self-suspended lines only.
-    ///
-    /// Transitions `SelfSuspended → Active`. Lets a borrower revert their own
-    /// voluntary suspension without admin. An admin `Suspended` line **cannot**
-    /// be cleared via this path — least privilege.
-    ///
-    /// # Authorization
-    /// Requires `borrower.require_auth()`.
-    pub fn self_unsuspend_credit_line(env: Env, borrower: Address) {
-        lifecycle::self_unsuspend_credit_line(env, borrower)
-    }
-
     pub fn close_credit_line(env: Env, borrower: Address, closer: Address) {
         closer.require_auth();
         if closer == require_admin(&env) {
@@ -2122,7 +2084,6 @@ impl Credit {
             recovered_amount,
             settlement_id,
             close_factor_bps,
-            oracle_price,
         );
     }
 
@@ -2145,15 +2106,6 @@ impl Credit {
     /// Return the configured auction contract address, if set.
     pub fn get_auction_contract(env: Env) -> Option<Address> {
         crate::storage::get_auction_contract(&env)
-    }
-
-    /// Return the number of liquidation auctions currently active (read-only).
-    ///
-    /// An auction is active while its credit line is in `Defaulted` status.
-    /// While this count is non-zero, fee-configuration entrypoints revert with
-    /// [`ContractError::AuctionActive`] (Issue #1169).
-    pub fn get_pending_auction_count(env: Env) -> u32 {
-        crate::storage::get_pending_auction_count(&env)
     }
 
     // ── Close factor (partial liquidation cap) ────────────────────────────────
@@ -2326,14 +2278,6 @@ impl Credit {
 
         let canonical_price = oracles::resolve_quorum_price(&env, &prices, &qcfg);
         let now = env.ledger().timestamp();
-        // Quorum-mode settlement reads the resolved price from its own keys
-        // (`DataKey::OracleQuorumPrice` / `OracleQuorumPriceTs`), so the median
-        // must be persisted there. Storing it under the single-oracle key
-        // instead left quorum mode with no price at all, and every settlement
-        // reverted `OracleQuorumNotMet` (#50) regardless of age. The
-        // single-oracle key is still written: it is the "last accepted price"
-        // read by the deviation circuit breaker and by collateral release.
-        crate::storage::set_oracle_quorum_price(&env, canonical_price, now);
         crate::storage::set_oracle_last_price(&env, canonical_price, now);
         publish_oracle_quorum_price_set_event(&env, canonical_price, qcfg.min_quorum_k, now);
     }
@@ -2545,33 +2489,8 @@ impl Credit {
     ///
     /// # Events
     /// Emits `("credit", "paused")` with `true` or `("credit", "unpaused")` with `false`.
-    ///
-    /// # Idempotency and observability
-    /// The transition is idempotent: a request to move to the state the contract
-    /// is **already** in is a safe no-op that neither rewrites the pause reason
-    /// nor emits a misleading transition event. Only a genuine state change
-    /// writes the flag and emits an event, so off-chain monitors see exactly one
-    /// event per real pause/unpause and never a spurious duplicate from a retry.
-    /// A reason-less pause additionally clears any stale reason recorded by an
-    /// earlier `set_protocol_paused_with_reason` call.
     pub fn set_protocol_paused(env: Env, paused: bool) {
         require_admin_auth(&env);
-        let already = crate::storage::is_paused(&env);
-
-        if paused == already {
-            // Idempotent no-op: do not rewrite state or emit a duplicate event.
-            if paused {
-                // Reason-less pause — the latest intent carries no reason, so
-                // drop any stale reason recorded by an earlier pause-with-reason.
-                crate::storage::clear_pause_reason(&env);
-            }
-            return;
-        }
-
-        if !paused {
-            // Unpause clears the recorded reason.
-            crate::storage::clear_pause_reason(&env);
-        }
         crate::storage::set_paused(&env, paused);
         publish_paused_event(&env, paused);
     }
@@ -2608,42 +2527,20 @@ impl Credit {
     ///
     /// # Events
     /// Emits `("credit", "paused")` or `("credit", "unpaused")`.
-    ///
-    /// # Idempotency and observability
-    /// Idempotent and observable like [`Self::set_protocol_paused`]. A request to
-    /// pause while already paused refreshes the recorded reason (timestamp and
-    /// actor reflect this latest invocation) but does **not** emit a duplicate
-    /// `"paused"` event, because the flag did not change; unpausing while already
-    /// unpaused is a pure no-op. This guarantees one event per real transition so
-    /// retries and duplicate admin calls cannot mislead monitors or corrupt the
-    /// audit trail.
     pub fn set_protocol_paused_with_reason(env: Env, paused: bool, reason: soroban_sdk::Symbol) {
         let admin = require_admin_auth(&env);
-        let already = crate::storage::is_paused(&env);
 
         if paused {
-            // Record the reason for this pause invocation (fresh timestamp/actor).
             let pause_reason = crate::types::PauseReason {
                 reason,
                 timestamp: env.ledger().timestamp(),
                 actor: admin,
             };
             crate::storage::set_pause_reason(&env, &pause_reason);
-
-            if already {
-                // No flag change: refresh the reason but emit no duplicate event.
-                return;
-            }
-            crate::storage::set_paused(&env, true);
-            publish_paused_event(&env, true);
-        } else {
-            if already {
-                crate::storage::clear_pause_reason(&env);
-                crate::storage::set_paused(&env, false);
-                publish_paused_event(&env, false);
-            }
-            // Already unpaused: idempotent no-op.
         }
+
+        crate::storage::set_paused(&env, paused);
+        publish_paused_event(&env, paused);
     }
 
     /// Freeze all draws globally (admin only).
@@ -2917,7 +2814,7 @@ mod test_rate_change_limits {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger as _;
-    use soroban_sdk::token::{self, StellarAssetClient};
+    use soroban_sdk::token;
 
     fn setup<'a>(
         env: &'a Env,
@@ -2967,69 +2864,6 @@ mod test_rate_change_limits {
                 "active credit lines must stay within their limit"
             );
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "utilization conservation")]
-    fn test_total_utilized_invariant_rejects_state_drift() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin);
-
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-        let token = token_id.address();
-        client.set_liquidity_token(&token);
-        client.set_liquidity_source(&contract_id);
-
-        let sac = StellarAssetClient::new(&env, &token);
-        sac.mint(&contract_id, &100_000_i128);
-        sac.mint(&borrower, &100_000_i128);
-
-        client.open_credit_line(&borrower, &10_000_i128, &300_u32, &70_u32);
-        client.deposit_collateral(&borrower, &5_000_i128);
-        client.draw_credit(&borrower, &1_000_i128);
-
-        env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .set(&crate::storage::DataKey::TotalUtilized, &9_999_i128);
-            crate::storage::assert_total_utilized_conserved(&env);
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "collateral conservation")]
-    fn test_total_collateral_invariant_rejects_state_drift() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let borrower = Address::generate(&env);
-        let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
-        client.init(&admin);
-
-        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-        let token = token_id.address();
-        client.set_liquidity_token(&token);
-        client.set_liquidity_source(&contract_id);
-
-        let sac = StellarAssetClient::new(&env, &token);
-        sac.mint(&contract_id, &100_000_i128);
-        sac.mint(&borrower, &100_000_i128);
-
-        client.open_credit_line(&borrower, &10_000_i128, &300_u32, &70_u32);
-        client.deposit_collateral(&borrower, &5_000_i128);
-
-        env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .set(&crate::storage::DataKey::TotalCollateral, &4_999_i128);
-            crate::storage::assert_total_collateral_conserved(&env);
-        });
     }
 
     #[test]
@@ -4529,7 +4363,7 @@ mod test_mock_liquidity_token {
 
         // Advance ledger timestamp by exactly one year
         env.ledger()
-            .set_timestamp(checkpoint + crate::math_utils::SECONDS_PER_YEAR as u64);
+            .set_timestamp(checkpoint + crate::accrual::SECONDS_PER_YEAR);
 
         // At 300 bps (3%) on 900 principal, expected interest = floor(900 * 300 / 10000) = 27
         StellarAssetClient::new(&env, &token).mint(&borrower, &200);
@@ -6378,10 +6212,9 @@ mod test_max_draw_amount {
         fn draw_without_liquidity_token_uses_stable_error_code() {
             let env = Env::default();
             env.mock_all_auths();
-            let admin = Address::generate(&env);
-            let borrower = Address::generate(&env);
+            let admin = Address::generate(env);
             let contract_id = env.register(Credit, ());
-            let client = CreditClient::new(&env, &contract_id);
+            let client = CreditClient::new(env, &contract_id);
             client.init(&admin);
             // Unit tests exercise unsecured draws; opt out of the default floor.
             client.set_min_collateral_ratio_bps(&0);

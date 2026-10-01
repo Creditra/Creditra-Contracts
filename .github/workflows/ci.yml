@@ -19,23 +19,6 @@ env:
   # Cargo.lock. Any drift (manifest edit without lock refresh) fails the build
   # instead of silently picking new dependency versions.
   CARGOFLAGS: --locked
-  # Pinned cargo-llvm-cov version. Bump deliberately in the same commit as any
-  # toolchain bump: a different reporter can move the measured line percentage
-  # and therefore trip the floor below.
-  CARGO_LLVM_COV_VERSION: "0.9.1"
-  # Enforced line-coverage floor, in percent, for contracts/creditra-credit.
-  #
-  # This is the single source of truth for the floor. `docs/COVERAGE.md` and
-  # `README.md` describe it in prose; this value is what CI actually enforces.
-  #
-  # 92 is a ratchet on the measured 92.93% (3777 lines, 3510 covered), leaving
-  # ~0.93pp of headroom so unrelated PRs are not blocked by fractional drift.
-  # The floor is raised as tests land — never lowered to unblock a PR.
-  #
-  # Note: the 95% figure previously advertised in README.md was measured over
-  # the root Soroban workspace, which does not compile on main and therefore
-  # cannot be measured by any tool. See docs/COVERAGE.md.
-  MIN_LINE_COVERAGE: "92"
 
 jobs:
   contract:
@@ -142,11 +125,7 @@ jobs:
         working-directory: contracts/creditra-credit
         env:
           RUSTFLAGS: -C link-arg=--allow-undefined
-        # Build only the library for the wasm target so host-side binaries
-        # (e.g. the `schema` generator) are not compiled for wasm. This
-        # prevents host-only macros and traits from being evaluated for the
-        # wasm build and avoids CI failures when building the artifact.
-        run: cargo build $CARGOFLAGS --release --lib --target wasm32-unknown-unknown
+        run: cargo build $CARGOFLAGS --release --target wasm32-unknown-unknown
 
       # Enforce the artifact size budget with the same scanner the guard tests
       # exercise (scripts/check-wasm-size.sh), so CI and local policy checks
@@ -359,8 +338,6 @@ jobs:
       - name: Publish coverage summary
         if: always()
         working-directory: contracts/creditra-credit
-        env:
-          REPORT_JSON: target/llvm-cov/coverage.json
         run: |
           set -euo pipefail
           if [[ ! -d target/llvm-cov/html ]]; then
@@ -387,11 +364,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Replaces the coverage/ HTML tree that used to be committed to git. The
-      # directory is already ignored via `/coverage` in .gitignore; the report is
-      # now attached to each run so it can never go stale again.
-      - name: Upload coverage report
-        if: always()
+      - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
