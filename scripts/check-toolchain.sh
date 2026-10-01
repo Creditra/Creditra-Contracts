@@ -16,7 +16,10 @@
 #   3. The CI workflow must consume the pin (reference `rust-toolchain.toml`)
 #      and must not select a floating toolchain (`@stable` refs or floating
 #      `toolchain:` inputs).
-#   4. Every required `Cargo.lock` must exist and be committed to git.
+#   4. Every required `Cargo.lock` must exist, be committed to git, and must
+#      NOT be matched by `.gitignore`. A tracked-but-ignored lock file cannot
+#      be staged when it is regenerated, which silently reintroduces the
+#      dependency drift that `--locked` builds are meant to prevent.
 #   5. With `--verify-active`, the currently active `rustc` must match the
 #      pin — catching stray `rustup override`s, `RUSTUP_TOOLCHAIN` values, or
 #      rustup-less environments before they produce diverging artifacts.
@@ -163,6 +166,16 @@ for lock in "${LOCK_FILES[@]}"; do
             echo "::error::Lock file $lock exists but is not committed to git. Run: git add $lock" >&2
             fail=1
         fi
+        # A lock file matched by .gitignore is invisible to `git add`/`git
+        # status`, so a regenerated lock would never be staged. `--no-index` is
+        # required: without it `git check-ignore` skips tracked paths, which is
+        # precisely the state that hides this bug (the root lock is tracked
+        # today even though a rule matches it).
+        if git -C "$lock_dir" check-ignore -q --no-index "$(basename "$lock")"; then
+            echo "::error::Lock file $lock is matched by .gitignore, so a regenerated lock could not be staged. Remove the ignore rule that matches it." >&2
+            git -C "$lock_dir" check-ignore -v --no-index "$(basename "$lock")" >&2 || true
+            fail=1
+        fi
     fi
     # Lock files outside a git tree (test fixtures) only need to exist.
 done
@@ -200,5 +213,5 @@ if [[ "$fail" -ne 0 ]]; then
     exit 1
 fi
 
-echo "Reproducible-build policy OK: toolchain pinned to $channel, wasm target + components declared, lock files committed, rust-version aligned."
+echo "Reproducible-build policy OK: toolchain pinned to $channel, wasm target + components declared, lock files committed and un-ignored, rust-version aligned."
 exit 0
