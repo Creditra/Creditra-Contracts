@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use creditra_credit::events::{BountyWithdrawnEvent, TreasuryWithdrawnEvent};
+use creditra_credit::events::BountyWithdrawnEvent;
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{symbol_short, token, Address, Env, FromVal, Symbol, TryFromVal};
@@ -77,71 +77,6 @@ fn accrue_fees(
     );
 
     client.repay_credit(borrower, &repay_amount);
-}
-
-#[test]
-fn withdraw_treasury_zero_balance_emits_no_events() {
-    let env = Env::default();
-    let (_contract_id, _token, admin, _borrower, _treasury, _bounty, client) =
-        setup_test_env(&env);
-
-    let initial_events = env.events().all().len();
-    client.withdraw_treasury(&admin);
-    let after_events = env.events().all().len();
-
-    assert_eq!(initial_events, after_events);
-}
-
-#[test]
-fn withdraw_treasury_non_zero_balance_emits_event_and_transfers() {
-    let env = Env::default();
-    let (contract_id, token_address, admin, borrower, treasury, _bounty, client) =
-        setup_test_env(&env);
-
-    accrue_fees(&env, &contract_id, &token_address, &borrower, &client);
-
-    let initial_balance = client.get_protocol_summary().treasury_balance;
-    assert!(initial_balance > 0);
-
-    let token_client = token::Client::new(&env, &token_address);
-    assert_eq!(token_client.balance(&treasury), 0);
-
-    let initial_credit_events = env
-        .events()
-        .all()
-        .iter()
-        .filter(|e| e.0 == contract_id)
-        .count();
-
-    client.withdraw_treasury(&admin);
-
-    let current_credit_events: std::vec::Vec<_> = env
-        .events()
-        .all()
-        .into_iter()
-        .filter(|e| e.0 == contract_id)
-        .collect();
-
-    assert_eq!(current_credit_events.len(), initial_credit_events + 1);
-    assert_eq!(token_client.balance(&treasury), initial_balance);
-    assert_eq!(client.get_protocol_summary().treasury_balance, 0);
-
-    let last_ev = current_credit_events.last().unwrap();
-    let topics = &last_ev.1;
-    let t0 = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
-    let t1 = Symbol::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
-
-    assert_eq!(t0, symbol_short!("credit"));
-    assert_eq!(t1, Symbol::new(&env, "tre_wdrn"));
-
-    let data = TreasuryWithdrawnEvent::from_val(&env, &last_ev.2);
-    assert_eq!(data.recipient, treasury);
-    assert_eq!(data.amount, initial_balance);
-    assert_eq!(data.executor, admin);
-
-    let events_count_before_second = env.events().all().len();
-    client.withdraw_treasury(&admin);
-    assert_eq!(env.events().all().len(), events_count_before_second);
 }
 
 #[test]

@@ -1,5 +1,7 @@
 # Query capabilities view (v7)
 
+**Notice:** This is a test/indexer support crate for the Creditra protocol. It is **not a deployable smart contract**.
+
 Read-only bitmap reporting which borrower-scoped query results are currently
 meaningful, so off-chain clients and keepers can batch availability checks
 without issuing multiple separate reads.

@@ -10,7 +10,7 @@
 #
 # By default the script runs `cargo test budget_regression` inside the `credit`
 # crate to check observed resource usage against the pinned baselines in
-# `contracts/credit/test_snapshots/budget.json`.
+# `contracts/.gas-baseline.json`.
 #
 # When `--regen` (or `--regen-only`) is passed, it first re-runs the
 # `budget_baseline` example to overwrite the snapshot with fresh numbers.

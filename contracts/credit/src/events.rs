@@ -135,6 +135,8 @@ pub struct DefaultLiquidationSettledEvent {
     pub borrower: Address,
     pub settlement_id: Symbol,
     pub recovered_amount: i128,
+    pub interest_recovered: i128,
+    pub principal_recovered: i128,
     pub remaining_utilized_amount: i128,
     pub status: CreditStatus,
     pub close_factor_bps: u32,
@@ -602,6 +604,8 @@ pub struct TreasuryWithdrawalExecutedEvent {
     pub executor: Address,
     /// Ledger timestamp at execution.
     pub executed_at: u64,
+    /// Fees accrued after the proposal, still accounted for by the treasury.
+    pub remaining_balance: i128,
 }
 
 /// Publish a treasury withdrawal proposed event.
@@ -620,20 +624,6 @@ pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawal
     );
 }
 
-/// Emitted when accumulated treasury funds are swept via `withdraw_treasury`.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TreasuryWithdrawnEvent {
-    /// Treasury recipient address.
-    pub recipient: Address,
-    /// Amount transferred.
-    pub amount: i128,
-    /// Admin who executed the withdrawal.
-    pub executor: Address,
-}
-
-pub type TreasuryWithdrawn = TreasuryWithdrawnEvent;
-
 /// Emitted when accumulated bounty pool funds are swept via `withdraw_bounty`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -647,14 +637,6 @@ pub struct BountyWithdrawnEvent {
 }
 
 pub type BountyWithdrawn = BountyWithdrawnEvent;
-
-/// Publish a treasury withdrawn event for direct sweeps.
-pub fn publish_treasury_withdrawn_event(env: &Env, event: TreasuryWithdrawnEvent) {
-    env.events().publish(
-        (symbol_short!("credit"), Symbol::new(env, "tre_wdrn")),
-        event,
-    );
-}
 
 /// Publish a bounty pool withdrawn event for direct sweeps.
 pub fn publish_bounty_withdrawn_event(env: &Env, event: BountyWithdrawnEvent) {

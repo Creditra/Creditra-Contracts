@@ -411,23 +411,6 @@ All credit contract events are published under the `("credit", "...")` namespace
 
 ---
 
-#### Event: Treasury Withdrawn (Sweep)
-
-**Topic:** `("credit", "tre_wdrn")`
-
-**Payload Struct:** `TreasuryWithdrawnEvent`
-
-**Fields:**
-1. `recipient: Address` - Treasury recipient address
-2. `amount: i128` - Amount transferred
-3. `executor: Address` - Admin who executed the sweep
-
-**Version Added:** 1.0.0  
-**Stability:** Stable  
-**Publisher:** `publish_treasury_withdrawn_event`
-
----
-
 #### Event: Bounty Withdrawn (Sweep)
 
 **Topic:** `("credit", "bty_wdrn")`
@@ -1010,7 +993,6 @@ All events are emitted by the CosmWasm `creditra-credit` contract (`contracts/cr
 | `("credit","admin_acc")` | 1.0.0 | No | — | |
 | `("credit","tre_prop")` | 1.0.0 | No | — | |
 | `("credit","tre_exec")` | 1.0.0 | No | — | |
-| `("credit","tre_wdrn")` | 1.0.0 | No | — | Direct treasury sweep |
 | `("credit","bty_wdrn")` | 1.0.0 | No | — | Direct bounty pool sweep |
 | `("credit","upgraded")` | 1.0.0 | No | — | |
 | `("credit","liq_req")` | 1.0.0 | No | — | Raw tuple payload |
@@ -1065,7 +1047,6 @@ All credit contract publishers live in `contracts/credit/src/events.rs`:
 | `publish_admin_rotation_accepted` | `("credit", "admin_acc")` |
 | `publish_treasury_withdrawal_proposed` | `("credit", "tre_prop")` |
 | `publish_treasury_withdrawal_executed` | `("credit", "tre_exec")` |
-| `publish_treasury_withdrawn_event` | `("credit", "tre_wdrn")` |
 | `publish_bounty_withdrawn_event` | `("credit", "bty_wdrn")` |
 | `publish_contract_upgraded_event` | `("credit", "upgraded")` |
 | `publish_default_liquidation_requested_event` | `("credit", "liq_req")` |

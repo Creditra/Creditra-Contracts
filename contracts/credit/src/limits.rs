@@ -44,7 +44,7 @@ pub fn check_borrower_exposure_cap(
 ) -> Result<(), ContractError> {
     if let Some(cap) = get_max_borrower_exposure(env, borrower) {
         if updated_utilized > cap {
-            return Err(ContractError::ExposureCapExceeded);
+            return Err(ContractError::BorrowerExposureCapExceeded);
         }
     }
     Ok(())

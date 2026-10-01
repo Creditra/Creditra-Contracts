@@ -6,10 +6,9 @@ use creditra_credit::events::{
     publish_default_liquidation_settled_event, publish_draw_reversed_event,
     publish_drawn_event, publish_draws_frozen_event, publish_grace_waiver_receipt_event,
     publish_interest_accrued_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_risk_parameters_updated,
-    publish_treasury_withdrawn_event, BountyWithdrawnEvent,
+    publish_repayment_event, publish_risk_parameters_updated, BountyWithdrawnEvent,
     DefaultLiquidationSettledEvent, DrawReversedEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawnEvent,
+    RepaymentEvent,
 };
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
@@ -64,6 +63,8 @@ fn test_event_topics_stability() {
                 borrower: borrower.clone(),
                 settlement_id: Symbol::new(&env, "setl1"),
                 recovered_amount: 20,
+                interest_recovered: 10,
+                principal_recovered: 10,
                 remaining_utilized_amount: 35,
                 status: CreditStatus::Active,
                 close_factor_bps: 0,
@@ -93,14 +94,6 @@ fn test_event_topics_stability() {
             &borrower,
             10,
             creditra_credit::types::GraceWaiverMode::FullWaiver,
-        );
-        publish_treasury_withdrawn_event(
-            &env,
-            TreasuryWithdrawnEvent {
-                recipient: admin.clone(),
-                amount: 100,
-                executor: admin.clone(),
-            },
         );
         publish_bounty_withdrawn_event(
             &env,
@@ -149,6 +142,5 @@ fn test_event_topics_stability() {
     );
     assert_topic(10, "credit", "rate_form");
     assert_topic(11, "credit", "grace_wv");
-    assert_topic(12, "credit", "tre_wdrn");
-    assert_topic(13, "credit", "bty_wdrn");
+    assert_topic(12, "credit", "bty_wdrn");
 }

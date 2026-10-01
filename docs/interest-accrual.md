@@ -42,10 +42,10 @@ accrued = floor(utilized_amount * annual_rate * elapsed_seconds / SECONDS_PER_YE
 With integer math:
 
 ```text
-accrued = floor(utilized_amount * interest_rate_bps * elapsed_seconds / (10_000 * 31_536_000))
+accrued = floor(utilized_amount * interest_rate_bps * elapsed_seconds / (10_000 * 31_557_600))
 ```
 
-`SECONDS_PER_YEAR` is fixed at `31_536_000` (`365 * 24 * 60 * 60`).
+`SECONDS_PER_YEAR` is fixed at `31_557_600` (365.25 × 86 400 — Julian year, matching `math_utils::SECONDS_PER_YEAR`).
 
 ## Rounding and overflow policy
 
