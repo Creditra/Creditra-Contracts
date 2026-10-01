@@ -2,14 +2,14 @@
 name = "creditra-borrow"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra borrow v7 error stability tests"
+description = "Creditra borrow v7 error stability tests (test/indexer support crate, not deployable)"
 license = "MIT"
-keywords = ["soroban", "stellar", "borrow", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "borrow", "credit"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "README.md"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }

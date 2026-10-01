@@ -2,14 +2,14 @@
 name = "creditra-freeze"
 version = "0.1.0"
 edition = "2021"
-description = "Creditra freeze auth-boundary integration tests"
+description = "Creditra freeze auth-boundary integration tests (test/indexer support crate, not deployable)"
 license = "MIT"
-keywords = ["soroban", "stellar", "freeze", "credit", "smart-contract"]
+keywords = ["soroban", "stellar", "freeze", "credit"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "README.md"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }

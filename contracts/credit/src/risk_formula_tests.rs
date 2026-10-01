@@ -428,6 +428,18 @@ fn set_config_base_exceeds_cap_reverts() {
     client.set_rate_formula_config(&10_001_u32, &50_u32, &100_u32, &5000_u32);
 }
 
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn set_config_min_exceeds_cap_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    client.set_rate_formula_config(&200_u32, &50_u32, &12_000_u32, &15_000_u32);
+}
+
 // ── Auth tests ───────────────────────────────────────────────────────────
 
 #[test]

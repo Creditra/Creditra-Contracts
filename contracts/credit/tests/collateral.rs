@@ -30,6 +30,7 @@ fn test_deposit_and_withdraw_collateral() {
     let env = Env::default();
     let (client, _, borrower, _) = setup(&env);
 
+    client.open_credit_line(&borrower, &10000, &0, &0);
     client.deposit_collateral(&borrower, &5000);
     assert_eq!(client.get_collateral(&borrower), 5000);
 
@@ -118,6 +119,7 @@ fn test_withdraw_without_collateral_token_fails() {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
+    client.open_credit_line(&borrower, &10000, &0, &0);
     // Set collateral balance directly so amount <= cur_balance check passes before MissingLiquidityToken check
     env.as_contract(&contract_id, || {
         creditra_credit::storage::set_collateral_balance(&env, &borrower, 1000);
@@ -132,6 +134,7 @@ fn test_withdraw_collateral_insufficient_balance() {
     let env = Env::default();
     let (client, _, borrower, _) = setup(&env);
 
+    client.open_credit_line(&borrower, &10000, &0, &0);
     client.deposit_collateral(&borrower, &1000);
     assert_eq!(client.get_collateral(&borrower), 1000);
 
@@ -155,6 +158,7 @@ fn test_withdraw_exact_collateral_balance_succeeds() {
     let env = Env::default();
     let (client, _, borrower, _) = setup(&env);
 
+    client.open_credit_line(&borrower, &10000, &0, &0);
     client.deposit_collateral(&borrower, &1000);
     assert_eq!(client.get_collateral(&borrower), 1000);
 
@@ -163,6 +167,175 @@ fn test_withdraw_exact_collateral_balance_succeeds() {
     assert_eq!(client.get_collateral(&borrower), 0);
 }
 
+#[test]
+fn test_draw_credit_exact_collateral_boundary_succeeds() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+    // Required collateral = 1000 * 15,000 / 10_000 = 1500.
+    client.deposit_collateral(&borrower, &1500);
+
+    // Exact boundary requirement succeeds
+    client.draw_credit(&borrower, &1000);
+    assert_eq!(client.get_collateral(&borrower), 1500);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_draw_credit_one_unit_short_reverts_error_35() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+    // Required collateral = 1000 * 15,000 / 10_000 = 1500.
+    // 1499 is exactly 1 unit short of requirement.
+    client.deposit_collateral(&borrower, &1499);
+
+    client.draw_credit(&borrower, &1000);
+}
+
+#[test]
+fn test_draw_credit_small_utilization_floor_rounding_boundary() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+
+    // For utilization = 1 at 15,000 bps (150% ratio):
+    // required = floor(1 * 15,000 / 10_000) = floor(1.5) = 1 unit.
+    client.deposit_collateral(&borrower, &1);
+    client.draw_credit(&borrower, &1);
+    assert_eq!(client.get_collateral(&borrower), 1);
+
+    // For utilization = 5 total (drawing 4 more) at 15,000 bps:
+    // required = floor(5 * 15,000 / 10_000) = floor(7.5) = 7 units.
+    client.deposit_collateral(&borrower, &6); // total collateral = 7
+    client.draw_credit(&borrower, &4);
+    assert_eq!(client.get_collateral(&borrower), 7);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_draw_credit_small_utilization_one_unit_short_reverts_error_35() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+
+    // For utilization = 1 at 15,000 bps:
+    // required = floor(1 * 15,000 / 10_000) = 1.
+    // 0 collateral is 1 unit short of 1.
+    client.draw_credit(&borrower, &1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_draw_credit_small_utilization_floor_rounding_one_unit_short_reverts_error_35() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+
+    // For utilization = 5 at 15,000 bps:
+    // required = floor(5 * 15,000 / 10_000) = floor(7.5) = 7.
+    // 6 collateral is 1 unit short of required 7.
+    client.deposit_collateral(&borrower, &6);
+    client.draw_credit(&borrower, &5);
+}
+
+#[test]
+fn test_draw_credit_ratio_zero_unsecured_draw_succeeds() {
+    let env = Env::default();
+    let (client, _, borrower, _) = setup(&env);
+
+    client.open_credit_line(&borrower, &10000, &0, &0);
+    // Set ratio to 0 bps (unsecured draw allowed)
+    client.set_min_collateral_ratio_bps(&0);
+
+    // Required collateral = 1000 * 0 / 10_000 = 0.
+    // Zero collateral deposited.
+    client.draw_credit(&borrower, &1000);
+    assert_eq!(client.get_collateral(&borrower), 0);
+}
+
+// ── Risk-weighted collateral valuation (Issue #1223) ─────────────────────────
+
+/// An unset weight means full value.
+#[test]
+fn test_unset_risk_weight_keeps_full_value() {
+    let env = Env::default();
+    let (client, _, borrower, _token) = setup(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral(&borrower, &3_000);
+    client.draw_credit(&borrower, &1_000);
+
+    // 3_000 * 100_000_000 / (1_000 * 15_000) = 20_000
+    assert_eq!(client.get_health_factor(&borrower), 20_000);
+}
+
+/// A 5_000 bps weight halves the asset's contribution to the draw ratio.
+#[test]
+fn test_risk_weight_halves_draw_capacity() {
+    let env = Env::default();
+    let (client, _, borrower, token) = setup(&env);
+
+    client.set_collateral_risk_weight(&token, &5_000);
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral(&borrower, &3_000);
+    client.draw_credit(&borrower, &1_000);
+
+    // 1_500 weighted / 1_000 debt @ 150 % -> exactly on the floor.
+    assert_eq!(client.get_health_factor(&borrower), 10_000);
+}
+
+/// The same weight must constrain withdrawals, not just draws.
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_risk_weight_constrains_withdrawals() {
+    let env = Env::default();
+    let (client, _, borrower, token) = setup(&env);
+
+    client.set_collateral_risk_weight(&token, &5_000);
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral(&borrower, &3_000);
+    client.draw_credit(&borrower, &1_000);
+
+    // Removing 1_000 leaves 1_000 weighted < 1_500 required.
+    client.withdraw_collateral(&borrower, &1_000);
+}
+
+/// A weight change takes effect on the next draw without any migration.
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_risk_weight_change_applies_to_next_draw() {
+    let env = Env::default();
+    let (client, _, borrower, token) = setup(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral(&borrower, &3_000);
+    client.draw_credit(&borrower, &1_000);
+
+    client.set_collateral_risk_weight(&token, &5_000);
+    // updated_utilized = 1_001 -> required 1_501 > 1_500 weighted.
+    client.draw_credit(&borrower, &1);
+}
+
+/// Floor rounding must never manufacture borrowing power.
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_floor_rounding_never_over_credits() {
+    let env = Env::default();
+    let (client, _, borrower, token) = setup(&env);
+
+    // 3_333 bps on 2 units floors to 0; ceiling rounding would credit 1 and
+    // let this draw through.
+    client.set_collateral_risk_weight(&token, &3_333);
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral(&borrower, &2);
+    client.draw_credit(&borrower, &1);
+}
 
 // ─── Issue #1345: error-code ordering at the withdrawal entrypoints ─────────
 //
