@@ -94,5 +94,41 @@
     "cpu_instructions": 189764,
     "memory_bytes": 32696,
     "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "place_bid",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "bid_refunded",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "settle_default_liquidation",
+    "cpu_instructions": 100000,
+    "memory_bytes": 10000,
+    "tolerance_pct": 5.0
+  },
+  {
+    "entrypoint": "draw_credit_n10",
+    "cpu_instructions": 540000,
+    "memory_bytes": 90000,
+    "tolerance_pct": 10.0
+  },
+  {
+    "entrypoint": "draw_credit_n100",
+    "cpu_instructions": 560000,
+    "memory_bytes": 95000,
+    "tolerance_pct": 10.0
+  },
+  {
+    "entrypoint": "draw_credit_n500",
+    "cpu_instructions": 600000,
+    "memory_bytes": 105000,
+    "tolerance_pct": 10.0
   }
 ]

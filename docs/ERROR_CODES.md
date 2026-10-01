@@ -89,7 +89,7 @@ Arithmetic or numeric computation failures — inputs or calculations fall outsi
 
 ---
 
-## 4. Limit (codes 6, 10, 13, 17, 28, 45, 47, 59)
+## 4. Limit (codes 6, 10, 13, 17, 28, 45, 47, 59, 66)
 
 Draw, repay, or limit operations that violate numeric caps or boundary conditions.
 
@@ -103,6 +103,7 @@ Draw, repay, or limit operations that violate numeric caps or boundary condition
 | 45   | `CloseFactorAboveMax` | Close factor exceeds protocol maximum | `settle_default_liquidation` validation |
 | 47   | `DrawReversalWindowExpired` | Draw reversal window has expired | `reverse_draw` after `DRAW_REVERSAL_WINDOW_SECS` |
 | 59   | `UtilizedNotZero` | Utilization must be zero | Borrower self-close with outstanding debt |
+| 66   | `BorrowerExposureCapExceeded` | Per-borrower exposure cap exceeded | `draw_credit` when utilized + amount > borrower cap |
 
 **SDK recovery:**
 - `OverLimit`: Reduce draw amount to ≤ `credit_limit - utilized`.
@@ -129,6 +130,7 @@ Liquidity configuration is missing or a reserve/allowance/balance check fails.
 | 30   | `TreasuryNotSet` | Treasury not configured | `propose_treasury_withdrawal` without treasury |
 | 31   | `ExposureCapExceeded` | Global exposure cap exceeded | `draw_credit` when total_utilized + amount > cap |
 | 41   | `BountyNotSet` | Bounty address not configured | `withdraw_bounty` without bounty set |
+| 65   | `InsufficientTreasuryBalance` | Treasury balance below pending withdrawal | `execute_treasury_withdrawal` when the tracked balance < proposal amount |
 | 56   | `InsufficientReserve` | Reserve balance below draw amount | `draw_credit` when token reserve < amount |
 | 57   | `InsufficientAllowance` | Borrower token allowance insufficient | `repay_credit` when allowance < repayment |
 | 58   | `InsufficientBalance` | Borrower token balance insufficient | `repay_credit` when balance < repayment |
@@ -175,14 +177,17 @@ Oracle price-feed failures — the price data cannot be trusted.
 | 36   | `OraclePriceInvalid` | Price is zero, negative, or malformed | `settle_default_liquidation` oracle validation |
 | 37   | `OraclePriceStale` | Price exceeds `max_age_seconds` | `settle_default_liquidation` staleness check |
 | 38   | `OraclePriceDeviation` | Price deviation exceeds max allowed | `settle_default_liquidation` deviation check |
-| 50   | `OracleQuorumNotMet` | Quorum of K agreeing feeds not met | `submit_oracle_prices` quorum resolution |
+| 50   | `OracleQuorumNotMet` | Quorum of K agreeing feeds not met | `submit_oracle_prices` quorum resolution, or `settle_default_liquidation` while the weighted-median registry is active |
 | 54   | `OracleNotFound` | Oracle address not in the registry | `remove_oracle` when oracle not registered |
 
 **SDK recovery:**
 - `OraclePriceInvalid`: Ensure oracle returns a valid positive price.
 - `OraclePriceStale`: Wait for oracle price update.
 - `OraclePriceDeviation`: Circuit-breaker tripped; await a new price within bound.
-- `OracleQuorumNotMet`: Submit prices from more independent feeds.
+- `OracleQuorumNotMet`: Submit prices from more independent feeds, or — when
+  raised from settlement — collect fresh reports from enough weighted oracles
+  to reach the registry quorum (registry mode deliberately ignores the
+  caller-supplied `oracle_price`, so there is no admin-price fallback).
 - `OracleNotFound`: Verify the oracle address is registered before removal.
 
 ---
@@ -231,7 +236,7 @@ Draw-block conditions — the borrower, line, or protocol prevents draws.
 
 ---
 
-## 11. Misc (codes 3, 15, 42, 43, 44, 48, 49)
+## 11. Misc (codes 3, 15, 42, 43, 44, 48, 49, 64)
 
 Errors that do not fit into other categories — entity-not-found, timelock, and treasury proposal conflicts.
 
@@ -244,10 +249,11 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 | 44   | `TreasuryProposalExists` | Proposal already exists | `propose_treasury_withdrawal` while pending |
 | 48   | `OriginalDrawNotFound` | Draw audit record not found | Draw reversal without matching record |
 | 49   | `AttestationBatchNotFound` | No attestation batch committed | `verify_attestation_proof` without batch |
-| 50   | `OracleQuorumNotMet` | Oracle quorum condition not satisfied | `submit_oracle_prices` quorum resolution |
+| 50   | `OracleQuorumNotMet` | Oracle quorum condition not satisfied | `submit_oracle_prices` quorum resolution, or settlement while the registry is active |
 | 51   | `AlreadySettled` | Liquidation settlement already processed | Replay of the same `(borrower, settlement_id)` pair |
 | 52   | `InvalidRiskWeight` | Collateral risk weight exceeds 10 000 bps | `set_collateral_risk_weight` |
 | 53   | `InvalidAttestation` | Attestation proof is invalid or no batch committed | `verify_attestation_proof` with an invalid proof or missing batch |
+| 64   | `MissingVrfCommitment` | No VRF commitment exists for the borrower | Score verification without a prior VRF commitment |
 | 55   | `LiquidationGraceActive` | Per-borrower liquidation grace window active | `default_credit_line` called before grace period expiry |
 
 **SDK recovery:**
@@ -258,6 +264,7 @@ Errors that do not fit into other categories — entity-not-found, timelock, and
 - `TreasuryProposalExists`: Execute or cancel existing proposal first.
 - `OriginalDrawNotFound`: No reversal possible — no matching draw record.
 - `AttestationBatchNotFound`: Admin must commit a batch first.
+- `MissingVrfCommitment`: Commit the borrower's VRF output before score verification.
 
 ---
 

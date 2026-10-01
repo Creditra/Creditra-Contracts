@@ -34,7 +34,7 @@ use soroban_sdk::{
 use std::{collections::HashMap, path::Path};
 
 /// Relative path (from the `creditra-credit` crate root) to the pinned snapshot.
-pub const SNAPSHOT_REL_PATH: &str = "test_snapshots/budget.json";
+pub const SNAPSHOT_REL_PATH: &str = "../.gas-baseline.json";
 
 /// Default ± tolerance applied when a baseline omits `tolerance_pct`.
 pub const DEFAULT_TOLERANCE_PCT: f64 = 5.0;

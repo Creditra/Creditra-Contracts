@@ -209,6 +209,108 @@ when setting a floor. That prevents a misconfigured admin from creating an
 unresolvable ordering. Tested in `tests/borrower_rate_floor.rs` and
 `tests/borrower_rate_ceiling.rs`.
 
+### 2.8 Per-borrower risk admin cooldown (Issue #1280)
+
+#### Motivation
+
+The earlier single global `LastRiskAdminActionTs` caused `update_risk_parameters`
+for **any** borrower to start a shared cooldown window. After updating borrower A,
+the admin had to wait the full cooldown before updating borrower B. Re-scoring an
+entire portfolio after a market event therefore became **serial and slow**, creating
+pressure to disable the cooldown entirely and eliminating its security value.
+
+#### Scope change
+
+As of this fix, the cooldown is **per-borrower**. Each borrower's last-action
+timestamp is tracked independently in persistent storage under the composite key
+`(symbol_short!("rad_last"), borrower)` — the same pattern used by
+`LastAccrualAdminActionTs`.
+
+The global `rad_last` instance key is retained for backward compatibility but is
+no longer written to or enforced by `update_risk_parameters`.
+
+#### Storage keys
+
+| Key | Storage tier | Type | Description |
+|---|---|---|---|
+| `symbol_short!("rad_cool")` | Instance | `u64` | Cooldown duration in seconds (global, 0 = disabled) |
+| `(symbol_short!("rad_last"), borrower)` | Persistent | `u64` | Last risk admin action timestamp for the specific borrower |
+
+#### Enforcement logic (`storage.rs: assert_risk_admin_cooldown_elapsed_for`)
+
+```
+fn assert_risk_admin_cooldown_elapsed_for(env, borrower):
+    cooldown = get_risk_admin_cooldown_seconds(env)
+    if cooldown == 0: return          // disabled
+    last_ts = get_last_risk_admin_action_ts_for(env, borrower)
+    if last_ts == 0: return           // first update always allowed
+    now = env.ledger().timestamp()
+    if now < last_ts + cooldown:
+        revert RiskAdminCooldownActive = 54
+```
+
+- When `cooldown_seconds == 0` (default): enforcement is disabled entirely —
+  backward compatible, no change in behavior.
+- When no prior action exists for the borrower (`last_ts == 0`): the first
+  `update_risk_parameters` always succeeds, regardless of cooldown duration.
+  This allows a full portfolio rescore with a fresh deployment without
+  serialization.
+- Otherwise: the call reverts with `ContractError::RiskAdminCooldownActive = 54`
+  if the elapsed time since the last update for **that specific borrower** is less
+  than the configured cooldown.
+
+#### Key properties
+
+1. **Updating borrower A does not block borrower B.** Each borrower has its own
+   independent cooldown window. After updating A at $t_0$, the admin can
+   immediately update B (provided B has no prior action, or its own window has
+   elapsed).
+
+2. **Repeated update of A within cooldown still reverts.** The per-borrower
+   timestamp is written after every successful `update_risk_parameters` call, so
+   A's second call within the window is still blocked.
+
+3. **Portfolio rescoring is parallel, not serial.** When each borrower has no
+   prior action recorded (first-time scoring or fresh deployment), all borrowers
+   can be updated in a single pass regardless of the cooldown setting.
+
+#### Worked numerical example — per-borrower isolation
+
+Configure `cooldown_seconds = 3 600` (1 hour).
+
+| Event | Timestamp | Borrower | Result | Reason |
+|---|---|---|---|---|
+| Open line A and B | t=0 | A, B | — | Credit lines created |
+| Update A | t=1 000 | A | **Allowed** | No prior action for A |
+| Update B | t=1 001 | B | **Allowed** | No prior action for B (A's cooldown is irrelevant) |
+| Update A again | t=1 001 | A | **Blocked** | 1 s < 3 600 s → `RiskAdminCooldownActive` |
+| Update A again | t=4 600 | A | **Allowed** | 3 600 s elapsed since t=1 000 |
+| Update B again | t=4 601 | B | **Blocked** | Only 3 600 s elapsed since t=1 001 → 1 s short |
+| Update B again | t=4 601 | B | **Allowed** (at t=4 601) | 3 600 s elapsed since t=1 001 |
+
+#### creditra-risk contract note
+
+The standalone `creditra-risk` contract (under `contracts/risk/`) operates
+without a borrower key — it holds a single global parameter set rather than
+per-borrower state. Its `risk_admin_cooldown` tests (`contracts/risk/tests/risk_admin_cooldown.rs`)
+therefore still use a single shared timestamp, which is semantically correct for
+that contract's model. The per-borrower scoping described here applies only to the
+`creditra-credit` contract.
+
+#### Test coverage
+
+| Test name | What it verifies |
+|---|---|
+| `cooldown_is_per_borrower_not_global` | Updating A does not block B |
+| `cooldown_blocks_same_borrower_within_window` | Repeated update of A still reverts |
+| `cooldown_independent_windows_per_borrower` | A and B have independent expiry times |
+| `portfolio_rescore_not_serialized` | All borrowers can be first-updated in one pass |
+| `cooldown_elapses_correctly` | Window expires at exactly `last_ts + cooldown_seconds` |
+| `first_risk_update_always_succeeds_even_with_cooldown` | First update never blocked |
+
+Full test file: `contracts/credit/tests/risk_admin_cooldown.rs`
+Validation command: `cargo test -p creditra-credit --test risk_admin_cooldown`
+
 ---
 
 ## 3. The Credit-Limit Function

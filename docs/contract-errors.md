@@ -71,7 +71,7 @@ See the [category enum reference](#contracterrorcategory) below.
 | 47 | `DrawReversalWindowExpired` | Limit | Draw reversal attempted after the allowed window expired. |
 | 48 | `OriginalDrawNotFound` | Misc | Original draw record not found for reversal. |
 | 49 | `AttestationBatchNotFound` | Misc | No attestation batch has been committed. |
-| 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied. |
+| 50 | `OracleQuorumNotMet` | Oracle | Oracle quorum condition not satisfied — raised by `submit_oracle_prices`, or by settlement while the weighted-median registry is active. |
 | 51 | `AlreadySettled` | Lifecycle | Liquidation for this (borrower, id) already processed. |
 | 52 | `InvalidRiskWeight` | Numeric | Collateral risk weight exceeds 10 000 bps. |
 | 53 | `AdminQueryCooldownActive` | Risk | Admin attempted a query-critical action before the cooldown elapsed. |
