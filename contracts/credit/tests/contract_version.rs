@@ -18,9 +18,12 @@ fn get_contract_version_returns_expected_value() {
     let (env, contract_id) = setup();
     let client = CreditClient::new(&env, &contract_id);
     let version = client.get_contract_version();
-    assert_eq!(version.0, 1);
-    assert_eq!(version.1, 0);
-    assert_eq!(version.2, 0);
+    // Compared against the constant rather than hard-coded numbers so a
+    // deliberate bump (e.g. the breaking change in Issue #1281) cannot leave
+    // this assertion silently stale.
+    assert_eq!(version.0, CONTRACT_API_VERSION.0);
+    assert_eq!(version.1, CONTRACT_API_VERSION.1);
+    assert_eq!(version.2, CONTRACT_API_VERSION.2);
 }
 
 #[test]

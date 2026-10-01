@@ -459,3 +459,20 @@ fn settle_default_liquidation_without_admin_auth_panics() {
     let settlement_id = Symbol::new(&env, "settle01");
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
 }
+
+/// Regression for the unblock path (Issue #1281): `set_borrower_blocked(false)`
+/// used to bump the TTL of the key it had just removed, which reverts with
+/// `Storage(MissingValue)`. Unblocking must succeed and be idempotent.
+#[test]
+fn unblock_borrower_is_idempotent() {
+    let (env, client, admin, borrower) = setup();
+    client.block_borrower(&admin, &borrower);
+    assert!(client.is_borrower_blocked(&borrower));
+
+    client.unblock_borrower(&admin, &borrower);
+    assert!(!client.is_borrower_blocked(&borrower));
+
+    env.ledger().set_timestamp(10_000);
+    client.unblock_borrower(&admin, &borrower);
+    assert!(!client.is_borrower_blocked(&borrower));
+}

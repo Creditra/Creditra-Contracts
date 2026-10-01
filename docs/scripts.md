@@ -87,12 +87,16 @@ variant with its discriminant. Has no third-party dependencies and runs on
 Python 3.9+.
 
 ```bash
-scripts/list_contract_errors.py            # text table
-scripts/list_contract_errors.py --json     # machine-readable
+scripts/list_contract_errors.py                # text table
+scripts/list_contract_errors.py --json         # machine-readable
+scripts/list_contract_errors.py --categories   # grouped by category
+scripts/list_contract_errors.py --check        # verify docs/errors.md
 ```
 
-The JSON output is convenient for keeping SDK / indexer error tables in
-sync with the contract source of truth.
+`--check` is the guard for the canonical error reference: it fails if
+[`docs/errors.md`](./errors.md) publishes a code the contract cannot emit, or
+omits / misnames / miscategorizes one that it can. `tests/error_discriminants.rs`
+asserts the same invariant, so the published table cannot drift from the enum.
 
 ## `scripts/gas-regression.sh`
 

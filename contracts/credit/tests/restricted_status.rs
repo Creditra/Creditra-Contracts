@@ -162,3 +162,45 @@ fn reinstated_restricted_line_recovers_after_repayment_below_limit() {
         2_000
     );
 }
+
+/// `Restricted → Active` is driven by the admin's next
+/// `update_risk_parameters`, not by the borrower repaying. Repayment only
+/// lowers `utilized_amount` (asserted above); the status flips when a new limit
+/// at or above the outstanding balance is written.
+#[test]
+fn update_risk_parameters_auto_cures_restricted_to_active() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_restricted_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Restricted
+    );
+
+    // Raise the limit back above the outstanding balance (5_000 drawn).
+    client.update_risk_parameters(&borrower, &8_000_i128, &300_u32, &50_u32);
+
+    let line = client
+        .get_credit_line(&borrower)
+        .expect("credit line exists");
+    assert_eq!(line.status, CreditStatus::Active);
+    assert_eq!(line.credit_limit, 8_000);
+    // The auto-cure must not touch the debt record.
+    assert_eq!(line.utilized_amount, 5_000);
+}
+
+/// A `Restricted` line is default-eligible: the limit cut is not a shield
+/// against liquidation, it is a grace period before it.
+#[test]
+fn restricted_can_default() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_restricted_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.default_credit_line(&borrower);
+
+    let line = client
+        .get_credit_line(&borrower)
+        .expect("credit line exists");
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 5_000);
+}

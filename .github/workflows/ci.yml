@@ -77,6 +77,13 @@ jobs:
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
 
+      # `docs/errors.md` is the single canonical error reference. This keeps it
+      # from drifting from `contracts/credit/src/types.rs`, which would hand SDK
+      # consumers a code the contract cannot emit. Stdlib-only Python, so it
+      # needs no toolchain beyond the runner.
+      - name: Verify canonical error reference
+        run: python3 scripts/list_contract_errors.py --check
+
       # The reproducible-build guard scripts are the enforcement layer for the
       # pinned-toolchain policy. Run their own test suites so a regression in
       # the guards themselves fails CI, not just a regression in the contracts.
@@ -155,6 +162,68 @@ jobs:
         with:
           name: creditra-credit-wasm
           path: target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          if-no-files-found: error
+
+  soroban-workspace:
+    name: Soroban workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache root Cargo workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: soroban-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            soroban-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
+
+      - name: Verify reproducible-build policy
+        run: scripts/check-toolchain.sh --verify-active
+
+      - name: Check workspace formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run workspace clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run workspace tests
+        if: always()
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Build Soroban WASM workspace
+        if: always()
+        run: scripts/build_wasm.sh
+
+      - name: Upload Soroban WASM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soroban-workspace-wasm
+          path: target/wasm32-unknown-unknown/release/*.wasm
           if-no-files-found: error
 
   fuzz:

@@ -10,7 +10,7 @@ treasury withdrawal flow.
 | Audience | Governance, auditors, integrators, operators |
 | Status | Normative. Describes `contracts/credit` as implemented at this commit. |
 | Source of truth | `contracts/credit/src/fees.rs`, `contracts/credit/src/lib.rs`, `contracts/credit/src/lifecycle.rs`, `contracts/credit/src/math_utils.rs`, `contracts/credit/src/storage.rs` |
-| Companion docs | [`PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) §2.7, [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md), [`storage-layout.md`](./storage-layout.md), [`SECURITY.md`](./SECURITY.md) (T9) |
+| Companion docs | [`PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) §2.7, [`EVENT_CATALOG.md`](./EVENT_CATALOG.md), [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md), [`SECURITY.md`](./SECURITY.md) (T9) |
 
 > **Terminology.** *Treasury* and *bounty pool* are two **internal
 > accumulators** (two `i128` instance-storage counters), not two token
@@ -595,7 +595,7 @@ Note the accumulator balances in `fee_accrd` are the **post-credit** values, so
 a consumer can track both accumulators from this event alone without extra
 reads. `fee_amount` is the pre-split total, which lets an indexer verify
 `treasury_amount + bounty_amount == fee_amount` (§9, I1). See
-[`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) for topics and versioning policy.
+[`EVENT_CATALOG.md`](./EVENT_CATALOG.md) for topics and versioning policy.
 
 There is **no** event for `withdraw_treasury` / `withdraw_bounty` (§10, item 5)
 and **no** event when `propose_treasury_withdrawal` reverts or when a split is
@@ -639,8 +639,8 @@ cargo test -p creditra-credit --test fee_split
 ## 14. Related documents
 
 - [`PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) §2.7 — the terse entrypoint table.
-- [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) — authoritative event topics.
-- [`storage-layout.md`](./storage-layout.md) / [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) — tier reference.
+- [`EVENT_CATALOG.md`](./EVENT_CATALOG.md) — authoritative event topics.
+- [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) / [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) — tier reference.
 - [`SECURITY.md`](./SECURITY.md) T9 — why treasury drain cannot reach reserve funds.
 - [`contract-errors.md`](./contract-errors.md) / [`errors.md`](./errors.md) — full error tables.
 - [`EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) — test catalog and CI.

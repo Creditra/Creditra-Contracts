@@ -452,7 +452,7 @@ fn multiple_settlements_reuse_same_quorum_price() {
 // max_age_seconds` boundary one second apart, and assert that a rejected
 // settlement mutates no state.
 
-/// `ContractError::OraclePriceStale` — stale price, see `docs/ERROR_CODES.md`.
+/// `ContractError::OraclePriceStale` — stale price, see `docs/errors.md`.
 const ORACLE_PRICE_STALE_CODE: u32 = 37;
 /// `ContractError::OracleQuorumNotMet` — no qualifying quorum price.
 const ORACLE_QUORUM_NOT_MET_CODE: u32 = 50;

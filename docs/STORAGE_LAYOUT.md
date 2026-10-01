@@ -224,7 +224,7 @@ fn liquidation_settlement_key(
 
 | Key | Value type | Tier | TTL | Writer |
 |-----|------------|------|-----|--------|
-| `(Symbol("liq_seen"), borrower, settlement_id)` | `bool` | **Persistent** | Not explicitly bumped after write — marker is set once and never read again for TTL purposes; the presence check in replay protection is sufficient within the ~6-month window | `settle_default_liquidation` |
+| `(Symbol("liq_seen"), borrower, settlement_id)` | `bool` | **Persistent** | Bumped to the credit-line window (~6 months) by `bump_settlement_marker_ttl` on write and on the replay-check read, so replay protection never lapses via archival | `settle_default_liquidation` |
 
 The marker is checked via `env.storage().persistent().has(&settlement_key)`
 before any state mutation. A second call with the same `(borrower, settlement_id)`

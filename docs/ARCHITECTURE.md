@@ -6,6 +6,7 @@ sequence of events for each core protocol flow. All component names and
 function signatures are anchored in the source.
 
 For the per-module contract surface, see `docs/PROTOCOL_SPEC.md`.
+For the credit-line status machine, see `docs/state-machine.md`.
 For the protocol-level model, see `WHITEPAPER.md`.
 
 ---
@@ -243,71 +244,26 @@ mechanics (e.g. a future sealed-bid or batch-auction implementation).
 
 ---
 
-## 6. State Diagram: Credit Line Lifecycle
+## 6. Credit Line Lifecycle
 
-```mermaid
-stateDiagram-v2
-    [*] --> Draft : pre-init
-    Draft --> Active : open_credit_line (admin)
+The full `CreditStatus` transition graph — every edge, its entrypoint, and the
+actor that may drive it — is maintained in one place:
+[`docs/state-machine.md`](./state-machine.md). That page is the normative
+reference; this section only records the invariants that the sequence diagrams
+above rely on.
 
-    Active --> Restricted : update_risk_parameters lowers limit below utilized
-    Restricted --> Active : repay_credit until utilized <= new limit
+Two properties of that graph are load-bearing for the rest of this document:
 
-    Active --> Suspended : suspend_credit_line (admin)
-    Active --> Suspended : self_suspend_credit_line (borrower)
-    Suspended --> Active : reinstate_credit_line (admin, target=Active)
-    Suspended --> Restricted : reinstate_credit_line (admin, target=Restricted)
-
-    Active --> Defaulted : default_credit_line (admin)
-    Restricted --> Defaulted : default_credit_line (admin)
-    Suspended --> Defaulted : default_credit_line (admin)
-    Defaulted --> Active : reinstate_credit_line (admin)
-    Defaulted --> Restricted : reinstate_credit_line (admin)
-    Defaulted --> Closed : settle_default_liquidation (utilized → 0)
-
-    Active --> Closed : close_credit_line (borrower if utilized=0; admin always)
-    Restricted --> Closed : close_credit_line (admin)
-    Suspended --> Closed : close_credit_line (admin)
-
-    Closed --> [*]
-
-    note right of Active
-      draw: yes
-      repay: yes
-      update_risk_parameters: yes
-    end note
-
-    note right of Restricted
-      draw: rejected by OverLimit
-      repay: yes (cures back to Active)
-      update_risk_parameters: yes
-    end note
-
-    note right of Suspended
-      draw: rejected by CreditLineSuspended
-      repay: yes
-      grace policy applied during accrual
-    end note
-
-    note right of Defaulted
-      draw: rejected by CreditLineDefaulted
-      repay: yes
-      settlement is the cure path
-    end note
-
-    note right of Closed
-      terminal; idempotent close
-    end note
-```
-
-Detailed transition rules are in `docs/state-machine.md` and the source at
-`contracts/credit/src/lifecycle.rs`. Implementation invariants:
-
-- `apply_accrual` is called **before** every state transition.
-- `persist_credit_line(prev_utilized, line)` updates the global
-  `TotalUtilized` accumulator atomically with the line write.
+- `apply_accrual` is called **before** every state transition, so interest is
+  materialised at the transition and never double-counted on a retry.
+- `persist_credit_line(prev_utilized, line)` updates the global `TotalUtilized`
+  accumulator atomically with the line write, and the pending-auction counter
+  moves in the same transaction on every entry to and exit from `Defaulted`.
 - `suspension_ts` is monotone non-decreasing; `assert_ts_monotonic` enforces.
 - Settlement uses the `(borrower, settlement_id)` persistent dedup marker.
+- A repeat of any transition reverts with `StaleStateTransition` (60) rather
+  than silently succeeding, so a retried lifecycle call is always diagnosable.
+
 
 ---
 
@@ -630,7 +586,8 @@ The wrapper crates include:
 - `contracts/credit/src/storage.rs` — storage abstraction & TTL
 - `gateway-contract/contracts/auction_contract/src/lib.rs` — auction
 - `docs/PROTOCOL_SPEC.md` — per-entrypoint contract surface
-- `docs/state-machine.md` — exhaustive state transitions
+- `docs/state-machine.md` — **canonical** `CreditStatus` transition graph and
+  the repayment-schedule machine
 - `docs/storage-layout.md` — storage tier reference
 - `docs/threat-model.md` — authorization matrix
 - `docs/indexer-integration.md` — event decoding

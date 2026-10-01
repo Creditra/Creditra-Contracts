@@ -311,7 +311,7 @@ addressed before mainnet.
 - `WHITEPAPER.md` — protocol-level design
 - `docs/upgrade-policy.md` — upgrade procedure
 - `docs/EXECUTION_QUALITY.md` — test catalog
-- `docs/error-taxonomy.md` — categorized error variants with SDK recovery hints
+- `docs/errors.md` — canonical error codes, categories, and SDK recovery hints
 - `docs/CIRCUIT_BREAKER_IMPLEMENTATION.md` — pause design
 - `docs/AUCTION_CLOSE_TIME_FIX.md` — close-time off-by-one fix
 - `contracts/credit/UNWRAP_AUDIT_REPORT.md` — production-unwrap removal (PR #418)

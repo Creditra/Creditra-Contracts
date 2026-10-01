@@ -331,7 +331,7 @@ The pattern is visible:
 | `docs/state-machine.md` | Authoritative state-transition table |
 | `docs/interest-accrual.md`, `docs/interest-accrual-design.md` | Accrual references |
 | `docs/risk-based-rate-formula.md` | Rate formula reference |
-| `docs/contract-errors.md`, `docs/errors.md` | Error code table |
+| `docs/errors.md` | Canonical error code table (single source) |
 | `docs/storage-layout.md` | Storage tier reference |
 | `docs/threat-model.md` | Authorization matrix |
 | `docs/default-liquidation-auction-hook.md` | Cross-contract handoff |

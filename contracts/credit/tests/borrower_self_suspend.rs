@@ -22,7 +22,10 @@
 //! ## 3. Functional Capabilities Post-Suspension
 //! - ✓ Draw operations are blocked after self-suspension
 //! - ✓ Repayment operations remain allowed after self-suspension
-//! - ✓ Admin can reinstate a self-suspended line to Active
+//! - ✓ Borrower can self-unsuspend their own line back to Active
+//! - ✓ Borrower cannot clear an admin-initiated suspension
+//! - ✓ Admin can unsuspend a self-suspended line to Active
+//! - ✓ `reinstate_credit_line` is rejected for a self-suspended line
 //! - ✓ Admin can force-close a self-suspended line
 //! - ✓ Utilization amount is preserved during self-suspension
 //!
@@ -333,28 +336,113 @@ fn test_repay_allowed_after_self_suspension() {
 /// - Status transitions from Suspended to Active
 ///
 /// **Note:** This test assumes `reinstate_credit_line` works for Suspended status.
-/// If reinstate only works for Defaulted, this test documents the expected behavior.
+/// Test: Borrower can clear their own self-suspension without admin action.
+///
+/// **Validates:**
+/// - `SelfSuspended → Active` is reachable by the borrower
+/// - The debt record and credit parameters survive the round trip unchanged
+#[test]
+fn test_borrower_can_self_unsuspend_own_line() {
+    let (env, _admin, borrower, contract_id, _token_address, _drawn_amount) =
+        setup_with_utilized_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.self_suspend_credit_line(&borrower);
+    let suspended = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(suspended.status, CreditStatus::SelfSuspended);
+
+    client.self_unsuspend_credit_line(&borrower);
+    let active = client.get_credit_line(&borrower).unwrap();
+
+    assert_eq!(active.status, CreditStatus::Active);
+    assert_eq!(active.utilized_amount, suspended.utilized_amount);
+    assert_eq!(active.credit_limit, suspended.credit_limit);
+    assert_eq!(active.interest_rate_bps, suspended.interest_rate_bps);
+}
+
+/// Test: A borrower cannot clear an admin-initiated suspension.
+///
+/// This is the reason `SelfSuspended` exists as a distinct variant from
+/// `Suspended`: the borrower-only exit path must not double as an override of
+/// the admin's hold.
+///
+/// **Validates:**
+/// - `self_unsuspend_credit_line` rejects a `Suspended` source
+/// - The line stays `Suspended`; no partial state change
+#[test]
+fn test_borrower_cannot_self_unsuspend_admin_suspension() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
+    client.suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Suspended
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.self_unsuspend_credit_line(&borrower);
+    }));
+    assert!(
+        result.is_err(),
+        "borrower must not clear an admin-initiated suspension"
+    );
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Suspended
+    );
+}
+
+/// Test: Admin can clear a borrower self-suspension via `unsuspend_credit_line`.
+///
+/// **Validates:**
+/// - `SelfSuspended → Active` is also reachable by the admin
+/// - `unsuspend_credit_line` is the recovery path for both suspension origins
 #[test]
 fn test_admin_can_unsuspend_self_suspended_line() {
-    #[allow(unused_variables)] let (env, _admin, borrower, contract_id, token_address) = setup_with_active_line(); #[allow(unused_variables)] let token = token_address.clone(); let client = CreditClient::new(&env, &contract_id);
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
 
-    // Self-suspend the line
+    client.self_suspend_credit_line(&borrower);
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
+
+    client.unsuspend_credit_line(&borrower);
+
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::Active
+    );
+}
+
+/// Test: `reinstate_credit_line` is not the way out of a suspension.
+///
+/// **Validates:**
+/// - Reinstate only accepts `Defaulted` as a source
+/// - An integrator wiring a `SelfSuspended` line to the reinstate button gets a
+///   deterministic error, not a silent no-op
+#[test]
+fn test_reinstate_cannot_replace_self_unsuspend() {
+    let (env, _admin, borrower, contract_id, _token_address) = setup_with_active_line();
+    let client = CreditClient::new(&env, &contract_id);
+
     client.self_suspend_credit_line(&borrower);
 
-    // Verify status is SelfSuspended
-    let credit_line_suspended = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(credit_line_suspended.status, CreditStatus::SelfSuspended);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.reinstate_credit_line(&borrower, &CreditStatus::Active);
+    }));
+    assert!(
+        result.is_err(),
+        "reinstate must reject a SelfSuspended source"
+    );
 
-    // Admin unsuspends by opening a new line (current behavior) or via a dedicated unsuspend function
-    // For now, we test that admin can transition back by re-opening
-    // Note: In production, you may want a dedicated `unsuspend_credit_line` function
-
-    // Since there's no direct unsuspend, we verify admin can force-close and reopen
-    // Or we can test that the line remains suspended until admin takes action
-    // For this test, we document that admin intervention is required
-
-    // This test serves as documentation that self-suspended lines require admin action
-    // to return to Active status (either via reinstate or other admin functions)
+    assert_eq!(
+        client.get_credit_line(&borrower).unwrap().status,
+        CreditStatus::SelfSuspended
+    );
 }
 
 /// Test: Admin can force-close a self-suspended line.

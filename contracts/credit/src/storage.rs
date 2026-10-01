@@ -364,6 +364,20 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
         .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
 }
 
+/// Refresh the persistent TTL for a default-liquidation replay marker.
+///
+/// Mirrors the auction contract's `bump_settlement_marker_ttl`
+/// (`gateway-contract/contracts/auction_contract/src/storage.rs`): the marker
+/// lives under `(Symbol("liq_seen"), borrower, settlement_id)` and must
+/// outlive every credit-line state it guards, so it is bumped to the same
+/// ~6-month window as the credit-line entry on write and on the replay-check
+/// read path. The bump is a no-op when the marker does not yet exist.
+pub fn bump_settlement_marker_ttl(env: &Env, key: &(Symbol, Address, Symbol)) {
+    if env.storage().persistent().has(key) {
+        bump_persistent_ttl(env, key);
+    }
+}
+
 /// Refresh the persistent TTL for a borrower's VRF commitment.
 pub fn bump_vrf_commitment_ttl(env: &Env, borrower: &Address) {
     let key = DataKey::VrfCommitment(borrower.clone());
@@ -1155,12 +1169,18 @@ pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
         env.storage()
             .persistent()
             .set(&key, &true);
+        bump_persistent_ttl(env, &key);
     } else {
         env.storage()
             .persistent()
             .remove(&key);
+        // Only the instance TTL can be bumped here: the per-borrower record has
+        // just been removed, and `extend_ttl` on a removed key reverts with
+        // `Storage(MissingValue)`. Bumping unconditionally made
+        // `unblock_borrower` revert for every borrower and left the block in
+        // place. Unblocking is now idempotent, as the entrypoint documents.
+        bump_instance_ttl(env);
     }
-    bump_persistent_ttl(env, &key);
 }
 
 /// Check if a borrower is blocked from drawing.

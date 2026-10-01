@@ -335,6 +335,69 @@ fn settle_default_liquidation_bumps_credit_line_ttl_on_accrual_read() {
 }
 
 #[test]
+fn settle_default_liquidation_bumps_replay_marker_ttl() {
+    let env = Env::default();
+    let (contract_id, client, _admin) = setup(&env);
+
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+
+    // Seed an outstanding balance so the settlement's economic validation
+    // passes: `recovered_amount` must not exceed
+    // `utilized_amount * close_factor_bps / 10_000`.
+    env.as_contract(&contract_id, || {
+        let mut line =
+            creditra_credit::storage::get_credit_line(&env, &borrower).expect("fresh line exists");
+        line.utilized_amount = 1_000;
+        let status = line.status;
+        creditra_credit::storage::persist_credit_line(&env, &borrower, &line, 0, Some(status));
+    });
+
+    client.default_credit_line(&borrower);
+
+    let settlement_id = Symbol::new(&env, "settle1");
+    client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
+
+    // The replay-protection marker lives under
+    // `(Symbol("liq_seen"), borrower, settlement_id)`; its TTL must be bumped
+    // to the same ~6-month window as the credit-line entry so replay
+    // protection never silently lapses via archival.
+    let marker_key = (
+        Symbol::new(&env, "liq_seen"),
+        borrower.clone(),
+        settlement_id.clone(),
+    );
+    let marker_ttl = ttl_for_key(&env, &contract_id, &marker_key);
+    assert!(
+        marker_ttl >= LEDGER_BUMP_AMOUNT,
+        "settlement replay marker TTL not extended on write: {marker_ttl}"
+    );
+
+    // Marker TTL equals the credit-line TTL after settlement.
+    let credit_line_ttl = ttl_for_key(&env, &contract_id, &borrower);
+    assert_eq!(
+        marker_ttl, credit_line_ttl,
+        "settlement marker TTL {marker_ttl} != credit-line TTL {credit_line_ttl}"
+    );
+
+    // The replay check bumps the marker TTL again when it exists. A replayed
+    // settlement reverts on the `AlreadyInitialized` panic, so exercise the
+    // exact bump the replay check performs directly.
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, marker_ttl.saturating_sub(target_remaining));
+
+    env.as_contract(&contract_id, || {
+        creditra_credit::storage::bump_settlement_marker_ttl(&env, &marker_key);
+    });
+
+    let marker_ttl_after = ttl_for_key(&env, &contract_id, &marker_key);
+    assert!(
+        marker_ttl_after > target_remaining,
+        "replay check did not bump the settlement marker TTL: {marker_ttl_after}"
+    );
+}
+
+#[test]
 fn reverse_draw_bumps_credit_line_ttl_on_accrual_read() {
     let env = Env::default();
     // 200 of debt so the 100 reversed below has something to come out of.

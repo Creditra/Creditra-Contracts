@@ -196,9 +196,15 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
         v as i128
     };
 
-    // Check if the borrower is delinquent to apply penalty surcharge
+    // A structured config selects exactly one late-fee mode. Flat suppresses
+    // the legacy APR surcharge; AprBased overrides it (including zero bps).
+    // Only an absent config restores the legacy surcharge.
     let is_delinquent = crate::query::is_delinquent(env.clone(), line.borrower.clone());
-    let penalty_surcharge_bps = crate::storage::get_penalty_surcharge_bps(env);
+    let penalty_surcharge_bps = match crate::storage::get_late_fee_config(env) {
+        Some(crate::penalties::LateFeeConfig::AprBased(cfg)) => cfg.surcharge_bps,
+        Some(crate::penalties::LateFeeConfig::Flat(_)) => 0,
+        None => crate::storage::get_penalty_surcharge_bps(env),
+    };
 
     // Track previous rate to detect penalty rate entry/exit
     let previous_effective_rate = line.interest_rate_bps;
