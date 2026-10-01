@@ -54,7 +54,7 @@ use crate::storage::{
     get_min_collateral_ratio_bps, is_collateral_token_allowed, set_collateral_balance,
     set_collateral_balance_for_token,
 };
-use crate::types::{CollateralEventKind, ContractError};
+use crate::types::{CollateralEventKind, CollateralState, ContractError};
 use soroban_sdk::{token, Address, Env};
 
 // ── Shared collateral valuation (Issues #1222 / #1223) ────────────────────────
@@ -274,6 +274,57 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 /// Read‑only getter for a borrower's collateral balance.
 pub fn get_collateral(env: &Env, borrower: &Address) -> i128 {
     get_collateral_balance(env, borrower)
+}
+
+/// Return a full collateral state snapshot for `borrower`.
+///
+/// Reads the borrower's collateral balance, the protocol-wide minimum
+/// collateral ratio, the configured collateral token, and computes the
+/// current health factor — all in a single read-only call.
+///
+/// # Health factor
+///
+/// ```text
+/// health_factor_bps = balance * 10_000 / utilized_amount
+/// ```
+///
+/// A value at or above `min_ratio_bps` indicates the position is adequately
+/// collateralized. Returns `u32::MAX` when `utilized_amount == 0` (no
+/// outstanding debt), and clamps to `u32::MAX` when the ratio exceeds the
+/// `u32` range (extreme collateral-to-debt ratios).
+///
+/// This is the *raw* ratio: it deliberately ignores `min_ratio_bps` because
+/// `min_ratio_bps == 0` disables the ratio check entirely, and a disabled
+/// check must not make an unsecured position look liquidatable. The
+/// min-ratio-aware factor that keepers compare against `10_000` is
+/// [`crate::query::get_health_factor`].
+///
+/// # Authentication
+///
+/// None required — this is a pure read.
+pub fn get_collateral_state(env: &Env, borrower: &Address) -> CollateralState {
+    let balance = get_collateral_balance(env, borrower);
+    let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+    let collateral_token = get_collateral_token(env);
+
+    let utilized_amount = get_credit_line(env, borrower)
+        .map(|l| l.utilized_amount)
+        .unwrap_or(0);
+
+    let health_factor_bps: u32 = if utilized_amount <= 0 {
+        u32::MAX
+    } else {
+        let hf = balance.checked_mul(10_000_i128).unwrap_or(i128::MAX) / utilized_amount;
+        u32::try_from(hf).unwrap_or(u32::MAX)
+    };
+
+    CollateralState {
+        borrower: borrower.clone(),
+        balance,
+        min_ratio_bps,
+        collateral_token,
+        health_factor_bps,
+    }
 }
 
 /// Allow a borrower to release a portion of their collateral while keeping

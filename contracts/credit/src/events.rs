@@ -135,6 +135,8 @@ pub struct DefaultLiquidationSettledEvent {
     pub borrower: Address,
     pub settlement_id: Symbol,
     pub recovered_amount: i128,
+    pub interest_recovered: i128,
+    pub principal_recovered: i128,
     pub remaining_utilized_amount: i128,
     pub status: CreditStatus,
     pub close_factor_bps: u32,
