@@ -115,6 +115,7 @@ noted. Publishers live in `contracts/credit/src/events.rs`.
 | `"admin_acc"` | `AdminRotationAcceptedEvent` | 1. `new_admin: Address` | 1.0.0 | Stable |
 | `"tre_prop"` | `TreasuryWithdrawalProposedEvent` | 1. `recipient: Address`, 2. `amount: i128`, 3. `proposer: Address`, 4. `proposed_at: u64`, 5. `execute_after: u64` | 1.0.0 | Stable |
 | `"tre_exec"` | `TreasuryWithdrawalExecutedEvent` | 1. `recipient: Address`, 2. `amount: i128`, 3. `executor: Address`, 4. `executed_at: u64` | 1.0.0 | Stable |
+| `"bty_wdrn"` | `BountyWithdrawnEvent` | 1. `recipient: Address`, 2. `amount: i128`, 3. `executor: Address` | 1.0.0 | Stable |
 | `"upgraded"` | `ContractUpgradedEvent` | 1. `old_wasm_hash: BytesN<32>`, 2. `new_wasm_hash: BytesN<32>` | 1.0.0 | Stable |
 
 ### 4.6 Blocklist and freeze events
@@ -257,6 +258,7 @@ All events are emitted by the CosmWasm `creditra-credit` contract
 | `("credit","admin_acc")` | 1.0.0 | No | — | |
 | `("credit","tre_prop")` | 1.0.0 | No | — | |
 | `("credit","tre_exec")` | 1.0.0 | No | — | |
+| `("credit","bty_wdrn")` | 1.0.0 | No | — | Direct bounty pool sweep |
 | `("credit","upgraded")` | 1.0.0 | No | — | |
 | `("credit","liq_req")` | 1.0.0 | No | — | Raw tuple payload |
 | `("credit","liq_setl")` | 1.0.0 | No | — | |
@@ -329,6 +331,7 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | `publish_admin_rotation_accepted` | `("credit", "admin_acc")` |
 | `publish_treasury_withdrawal_proposed` | `("credit", "tre_prop")` |
 | `publish_treasury_withdrawal_executed` | `("credit", "tre_exec")` |
+| `publish_bounty_withdrawn_event` | `("credit", "bty_wdrn")` |
 | `publish_contract_upgraded_event` | `("credit", "upgraded")` |
 | `publish_default_liquidation_requested_event` | `("credit", "liq_req")` |
 | `publish_default_liquidation_settled_event` | `("credit", "liq_setl")` |
@@ -365,6 +368,7 @@ publisher takes `&Env` plus the event-specific payload fields and calls
 | 2026-06-28 | Added `contracts/credit/tests/events_catalog.rs` | New integration test verifying every cataloged event is emitted with the correct topic and payload shape. |
 | 2026-07-24 | Added `DrawReversedEvent`, `CollateralPartialReleasedEvent`, oracle quorum events (`orc_qcfg`, `orc_qprc`) to catalog | Catalog was missing 4 events present in `contracts/credit/src/events.rs`. Fixed `GraceWaiverAppliedEvent` → `GraceWaiverReceiptEvent` naming to match code. Added corresponding tests. |
 | 2026-07-25 | Added accrual contract events (`contracts/accrual/`), CosmWasm contract events (`contracts/creditra-credit/`). Fixed `"default"` → `"defaulted"` lifecycle topic. Fixed `BorrowerFrozenEvent` topic from `("credit","br_freeze")` to `("br_freeze",)`. Added `Restricted = 4` to `CreditStatus`. Expanded `FreezeReason` with all 5 variants. Updated doc comment in `events.rs`. | Schema v1.0 → v1.1 |
+| 2026-09-28 | Added `BountyWithdrawnEvent` (`bty_wdrn`) to catalog | Emitted on the direct `withdraw_bounty` sweep when the balance is non-zero. Treasury withdrawals are timelocked and already emit `tre_exec`. Closes #1265. |
 
 ---
 

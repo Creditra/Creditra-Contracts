@@ -150,7 +150,7 @@ use soroban_sdk::{
 use crate::auth::{require_admin, require_admin_auth, require_admin_auth_with_argument};
 use crate::attestation::AttestationBatch;
 use crate::events::{
-    publish_admin_rotation_accepted, publish_admin_rotation_proposed,
+    publish_admin_rotation_accepted, publish_admin_rotation_proposed, publish_bounty_withdrawn_event,
     publish_borrow_lifecycle_event, publish_borrower_blocked_event,
     publish_borrower_frozen_event, publish_close_factor_bps_set_event,
     publish_contract_upgraded_event, publish_credit_line_event,
@@ -161,7 +161,7 @@ use crate::events::{
     publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
     publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, BountyWithdrawnEvent, ContractUpgradedEvent,
     CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
     RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
@@ -1448,6 +1448,14 @@ impl Credit {
         token_client.transfer(&contract_address, &bounty_addr, &amount);
 
         crate::storage::clear_bounty_balance(&env);
+        publish_bounty_withdrawn_event(
+            &env,
+            BountyWithdrawnEvent {
+                recipient: bounty_addr,
+                amount,
+                executor: admin,
+            },
+        );
     }
 
     /// Withdraw accumulated treasury balance to the configured treasury address

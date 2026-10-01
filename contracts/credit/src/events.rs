@@ -575,8 +575,7 @@ pub fn publish_grace_waiver_applied_event(
     );
 }
 
-
-
+pub use publish_grace_waiver_applied_event as publish_grace_waiver_receipt_event;
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -621,6 +620,28 @@ pub fn publish_treasury_withdrawal_proposed(env: &Env, event: TreasuryWithdrawal
 pub fn publish_treasury_withdrawal_executed(env: &Env, event: TreasuryWithdrawalExecutedEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "tre_exec")),
+        event,
+    );
+}
+
+/// Emitted when accumulated bounty pool funds are swept via `withdraw_bounty`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BountyWithdrawnEvent {
+    /// Bounty recipient address.
+    pub recipient: Address,
+    /// Amount transferred.
+    pub amount: i128,
+    /// Admin who executed the withdrawal.
+    pub executor: Address,
+}
+
+pub type BountyWithdrawn = BountyWithdrawnEvent;
+
+/// Publish a bounty pool withdrawn event for direct sweeps.
+pub fn publish_bounty_withdrawn_event(env: &Env, event: BountyWithdrawnEvent) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "bty_wdrn")),
         event,
     );
 }
