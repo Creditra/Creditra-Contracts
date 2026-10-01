@@ -349,6 +349,17 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
         .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
 }
 
+/// Refresh the persistent TTL for a settlement replay-protection marker.
+pub fn bump_settlement_marker_ttl(env: &Env, key: &(Symbol, Address, Symbol)) {
+    if env.storage().persistent().has(key) {
+        env.storage().persistent().extend_ttl(
+            key,
+            CREDIT_LINE_TTL_THRESHOLD,
+            CREDIT_LINE_TTL_EXTEND_TO,
+        );
+    }
+}
+
 /// Refresh the persistent TTL for an active credit-line freeze record.
 pub fn bump_credit_line_freeze_ttl(env: &Env, borrower: &Address) {
     let key = DataKey::CreditLineFreeze(borrower.clone());

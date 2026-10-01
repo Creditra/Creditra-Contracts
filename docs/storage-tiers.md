@@ -115,6 +115,13 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `DrawAudit(Address, u64)` | `i128` | none (direct `persistent().set`) | Written on draw; **no explicit TTL bump** | Written in `reverse_draw` (read at line 1393 of `lib.rs`); `get` ← `reverse_draw` |
 | `DrawReversedAmount(Address, u64)` | `i128` | none (direct `persistent().set`) | Accumulated on each partial reversal; **no explicit TTL bump** | `persistent().set` ← `reverse_draw` (line 1413 of `lib.rs`); `get` ← `reverse_draw` (line 1398) |
 
+The settlement replay marker is also persistent storage, but is keyed by the
+tuple `(Symbol("liq_seen"), borrower, settlement_id)` rather than a `DataKey`
+variant. Its boolean presence records an accepted settlement and its TTL is
+managed by `bump_settlement_marker_ttl`, using the same threshold and extension
+target as the credit-line entry. The marker is bumped before replay checks and
+after every write in `settle_default_liquidation`.
+
 > **⚠ TTL hygiene note — unbumped persistent keys**
 >
 > The ten persistent-tier variants marked "no explicit TTL bump" above rely on
@@ -186,6 +193,7 @@ below `LEDGER_BUMP_THRESHOLD` (~3 months) to `LEDGER_BUMP_AMOUNT` (~6 months).
 | `CollateralBalance(Address)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for that borrower |
 | `DrawAudit(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |
 | `DrawReversedAmount(Address, u64)` | Persistent | ⚠️ indirect | Co-bumped only if `persist_credit_line` runs for same borrower |
+| `(Symbol("liq_seen"), borrower, settlement_id)` | Persistent | ✅ | `bump_settlement_marker_ttl` before replay checks and after writes | `settle_default_liquidation` |
 
 ---
 
