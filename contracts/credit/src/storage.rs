@@ -332,7 +332,7 @@ pub fn bump_instance_ttl(env: &Env) {
         .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
-fn bump_persistent_ttl<K>(env: &Env, key: &K)
+pub fn bump_persistent_ttl<K>(env: &Env, key: &K)
 where
     K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
 {
@@ -347,6 +347,12 @@ pub fn bump_credit_line_ttl(env: &Env, borrower: &Address) {
     env.storage()
         .persistent()
         .extend_ttl(borrower, CREDIT_LINE_TTL_THRESHOLD, CREDIT_LINE_TTL_EXTEND_TO);
+}
+
+/// Refresh the persistent TTL for a borrower's VRF commitment.
+pub fn bump_vrf_commitment_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::VrfCommitment(borrower.clone());
+    bump_persistent_ttl(env, &key);
 }
 
 /// Refresh the persistent TTL for an active credit-line freeze record.
@@ -1658,6 +1664,10 @@ pub fn set_risk_admin_cooldown_seconds(env: &Env, seconds: u64) {
 
 /// Get the timestamp of the last risk admin action.
 /// Returns `0` when no action has been recorded yet.
+///
+/// # Deprecation note
+/// This global key is retained for backward compatibility. New code should
+/// use [`get_last_risk_admin_action_ts_for`] which is scoped per borrower.
 pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
     let key = symbol_short!("rad_last");
     env.storage()
@@ -1667,6 +1677,10 @@ pub fn get_last_risk_admin_action_ts(env: &Env) -> u64 {
 }
 
 /// Set the timestamp of the last risk admin action.
+///
+/// # Deprecation note
+/// This global key is retained for backward compatibility. New code should
+/// use [`set_last_risk_admin_action_ts_for`] which is scoped per borrower.
 pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
     let key = symbol_short!("rad_last");
     env.storage()
@@ -1674,10 +1688,66 @@ pub fn set_last_risk_admin_action_ts(env: &Env, ts: u64) {
         .set(&key, &ts);
 }
 
+/// Get the timestamp of the last risk admin action for a specific borrower.
+///
+/// Keyed by `(symbol_short!("rad_last"), borrower)` in persistent storage,
+/// mirroring `LastAccrualAdminActionTs` which is also per-borrower.
+/// Returns `0` when no action has been recorded for this borrower yet.
+pub fn get_last_risk_admin_action_ts_for(env: &Env, borrower: &Address) -> u64 {
+    let key = (symbol_short!("rad_last"), borrower.clone());
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(0)
+}
+
+/// Set the timestamp of the last risk admin action for a specific borrower.
+///
+/// Keyed by `(symbol_short!("rad_last"), borrower)` in persistent storage.
+pub fn set_last_risk_admin_action_ts_for(env: &Env, borrower: &Address, ts: u64) {
+    let key = (symbol_short!("rad_last"), borrower.clone());
+    env.storage()
+        .persistent()
+        .set(&key, &ts);
+}
+
+/// Assert that the risk admin cooldown has elapsed since the last action
+/// for the given borrower.
+///
+/// # Scope (Issue #1280)
+/// The cooldown is now **per-borrower**: each borrower's last-action timestamp
+/// is tracked independently. Updating borrower A's risk parameters does not
+/// start or reset the cooldown for borrower B.
+///
+/// # Behaviour
+/// - When `cooldown_seconds == 0` (default): always passes (disabled).
+/// - When no prior action exists for this borrower (`last_ts == 0`): always
+///   passes (first update is never blocked).
+/// - Otherwise: reverts with [`ContractError::RiskAdminCooldownActive`] if
+///   `now < last_ts + cooldown_seconds`.
+pub fn assert_risk_admin_cooldown_elapsed_for(env: &Env, borrower: &Address) {
+    let cooldown = get_risk_admin_cooldown_seconds(env);
+    if cooldown == 0 {
+        return;
+    }
+    let last_ts = get_last_risk_admin_action_ts_for(env, borrower);
+    if last_ts == 0 {
+        return;
+    }
+    let now = env.ledger().timestamp();
+    if now < last_ts.saturating_add(cooldown) {
+        env.panic_with_error(ContractError::RiskAdminCooldownActive);
+    }
+}
+
 /// Assert that the risk admin cooldown has elapsed since the last action.
 /// Panics with `RiskAdminCooldownActive` if the cooldown has not yet elapsed.
 /// When `last_ts` is `0` (no prior action recorded), the cooldown is not
 /// enforced so the first call always succeeds.
+///
+/// # Deprecation note
+/// This checks the legacy global timestamp. Prefer
+/// [`assert_risk_admin_cooldown_elapsed_for`] for per-borrower enforcement.
 pub fn assert_risk_admin_cooldown_elapsed(env: &Env) {
     let cooldown = get_risk_admin_cooldown_seconds(env);
     if cooldown == 0 {

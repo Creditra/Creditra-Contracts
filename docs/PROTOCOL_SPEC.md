@@ -68,8 +68,7 @@ entrypoints are inside a single `#[contractimpl]` block at
 | `LEDGER_BUMP_AMOUNT`             | `3_110_400`       | `storage.rs:122`     | ~6 months at 5s/ledger        |
 | `LEDGER_BUMP_THRESHOLD`          | `1_555_200`       | `storage.rs:123`     | ~3 months bump trigger        |
 | `INSTANCE_BUMP_AMOUNT/THRESHOLD` | mirror of above   | `storage.rs:126-127` |                               |
-| `SECONDS_PER_YEAR` (accrual)     | `31_536_000`      | `accrual.rs:60`      | dead-code, legacy             |
-| `SECONDS_PER_YEAR` (math)        | `31_557_600`      | `math_utils.rs:60`   | Julian — live                 |
+| `SECONDS_PER_YEAR`               | `31_557_600`      | `math_utils.rs:60`   | Julian — live                 |
 | `BPS_DENOMINATOR`                | `10_000`          | `math_utils.rs:57`   |                               |
 | `BPS_YEAR_DENOM`                 | `315_576_000_000` | `math_utils.rs:66`   | precomputed                   |
 
@@ -326,8 +325,14 @@ emits `("credit","rate_form")` with `true`.
 | `withdraw_bounty(admin)`          | Transfers `BountyBalance` to `BountyAddress`; clears balance. Errors: `BountyNotSet`, `MissingLiquidityToken`.                      |
 
 On `repay_credit`, the protocol fee skim is split per `TreasuryFeeShareBps` into
-`TreasuryBalance` and `BountyBalance` (floor to treasury, remainder to bounty).
-See `contracts/credit/src/fees.rs`.
+`TreasuryBalance` and `BountyBalance` by largest-remainder apportionment
+(`math_utils::split_conserving`): both shares are floored, then the leftover base
+unit goes to the recipient with the larger fractional claim, ties broken in
+favour of treasury. The shares always sum exactly to the fee. Flat late fees are
+credited to `TreasuryBalance` only and are **not** split. See
+`contracts/credit/src/fees.rs` and [`docs/treasury.md`](./treasury.md) for the
+full lifecycle, worked examples, the `AuctionActive` freeze, and the immediate
+vs 24-hour-timelocked withdrawal paths.
 
 ### 2.8 Settlement & oracle
 
@@ -406,9 +411,9 @@ See `contracts/credit/src/fees.rs`.
 | `get_treasury()`                                                 | `Option<Address>`                                                                                        |
 | `get_protocol_fee_bps()`                                         | `Option<u32>`                                                                                            |
 | `get_collateral(borrower)`                                       | `i128`                                                                                                   |
-| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = liquidatable; see `query.rs:get_health_factor`) |
+| `get_health_factor(borrower)`                                    | `u32` (bps-scaled, `u32::MAX` when no debt; `< 10_000` = under-collateralized advisory threshold; `default_credit_line` does not check health factor; see `query.rs:get_health_factor` and `docs/credit.md`) |
 | `get_protocol_summary_view()`                                    | `ProtocolSummaryView { total_utilized, total_collateral, active_line_count }` — active-line-only aggregate view built for the GrantFox campaign; see `views.rs:get_protocol_summary_view` |
-| `risk_capabilities(borrower)`                                    | `RiskCapabilities { can_update_risk_parameters, can_change_rate, can_commit_vrf }` — read-only risk mutation pre-flight bitmap; see `contracts/risk/src/views.rs` |
+| —                                                               | **Not implemented.** The `risk_capabilities` / `RiskCapabilities` surface has no entrypoint on this contract. `contracts/risk/src/views.rs` is not declared as a module of `creditra-risk` and imports `creditra-credit` internals, so it is not built or callable; see [`contracts/risk/README.md`](../contracts/risk/README.md) §8. |
 | `query_capabilities(borrower)`                                   | `QueryCapabilities { has_credit_line, has_repayment_schedule, health_factor_applicable, delinquency_applicable, is_delinquent }` — read-only query availability bitmap; see `contracts/query/src/views.rs` |
 
 Reads with persistent borrower data invoke `bump_credit_line_ttl` (a write,

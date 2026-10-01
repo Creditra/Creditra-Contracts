@@ -370,3 +370,77 @@ fn new_proposal_allowed_after_execution() {
     client.propose_treasury_withdrawal(&admin); // must not panic
     assert!(client.get_pending_treasury_withdrawal().is_some());
 }
+
+// ── Instant sweep is gated behind the timelock (issue #1221) ────────────────
+
+/// `withdraw_treasury` must not sweep without a pending proposal.
+#[test]
+#[should_panic(expected = "Error(Contract, #42)")] // NoPendingTreasuryWithdrawal
+fn withdraw_treasury_without_proposal_reverts() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    // No proposal was ever made — the legacy entrypoint must not move funds.
+    client.withdraw_treasury(&admin);
+}
+
+/// A pending but immature proposal is not enough either.
+#[test]
+#[should_panic(expected = "Error(Contract, #43)")] // TreasuryTimelockActive
+fn withdraw_treasury_before_timelock_reverts() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    let now = 100_000_u64;
+    env.ledger().with_mut(|l| l.timestamp = now);
+    client.propose_treasury_withdrawal(&admin);
+
+    // One second before the unlock the sweep must still revert.
+    env.ledger().with_mut(|l| l.timestamp = now + TIMELOCK - 1);
+    client.withdraw_treasury(&admin);
+}
+
+/// Once matured, the legacy entrypoint performs the same single transfer as
+/// `execute_treasury_withdrawal` and consumes the proposal.
+#[test]
+fn withdraw_treasury_after_timelock_executes_the_matured_proposal() {
+    let (env, contract_id, token_address, treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    let expected = client.get_protocol_summary().treasury_balance;
+    assert!(expected > 0, "setup must seed a treasury balance");
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000);
+    client.propose_treasury_withdrawal(&admin);
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
+    client.withdraw_treasury(&admin);
+
+    // Exactly the proposed amount reached the treasury address…
+    assert_eq!(
+        token::Client::new(&env, &token_address).balance(&treasury),
+        expected
+    );
+    // …the proposal is spent, and the on-chain accumulator is cleared.
+    assert!(client.get_pending_treasury_withdrawal().is_none());
+    assert_eq!(client.get_protocol_summary().treasury_balance, 0);
+}
+
+/// A second sweep after execution has nothing to execute.
+#[test]
+#[should_panic(expected = "Error(Contract, #42)")] // NoPendingTreasuryWithdrawal
+fn withdraw_treasury_cannot_be_replayed() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000);
+    client.propose_treasury_withdrawal(&admin);
+    env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
+    client.withdraw_treasury(&admin);
+
+    client.withdraw_treasury(&admin);
+}

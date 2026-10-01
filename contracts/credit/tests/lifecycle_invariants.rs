@@ -653,3 +653,203 @@ fn reopen_after_closed_resets_state_correctly() {
     assert_eq!(reopened.utilized_amount, 0, "reopened line must have zero utilized");
     assert_eq!(reopened.accrued_interest, 0, "reopened line must have zero accrued interest");
 }
+
+// ── ActiveLineCount vs. full recount (issue #1343) ───────────────────────────
+//
+// `persist_credit_line` maintains `DataKey::ActiveLineCount` incrementally:
+// it increments when a line becomes `Active` and decrements when an `Active`
+// line leaves that state. That is only correct as long as *every* writer passes
+// the correct `previous_status`. A missed caller (or a transition that changes
+// status without going through `persist_credit_line`) silently desynchronises
+// the counter from reality, which is exactly what the invariant below catches.
+
+/// Deterministic PRNG used to pin the generated lifecycle sequences.
+struct Xorshift64(u64);
+
+impl Xorshift64 {
+    fn new(seed: u64) -> Self {
+        assert_ne!(seed, 0, "xorshift64 requires a non-zero seed");
+        Self(seed)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+}
+
+/// Fixed seed for the deterministic replay below.
+const ACTIVE_LINE_SEED: u64 = 0x1343_0000_0000_0001;
+
+/// Recount Active lines from storage, ignoring the cached counter entirely.
+///
+/// Walks the stable id registry through `enumerate_credit_lines` and counts the
+/// records whose persisted status is `Active`. This is deliberately O(n) and
+/// therefore only used from tests.
+fn recount_active_lines(client: &CreditClient<'_>) -> u32 {
+    const PAGE: u32 = 100;
+    let mut active = 0u32;
+    let mut cursor: Option<u32> = None;
+
+    loop {
+        let page = client.enumerate_credit_lines(&cursor, &PAGE);
+        let page_len = page.len();
+        if page_len == 0 {
+            break;
+        }
+
+        for (_, line) in page.iter() {
+            if line.status == CreditStatus::Active {
+                active = active.saturating_add(1);
+            }
+        }
+
+        if page_len < PAGE {
+            break;
+        }
+        match page.get(page_len - 1) {
+            Some((last_id, _)) => cursor = Some(last_id),
+            None => break,
+        }
+    }
+
+    active
+}
+
+/// Assert the cached `ActiveLineCount` agrees with a full recount.
+fn assert_active_line_count_matches_recount(client: &CreditClient<'_>, label: &str) {
+    let cached = client.get_protocol_summary_view().active_line_count;
+    let recounted = recount_active_lines(client);
+    assert_eq!(
+        cached, recounted,
+        "{label}: ActiveLineCount ({cached}) != recount over enumerated lines ({recounted})"
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 192,
+        max_shrink_iters: 512,
+        ..ProptestConfig::default()
+    })]
+
+    /// Same model as the accounting proptest, but the operation stream is
+    /// derived from a fixed seed instead of proptest's own RNG, so a failing
+    /// sequence can be replayed exactly (`proptest` 1.3.1 predates
+    /// `Config::rng_seed`).
+    #[test]
+    fn prop_active_line_count_matches_recount_for_seeded_sequences(
+        batch in any::<u64>(),
+    ) {
+        let (env, client, admin, borrower) = setup();
+        let mut rng = Xorshift64::new(ACTIVE_LINE_SEED ^ batch.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let steps = 1 + (rng.next_u64() % 40) as usize;
+
+        assert_active_line_count_matches_recount(&client, "initial");
+
+        for step in 0..steps {
+            match rng.next_u64() % 9 {
+                0 => {
+                    let _ = client.try_open_credit_line(
+                        &borrower,
+                        &CREDIT_LIMIT,
+                        &RATE_BPS,
+                        &RISK_SCORE,
+                    );
+                }
+                1 => {
+                    let _ = client.try_suspend_credit_line(&borrower);
+                }
+                2 => {
+                    let _ = client.try_self_suspend_credit_line(&borrower);
+                }
+                3 => {
+                    let _ = client.try_unsuspend_credit_line(&borrower);
+                }
+                4 => {
+                    let _ = client.try_self_unsuspend_credit_line(&borrower);
+                }
+                5 => {
+                    let _ = client.try_reinstate_credit_line(&borrower, &CreditStatus::Active);
+                }
+                6 => {
+                    let _ =
+                        client.try_reinstate_credit_line(&borrower, &CreditStatus::Restricted);
+                }
+                7 => {
+                    let _ = client.try_default_credit_line(&borrower);
+                }
+                _ => {
+                    let _ = client.try_close_credit_line(&borrower, &admin);
+                }
+            }
+
+            assert_active_line_count_matches_recount(
+                &client,
+                &std::format!("batch={batch} step={step}"),
+            );
+        }
+
+        let _ = &env;
+    }
+}
+
+/// Fixed-seed replay: 200 counter-relevant transitions, checked after each one.
+///
+/// Covers the reopen path (`open_credit_line` on a `Closed` line) and both
+/// reinstate targets (`Active` and `Restricted`), which are the transitions
+/// most likely to leave the counter stale.
+#[test]
+fn active_line_count_matches_recount_for_fixed_seed_replay() {
+    const STEPS: usize = 200;
+
+    let (env, client, admin, borrower) = setup();
+    let mut rng = Xorshift64::new(ACTIVE_LINE_SEED);
+
+    assert_active_line_count_matches_recount(&client, "initial");
+
+    for step in 0..STEPS {
+        match rng.next_u64() % 9 {
+            0 => {
+                let _ = client.try_open_credit_line(
+                    &borrower,
+                    &CREDIT_LIMIT,
+                    &RATE_BPS,
+                    &RISK_SCORE,
+                );
+            }
+            1 => {
+                let _ = client.try_suspend_credit_line(&borrower);
+            }
+            2 => {
+                let _ = client.try_self_suspend_credit_line(&borrower);
+            }
+            3 => {
+                let _ = client.try_unsuspend_credit_line(&borrower);
+            }
+            4 => {
+                let _ = client.try_self_unsuspend_credit_line(&borrower);
+            }
+            5 => {
+                let _ = client.try_reinstate_credit_line(&borrower, &CreditStatus::Active);
+            }
+            6 => {
+                let _ = client.try_reinstate_credit_line(&borrower, &CreditStatus::Restricted);
+            }
+            7 => {
+                let _ = client.try_default_credit_line(&borrower);
+            }
+            _ => {
+                let _ = client.try_close_credit_line(&borrower, &admin);
+            }
+        }
+
+        assert_active_line_count_matches_recount(&client, &std::format!("step={step}"));
+    }
+
+    let _ = &env;
+}
