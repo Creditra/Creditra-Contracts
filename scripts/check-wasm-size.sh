@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Fail when any workspace contract WASM exceeds the size budget (default 100 KB).
+# Fail when any workspace contract WASM exceeds the size budget (default 50 KB).
 #
 # Usage:
 #   scripts/check-wasm-size.sh              # build all workspace WASM, then check
 #   scripts/check-wasm-size.sh --check-only # check existing artifacts only
 #
 # Environment:
-#   THRESHOLD_BYTES  Override limit in bytes (default: 102400 = 100 KiB)
+#   THRESHOLD_BYTES  Override limit in bytes (default: 51200 = 50 KB)
 #   WASM_DIR         Directory to scan (default: target/wasm32-unknown-unknown/release)
 set -euo pipefail
 
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-THRESHOLD_BYTES="${THRESHOLD_BYTES:-102400}"
+THRESHOLD_BYTES="${THRESHOLD_BYTES:-51200}"
 WASM_DIR="${WASM_DIR:-target/wasm32-unknown-unknown/release}"
 
 file_size_bytes() {

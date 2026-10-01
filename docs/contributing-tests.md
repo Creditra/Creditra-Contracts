@@ -165,3 +165,45 @@ Commit both the updated test and the regenerated
 The snapshot file is committed to the repository.  Any modification to
 `accrued_interest`'s arithmetic must be followed by a regeneration run and the
 new JSON committed in the same PR so CI never sees a stale snapshot.
+
+## Feature-Gated Tests
+
+Several test suites require the `instrument` feature flag to run. Without it, these suites are skipped and you may break baselines unknowingly.
+
+Run them explicitly:
+
+```bash
+# In the main workspace
+cargo test -p creditra-credit --test budget_regression --features instrument
+cargo test -p creditra-credit --test instrument --features instrument
+cargo test -p creditra-risk --test risk_admin_cooldown --features instrument
+```
+
+## CosmWasm Crate
+
+The CosmWasm crate (`contracts/creditra-credit`) is a standalone package, not a member of the Soroban root workspace. Standard `cargo test --workspace` commands at the root will skip it.
+
+To run tests for the CosmWasm crate separately:
+
+```bash
+cd contracts/creditra-credit
+cargo test
+# Include instrumented tests
+cargo test --features instrument
+```
+
+## Snapshot Tests (Insta)
+
+Tests relying on snapshot assertions use the `insta` crate. When you make intentional changes that affect snapshot outputs, tests will fail and produce `.new` files.
+
+Use the `insta` CLI to review and accept these changes:
+
+```bash
+cargo insta review
+```
+
+## Proptest Regressions
+
+We use `proptest` for property-based testing. When a property test fails, it creates a regression file (e.g., in a `proptest-regressions` folder) to persist the failing random seed.
+
+**Policy:** Do not commit `proptest-regressions` files unless adding a permanent regression case for a complex bug. By default, fix the underlying logic error, verify the test passes, and remove the regression file locally before opening a PR.
