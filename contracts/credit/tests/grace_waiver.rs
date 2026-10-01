@@ -490,72 +490,71 @@ fn reduced_rate_equal_to_full_rate_emits_no_event() {
     );
 }
 
- / /    % %  p a r a m e t e r i z e d   s t r a d d l e   t e s t s    % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % %
- 
- # [ t e s t ] 
- f n   s t r a d d l e _ g r a c e _ e n d _ f u l l _ w a i v e r ( )   { 
-         l e t   u t i l i z e d :   i 1 2 8   =   1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ; 
-         l e t   ( e n v ,   c o n t r a c t _ i d ,   b o r r o w e r )   =   s e t u p _ s u s p e n d e d ( 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   u t i l i z e d ,   1 0 0 0 ,   1 ) ; 
-         l e t   c l i e n t   =   C r e d i t C l i e n t : : n e w ( & e n v ,   & c o n t r a c t _ i d ) ; 
- 
-         l e t   g r a c e _ g   =   3 1 _ 5 3 6 _ 0 0 0 _ u 6 4 ; 
-         c l i e n t . s e t _ g r a c e _ p e r i o d _ c o n f i g ( & g r a c e _ g ,   & G r a c e W a i v e r M o d e : : F u l l W a i v e r ,   & 0 _ u 3 2 ) ; 
- 
-         l e t   g r a c e _ e n d   =   1   +   g r a c e _ g ; 
- 
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d   -   1 0 ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
-         l e t   _   =   e n v . e v e n t s ( ) . a l l ( ) ; 
- 
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d   +   1 0 0 ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
- 
-         l e t   e v t   =   f i n d _ g r a c e _ w a i v e r _ e v e n t ( & e n v ) . e x p e c t ( " E v e n t   m u s t   b e   e m i t t e d " ) ; 
-         a s s e r t _ e q ! ( e v t . w a i v e d _ a m o u n t ,   3 1 7 0 ,   " w a i v e d   a m o u n t   i s   f u l l   r a t e   f o r   1 0 s " ) ; 
- } 
- 
- # [ t e s t ] 
- f n   s t r a d d l e _ g r a c e _ e n d _ r e d u c e d _ r a t e ( )   { 
-         l e t   u t i l i z e d :   i 1 2 8   =   1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ; 
-         l e t   ( e n v ,   c o n t r a c t _ i d ,   b o r r o w e r )   =   s e t u p _ s u s p e n d e d ( 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   u t i l i z e d ,   1 0 0 0 ,   1 ) ; 
-         l e t   c l i e n t   =   C r e d i t C l i e n t : : n e w ( & e n v ,   & c o n t r a c t _ i d ) ; 
- 
-         l e t   g r a c e _ g   =   3 1 _ 5 3 6 _ 0 0 0 _ u 6 4 ; 
-         c l i e n t . s e t _ g r a c e _ p e r i o d _ c o n f i g ( & g r a c e _ g ,   & G r a c e W a i v e r M o d e : : R e d u c e d R a t e ,   & 2 0 0 _ u 3 2 ) ; 
- 
-         l e t   g r a c e _ e n d   =   1   +   g r a c e _ g ; 
- 
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d   -   1 0 ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
-         l e t   _   =   e n v . e v e n t s ( ) . a l l ( ) ; 
- 
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d   +   1 0 0 ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
- 
-         l e t   e v t   =   f i n d _ g r a c e _ w a i v e r _ e v e n t ( & e n v ) . e x p e c t ( " E v e n t   m u s t   b e   e m i t t e d " ) ; 
-         a s s e r t _ e q ! ( e v t . w a i v e d _ a m o u n t ,   2 5 3 6 ,   " w a i v e d   a m o u n t   i s   d i f f e r e n c e   f o r   1 0 s " ) ; 
- } 
- 
- # [ t e s t ] 
- f n   b o u n d a r y _ n o w _ e q u a l s _ g r a c e _ e n d ( )   { 
-         l e t   u t i l i z e d :   i 1 2 8   =   1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ; 
-         l e t   ( e n v ,   c o n t r a c t _ i d ,   b o r r o w e r )   =   s e t u p _ s u s p e n d e d ( 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   u t i l i z e d ,   1 0 0 0 ,   1 ) ; 
-         l e t   c l i e n t   =   C r e d i t C l i e n t : : n e w ( & e n v ,   & c o n t r a c t _ i d ) ; 
- 
-         l e t   g r a c e _ g   =   3 1 _ 5 3 6 _ 0 0 0 _ u 6 4 ; 
-         c l i e n t . s e t _ g r a c e _ p e r i o d _ c o n f i g ( & g r a c e _ g ,   & G r a c e W a i v e r M o d e : : F u l l W a i v e r ,   & 0 _ u 3 2 ) ; 
- 
-         l e t   g r a c e _ e n d   =   1   +   g r a c e _ g ; 
-         
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d   -   1 0 ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
-         l e t   _   =   e n v . e v e n t s ( ) . a l l ( ) ; 
- 
-         e n v . l e d g e r ( ) . s e t _ t i m e s t a m p ( g r a c e _ e n d ) ; 
-         c l i e n t . u p d a t e _ r i s k _ p a r a m e t e r s ( & b o r r o w e r ,   & 1 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0 ,   & 1 0 0 0 ,   & 5 0 ) ; 
- 
-         l e t   e v t   =   f i n d _ g r a c e _ w a i v e r _ e v e n t ( & e n v ) . e x p e c t ( " E v e n t   m u s t   b e   e m i t t e d " ) ; 
-         a s s e r t _ e q ! ( e v t . w a i v e d _ a m o u n t ,   3 1 7 0 ,   " w a i v e d   a m o u n t   i s   e x a c t l y   f u l l   r a t e   f o r   1 0 s " ) ; 
- } 
-  
- 
+// ── parameterized straddle tests ──────────────────────────────────────────────
+
+#[test]
+fn straddle_grace_end_full_waiver() {
+    let utilized: i128 = 100_000_000_000;
+    let (env, contract_id, borrower) = setup_suspended(100_000_000_000, utilized, 1000, 1);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let grace_g = 31_536_000_u64;
+    client.set_grace_period_config(&grace_g, &GraceWaiverMode::FullWaiver, &0_u32);
+
+    let grace_end = 1 + grace_g;
+
+    env.ledger().set_timestamp(grace_end - 10);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+    let _ = env.events().all();
+
+    env.ledger().set_timestamp(grace_end + 100);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+
+    let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
+    assert_eq!(evt.waived_amount, 3170, "waived amount is full rate for 10s");
+}
+
+#[test]
+fn straddle_grace_end_reduced_rate() {
+    let utilized: i128 = 100_000_000_000;
+    let (env, contract_id, borrower) = setup_suspended(100_000_000_000, utilized, 1000, 1);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let grace_g = 31_536_000_u64;
+    client.set_grace_period_config(&grace_g, &GraceWaiverMode::ReducedRate, &200_u32);
+
+    let grace_end = 1 + grace_g;
+
+    env.ledger().set_timestamp(grace_end - 10);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+    let _ = env.events().all();
+
+    env.ledger().set_timestamp(grace_end + 100);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+
+    let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
+    assert_eq!(evt.waived_amount, 2536, "waived amount is difference for 10s");
+}
+
+#[test]
+fn boundary_now_equals_grace_end() {
+    let utilized: i128 = 100_000_000_000;
+    let (env, contract_id, borrower) = setup_suspended(100_000_000_000, utilized, 1000, 1);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let grace_g = 31_536_000_u64;
+    client.set_grace_period_config(&grace_g, &GraceWaiverMode::FullWaiver, &0_u32);
+
+    let grace_end = 1 + grace_g;
+    
+    env.ledger().set_timestamp(grace_end - 10);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+    let _ = env.events().all();
+
+    env.ledger().set_timestamp(grace_end);
+    client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
+
+    let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
+    assert_eq!(evt.waived_amount, 3170, "waived amount is exactly full rate for 10s");
+}
+

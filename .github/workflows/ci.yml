@@ -87,6 +87,11 @@ jobs:
           scripts/test_check_toolchain.sh
           scripts/test_check_wasm_size.sh
 
+      # Ensure the root lockfile resolves cleanly without package collisions
+      # (e.g. duplicate workspace paths causing duplicate package entries).
+      - name: Validate root lockfile metadata
+        run: cargo metadata --locked --format-version 1
+
       - name: Prevent stale rustdoc placeholders
         run: |
           set -euo pipefail
@@ -96,6 +101,10 @@ jobs:
             echo "::error::Found stale 'Not yet implemented' placeholder in non-test Rust code"
             exit 1
           fi
+
+      # Every document must stay discoverable from docs/INDEX.md.
+      - name: Check documentation index
+        run: scripts/check_docs_index.sh
 
       - name: Print toolchain versions
         run: |

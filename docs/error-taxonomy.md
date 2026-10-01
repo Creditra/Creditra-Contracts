@@ -120,6 +120,7 @@ where the contract can observe it. |
 | 30   | `TreasuryNotSet` | Treasury address is not configured when attempting a treasury withdrawal. |
 | 31   | `ExposureCapExceeded` | Draw would push global `TotalUtilized` above `MaxTotalExposure`. |
 | 41   | `BountyNotSet` | Bounty pool address is not configured. |
+| 65   | `InsufficientTreasuryBalance` | Tracked treasury balance fell below the pending withdrawal snapshot at execution. |
 
 **Recovery action:**
 - `MissingLiquidityToken` / `MissingLiquiditySource`: Inform the admin to
@@ -167,7 +168,7 @@ where the contract can observe it. |
 | 36   | `OraclePriceInvalid` | Oracle price is zero, negative, or malformed. |
 | 37   | `OraclePriceStale` | Oracle price exceeds `max_age_seconds` since last update. |
 | 38   | `OraclePriceDeviation` | Oracle price deviation exceeds `max_deviation_bps` relative to prior. |
-| 50   | `OracleQuorumNotMet` | Fewer than `min_quorum_k` prices agree within the deviation bound. |
+| 50   | `OracleQuorumNotMet` | Fewer than `min_quorum_k` prices agree within the deviation bound, or the weighted-median registry is active but cannot assemble a quorum of fresh reports during settlement. |
 
 **Recovery action:**
 - `OraclePriceInvalid`: Ensure the oracle is returning a valid positive price.
@@ -175,7 +176,11 @@ where the contract can observe it. |
   oracle's push mechanism.
 - `OraclePriceDeviation`: Circuit-breaker tripped; await a new price within the
   deviation bound. Do **not** retry with the same price.
-- `OracleQuorumNotMet`: Submit prices from more independent oracle feeds.
+- `OracleQuorumNotMet`: Submit prices from more independent oracle feeds, or
+  (registry mode) ensure enough weighted oracles have reported within the
+  reporting window. Registry mode ignores the caller-supplied `oracle_price`,
+  so there is no admin-price fallback — clear the registry quorum threshold to
+  return to the quorum-of-K or single-oracle precedence.
 
 ---
 

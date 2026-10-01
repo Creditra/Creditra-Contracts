@@ -229,6 +229,100 @@ fn test_multi_token_deposit_does_not_affect_legacy_collateral_balance() {
     );
 }
 
+// ── Health-aware multi-token withdrawals (Issue #1222) ────────────────────────
+
+/// Contract with a liquidity token plus one allowlisted collateral token,
+/// funded for the borrower. `CreditClient` is returned by value; `contract_id`
+/// doubles as the liquidity source so draws can settle.
+fn setup_drawable(env: &Env) -> (CreditClient, Address, Address, Address) {
+    let (client, _admin, contract_id) = setup(env);
+    let borrower = Address::generate(env);
+
+    let liquidity = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let liquidity_addr = liquidity.address();
+    client.set_liquidity_token(&liquidity_addr);
+    client.set_liquidity_source(&contract_id);
+    StellarAssetClient::new(env, &liquidity_addr).mint(&contract_id, &1_000_000);
+    StellarAssetClient::new(env, &liquidity_addr).mint(&borrower, &1_000_000);
+
+    let col = mint_token(env, &borrower, 100_000);
+    StellarAssetClient::new(env, &col).mint(&contract_id, &100_000);
+    client.set_collateral_token_allowlist(&vec![&env, col.clone()]);
+
+    (client, contract_id, borrower, col)
+}
+
+/// A balance deposited through `deposit_collateral_token` must back a draw:
+/// a 1_500 token balance covers exactly a 1_000 draw at the 150 % floor.
+#[test]
+fn test_multi_token_deposit_backs_draw_ratio() {
+    let env = Env::default();
+    let (client, _contract_id, borrower, col) = setup_drawable(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral_token(&borrower, &col, &1_500);
+
+    client.draw_credit(&borrower, &1_000);
+    assert_eq!(client.get_total_utilized(), 1_000);
+}
+
+/// The same deposit below the floor must NOT back the draw.
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_multi_token_deposit_below_floor_rejects_draw() {
+    let env = Env::default();
+    let (client, _contract_id, borrower, col) = setup_drawable(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral_token(&borrower, &col, &1_000);
+
+    // Required for a 1_000 draw at 150 % is 1_500.
+    client.draw_credit(&borrower, &1_000);
+}
+
+/// Withdrawing an allowlisted token that drops the position below the floor
+/// must revert.
+#[test]
+#[should_panic(expected = "Error(Contract, #35)")] // CollateralRatioBelowMinimum
+fn test_withdraw_collateral_token_breaching_ratio_reverts() {
+    let env = Env::default();
+    let (client, _contract_id, borrower, col) = setup_drawable(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral_token(&borrower, &col, &2_000);
+    client.draw_credit(&borrower, &1_000); // requires 1_500 of collateral
+
+    // Leaving 1_000 behind is below the 1_500 requirement.
+    client.withdraw_collateral_token(&borrower, &col, &1_000);
+}
+
+/// A zero-debt borrower keeps full freedom to withdraw any token.
+#[test]
+fn test_zero_debt_borrower_withdraws_token_freely() {
+    let env = Env::default();
+    let (client, _contract_id, borrower, col) = setup_drawable(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral_token(&borrower, &col, &2_000);
+
+    client.withdraw_collateral_token(&borrower, &col, &2_000);
+    assert_eq!(client.get_collateral_for_token(&borrower, &col), 0);
+}
+
+/// `get_health_factor` must see multi-token balances, not just the legacy one.
+#[test]
+fn test_health_factor_reflects_multi_token_balances() {
+    let env = Env::default();
+    let (client, _contract_id, borrower, col) = setup_drawable(&env);
+
+    client.open_credit_line(&borrower, &10_000, &0, &0);
+    client.deposit_collateral_token(&borrower, &col, &3_000);
+    client.draw_credit(&borrower, &1_000);
+
+    // 3_000 * 100_000_000 / (1_000 * 15_000) = 20_000
+    assert_eq!(client.get_health_factor(&borrower), 20_000);
+}
+
 #[test]
 fn test_mixed_legacy_and_allowlisted_collateral_conserves_total() {
     let env = Env::default();

@@ -129,7 +129,12 @@ mod risk;
 pub use crate::risk::compute_rate_from_score;
 pub use crate::types::FreezeReason;
 pub mod scoring;
-mod storage;
+/// Storage layout, TTL policy and typed accessors (see also
+/// [`storage`] docs and `docs/STORAGE_LAYOUT.md`).
+///
+/// Public so integration tests can assert on the exact storage keys and TTL
+/// constants the contract uses (e.g. `tests/storage_ttl.rs`).
+pub mod storage;
 pub mod types;
 mod views;
 
@@ -145,7 +150,7 @@ use crate::events::{
     publish_borrower_frozen_event, publish_close_factor_bps_set_event,
     publish_contract_upgraded_event, publish_credit_line_event,
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_oracle_config_set_event, publish_oracle_price_accepted_event,
+    publish_oracle_config_set_event,
     publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
     publish_paused_event, publish_protocol_fee_bounds_set_event,
     publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
@@ -155,7 +160,7 @@ use crate::events::{
     CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
     RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
-use crate::math_utils::{compute_deviation_bps, mul_div, safe_mul_div, Rounding};
+use crate::math_utils::{mul_div, safe_mul_div, Rounding};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
     admin_key, assert_not_paused, clear_borrower_frozen, clear_reentrancy_guard,
@@ -165,17 +170,22 @@ use crate::storage::{
     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
     is_borrower_frozen as storage_is_borrower_frozen, persist_credit_line, proposed_admin_key,
-    proposed_at_key, rate_cfg_key, set_borrower_blocked as storage_set_borrower_blocked,
-    set_borrower_frozen_until, set_borrower_unblocked,
+    proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
+    set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
+    set_borrower_unblocked, set_draw_reversed_amount as storage_set_draw_reversed_amount,
     set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
     set_pending_treasury_withdrawal, set_reentrancy_guard,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps,
+    get_draw_audit as storage_get_draw_audit,
+    get_draw_reversed_amount as storage_get_draw_reversed_amount, DataKey,
+    MAX_ENUMERATION_LIMIT,
 };
 use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::types::{
-    ContractError, CreditLineData, CreditLinesPage, CreditStatus, GracePeriodConfig,
-    GraceWaiverMode, OracleConfig, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    ProofOfReserve, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
+    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
+    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
+    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
 };
 
 #[cfg(test)]
@@ -519,7 +529,10 @@ impl Credit {
 
         // Enforce minimum collateral ratio
         let min_ratio_bps = crate::storage::get_min_collateral_ratio_bps(&env).unwrap_or(15000);
-        let current_collateral = crate::storage::get_collateral_balance(&env, &borrower);
+        // Value the borrower's collateral through the shared helper so balances
+        // deposited via `deposit_collateral_token` back the draw and per-asset
+        // risk weights are applied (Floor) to every unit.
+        let current_collateral = crate::collateral::effective_collateral_value(&env, &borrower);
         let required_collateral = (updated_utilized as i128)
             .checked_mul(min_ratio_bps as i128)
             .unwrap_or_else(|| {
@@ -702,51 +715,64 @@ impl Credit {
         let (effective_repay, interest_repaid, _principal_repaid) =
             lifecycle::allocate_repayment(total_debt, credit_line.accrued_interest, amount);
 
+        // Repayment moves real tokens into the protocol, so the liquidity
+        // token has to be configured. The transfer block used to be skipped
+        // entirely when `LiquidityToken` was unset, while `utilized_amount`
+        // and `accrued_interest` were still reduced and `RepaymentEvent` was
+        // still emitted: a deployment without a token let borrowers
+        // extinguish debt for free. `draw_credit` already fails the same way,
+        // and the check runs before any state mutation, so a failed repay
+        // leaves the credit line untouched (#1221).
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityToken)
+            .unwrap_or_else(|| {
+                clear_reentrancy_guard(&env);
+                env.panic_with_error(ContractError::MissingLiquidityToken)
+            });
+
         if effective_repay > 0 {
-            let maybe_token: Option<Address> =
-                env.storage().instance().get(&DataKey::LiquidityToken);
-            if let Some(token_address) = maybe_token {
-                let reserve_address: Address = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::LiquiditySource)
-                    .unwrap_or_else(|| env.current_contract_address());
+            let reserve_address: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::LiquiditySource)
+                .unwrap_or_else(|| env.current_contract_address());
 
-                let token_client = token::Client::new(&env, &token_address);
-                let contract_address = env.current_contract_address();
+            let token_client = token::Client::new(&env, &token_address);
+            let contract_address = env.current_contract_address();
 
-                // Compute protocol fee only on the interest component.
-                let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
-                let mut fee: i128 = 0;
-                if fee_bps > 0 && interest_repaid > 0 {
-                    fee = crate::math_utils::apply_bps(
-                        interest_repaid as u128,
-                        fee_bps,
-                        Rounding::Floor,
-                    ) as i128;
-                }
+            // Compute protocol fee only on the interest component.
+            let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
+            let mut fee: i128 = 0;
+            if fee_bps > 0 && interest_repaid > 0 {
+                fee = crate::math_utils::apply_bps(
+                    interest_repaid as u128,
+                    fee_bps,
+                    Rounding::Floor,
+                ) as i128;
+            }
 
-                // Transfer fee portion into contract (treasury accumulator), then
-                // transfer remaining amount into the reserve.
-                if fee > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &contract_address,
-                        &fee,
-                    );
-                    crate::fees::accrue_protocol_fee(&env, &borrower, fee);
-                }
+            // Transfer fee portion into contract (treasury accumulator), then
+            // transfer remaining amount into the reserve.
+            if fee > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &contract_address,
+                    &fee,
+                );
+                crate::fees::accrue_protocol_fee(&env, &borrower, fee);
+            }
 
-                let reserve_amount = effective_repay.saturating_sub(fee);
-                if reserve_amount > 0 {
-                    token_client.transfer_from(
-                        &contract_address,
-                        &borrower,
-                        &reserve_address,
-                        &reserve_amount,
-                    );
-                }
+            let reserve_amount = effective_repay.saturating_sub(fee);
+            if reserve_amount > 0 {
+                token_client.transfer_from(
+                    &contract_address,
+                    &borrower,
+                    &reserve_address,
+                    &reserve_amount,
+                );
             }
         }
 
@@ -1314,6 +1340,11 @@ impl Credit {
             env.panic_with_error(ContractError::TreasuryTimelockActive);
         }
 
+        // Check and consume the proposal before the external token call.
+        // Soroban rolls both storage writes back if that transfer fails.
+        let remaining_balance = crate::storage::subtract_treasury_balance(&env, proposal.amount);
+        clear_pending_treasury_withdrawal(&env);
+
         if proposal.amount > 0 {
             let token_address: Address = env
                 .storage()
@@ -1328,9 +1359,6 @@ impl Credit {
             token_client.transfer(&contract_address, &proposal.recipient, &proposal.amount);
         }
 
-        clear_pending_treasury_withdrawal(&env);
-        crate::storage::clear_treasury_balance(&env);
-
         publish_treasury_withdrawal_executed(
             &env,
             TreasuryWithdrawalExecutedEvent {
@@ -1338,6 +1366,7 @@ impl Credit {
                 amount: proposal.amount,
                 executor: admin,
                 executed_at: now,
+                remaining_balance,
             },
         );
     }
@@ -1844,6 +1873,11 @@ impl Credit {
     ///
     /// `start_after` is an exclusive cursor over the stable numeric id.
     /// Results are capped by `MAX_ENUMERATION_LIMIT` for predictable cost.
+    ///
+    /// # Storage
+    /// Every visited line is loaded through [`crate::storage::get_credit_line`],
+    /// so enumeration refreshes the persistent TTL of each borrower entry it
+    /// touches instead of relying on a raw storage read.
     pub fn enumerate_credit_lines(
         env: Env,
         start_after: Option<u32>,
@@ -1861,11 +1895,10 @@ impl Credit {
         let mut returned = 0_u32;
         while next_id < count && returned < capped_limit {
             if let Some(borrower) = get_borrower_by_credit_line_id(&env, next_id) {
-                if let Some(line) = env
-                    .storage()
-                    .persistent()
-                    .get::<Address, CreditLineData>(&borrower)
-                {
+                // TTL bump on read: this is a paginated read over live credit
+                // lines, so each visited entry is refreshed through the same
+                // getter used by the rest of the contract.
+                if let Some(line) = crate::storage::get_credit_line(&env, &borrower) {
                     out.push_back((next_id, line));
                     returned = returned.saturating_add(1);
                 }
@@ -1984,53 +2017,13 @@ impl Credit {
         require_admin_auth(&env);
         set_reentrancy_guard(&env);
 
-        // Oracle price-feed circuit breaker: validate price before settlement.
-        //
-        // Quorum mode takes precedence over single-oracle mode: when an
-        // `OracleQuorumConfig` is set, the stored quorum price is authoritative
-        // and the caller-supplied `oracle_price` is ignored — `oracle_validation`
-        // enforces that downstream. Running this single-oracle block in quorum
-        // mode would reject the settlement with `OraclePriceInvalid` (#36)
-        // whenever no caller price is supplied, and would let a caller-supplied
-        // price overwrite the quorum price when one is.
-        if crate::storage::get_oracle_quorum_config(&env).is_none() {
-            if let Some(cfg) = crate::storage::get_oracle_config(&env) {
-                let price = oracle_price.unwrap_or_else(|| {
-                    clear_reentrancy_guard(&env);
-                    env.panic_with_error(ContractError::OraclePriceInvalid)
-                });
-
-                if price <= 0 {
-                    clear_reentrancy_guard(&env);
-                    env.panic_with_error(ContractError::OraclePriceInvalid);
-                }
-
-                let now = env.ledger().timestamp();
-
-                if let Some(last_ts) = crate::storage::get_oracle_last_price_ts(&env) {
-                    let age = now.saturating_sub(last_ts);
-                    if age > cfg.max_age_seconds {
-                        clear_reentrancy_guard(&env);
-                        env.panic_with_error(ContractError::OraclePriceStale);
-                    }
-
-                    if let Some(last_price) = crate::storage::get_oracle_last_price(&env) {
-                        let deviation =
-                            compute_deviation_bps(price, last_price).unwrap_or_else(|| {
-                                clear_reentrancy_guard(&env);
-                                env.panic_with_error(ContractError::OraclePriceInvalid)
-                            });
-                        if deviation > cfg.max_deviation_bps {
-                            clear_reentrancy_guard(&env);
-                            env.panic_with_error(ContractError::OraclePriceDeviation);
-                        }
-                    }
-                }
-
-                crate::storage::set_oracle_last_price(&env, price, now);
-                publish_oracle_price_accepted_event(&env, price, now);
-            }
-        }
+        // Oracle price validation lives in `oracle_validation` and runs inside
+        // `lifecycle::settle_default_liquidation` (Step 4), before any state
+        // mutation. Precedence, highest first:
+        //   1. weighted-median registry (`add_oracle` / `report_value`)
+        //   2. quorum-of-K price feed (`submit_oracle_prices`)
+        //   3. single-oracle circuit breaker (`set_oracle_config`)
+        // See the `oracle_validation` module for the full rules.
 
         // Cross-contract auction settlement hook (when configured).
         //
@@ -2462,22 +2455,12 @@ impl Credit {
             .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
         credit_line = accrual::apply_accrual(&env, credit_line);
 
-        let original_draw: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::DrawAudit(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }))
+        // Load the audit trail through TTL-bumping accessors as well: these are
+        // per-borrower persistent entries, so a reverse-draw path must refresh
+        // them instead of letting them drift to archival (Issue #1273).
+        let original_draw: i128 = storage_get_draw_audit(&env, &borrower, original_ts)
             .unwrap_or_else(|| env.panic_with_error(ContractError::OriginalDrawNotFound));
-        let already_reversed: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::DrawReversedAmount(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }))
-            .unwrap_or(0);
+        let already_reversed: i128 = storage_get_draw_reversed_amount(&env, &borrower, original_ts);
         let remaining_reversible = original_draw.saturating_sub(already_reversed);
         if amount > remaining_reversible {
             env.panic_with_error(ContractError::OverLimit);
@@ -2490,13 +2473,7 @@ impl Credit {
 
         credit_line.utilized_amount = new_utilized_amount;
         env.storage().persistent().set(&borrower, &credit_line);
-        env.storage().persistent().set(
-            &DataKey::DrawReversedAmount(DrawAuditKey {
-                borrower: borrower.clone(),
-                timestamp: original_ts,
-            }),
-            &(already_reversed + amount),
-        );
+        storage_set_draw_reversed_amount(&env, &borrower, original_ts, already_reversed + amount);
 
         publish_draw_reversed_event(
             &env,
@@ -6849,5 +6826,104 @@ mod test_issue_1215_blocklist_draw {
             client.try_draw_credit(&borrower, &10_i128),
             Err(Ok(ContractError::BorrowerBlocked.into()))
         );
+    }
+}
+
+
+/// Regression coverage for the repay-side liquidity token requirement (#1221).
+///
+/// `repay_credit` used to skip the token transfer entirely when
+/// `LiquidityToken` was unset while still reducing `utilized_amount`, which
+/// let a deployment with an unconfigured token extinguish debt for free.
+#[cfg(test)]
+mod test_issue_1221_repay_requires_liquidity_token {
+    use super::*;
+    use crate::types::ContractError;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+    use soroban_sdk::{Address, Env};
+
+    /// Contract and an open credit line, with **no** liquidity token set.
+    fn setup_without_token(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        (client, contract_id, borrower)
+    }
+
+    /// Seed real debt on the line without a token. This is the state a
+    /// deployment lands in when the token was never configured (or was
+    /// unset later), and it is exactly what the old repay path let borrowers
+    /// wipe out for free.
+    fn seed_debt(env: &Env, contract_id: &Address, borrower: &Address, amount: i128) {
+        env.as_contract(contract_id, || {
+            let mut line: CreditLineData = env
+                .storage()
+                .persistent()
+                .get::<Address, CreditLineData>(borrower)
+                .unwrap();
+            line.utilized_amount = amount;
+            env.storage().persistent().set(borrower, &line);
+        });
+    }
+
+    /// Repaying without `set_liquidity_token` reverts with #22 and leaves the
+    /// credit line untouched.
+    #[test]
+    fn repay_without_liquidity_token_reverts_with_missing_token() {
+        let env = Env::default();
+        let (client, contract_id, borrower) = setup_without_token(&env);
+        seed_debt(&env, &contract_id, &borrower, 500);
+
+        let outcome = client.try_repay_credit(&borrower, &200_i128);
+        assert_eq!(outcome, Err(Ok(ContractError::MissingLiquidityToken.into())));
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            500
+        );
+    }
+
+    /// With a token configured, repay still moves `effective_repay` into the
+    /// reserve and reduces the debt.
+    #[test]
+    fn repay_with_liquidity_token_still_reduces_debt() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = token_id.address();
+        client.set_liquidity_token(&token);
+        StellarAssetClient::new(&env, &token).mint(&contract_id, &10_000_i128);
+        StellarAssetClient::new(&env, &token).mint(&borrower, &10_000_i128);
+        TokenClient::new(&env, &token).approve(
+            &borrower,
+            &contract_id,
+            &10_000_i128,
+            &1_000_000_u32,
+        );
+        client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
+        // This case is about the repay path, not about collateral, so remove
+        // the collateral requirement instead of funding a position.
+        client.set_min_collateral_ratio_bps(&0_u32);
+
+        client.draw_credit(&borrower, &500_i128);
+        client.repay_credit(&borrower, &200_i128);
+
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            300
+        );
+        assert_eq!(TokenClient::new(&env, &token).balance(&borrower), 10_300);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contract_id), 9_700);
     }
 }

@@ -65,9 +65,7 @@ pub fn get_protocol_summary(env: Env) -> ProtocolSummary {
 /// [`crate::storage::get_repayment_schedule`], which bumps the schedule
 /// entry's TTL on read so an active borrower's schedule stays live.
 pub fn get_repayment_schedule(env: Env, borrower: Address) -> Option<RepaymentSchedule> {
-    env.storage()
-        .persistent()
-        .get(&crate::storage::DataKey::RepaymentSchedule(borrower))
+    crate::storage::get_repayment_schedule(&env, &borrower)
 }
 
 /// Return the collateral-aware health factor for a borrower, expressed in basis
@@ -198,9 +196,11 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
         return u32::MAX;
     }
 
-    // Fetch collateral balance.  Defaults to 0 if no collateral has been
-    // deposited.
-    let collateral = crate::storage::get_collateral_balance(&env, &borrower);
+    // Fetch the borrower's *effective* collateral value: the legacy balance plus
+    // every allowlisted token balance, each discounted by its configured risk
+    // weight. This is the same helper the draw-time ratio check uses, so the
+    // query can never disagree with the enforcement path.
+    let collateral = crate::collateral::effective_collateral_value(&env, &borrower);
 
     // Fetch the global minimum collateral ratio.  When unset the draw-time
     // default of 15_000 bps (150 %) applies.

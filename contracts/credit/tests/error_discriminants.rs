@@ -76,6 +76,8 @@ fn error_discriminants_are_stable() {
     // Appended in Issue #1169 — fee config frozen while an auction is active.
     assert_eq!(ContractError::AuctionActive as u32, 63);
     assert_eq!(ContractError::MissingVrfCommitment as u32, 64);
+    // Appended in Issue #1220 — timelocked treasury withdrawal underflow.
+    assert_eq!(ContractError::InsufficientTreasuryBalance as u32, 65);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -142,6 +144,7 @@ fn no_duplicate_discriminants() {
         ContractError::AuctionCallFailed as u32,
         ContractError::AuctionActive as u32,
         ContractError::MissingVrfCommitment as u32,
+        ContractError::InsufficientTreasuryBalance as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -155,7 +158,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 62;
+    const EXPECTED_VARIANT_COUNT: usize = 63;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -221,6 +224,7 @@ fn variant_count_is_known() {
         ContractError::StaleStateTransition as u32,
         ContractError::AuctionActive as u32,
         ContractError::MissingVrfCommitment as u32,
+        ContractError::InsufficientTreasuryBalance as u32,
     ];
 
     assert_eq!(
@@ -427,6 +431,10 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Liquidity
     );
     assert_eq!(
+        ContractError::InsufficientTreasuryBalance.category(),
+        ContractErrorCategory::Liquidity
+    );
+    assert_eq!(
         ContractError::ExposureCapExceeded.category(),
         ContractErrorCategory::Liquidity
     );
@@ -630,6 +638,7 @@ fn borrow_error_catalog_lists_all_variants() {
         "AlreadySettled",
         "InvalidRiskWeight",
         "MissingVrfCommitment",
+        "InsufficientTreasuryBalance",
     ] {
         assert!(
             catalog.contains(variant),
@@ -710,6 +719,7 @@ fn every_variant_has_known_category() {
         ContractError::AuctionCallFailed.category(),
         ContractError::AuctionActive.category(),
         ContractError::MissingVrfCommitment.category(),
+        ContractError::InsufficientTreasuryBalance.category(),
     ];
 
     let mut sorted: Vec<ContractErrorCategory> = all_variants.clone();
@@ -720,7 +730,7 @@ fn every_variant_has_known_category() {
         12,
         "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 62, "Expected 62 ContractError variants");
+    assert_eq!(all_variants.len(), 63, "Expected 63 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

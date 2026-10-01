@@ -47,13 +47,107 @@ use crate::events::{
     publish_collateral_partial_released_event, publish_collateral_withdrawn_event,
     CollateralDepositedEvent, CollateralPartialReleasedEvent, CollateralWithdrawnEvent,
 };
+use crate::math_utils::{mul_div, Rounding};
 use crate::storage::{
     get_collateral_balance, get_collateral_balance_for_token, get_collateral_risk_weight_bps,
-    get_collateral_token, get_credit_line, get_min_collateral_ratio_bps,
-    is_collateral_token_allowed, set_collateral_balance, set_collateral_balance_for_token,
+    get_collateral_token, get_collateral_token_allowlist, get_credit_line,
+    get_min_collateral_ratio_bps, is_collateral_token_allowed, set_collateral_balance,
+    set_collateral_balance_for_token,
 };
 use crate::types::{CollateralEventKind, CollateralState, ContractError};
 use soroban_sdk::{token, Address, Env};
+
+// ── Shared collateral valuation (Issues #1222 / #1223) ────────────────────────
+//
+// Until per-asset price oracles exist, every collateral unit is valued 1:1 in
+// the unit of the `utilized_amount` it backs. The ONLY discount applied is the
+// per-asset risk weight configured through `set_collateral_risk_weight`, which
+// is expressed in basis points and defaults to 10_000 (100 %, no haircut).
+
+/// Weight in basis points configured for `asset`, defaulting to 10_000 (100 %).
+fn asset_weight_bps(env: &Env, asset: &Address) -> u32 {
+    get_collateral_risk_weight_bps(env, asset).unwrap_or(10_000)
+}
+
+/// Weight that applies to the legacy single-token collateral balance.
+///
+/// The legacy balance is denominated in the contract's collateral token (the
+/// configured liquidity token), so its weight is the one configured for that
+/// asset. When no token is configured the balance cannot exist, so 10_000 is
+/// used.
+fn legacy_collateral_weight_bps(env: &Env) -> u32 {
+    get_collateral_token(env)
+        .map(|token| asset_weight_bps(env, &token))
+        .unwrap_or(10_000)
+}
+
+/// Apply `weight_bps` to `amount` with Floor rounding.
+///
+/// Floor is deliberate: a risk weight may only ever *under*-count collateral,
+/// never over-credit it, so rounding can never manufacture borrowing power.
+fn weighted_collateral_value(env: &Env, amount: i128, weight_bps: u32) -> i128 {
+    if amount <= 0 {
+        return 0;
+    }
+    if weight_bps >= 10_000 {
+        return amount;
+    }
+    let weighted = mul_div(amount as u128, weight_bps as u128, 10_000, Rounding::Floor);
+    i128::try_from(weighted).unwrap_or_else(|_| env.panic_with_error(ContractError::Overflow))
+}
+
+/// Effective (risk-weighted) collateral value backing a borrower's debt.
+///
+/// Sums the legacy single-token balance and every allowlisted multi-token
+/// balance, each discounted by its configured risk weight with Floor rounding.
+/// The result is directly comparable to `CreditLineData::utilized_amount`, so
+/// it can be used by the draw-time ratio check, the withdrawal guards and
+/// `query::get_health_factor` alike — one valuation, one answer.
+pub fn effective_collateral_value(env: &Env, borrower: &Address) -> i128 {
+    let mut total = 0_i128;
+
+    let legacy_balance = get_collateral_balance(env, borrower);
+    if legacy_balance > 0 {
+        total = total
+            .checked_add(weighted_collateral_value(
+                env,
+                legacy_balance,
+                legacy_collateral_weight_bps(env),
+            ))
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    }
+
+    for token in get_collateral_token_allowlist(env).iter() {
+        let balance = get_collateral_balance_for_token(env, borrower, &token);
+        if balance <= 0 {
+            continue;
+        }
+        total = total
+            .checked_add(weighted_collateral_value(
+                env,
+                balance,
+                asset_weight_bps(env, &token),
+            ))
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    }
+
+    total
+}
+
+/// Effective collateral required to back `utilized` at the configured floor.
+///
+/// Rounds the requirement **up** so a dust-sized utilization cannot leave the
+/// credit line below `MinCollateralRatioBps`.
+fn required_collateral_for(env: &Env, utilized: i128) -> i128 {
+    if utilized <= 0 {
+        return 0;
+    }
+    let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+    let numerator = utilized
+        .checked_mul(min_ratio_bps as i128)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    numerator / 10_000 + if numerator % 10_000 == 0 { 0 } else { 1 }
+}
 
 /// Deposit collateral tokens from the borrower into the contract.
 /// Requires borrower authentication.
@@ -122,21 +216,26 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
 
     let post_balance = cur_balance - amount;
 
-    // Check if the borrower has an active credit line to enforce ratio
-    // If no credit line exists, they can withdraw everything.
+    // Check if the borrower has an active credit line to enforce ratio.
+    // If no credit line exists, or the line carries no debt, they can withdraw
+    // everything: the floor only protects outstanding utilization.
+    //
+    // The comparison uses the borrower's *effective* collateral value, so a
+    // balance deposited through `deposit_collateral_token` backs a draw and
+    // cannot be pulled out while the combined position sits below the floor.
+    // The released amount is removed at its own risk weight (Floor), which can
+    // only make the remaining value smaller and therefore the check stricter.
     if let Some(credit_line) = get_credit_line(env, borrower) {
         if credit_line.utilized_amount > 0 {
-            // Compute required collateral after withdrawal
-            let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15000);
-            // Round up so a dust-sized utilization cannot leave the credit line
-            // below the configured minimum collateral ratio.
-            let required_numerator = (credit_line.utilized_amount as i128)
-                .checked_mul(min_ratio_bps as i128)
-                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
-            let required = required_numerator / 10_000
-                + if required_numerator % 10_000 == 0 { 0 } else { 1 };
+            let effective_after = effective_collateral_value(env, borrower)
+                .checked_sub(weighted_collateral_value(
+                    env,
+                    amount,
+                    legacy_collateral_weight_bps(env),
+                ))
+                .unwrap_or(0);
 
-            if post_balance < required {
+            if effective_after < required_collateral_for(env, credit_line.utilized_amount) {
                 env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
             }
         }
@@ -297,38 +396,37 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
     // ── 4. Health-factor guard ─────────────────────────────────────────────
-    // Fetch the credit line (if any) and enforce MinCollateralRatioBps.
+    // Fetch the credit line (if any) and enforce MinCollateralRatioBps against
+    // the borrower's *effective* collateral value: the legacy balance plus every
+    // allowlisted token balance, each discounted by its configured risk weight.
     let utilized_amount = if let Some(credit_line) = get_credit_line(env, borrower) {
         credit_line.utilized_amount
     } else {
         0_i128
     };
 
-    if utilized_amount > 0 {
-        let min_ratio_bps = get_min_collateral_ratio_bps(env).unwrap_or(15_000);
+    let effective_after = effective_collateral_value(env, borrower)
+        .checked_sub(weighted_collateral_value(
+            env,
+            amount,
+            legacy_collateral_weight_bps(env),
+        ))
+        .unwrap_or(0);
 
-        // required = ceil(utilized * min_ratio_bps / 10_000)
-        // Round up so a dust-sized utilization cannot leave the credit line
-        // below the configured minimum collateral ratio.
-        let required_numerator = utilized_amount
-            .checked_mul(min_ratio_bps as i128)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
-        let required = required_numerator / 10_000_i128
-            + if required_numerator % 10_000_i128 == 0 { 0 } else { 1 };
-
-        if post_balance < required {
-            env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
-        }
+    if utilized_amount > 0 && effective_after < required_collateral_for(env, utilized_amount) {
+        env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
     }
 
     // ── 5. Compute reported health factor ──────────────────────────────────
-    // health_factor_bps = post_balance * 10_000 / utilized_amount
-    // u32::MAX signals "no outstanding debt" (unbounded).
+    // health_factor_bps = effective_collateral * 10_000 / utilized_amount
+    //
+    // u32::MAX signals "no outstanding debt" (unbounded). The value is the
+    // risk-weighted effective collateral used by the guard above, so the emitted
+    // receipt can never disagree with `query::get_health_factor`.
     let health_factor_bps: u32 = if utilized_amount == 0 {
         u32::MAX
     } else {
-        // post_balance * 10_000 fits in i128 for any realistic balance.
-        let hf = post_balance
+        let hf = effective_after
             .checked_mul(10_000_i128)
             .unwrap_or(i128::MAX)
             / utilized_amount;
@@ -463,10 +561,14 @@ pub fn deposit_collateral_token(env: &Env, borrower: &Address, token_addr: &Addr
 
 /// Withdraw a specific allowlisted collateral token to the borrower.
 ///
-/// Requires borrower authentication. Does **not** enforce the `MinCollateralRatioBps`
-/// check on the per-token balance because cross-token ratio enforcement would require
-/// oracle pricing; callers relying on a collateral floor should use the single-token
-/// [`withdraw_collateral`] path.
+/// Requires borrower authentication and enforces the `MinCollateralRatioBps`
+/// floor against the borrower's *combined* effective collateral value: the
+/// legacy balance plus every allowlisted token balance, each discounted by its
+/// configured risk weight. Until per-asset price oracles exist, every unit is
+/// valued 1:1, which is the documented valuation model.
+///
+/// Zero-debt borrowers (no credit line, or `utilized_amount == 0`) withdraw
+/// freely — the floor only protects outstanding utilization.
 pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Address, amount: i128) {
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -481,6 +583,25 @@ pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Add
         env.panic_with_error(ContractError::InsufficientCollateralBalance);
     }
     let post_balance = cur_balance - amount;
+
+    // Health guard: remove the withdrawn token's weighted contribution from the
+    // borrower's combined effective collateral and require the remainder to still
+    // cover the configured floor on the outstanding utilization.
+    if let Some(credit_line) = get_credit_line(env, borrower) {
+        if credit_line.utilized_amount > 0 {
+            let effective_after = effective_collateral_value(env, borrower)
+                .checked_sub(weighted_collateral_value(
+                    env,
+                    amount,
+                    asset_weight_bps(env, token_addr),
+                ))
+                .unwrap_or(0);
+
+            if effective_after < required_collateral_for(env, credit_line.utilized_amount) {
+                env.panic_with_error(ContractError::CollateralRatioBelowMinimum);
+            }
+        }
+    }
 
     let token_client = token::Client::new(env, token_addr);
     let contract_addr = env.current_contract_address();

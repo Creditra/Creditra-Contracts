@@ -8,7 +8,7 @@ keywords = ["soroban", "stellar", "credit", "defi", "smart-contract"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
 readme = "../../README.md"
 
-lib]
+[lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]

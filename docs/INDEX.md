@@ -60,7 +60,7 @@ Read in this order:
    `CreditStatus` transition table.
 4. [`docs/indexer-integration.md`](./indexer-integration.md) — event topics,
    payload field layouts, sample `getEvents` JSON.
-5. [`docs/storage-layout.md`](./storage-layout.md) — instance vs persistent
+5. [`docs/STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) — instance vs persistent
    storage tier reference.
 
 For the rate / accrual formulas:
@@ -138,51 +138,80 @@ Commit style: conventional commits (`docs:`, `feat:`, `fix:`,
 
 ---
 
-## Document inventory
+## Complete document inventory
 
-### Long-form references (this directory)
+Every `docs/*.md` file is linked below, routed by audience. Nothing in this
+directory should be reachable only by guessing its filename.
 
-| File | Pages | Purpose |
-|---|---|---|
-| `INDEX.md` | 1 | This page |
-| `CONTRIBUTING.md` | ~2 | Contributing guidelines and PR workflow conventions |
-| `PROTOCOL_SPEC.md` | ~12 | Per-module contract surface |
-| `ARCHITECTURE.md` | ~10 | Sequence + state + topology diagrams |
-| `RISK_PRICING.md` | ~12 | Pricing algorithm + worked examples |
-| `SECURITY.md` | ~8 | Threat model + auditor checklist |
-| `EXECUTION_QUALITY.md` | ~10 | Tests + CI + deployment + PR cadence |
-| `CIRCUIT_BREAKER_IMPLEMENTATION.md` | ~3 | Pause / unpause design rationale |
-| `ORACLE_VALIDATION_DESIGN.md` | ~4 | Oracle input validation before price-dependent settlement |
-| `VALIDATION_LAYER_DESIGN.md` | ~5 | Oracle validation layer architecture & interfaces |
-| `SELF_SUSPEND_ARCHITECTURE.md` | ~10 | Borrower self-suspend architecture & sequence diagrams |
-| `STORAGE_KEY_ENCODING_DIAGRAMS.md` | ~10 | Soroban storage key encoding & collision resistance diagrams |
-| `AUCTION_CLOSE_TIME_FIX.md` | ~3 | Auction close-time hardening specification |
-| `state-machine.md` | ~4 | Normative state-transition table |
-| `interest-accrual.md` | ~3 | Accrual normative reference |
-| `interest-accrual-design.md` | ~6 | Accrual design spec |
-| `risk-based-rate-formula.md` | ~3 | Rate formula normative reference |
-| `treasury.md` | ~10 | **Treasury fee lifecycle end to end** (accrual → split → withdrawal) |
-| `contract-errors.md`, `errors.md` | ~4 each | Error code tables |
-| `storage-layout.md` | ~4 | Storage tier reference |
-| `threat-model.md` | ~4 | Authorization matrix |
-| `default-liquidation-auction-hook.md` | ~3 | Cross-contract handoff |
-| `default-oracle.md` | ~5 | Staged default-signal oracle |
-| `credit.md` | ~15 | Master credit-contract reference |
-| `upgrade-policy.md` | ~3 | Upgrade procedure |
-| `utilization-cap.md` | ~3 | Per-borrower utilization cap |
-| `indexer-integration.md` | ~4 | Off-chain event decoding |
-| `EVENTS_CATALOG.md` | ~6 | **Authoritative event catalog and versioning policy** |
-| `events-schema.md` | ~4 | Legacy event schema reference (superseded by `EVENTS_CATALOG.md`) |
-| `deploy.md` | ~2 | Deploy quickstart |
-| `contributing-tests.md` | ~3 | Test helper conventions |
-| `scripts.md` | ~2 | Helper script reference |
+`scripts/check_docs_index.sh` enforces this: it fails when a `docs/*.md` file
+exists but is not referenced from this page (and is run in CI).
+
+| Audience | File | Purpose |
+| --- | --- | --- |
+| Auditors / integrators | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Creditra System Architecture |
+| Auditors / contributors | [`AUCTION_CLOSE_TIME_FIX.md`](./AUCTION_CLOSE_TIME_FIX.md) | Auction close-time hardening specification |
+| Auditors / operators | [`CIRCUIT_BREAKER_IMPLEMENTATION.md`](./CIRCUIT_BREAKER_IMPLEMENTATION.md) | Pause / unpause design rationale |
+| Contributors | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Contributing guidelines and PR workflow conventions |
+| Grant reviewers / contributors | [`COVERAGE.md`](./COVERAGE.md) | Coverage Guide |
+| Auditors / integrators | [`CROSS_CONTRACT_HANDSHAKE.md`](./CROSS_CONTRACT_HANDSHAKE.md) | Cross-Contract Handshake Protocol |
+| Integrators | [`ERROR_CODES.md`](./ERROR_CODES.md) | ContractError Codes — Categorized Reference |
+| Integrators | [`ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) | V1 to V2 `ContractError` encoding migration |
+| Integrators | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | **Authoritative event catalog and versioning policy** |
+| Integrators | [`EVENT_SCHEMA.md`](./EVENT_SCHEMA.md) | Event Schema Documentation |
+| Grant reviewers / contributors | [`EXECUTION_QUALITY.md`](./EXECUTION_QUALITY.md) | Creditra Execution Quality — The Receipts |
+| Everyone | [`GLOSSARY.md`](./GLOSSARY.md) | Creditra Glossary |
+| Everyone | [`INDEX.md`](./INDEX.md) | Creditra Documentation Index |
+| Operators / auditors | [`ORACLE_OUTAGE_SIMULATION.md`](./ORACLE_OUTAGE_SIMULATION.md) | Multi-Oracle Outage Simulation & Recovery Guidelines (`creditra-credit`) |
+| Auditors / integrators | [`ORACLE_VALIDATION_DESIGN.md`](./ORACLE_VALIDATION_DESIGN.md) | Oracle input validation before price-dependent settlement |
+| Auditors / integrators | [`PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) | Creditra Protocol Specification |
+| Grant reviewers / integrators | [`RISK_PRICING.md`](./RISK_PRICING.md) | Creditra Risk-Pricing Algorithm — In Depth |
+| Auditors / integrators | [`SCORING.md`](./SCORING.md) | Credit Score VRF Commitment |
+| Auditors / operators | [`SECURITY.md`](./SECURITY.md) | Creditra Security & Threat Model |
+| Auditors / integrators | [`SELF_SUSPEND_ARCHITECTURE.md`](./SELF_SUSPEND_ARCHITECTURE.md) | Borrower self-suspend architecture & sequence diagrams |
+| Auditors / integrators | [`STORAGE_KEY_ENCODING_DIAGRAMS.md`](./STORAGE_KEY_ENCODING_DIAGRAMS.md) | Soroban storage key encoding & collision resistance diagrams |
+| Integrators | [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) | **Authoritative storage layout** (DataKey source of truth) |
+| Auditors / integrators | [`VALIDATION_LAYER_DESIGN.md`](./VALIDATION_LAYER_DESIGN.md) | Oracle validation layer architecture & interfaces |
+| Integrators | [`contract-errors.md`](./contract-errors.md) | `ContractError` reference |
+| Contributors | [`contributing-tests.md`](./contributing-tests.md) | Contributing Tests |
+| Everyone | [`credit.md`](./credit.md) | Master credit-contract reference |
+| Operators / auditors | [`default-liquidation-auction-hook.md`](./default-liquidation-auction-hook.md) | Default Liquidation Auction Hook |
+| Operators / auditors | [`default-oracle.md`](./default-oracle.md) | Default Oracle Design (Stellar/Soroban) |
+| Operators | [`deploy.md`](./deploy.md) | Deployment Guide |
+| Auditors / integrators | [`error-taxonomy.md`](./error-taxonomy.md) | `ContractError` Taxonomy — Recovery Actions by Category |
+| Integrators | [`errors.md`](./errors.md) | ContractError Reference |
+| Integrators | [`events-schema.md`](./events-schema.md) | Creditra Event Schema Reference |
+| Integrators | [`indexer-integration.md`](./indexer-integration.md) | Indexer Integration Guide (Soroban Events) |
+| Auditors / contributors | [`interest-accrual-design.md`](./interest-accrual-design.md) | Interest Accrual Design Specification |
+| Integrators | [`interest-accrual.md`](./interest-accrual.md) | Accrual normative reference |
+| Operators / auditors | [`oracle-mechanisms.md`](./oracle-mechanisms.md) | Canonical reference for all three oracle mechanisms |
+| Integrators | [`risk-based-rate-formula.md`](./risk-based-rate-formula.md) | Risk-Score Based Dynamic Interest Rate Formula |
+| Operators / contributors | [`scripts.md`](./scripts.md) | Helper scripts |
+| Integrators / auditors | [`state-machine.md`](./state-machine.md) | Repayment Schedule State Machine |
+| Auditors | [`threat-model.md`](./threat-model.md) | Threat Model — Authorization Matrix |
+| Operators / auditors | [`treasury.md`](./treasury.md) | **Treasury fee lifecycle end to end** (accrual → split → withdrawal) |
+| Operators | [`upgrade-policy.md`](./upgrade-policy.md) | Upgrade Policy: Native WASM Upgrade Path |
+| Operators / integrators | [`utilization-cap.md`](./utilization-cap.md) | Per-Borrower Utilization Ratio Cap |
+
+### Superseded duplicates
+
+These files are kept only so old links keep resolving. Treat the canonical
+column as the single source of truth and do not extend the duplicates.
+
+| Superseded | Canonical | Reason |
+| --- | --- | --- |
+| [`errors.md`](./errors.md) | [`contract-errors.md`](./contract-errors.md) | legacy copy of the error-code table |
+| [`ERROR_CODES.md`](./ERROR_CODES.md) | [`contract-errors.md`](./contract-errors.md) | upper-case duplicate of the error-code table |
+| [`EVENT_SCHEMA.md`](./EVENT_SCHEMA.md) | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | legacy event schema (catalogue is authoritative) |
+| [`events-schema.md`](./events-schema.md) | [`EVENTS_CATALOG.md`](./EVENTS_CATALOG.md) | legacy event schema (catalogue is authoritative) |
+| [`interest-accrual-design.md`](./interest-accrual-design.md) | [`interest-accrual.md`](./interest-accrual.md) | design history for the normative accrual reference |
+| [`ERROR_MIGRATION.md`](./ERROR_MIGRATION.md) | [`error-taxonomy.md`](./error-taxonomy.md) | error taxonomy migration note |
 
 ### Top-level companions
 
 | File | Purpose |
-|---|---|
-| `WHITEPAPER.md` | Protocol-level design (the centerpiece) |
-| `README.md` | Repo entry point |
+| --- | --- |
+| [`WHITEPAPER.md`](../WHITEPAPER.md) | Protocol-level design (the centerpiece) |
+| [`README.md`](../README.md) | Repo entry point |
 
 ### Contract-local READMEs
 
@@ -201,4 +230,4 @@ document rather than with this index.
 
 ---
 
-*Last updated alongside the documentation pass in June 2026.*
+*Documentation index is checked by `scripts/check_docs_index.sh`.*

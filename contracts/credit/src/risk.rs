@@ -246,7 +246,10 @@ pub fn update_risk_parameters(
     risk_score: u32,
 ) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
+    // Admin-only, enforced by the `lib.rs` wrapper (`require_admin_auth`); not
+    // re-checked here because a second `require_auth` for the already-authorized
+    // admin address within one invocation is rejected by the Soroban auth frame
+    // as `Error(Auth, ExistingValue)`.
     assert_risk_admin_cooldown_elapsed_for(&env, &borrower);
 
     let stored_line: CreditLineData = crate::storage::get_credit_line(&env, &borrower)

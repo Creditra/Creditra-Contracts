@@ -168,6 +168,7 @@ pub enum CreditStatus {
 /// | 62   | `AuctionCallFailed`            | Handshake     | Cross-contract auction CPI call failed or returned an unexpected value |
 /// | 63   | `AuctionActive`                | Lifecycle     | Fee configuration change rejected while a liquidation auction is active |
 /// | 64   | `MissingVrfCommitment`          | Misc          | No VRF commitment exists for the borrower |
+/// | 65   | `InsufficientTreasuryBalance`  | Liquidity     | Treasury balance fell below the proposed withdrawal amount |
 // `export = false`: `ContractError` has grown past the 50-case limit the
 // Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
@@ -270,6 +271,8 @@ pub enum ContractError {
     AuctionActive = 63,
     /// No VRF commitment exists for the borrower whose score is being verified.
     MissingVrfCommitment = 64,
+    /// The treasury balance fell below the pending withdrawal snapshot.
+    InsufficientTreasuryBalance = 65,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -349,6 +352,7 @@ impl ContractError {
             | Self::InsufficientRepaymentAllowance
             | Self::InsufficientRepaymentBalance
             | Self::TreasuryNotSet
+            | Self::InsufficientTreasuryBalance
             | Self::ExposureCapExceeded
             | Self::BountyNotSet => Liquidity,
 

@@ -104,7 +104,7 @@ fn assert_accounting(client: &CreditClient<'_>, borrower: &Address, label: &str)
     );
 }
 
-/// Assert that the status is one of the five defined variants (exhaustive match).
+/// Assert that the status is one of the six defined variants (exhaustive match).
 fn assert_valid_status(client: &CreditClient<'_>, borrower: &Address, label: &str) {
     let Some(line) = client.get_credit_line(borrower) else {
         return;
@@ -116,7 +116,8 @@ fn assert_valid_status(client: &CreditClient<'_>, borrower: &Address, label: &st
         | CreditStatus::Suspended
         | CreditStatus::Defaulted
         | CreditStatus::Closed
-        | CreditStatus::Restricted => {}
+        | CreditStatus::Restricted
+        | CreditStatus::SelfSuspended => {}
     }
     let _ = label; // used in assertion messages above; silence unused warning
 }
@@ -189,7 +190,7 @@ proptest! {
                 LifecycleOp::Draw(amount) => {
                     if let Some(line) = client.get_credit_line(&borrower) {
                         let headroom = (line.credit_limit - line.utilized_amount).max(0);
-                        let capped = amount.min(headroom).min(10_000);
+                        let capped = (*amount).min(headroom).min(10_000);
                         if capped > 0 {
                             let _ = client.try_draw_credit(&borrower, &capped);
                         }
@@ -199,7 +200,7 @@ proptest! {
                 LifecycleOp::Repay(amount) => {
                     if let Some(line) = client.get_credit_line(&borrower) {
                         if line.utilized_amount > 0 {
-                            let capped = amount.min(line.utilized_amount + 1_000);
+                            let capped = (*amount).min(line.utilized_amount + 1_000);
                             let _ = client.try_repay_credit(&borrower, &capped);
                         }
                     }
