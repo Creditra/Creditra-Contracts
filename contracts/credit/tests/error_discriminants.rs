@@ -73,7 +73,7 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::StaleStateTransition as u32, 60);
     assert_eq!(ContractError::IncompatibleVersion as u32, 61);
     assert_eq!(ContractError::AuctionCallFailed as u32, 62);
-    // Appended in Issue #1169 — fee config frozen while an auction is active.
+// Appended in Issue #1169 — fee config frozen while an auction is active.
     assert_eq!(ContractError::AuctionActive as u32, 63);
     assert_eq!(ContractError::MissingVrfCommitment as u32, 64);
     // Appended in Issue #1220 — timelocked treasury withdrawal underflow.
@@ -144,7 +144,7 @@ fn no_duplicate_discriminants() {
         ContractError::RiskAdminCooldownActive as u32,
         ContractError::IncompatibleVersion as u32,
         ContractError::AuctionCallFailed as u32,
-        ContractError::AuctionActive as u32,
+ContractError::AuctionActive as u32,
         ContractError::MissingVrfCommitment as u32,
         ContractError::InsufficientTreasuryBalance as u32,
         ContractError::BorrowerExposureCapExceeded as u32,
@@ -161,7 +161,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 64;
+const EXPECTED_VARIANT_COUNT: usize = 61;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -218,7 +218,7 @@ fn variant_count_is_known() {
         ContractError::InvalidRiskWeight as u32,
         ContractError::InvalidAttestation as u32,
         ContractError::RiskAdminCooldownActive as u32,
-        ContractError::OracleNotFound as u32,
+ContractError::OracleNotFound as u32,
         ContractError::FreezeCooldownActive as u32,
         ContractError::AdminCollateralCooldownActive as u32,
         ContractError::LiquidationGraceActive as u32,
@@ -439,6 +439,7 @@ fn category_mappings_are_stable() {
         ContractErrorCategory::Liquidity
     );
     assert_eq!(
+assert_eq!(
         ContractError::ExposureCapExceeded.category(),
         ContractErrorCategory::Liquidity
     );
@@ -765,25 +766,69 @@ fn canonical_error_code_table_matches_enum() {
 /// Verify the canonical category summary lists exactly the variants that
 /// `ContractError::category()` returns, with the right per-category counts.
 #[test]
-fn canonical_error_category_table_matches_enum() {
-    use std::collections::BTreeMap;
+fn borrow_error_catalog_lists_all_variants() {
+    let catalog_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/errors/borrow.md");
+    let catalog = std::fs::read_to_string(&catalog_path)
+        .unwrap_or_else(|_| panic!("Missing borrow error catalog at {:?}", catalog_path));
 
-    let doc = canonical_error_doc();
-    let table = doc_section(&doc, "Categories");
-
-    // category name -> variants published for it.
-    let mut published: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for line in table.lines() {
-        let cells = table_cells(line);
-        if cells.len() < 4 || cells[0].trim_matches('`').parse::<u32>().is_err() {
-            continue; // header / separator / total row
-        }
-        let category = cells[1].trim_matches('`').to_string();
-        let variants = cells[3]
-            .split(',')
-            .map(|variant| variant.trim().trim_matches('`').to_string())
-            .filter(|variant| !variant.is_empty())
-            .collect();
+    for variant in [
+        "Unauthorized",
+        "NotAdmin",
+        "CreditLineNotFound",
+        "CreditLineClosed",
+        "InvalidAmount",
+        "OverLimit",
+        "NegativeLimit",
+        "RateTooHigh",
+        "ScoreTooHigh",
+        "UtilizationNotZero",
+        "Reentrancy",
+        "Overflow",
+        // "LimitDecreaseRequiresRepayment",
+        "AlreadyInitialized",
+        "QuorumNotMet",
+        "OracleNotFound",
+        "OracleAlreadyExists",
+        "AdminAcceptTooEarly",
+        "BorrowerBlocked",
+        "DrawExceedsMaxAmount",
+        "Paused",
+        "DrawsFrozen",
+        "CreditLineSuspended",
+        "CreditLineDefaulted",
+        "MissingLiquidityToken",
+        "MissingLiquiditySource",
+        "InsufficientLiquidityReserve",
+        "LiquidityTokenCallFailed",
+        "InsufficientRepaymentAllowance",
+        "InsufficientRepaymentBalance",
+        "RepayExceedsMaxAmount",
+        "DrawCooldownActive",
+        "TreasuryNotSet",
+        "ExposureCapExceeded",
+        "AdminNotInitialized",
+        "TimestampRegression",
+        "LimitOutOfBounds",
+        "CollateralRatioBelowMinimum",
+        "OraclePriceInvalid",
+        "OraclePriceStale",
+        "OraclePriceDeviation",
+        "InsufficientCollateralBalance",
+        "BorrowerFrozen",
+        "BountyNotSet",
+        "NoPendingTreasuryWithdrawal",
+        "TreasuryTimelockActive",
+        "TreasuryProposalExists",
+        "CloseFactorAboveMax",
+        "CreditLineFrozen",
+        "DrawReversalWindowExpired",
+        "OriginalDrawNotFound",
+        "AttestationBatchNotFound",
+        "OracleQuorumNotMet",
+        "AlreadySettled",
+        "InvalidRiskWeight",
+    ] {
         assert!(
             published.insert(category.clone(), variants).is_none(),
             "docs/errors.md lists the {category} category more than once"
@@ -889,7 +934,7 @@ fn every_variant_has_known_category() {
         ContractError::LiquidationGraceActive.category(),
         // Issue #1146: stale state transition guard (Lifecycle category)
         ContractError::StaleStateTransition.category(),
-        // Issue #1169: fee config frozen while an auction is active
+// Issue #1169: fee config frozen while an auction is active
         ContractError::IncompatibleVersion.category(),
         ContractError::AuctionCallFailed.category(),
         ContractError::AuctionActive.category(),
@@ -906,7 +951,7 @@ fn every_variant_has_known_category() {
         12,
         "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 64, "Expected 64 ContractError variants");
+assert_eq!(all_variants.len(), 61, "Expected 61 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

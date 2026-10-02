@@ -454,7 +454,7 @@ pub fn open_credit_line(
             env.panic_with_error(ContractError::AlreadyInitialized);
         }
 
-        // Issue #1169: re-opening a `Defaulted` line replaces the defaulted
+// Issue #1169: re-opening a `Defaulted` line replaces the defaulted
         // record with a fresh `Active` line, which abandons the liquidation
         // auction. `persist_credit_line` is called with `previous_status =
         // None` below, so the active-auction counter is maintained here
@@ -465,6 +465,12 @@ pub fn open_credit_line(
 
         previous_status = Some(existing.status);
         previous_utilized = existing.utilized_amount;
+    }
+    // Re-opening any existing non-Active line is admin-gated: auth is enforced
+    // by the `lib.rs` wrapper (`require_admin_auth`), not re-checked here — a
+    // second `require_auth` for the already-authorized admin address within one
+    // invocation is rejected by the Soroban auth frame as
+    // `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
 
         if existing.status != CreditStatus::Closed {
             utilized_amount = existing.utilized_amount;

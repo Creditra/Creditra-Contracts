@@ -309,6 +309,10 @@ impl Credit {
         CONTRACT_API_VERSION
     }
 
+pub fn init(env: Env, admin: Address) {
+        config::init(env, admin)
+    }
+
     /// Return the contract API version as `(major, minor, patch)`.
     ///
     /// Canonical entrypoint. [`Credit::get_version`] is retained as an alias for
@@ -1388,7 +1392,7 @@ impl Credit {
 
     /// Set the treasury share of skimmed protocol fees in basis points (admin only).
     ///
-    /// `treasury_share_bps` must be in `0..=10_000`. The fee is apportioned by
+/// `treasury_share_bps` must be in `0..=10_000`. The fee is apportioned by
     /// [`crate::math_utils::split_conserving`] (largest remainder): each side is
     /// floored, then the leftover base unit goes to the recipient with the larger
     /// fractional claim, ties broken in favour of treasury, so the shares always
