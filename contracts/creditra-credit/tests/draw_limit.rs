@@ -195,6 +195,8 @@ fn over_limit_does_not_write_draw_or_audit() {
         QueryMsg::DrawAuditTrail {
             credit_line_id: cl_id,
             draw_id: None,
+            start_after: None,
+            limit: None,
         },
     )
     .unwrap();
