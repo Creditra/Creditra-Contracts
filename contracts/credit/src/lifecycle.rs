@@ -106,10 +106,11 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
     publish_borrow_lifecycle_event, publish_credit_line_event,
-    publish_debt_forgiven_event, publish_default_liquidation_requested_event,
-    publish_default_liquidation_settled_event, publish_late_fee_charged_event,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent, DebtForgivenEvent,
-    DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+    publish_debt_forgiven_event, publish_default_liquidation_no_recovery_event,
+    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event,
+    publish_late_fee_charged_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
+    DebtForgivenEvent, DefaultLiquidationNoRecoveryEvent, DefaultLiquidationSettledEvent,
+    LateFeeChargedEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
@@ -1091,7 +1092,9 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
 /// # Parameters
 /// - `env`: Soroban environment
 /// - `borrower`: Address of the defaulted borrower
-/// - `recovered_amount`: Amount recovered from liquidation (must be > 0)
+/// - `recovered_amount`: Amount recovered from liquidation. Must be `> 0`, except
+///   when a configured auction contract reports a zero recovery (a closed
+///   auction with no bids); see the zero-recovery path below.
 /// - `settlement_id`: Unique settlement identifier for replay protection
 /// - `close_factor_bps`: Percentage of utilized amount to recover (1..=10_000)
 /// - `oracle_price`: Optional single-oracle price (ignored if quorum config is set)
@@ -1139,7 +1142,18 @@ pub fn settle_default_liquidation(
     // Soroban auth frame as `Error(Auth, ExistingValue)`.
 
     // Step 2: Numeric validation (cheap checks before any storage reads)
-    if recovered_amount <= 0 {
+    //
+    // A negative recovery is always invalid. A *zero* recovery is only allowed
+    // on the auction-hooked path: `lib.rs::settle_default_liquidation` asserts
+    // the auction CPI's return value equals `recovered_amount` before calling
+    // here, so a zero reaching this function together with a configured auction
+    // means the auction genuinely closed with no bids. Without an auction hook
+    // the historical `> 0` rule still applies, so an admin cannot consume the
+    // replay marker by recording a no-op settlement.
+    if recovered_amount < 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+    if recovered_amount == 0 && crate::storage::get_auction_contract(&env).is_none() {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
@@ -1179,6 +1193,38 @@ pub fn settle_default_liquidation(
     // Step 6: Verify defaulted status
     if credit_line.status != CreditStatus::Defaulted {
         env.panic_with_error(ContractError::CreditLineDefaulted);
+    }
+
+    // Step 6b: Zero-recovery short-circuit (Issue #1284).
+    //
+    // A configured auction that closes with no bids reports a zero recovery.
+    // Recording that outcome must not touch the credit line's accounting: the
+    // line stays `Defaulted` with its outstanding balance byte-for-byte
+    // unchanged, and the pending-auction counter is not decremented (that only
+    // happens when the status actually changes). We deliberately do not persist
+    // the accrued `credit_line` here — the contract's stored debt is still
+    // `previous_utilized` — and instead write only the replay marker plus a
+    // dedicated no-recovery event. The admin can then `forgive_debt` and
+    // `close_credit_line` (or `reinstate_credit_line`) to resolve the line.
+    if recovered_amount == 0 {
+        env.storage().persistent().set(&settlement_key, &true);
+        bump_settlement_marker_ttl(&env, &settlement_key);
+        if let Some(price) = oracle_result.price() {
+            crate::oracle_validation::record_accepted_oracle_price(&env, price);
+        }
+
+        publish_default_liquidation_no_recovery_event(
+            &env,
+            DefaultLiquidationNoRecoveryEvent {
+                borrower,
+                settlement_id,
+                recovered_amount,
+                remaining_utilized_amount: previous_utilized,
+                status: CreditStatus::Defaulted,
+                close_factor_bps,
+            },
+        );
+        return;
     }
 
     // Step 7: Economic validation

@@ -25,12 +25,13 @@ for post-default liquidation handling.
   - `close_factor_bps`: Basis points of utilized_amount that can be recovered in this settlement (1–10_000). Default 10_000 = full liquidation.
 - Preconditions:
   - credit line status must be Defaulted
-  - recovered_amount must be positive and <= target_recovery (utilized_amount * close_factor_bps / 10_000)
+  - recovered_amount must be positive and <= target_recovery (utilized_amount * close_factor_bps / 10_000), except that a value of `0` is accepted when a configured auction contract reports a zero recovery (a closed auction with no bids)
   - settlement_id must be unused for that borrower
 - Effects:
   - decreases utilized_amount by recovered_amount
   - when remaining utilized_amount == 0, status transitions to Closed
   - emits credit/liq_setl with close_factor_bps field
+  - for a zero recovery, no accounting is applied: the line stays Defaulted with its debt unchanged, the settlement id is still consumed for replay protection, and credit/liq_norec is emitted instead of credit/liq_setl
 
 ### Auction contract settlement signal
 

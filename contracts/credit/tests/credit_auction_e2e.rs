@@ -10,9 +10,9 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use gateway_auction::{Auction, AuctionClient, AuctionMode, DutchAuctionDecay};
+use gateway_auction::{Auction, AuctionClient, AuctionMode};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
-use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, TryIntoVal};
 
 const CREDIT_LIMIT: i128 = 10_000;
@@ -55,8 +55,19 @@ fn setup_defaulted_credit(env: &Env, draw_amount: i128) -> Deployment {
     credit.set_liquidity_source(&credit_id);
 
     StellarAssetClient::new(env, &token_address).mint(&credit_id, &CREDIT_LIMIT);
+    StellarAssetClient::new(env, &token_address).mint(&borrower, &CREDIT_LIMIT);
+    // `draw_credit` enforces the minimum collateral ratio, so the position needs
+    // approved collateral before it can be drawn — the same shape a real
+    // defaulted position has when the liquidation auction runs.
+    TokenClient::new(env, &token_address).approve(
+        &borrower,
+        &credit_id,
+        &CREDIT_LIMIT,
+        &1_000_000_u32,
+    );
 
     credit.open_credit_line(&borrower, &CREDIT_LIMIT, &INTEREST_RATE_BPS, &RISK_SCORE);
+    credit.deposit_collateral(&borrower, &(draw_amount * 2));
     credit.draw_credit(&borrower, &draw_amount);
 
     let drawn = credit.get_credit_line(&borrower).unwrap();
@@ -88,6 +99,8 @@ fn run_auction_to_settlement(
     assert!(recovered_amount > first_bid);
 
     let auction = AuctionClient::new(env, &deployment.auction_id);
+    // Auctions may only be created by the registered factory.
+    auction.set_factory_contract(&deployment.credit_id);
     let bidder = Address::generate(env);
     let winner = Address::generate(env);
     let start_time = env.ledger().timestamp();
@@ -102,7 +115,7 @@ fn run_auction_to_settlement(
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &None,
         &None,
     );
     auction.place_bid(settlement_id, &bidder, &first_bid);
@@ -139,21 +152,32 @@ fn settle_credit_from_auction(
     assert_event_topic(env, &deployment.credit_id, "credit", "liq_setl");
 }
 
-fn assert_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &str) {
+fn has_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &str) -> bool {
     let expected0 = Symbol::new(env, topic0);
     let expected1 = Symbol::new(env, topic1);
 
-    let matched = env.events().all().iter().any(|(contract, topics, _data)| {
+    env.events().all().iter().any(|(contract, topics, _data)| {
         if contract != contract_id.clone() || topics.len() < 2 {
             return false;
         }
 
-        let actual0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
-        let actual1: Symbol = Symbol::try_from_val(env, &topics.get(1).unwrap()).unwrap();
+        let Ok(actual0) = Symbol::try_from_val(env, &topics.get(0).unwrap()) else {
+            return false;
+        };
+        let Ok(actual1) = Symbol::try_from_val(env, &topics.get(1).unwrap()) else {
+            return false;
+        };
+        let actual0: Symbol = actual0;
+        let actual1: Symbol = actual1;
         actual0 == expected0 && actual1 == expected1
-    });
+    })
+}
 
-    assert!(matched, "missing event topic ({topic0}, {topic1})");
+fn assert_event_topic(env: &Env, contract_id: &Address, topic0: &str, topic1: &str) {
+    assert!(
+        has_event_topic(env, contract_id, topic0, topic1),
+        "missing event topic ({topic0}, {topic1})"
+    );
 }
 
 fn auction_settlement_event(env: &Env, auction_id: &Address) -> AuctionSettlementEvent {
@@ -236,7 +260,7 @@ fn e2e_atomic_settlement_with_configured_auction() {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &None,
         &None,
     );
     auction.place_bid(
@@ -262,10 +286,88 @@ fn e2e_atomic_settlement_with_configured_auction() {
         &None,
     );
 
+    // Events must be read before any further contract call clears the buffer.
+    assert_event_topic(&env, &deployment.auction_id, "LIQ_SETL", "auction");
+
     let line = credit.get_credit_line(&deployment.borrower).unwrap();
     assert_eq!(line.utilized_amount, 0);
     assert_eq!(line.status, CreditStatus::Closed);
+}
 
-    // Also assert that the auction event is still emitted and marker is set
-    assert_event_topic(&env, &deployment.auction_id, "LIQ_SETL", "auction");
+/// Issue #1284: a closed auction with no bids reports `highest_bid == 0`. The
+/// credit contract must accept the zero recovery, record the settlement id, and
+/// leave the defaulted line untouched so the admin can write it off or
+/// reinstate it — instead of reverting and leaving the line stuck forever.
+#[test]
+fn e2e_zero_bid_auction_settles_without_reverting() {
+    let env = Env::default();
+    let draw_amount = 1_200;
+    let deployment = setup_defaulted_credit(&env, draw_amount);
+    let settlement_id = Symbol::new(&env, "auc_zero");
+
+    // Wire the auction contract as the credit contract's settlement hook, then
+    // run an auction with no bids at all.
+    let credit = CreditClient::new(&env, &deployment.credit_id);
+    credit.set_auction_contract(&deployment.auction_id);
+    let auction = AuctionClient::new(&env, &deployment.auction_id);
+    auction.set_factory_contract(&deployment.credit_id);
+
+    let start_time = env.ledger().timestamp();
+    let end_time = start_time + AUCTION_DURATION;
+
+    auction.init_auction(
+        &settlement_id,
+        &AuctionMode::English,
+        &start_time,
+        &end_time,
+        &MIN_BID,
+        &0_u32,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.ledger().set_timestamp(end_time);
+    auction.close_auction(&settlement_id);
+
+    // The auction CPI reports zero recovery; the credit contract must settle it.
+    credit.settle_default_liquidation(
+        &deployment.borrower,
+        &0_i128,
+        &settlement_id,
+        &10_000_u32,
+        &None,
+    );
+
+    // The no-recovery event records zero recovery; no settled/closed event is
+    // emitted because no accounting was applied.
+    assert_event_topic(&env, &deployment.credit_id, "credit", "liq_norec");
+    assert!(!has_event_topic(&env, &deployment.credit_id, "credit", "liq_setl"));
+    assert!(!has_event_topic(&env, &deployment.credit_id, "credit", "closed"));
+
+    let line = credit.get_credit_line(&deployment.borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, draw_amount);
+    assert_eq!(credit.get_pending_auction_count(), 1);
+
+    // The settlement id is consumed (the line can still be resolved, but this
+    // exact settlement cannot be replayed).
+    let replay = credit.try_settle_default_liquidation(
+        &deployment.borrower,
+        &0_i128,
+        &settlement_id,
+        &10_000_u32,
+        &None,
+    );
+    assert!(replay.is_err(), "replayed zero-bid settlement must revert");
+
+    // Admin resolution path: write the debt off, then close the line.
+    credit.forgive_debt(&deployment.borrower, &draw_amount);
+    credit.close_credit_line(&deployment.borrower, &deployment.borrower);
+
+    let closed = credit.get_credit_line(&deployment.borrower).unwrap();
+    assert_eq!(closed.status, CreditStatus::Closed);
+    assert_eq!(closed.utilized_amount, 0);
+    assert_eq!(credit.get_pending_auction_count(), 0);
 }
