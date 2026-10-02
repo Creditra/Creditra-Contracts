@@ -200,9 +200,11 @@ mod edge_cases {
     use super::*;
     use creditra_credit::types::CreditStatus;
 
-    /// Recovered amount must be > 0 (the contract enforces this).
+    /// Recovered amount must be > 0 unless a configured auction reports a zero
+    /// recovery (Issue #1284). This setup wires no auction, so the historical
+    /// guard still applies and zero recovery reverts.
     #[test]
-    fn zero_recovery_panics() {
+    fn zero_recovery_without_auction_panics() {
         let env = Env::default();
         env.mock_all_auths();
         let (client, borrower) = setup_defaulted_borrower(&env, 10_000, 1_000);
@@ -210,7 +212,7 @@ mod edge_cases {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.settle_default_liquidation(&borrower, &0_i128, &sid, &10_000_u32, &None);
         }));
-        assert!(result.is_err(), "zero recovery must panic");
+        assert!(result.is_err(), "zero recovery without an auction must panic");
     }
 
     /// Full liquidation (close_factor = 10000, recovered == utilized) closes

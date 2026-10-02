@@ -743,6 +743,7 @@ cargo test -p creditra-credit amount_validation
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
 | `("credit", "liq_req")`    | `liq_req`  | `default_credit_line`       | Default liquidation requested |
 | `("credit", "liq_setl")`   | `liq_setl` | `settle_default_liquidation`| Auction settlement applied to debt accounting |
+| `("credit", "liq_norec")`  | `liq_norec`| `settle_default_liquidation`| Zero-recovery (no-bid auction) settlement recorded; debt unchanged |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
 | `("credit", "drw_freeze")` | `DrawsFrozenEvent` | `freeze_draws`, `unfreeze_draws` | Global draw freeze toggled (`frozen`, `reason`) |

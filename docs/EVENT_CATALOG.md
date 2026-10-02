@@ -141,9 +141,15 @@ namespace unless noted.
 |---|---|---|---|
 | `"liq_req"` | Raw tuple `(Address, i128)` | `borrower: Address`, `utilized_amount: i128` | 1.0.0 |
 | `"liq_setl"` | `DefaultLiquidationSettledEvent` | `borrower: Address`, `settlement_id: Symbol`, `recovered_amount: i128`, `remaining_utilized_amount: i128`, `status: CreditStatus`, `close_factor_bps: u32` | 1.0.0 |
+| `"liq_norec"` | `DefaultLiquidationNoRecoveryEvent` | `borrower: Address`, `settlement_id: Symbol`, `recovered_amount: i128`, `remaining_utilized_amount: i128`, `status: CreditStatus`, `close_factor_bps: u32` | 1.0.0 |
+
+`"liq_norec"` is emitted instead of `"liq_setl"` when a configured auction
+reports a zero recovery (a closed auction with no bids). The `recovered_amount`
+field is always `0`; the line is left `Defaulted` with its debt unchanged.
 
 **Publishers:** `publish_default_liquidation_requested_event`,
-`publish_default_liquidation_settled_event`
+`publish_default_liquidation_settled_event`,
+`publish_default_liquidation_no_recovery_event`
 
 ### 1.9 Attestation events
 
@@ -257,6 +263,7 @@ All defined in `contracts/credit/src/types.rs`:
 | `publish_contract_upgraded_event` | `("credit", "upgraded")` |
 | `publish_default_liquidation_requested_event` | `("credit", "liq_req")` |
 | `publish_default_liquidation_settled_event` | `("credit", "liq_setl")` |
+| `publish_default_liquidation_no_recovery_event` | `("credit", "liq_norec")` |
 | `publish_borrower_blocked_event` | `("blk_chg",)` |
 | `publish_collateral_deposited_event` | `("credit", "col_dep")` |
 | `publish_collateral_withdrawn_event` | `("credit", "col_wit")` |

@@ -241,6 +241,26 @@ pub fn compute_dutch_price(
     current_price.max(floor_price)
 }
 
+/// Protocol handshake version reported to the credit (factory) contract.
+///
+/// The credit contract calls [`Auction::get_version`] before issuing a
+/// settlement and requires a matching major version — see
+/// [`docs/CROSS_CONTRACT_HANDSHAKE.md`](../../../../docs/CROSS_CONTRACT_HANDSHAKE.md).
+/// The struct mirrors `creditra_credit::handshake::ProtocolVersion`
+/// field-for-field (a `#[contracttype]` map keyed by field name) so the two
+/// contracts stay ABI-compatible without a build-time dependency between the
+/// auction and credit crates.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolVersion {
+    pub major: u32,
+    pub minor: u32,
+}
+
+/// Version reported by [`Auction::get_version`]. The major is locked by the
+/// credit contract's handshake; bump it only for breaking interface changes.
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 1, minor: 0 };
+
 #[contract]
 pub struct Auction;
 
@@ -258,6 +278,17 @@ pub enum AuctionKey {
 
 #[contractimpl]
 impl Auction {
+    /// Returns the protocol version for the credit-contract settlement
+    /// handshake.
+    ///
+    /// The credit contract reads this before its settlement CPI and rejects the
+    /// settlement when the major version does not match, so a future breaking
+    /// change to the settlement interface can be rolled out safely. This is a
+    /// read-only entrypoint and requires no authorization.
+    pub fn get_version(_env: Env) -> ProtocolVersion {
+        PROTOCOL_VERSION
+    }
+
     /// Initializes a new auction.
     ///
     /// # Authorization

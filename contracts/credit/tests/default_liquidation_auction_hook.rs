@@ -282,27 +282,66 @@ fn settle_full_with_auction_contract_closes_line() {
     assert_eq!(line.utilized_amount, 0);
 }
 
-/// The in-repo `gateway-auction` contract exports `settle_default_liquidation`
-/// but **not** `get_version`, so it cannot complete the settlement handshake.
-/// The credit contract must fail closed — reject the settlement atomically —
-/// rather than fall back to trusting an auction it could not version-check.
-///
-/// This is what the previous `settle_*_with_auction_contract_*` tests were
-/// implicitly asserting (and failing): wiring the in-repo auction as the hook
-/// reverts with `AuctionCallFailed (62)` before any accounting runs.
+/// The in-repo `gateway-auction` contract now exports `get_version`, so it can
+/// complete the settlement handshake. Wiring it as the hook must settle the
+/// credit line through the credit-controlled CPI exactly once.
 #[test]
-fn gateway_auction_hook_fails_closed_without_the_version_handshake() {
+fn gateway_auction_hook_completes_handshake_and_settles() {
     let (env, contract_id, borrower) = setup_defaulted_line(1_000);
     let client = CreditClient::new(&env, &contract_id);
 
     let auction_addr = env.register(Auction, ());
     client.set_auction_contract(&auction_addr);
 
-    // The real auction is otherwise fully usable: factory wired, auction
-    // closed at a 400 bid matching the amount the caller will claim.
     let settlement_id = Symbol::new(&env, "auc_real");
     setup_auction(&env, &contract_id, &auction_addr, &settlement_id, 400_i128);
 
+    client.settle_default_liquidation(&borrower, &400_i128, &settlement_id, &10_000_u32, &None);
+
+    assert_eq!(count_event_topic(&env, "liq_setl"), 1);
+
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Defaulted);
+    assert_eq!(line.utilized_amount, 600);
+}
+
+/// An auction that exports `settle_default_liquidation` but **not**
+/// `get_version` cannot complete the settlement handshake. The credit contract
+/// must fail closed — reject the settlement atomically — rather than fall back
+/// to trusting an auction it could not version-check (Issue #1359). The in-repo
+/// `gateway-auction` implements the handshake, so this test pins the guarantee
+/// against a legacy auction that predates it.
+mod legacy_auction {
+    use super::*;
+
+    #[contract]
+    pub struct LegacyAuction;
+
+    #[contractimpl]
+    impl LegacyAuction {
+        /// Legacy settlement entrypoint with no `get_version` companion.
+        pub fn settle_default_liquidation(
+            _env: Env,
+            _auction_id: Symbol,
+            _credit_contract: Address,
+            _borrower: Address,
+        ) -> i128 {
+            400
+        }
+    }
+}
+
+#[test]
+fn auction_hook_fails_closed_without_the_version_handshake() {
+    let (env, contract_id, borrower) = setup_defaulted_line(1_000);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let auction_addr = env.register(legacy_auction::LegacyAuction, ());
+    client.set_auction_contract(&auction_addr);
+
+    // The legacy auction would return a matching 400, but it cannot answer
+    // `get_version`, so the settlement is rejected before any accounting runs.
+    let settlement_id = Symbol::new(&env, "auc_legacy");
     assert_rejected_atomically(
         &env,
         &client,
@@ -311,8 +350,78 @@ fn gateway_auction_hook_fails_closed_without_the_version_handshake() {
         &settlement_id,
         400,
         ContractError::AuctionCallFailed,
-        "gateway-auction without a version handshake",
+        "auction without a version handshake",
     );
+}
+
+// ── Issue #1284: zero-bid auctions settle without reverting ─────────────────
+
+/// Without a configured auction there is no CPI that could report a zero
+/// recovery, so the historical `recovered_amount > 0` guard still applies.
+#[test]
+fn zero_recovery_without_auction_reverts_with_5() {
+    let (env, contract_id, borrower) = setup_defaulted_line(1_000);
+    let client = CreditClient::new(&env, &contract_id);
+
+    let rejected = client
+        .try_settle_default_liquidation(
+            &borrower,
+            &0_i128,
+            &Symbol::new(&env, "zero_no_auc"),
+            &10_000_u32,
+            &None,
+        )
+        .err()
+        .expect("zero recovery without an auction must revert")
+        .expect("the revert must be a typed contract error");
+    assert_eq!(rejected, ContractError::InvalidAmount.into());
+}
+
+/// A closed auction that drew no bids reports `recovered_amount == 0`. The
+/// settlement must succeed, consume the replay marker, emit a no-recovery
+/// event, and leave the line `Defaulted` with its debt unchanged and its
+/// pending-auction counter untouched.
+#[test]
+fn zero_bid_auction_settles_as_no_recovery() {
+    let (env, contract_id, borrower) = setup_defaulted_line(1_000);
+    let client = CreditClient::new(&env, &contract_id);
+    wire_mock_auction(&env, &contract_id, ok_config(0));
+
+    let settlement_id = Symbol::new(&env, "zero_bid");
+
+    // Events must be read before any further contract call clears the buffer.
+    client.settle_default_liquidation(&borrower, &0_i128, &settlement_id, &10_000_u32, &None);
+    assert_eq!(count_event_topic(&env, "liq_norec"), 1);
+    assert_eq!(count_event_topic(&env, "liq_setl"), 0);
+    assert_eq!(count_event_topic(&env, "closed"), 0);
+
+    let after = settlement_invariants(&env, &client, &contract_id, &borrower, &settlement_id);
+    assert_eq!(after.utilized_amount, 1_000, "debt must be unchanged");
+    assert_eq!(after.status, CreditStatus::Defaulted);
+    assert!(
+        after.replay_marker_written,
+        "a zero-recovery settlement must consume the replay marker"
+    );
+    assert_eq!(
+        after.pending_auctions, 1,
+        "no status change must not retire the pending auction"
+    );
+
+    // The settlement id is now used: a replay is rejected.
+    let replay = client
+        .try_settle_default_liquidation(&borrower, &0, &settlement_id, &10_000, &None)
+        .err()
+        .expect("replay must revert")
+        .expect("replay must surface a typed error");
+    assert_eq!(replay, ContractError::AlreadyInitialized.into());
+
+    // The admin can then write the debt off and close the line.
+    client.forgive_debt(&borrower, &1_000_i128);
+    client.close_credit_line(&borrower, &borrower);
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.status, CreditStatus::Closed);
+    assert_eq!(line.utilized_amount, 0);
+    assert_eq!(client.get_pending_auction_count(), 0);
 }
 
 #[test]

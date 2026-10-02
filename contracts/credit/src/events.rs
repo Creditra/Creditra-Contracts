@@ -142,6 +142,28 @@ pub struct DefaultLiquidationSettledEvent {
     pub close_factor_bps: u32,
 }
 
+/// Emitted when a default-liquidation settlement recovers **zero** value.
+///
+/// This is the illiquid-collateral case: a configured auction closes with no
+/// bids and reports `recovered_amount == 0`. The settlement is still recorded
+/// (the `(borrower, settlement_id)` replay marker is consumed) but the credit
+/// line is left untouched — it stays `Defaulted` with the same outstanding
+/// debt — so the admin can subsequently write the debt off and close the line,
+/// or reinstate it.
+///
+/// `recovered_amount` is always `0` here; it is carried explicitly so indexers
+/// can decode the "zero recovery" fact directly from the payload.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DefaultLiquidationNoRecoveryEvent {
+    pub borrower: Address,
+    pub settlement_id: Symbol,
+    pub recovered_amount: i128,
+    pub remaining_utilized_amount: i128,
+    pub status: CreditStatus,
+    pub close_factor_bps: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdminRotationProposedEvent {
@@ -331,6 +353,18 @@ pub fn publish_default_liquidation_settled_event(
 ) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
+        event,
+    );
+}
+
+/// Publish a [`DefaultLiquidationNoRecoveryEvent`] under the
+/// `("credit", "liq_norec")` topic.
+pub fn publish_default_liquidation_no_recovery_event(
+    env: &Env,
+    event: DefaultLiquidationNoRecoveryEvent,
+) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "liq_norec")),
         event,
     );
 }
