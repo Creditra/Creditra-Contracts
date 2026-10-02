@@ -10,6 +10,11 @@
 //! disabled (same semantics as borrower draw cooldown).
 
 use crate::auth::require_admin_auth;
+// This module is compiled both in the `creditra-collateral` crate and, via a
+// `#[path]` include, in `creditra-credit` as `collateral_admin`. Both crates
+// expose a `storage` module, so importing it unqualified lets the shared source
+// resolve `storage::*` in either host crate.
+use crate::storage;
 use crate::storage::{assert_not_paused};
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env, Vec};
