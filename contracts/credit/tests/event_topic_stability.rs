@@ -4,13 +4,12 @@ use creditra_credit::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
     publish_borrower_blocked_event, publish_default_liquidation_settled_event,
     publish_draw_reversed_event, publish_drawn_event, publish_draws_frozen_event,
-    publish_grace_waiver_receipt_event, publish_interest_accrued_event,
-    publish_oracle_added_event, publish_oracle_quorum_threshold_set_event,
-    publish_oracle_removed_event, publish_oracle_reporting_window_set_event,
-    publish_oracle_value_reported_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_risk_parameters_updated, AdminRotationAcceptedEvent,
-    AdminRotationProposedEvent, DefaultLiquidationSettledEvent, DrawReversedEvent,
-    InterestAccruedEvent, RepaymentEvent, RiskParametersUpdatedEvent,
+    publish_grace_waiver_receipt_event, publish_interest_accrued_event, publish_oracle_added_event,
+    publish_oracle_quorum_threshold_set_event, publish_oracle_removed_event,
+    publish_oracle_reporting_window_set_event, publish_oracle_value_reported_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_risk_parameters_updated,
+    AdminRotationAcceptedEvent, AdminRotationProposedEvent, DefaultLiquidationSettledEvent,
+    DrawReversedEvent, InterestAccruedEvent, RepaymentEvent, RiskParametersUpdatedEvent,
 };
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};

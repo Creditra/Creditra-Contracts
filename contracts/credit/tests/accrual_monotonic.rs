@@ -3,7 +3,10 @@
 //! as ledger time advances for active, suspended, and delinquent lines.
 
 use proptest::prelude::*;
-use soroban_sdk::{token, Address, Env, testutils::{Address as _, Ledger}};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    token, Address, Env,
+};
 
 use creditra_credit::{types::GraceWaiverMode, Credit, CreditClient};
 

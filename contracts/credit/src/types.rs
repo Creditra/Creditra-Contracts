@@ -265,9 +265,7 @@ impl ContractError {
     pub fn category(&self) -> ContractErrorCategory {
         use ContractErrorCategory::*;
         match self {
-            Self::Unauthorized
-            | Self::NotAdmin
-            | Self::AdminNotInitialized => Auth,
+            Self::Unauthorized | Self::NotAdmin | Self::AdminNotInitialized => Auth,
 
             Self::CreditLineClosed
             | Self::AlreadyInitialized
@@ -352,7 +350,6 @@ pub struct RiskAdminCooldownConfig {
     /// New cooldown duration in seconds. `0` means disabled.
     pub cooldown_seconds: u64,
 }
-
 
 /// Stored credit line data for a borrower.
 #[contracttype]
@@ -745,6 +742,36 @@ pub struct CreditLinesPage {
     pub has_more: bool,
 }
 
+/// Result of one page of the admin/keeper conservation verifier (Issue #1269).
+///
+/// Returned by `verify_conservation(cursor, limit)`. The caller walks the
+/// credit-line index in bounded pages and accumulates `utilized_sum` and
+/// `collateral_sum`; when `next_cursor` is `None` those aggregates must equal
+/// `stored_total_utilized` / `stored_total_collateral` (or, equivalently,
+/// `get_total_utilized()` / `get_total_collateral()`) for the on-chain
+/// accumulators to be conserved. A mismatch indicates storage drift or an
+/// archived credit-line entry.
+///
+/// The stored totals are repeated on every page so a keeper needs no second
+/// call; they are constant for the duration of a scan on a single-ledger read.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConservationCheckPage {
+    /// Exclusive cursor to pass to the next `verify_conservation` call, or
+    /// `None` when the whole index has been scanned.
+    pub next_cursor: Option<u32>,
+    /// Number of live credit lines folded into this page's sums.
+    pub scanned: u32,
+    /// Sum of `utilized_amount` over the lines scanned on this page.
+    pub utilized_sum: i128,
+    /// Sum of collateral balances over the borrowers scanned on this page.
+    pub collateral_sum: i128,
+    /// On-chain `TotalUtilized` accumulator at read time.
+    pub stored_total_utilized: i128,
+    /// On-chain `TotalCollateral` accumulator at read time.
+    pub stored_total_collateral: i128,
+}
+
 /// Oracle quorum configuration for multi-oracle price feeds.
 ///
 /// Used by `set_oracle_quorum_config` to configure the quorum threshold,
@@ -782,7 +809,6 @@ pub struct BorrowStateSnapshot {
     /// The borrower's current borrow capabilities.
     pub capabilities: BorrowCapabilities,
 }
-
 
 /// A pending treasury withdrawal proposal created by `propose_treasury_withdrawal`.
 ///

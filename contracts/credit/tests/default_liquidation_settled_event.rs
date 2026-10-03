@@ -130,7 +130,10 @@ fn settle_full_recovery_closes_line_and_event_matches_state() {
     assert_eq!(line.utilized_amount, 0);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
-    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
+    assert_eq!(
+        event.interest_recovered + event.principal_recovered,
+        event.recovered_amount
+    );
 }
 
 #[test]
@@ -168,7 +171,10 @@ fn settle_partial_recovery_keeps_line_defaulted_and_event_matches_state() {
     assert_eq!(line.utilized_amount, 700_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
-    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
+    assert_eq!(
+        event.interest_recovered + event.principal_recovered,
+        event.recovered_amount
+    );
 }
 
 #[test]
@@ -193,7 +199,10 @@ fn settle_minimal_partial_recovery_event_matches_state() {
     assert_eq!(line.utilized_amount, 499_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
-    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
+    assert_eq!(
+        event.interest_recovered + event.principal_recovered,
+        event.recovered_amount
+    );
 }
 
 #[test]
@@ -218,7 +227,10 @@ fn settle_near_full_recovery_event_matches_state() {
     assert_eq!(line.utilized_amount, 1_i128);
     assert_eq!(event.remaining_utilized_amount, line.utilized_amount);
     assert_eq!(event.status, line.status);
-    assert_eq!(event.interest_recovered + event.principal_recovered, event.recovered_amount);
+    assert_eq!(
+        event.interest_recovered + event.principal_recovered,
+        event.recovered_amount
+    );
 }
 
 #[test]
@@ -286,7 +298,10 @@ fn multiple_settlements_each_emit_event_with_correct_state() {
     let line2 = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line2.utilized_amount, 0_i128);
     assert_eq!(line2.status, CreditStatus::Closed);
-    assert_eq!(event2.interest_recovered + event2.principal_recovered, event2.recovered_amount);
+    assert_eq!(
+        event2.interest_recovered + event2.principal_recovered,
+        event2.recovered_amount
+    );
 }
 
 #[test]

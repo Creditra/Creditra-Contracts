@@ -13,11 +13,11 @@
 //! - Zero fee sends everything to reserve
 //! - Fee event emission correctness
 
-use proptest::prelude::*;
-use soroban_sdk::TryFromVal;
 use creditra_credit::events::FeeAccruedEvent;
 use creditra_credit::{Credit, CreditClient};
+use proptest::prelude::*;
 use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::TryFromVal;
 use soroban_sdk::{token, Address, Env};
 
 /// Create a minimal environment with a funded credit line ready to repay.
@@ -41,7 +41,7 @@ fn setup_minimal() -> (Env, CreditClient<'static>, Address, Address, Address) {
 
     client.set_liquidity_token(&token_address);
     client.set_liquidity_source(&reserve);
-        // draw_credit pays out of the liquidity source, so it must hold tokens
+    // draw_credit pays out of the liquidity source, so it must hold tokens
     token::StellarAssetClient::new(&env, &token_address).mint(&reserve, &10_000_000_i128);
 
     (env, client, borrower, token_address, reserve)
@@ -60,7 +60,7 @@ fn prepare_repay(
 ) {
     client.open_credit_line(borrower, &draw_amount, &interest_rate_bps, &50_u32);
 
-        let asset = token::StellarAssetClient::new(env, token_address);
+    let asset = token::StellarAssetClient::new(env, token_address);
     asset.mint(&client.address, &draw_amount);
     // draw_credit requires collateral of at least 150% of the draw
     let collateral = draw_amount * 3;
@@ -111,7 +111,10 @@ fn no_fee_on_principal_only_repayment() {
     );
 
     let summary = client.get_protocol_summary();
-    assert_eq!(summary.treasury_balance, 0, "no fee on principal-only repayment");
+    assert_eq!(
+        summary.treasury_balance, 0,
+        "no fee on principal-only repayment"
+    );
 }
 
 /// Fee on a mixed principal + interest repayment.
@@ -235,19 +238,25 @@ fn fee_event_emitted_on_repayment() {
         .find(|e| format!("{:?}", e).contains("fee_accrd"))
         .expect("FeeAccruedEvent must be emitted");
 
-    let fee_data: FeeAccruedEvent = FeeAccruedEvent::try_from_val(&env, &fee_event.2)
-        .expect("valid FeeAccruedEvent");
+    let fee_data: FeeAccruedEvent =
+        FeeAccruedEvent::try_from_val(&env, &fee_event.2).expect("valid FeeAccruedEvent");
 
     let contract_delta = token_client.balance(&client.address) - contract_before;
 
     assert_eq!(fee_data.borrower, borrower);
-    assert!(fee_data.fee_amount > 0, "interest was repaid, so a fee is charged");
+    assert!(
+        fee_data.fee_amount > 0,
+        "interest was repaid, so a fee is charged"
+    );
     assert_eq!(
         fee_data.fee_amount,
         fee_data.treasury_amount + fee_data.bounty_amount,
         "fee splits with nothing lost"
     );
-    assert_eq!(fee_data.treasury_amount, fee_data.fee_amount, "default 100% to treasury");
+    assert_eq!(
+        fee_data.treasury_amount, fee_data.fee_amount,
+        "default 100% to treasury"
+    );
     assert_eq!(fee_data.bounty_amount, 0);
     assert_eq!(
         fee_data.fee_amount, contract_delta,

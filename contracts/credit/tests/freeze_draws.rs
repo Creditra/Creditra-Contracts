@@ -11,7 +11,7 @@
 
 use creditra_credit::types::ContractError;
 use creditra_credit::{Credit, CreditClient, FreezeReason};
-use soroban_sdk::testutils::{Address as _, Events};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -235,7 +235,10 @@ fn freeze_draws_idempotent() {
 
     // Freeze again - should succeed and remain frozen
     client.freeze_draws(&FreezeReason::LiquidityReserve);
-    assert!(client.is_draws_frozen(), "should remain frozen after redundant freeze");
+    assert!(
+        client.is_draws_frozen(),
+        "should remain frozen after redundant freeze"
+    );
 }
 
 #[test]
@@ -245,7 +248,10 @@ fn unfreeze_draws_idempotent() {
 
     // Unfreeze when already unfrozen - should succeed
     client.unfreeze_draws();
-    assert!(!client.is_draws_frozen(), "should remain unfrozen after redundant unfreeze");
+    assert!(
+        !client.is_draws_frozen(),
+        "should remain unfrozen after redundant unfreeze"
+    );
 }
 
 // ── borrower temporary freeze expiry second behavior ─────────────────────────────
@@ -303,7 +309,10 @@ fn draw_allowed_at_exact_expiry() {
     client.draw_credit(&borrower, &500);
 
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.utilized_amount, 500, "draw should succeed at exact expiry");
+    assert_eq!(
+        line.utilized_amount, 500,
+        "draw should succeed at exact expiry"
+    );
 }
 
 #[test]
@@ -344,7 +353,10 @@ fn re_freeze_with_shortened_expiry_takes_effect() {
     client.draw_credit(&borrower, &500);
 
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.utilized_amount, 500, "draw should succeed after shortened expiry");
+    assert_eq!(
+        line.utilized_amount, 500,
+        "draw should succeed after shortened expiry"
+    );
 }
 
 #[test]

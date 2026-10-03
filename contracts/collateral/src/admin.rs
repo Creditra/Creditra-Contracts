@@ -10,7 +10,8 @@
 //! disabled (same semantics as borrower draw cooldown).
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused};
+use crate::storage;
+use crate::storage::assert_not_paused;
 use crate::types::ContractError;
 use soroban_sdk::{Address, Env, Vec};
 

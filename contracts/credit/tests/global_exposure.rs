@@ -417,14 +417,23 @@ fn cap_includes_interest_accrued_on_idle_credit_lines() {
     client.set_max_total_exposure(&1_863_i128);
 
     let result = client.try_draw_credit(&borrower_a, &10_i128);
-    assert!(result.is_err(), "idle-line interest must count toward the cap");
+    assert!(
+        result.is_err(),
+        "idle-line interest must count toward the cap"
+    );
 
     // Removing the cap is still an explicit opt-out, even after the same
     // accrued-interest scenario.
     client.set_max_total_exposure(&0_i128);
     client.draw_credit(&borrower_a, &10_i128);
-    assert_eq!(client.get_credit_line(&borrower_a).unwrap().utilized_amount, 937);
-    assert_eq!(client.get_credit_line(&borrower_b).unwrap().utilized_amount, 900);
+    assert_eq!(
+        client.get_credit_line(&borrower_a).unwrap().utilized_amount,
+        937
+    );
+    assert_eq!(
+        client.get_credit_line(&borrower_b).unwrap().utilized_amount,
+        900
+    );
 }
 
 #[test]
@@ -563,9 +572,7 @@ const B_IDLE_INTEREST: i128 = 270;
 /// Drive the shared near-cap state and idle for one year.
 ///
 /// Returns `(client, borrower_a, borrower_b)` with no accrual materialised.
-fn near_cap_after_one_idle_year(
-    env: &Env,
-) -> (CreditClient<'_>, Address, Address) {
+fn near_cap_after_one_idle_year(env: &Env) -> (CreditClient<'_>, Address, Address) {
     let (client, _admin, a, b) = setup_two_lines(env, 20_000, 300, 20_000);
     client.set_max_total_exposure(&CAP);
     client.draw_credit(&a, &A_DRAWN);

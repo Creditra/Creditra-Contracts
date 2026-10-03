@@ -67,7 +67,10 @@ pub fn split_protocol_fee(total_fee: i128, treasury_share_bps: u32) -> FeeSplitA
     }
 
     let total = total_fee as u128;
-    let parts = split_conserving(total, &[treasury_share_bps, MAX_FEE_SHARE_BPS - treasury_share_bps]);
+    let parts = split_conserving(
+        total,
+        &[treasury_share_bps, MAX_FEE_SHARE_BPS - treasury_share_bps],
+    );
 
     FeeSplitAmounts {
         treasury_amount: parts[0] as i128,

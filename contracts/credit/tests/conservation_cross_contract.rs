@@ -93,7 +93,7 @@ fn run_auction(env: &Env, deployment: &Deployment, settlement_id: &Symbol, highe
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &None,
         &None,
     );
     auction.place_bid(settlement_id, &bidder, &(highest_bid / 2));
@@ -106,11 +106,7 @@ fn run_auction(env: &Env, deployment: &Deployment, settlement_id: &Symbol, highe
     auction.close_auction(settlement_id);
 }
 
-fn get_auction_state(
-    env: &Env,
-    auction_id: &Address,
-    settlement_id: &Symbol,
-) -> AuctionState {
+fn get_auction_state(env: &Env, auction_id: &Address, settlement_id: &Symbol) -> AuctionState {
     env.as_contract(auction_id, || {
         env.storage().persistent().get(settlement_id).unwrap()
     })

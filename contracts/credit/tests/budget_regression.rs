@@ -50,12 +50,13 @@ fn budget_draw_credit_scaling() {
     let sample_100 = measure_draw_at(100);
     let sample_500 = measure_draw_at(500);
 
-    // Record the largest-N sample against the baseline entrypoint.
-    check(entrypoint::DRAW_CREDIT, sample_500);
-
-    let cpu_10 = sample_10.cpu as u128;
-    let cpu_100 = sample_100.cpu as u128;
-    let cpu_500 = sample_500.cpu as u128;
+    // NOTE: no baseline `check` here. The single-line `budget_draw_credit`
+    // baseline is only valid at N=1; the whole point of this test is that the
+    // cost must be (near-)constant as N grows, which the ratio assertions below
+    // prove directly.
+    let cpu_10 = sample_10.cpu_instructions as u128;
+    let cpu_100 = sample_100.cpu_instructions as u128;
+    let cpu_500 = sample_500.cpu_instructions as u128;
 
     // Guard against degenerate zero-cost measurements.
     assert!(cpu_10 > 0, "cpu_10 must be non-zero");
@@ -274,7 +275,7 @@ fn budget_close_credit_line() {
 fn budget_place_bid() {
     let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
     let auction_id = soroban_sdk::Symbol::new(&env, "auc_bid");
-    
+
     auction.init_auction(
         &auction_id,
         &gateway_auction::AuctionMode::English,
@@ -284,7 +285,7 @@ fn budget_place_bid() {
         &0_u32,
         &None,
         &None,
-        &gateway_auction::DutchAuctionDecay::None,
+        &None,
         &None,
     );
 
@@ -299,7 +300,7 @@ fn budget_place_bid() {
 fn budget_bid_refunded() {
     let (env, auction, _token, admin, bidder1, bidder2) = instrument::setup_auction_harness();
     let auction_id = soroban_sdk::Symbol::new(&env, "auc_refund");
-    
+
     auction.init_auction(
         &auction_id,
         &gateway_auction::AuctionMode::English,
@@ -309,7 +310,7 @@ fn budget_bid_refunded() {
         &0_u32,
         &None,
         &None,
-        &gateway_auction::DutchAuctionDecay::None,
+        &None,
         &None,
     );
 
@@ -326,7 +327,7 @@ fn budget_bid_refunded() {
 fn budget_settle_default_liquidation_auction() {
     let (env, auction, _token, admin, bidder1, _) = instrument::setup_auction_harness();
     let auction_id = soroban_sdk::Symbol::new(&env, "auc_settle");
-    
+
     auction.init_auction(
         &auction_id,
         &gateway_auction::AuctionMode::English,
@@ -336,13 +337,13 @@ fn budget_settle_default_liquidation_auction() {
         &0_u32,
         &None,
         &None,
-        &gateway_auction::DutchAuctionDecay::None,
+        &None,
         &None,
     );
 
     auction.place_bid(&auction_id, &bidder1, &100_i128);
     auction.close_auction(&auction_id);
-    
+
     let borrower = Address::generate(&env);
 
     let sample = BudgetSample::measure(&env, || {

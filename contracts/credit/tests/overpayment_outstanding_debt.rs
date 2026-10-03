@@ -53,7 +53,14 @@ fn setup<'a>(env: &'a Env, rate_bps: u32) -> Ctx<'a> {
     let token = TokenClient::new(env, &token_addr);
     token.approve(&borrower, &contract_id, &REPAY_REQUESTED, &u32::MAX);
 
-    Ctx { env, client, contract_id, borrower, reserve, token }
+    Ctx {
+        env,
+        client,
+        contract_id,
+        borrower,
+        reserve,
+        token,
+    }
 }
 
 fn last_repayment_event(env: &Env) -> RepaymentEvent {

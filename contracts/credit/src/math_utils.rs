@@ -1049,7 +1049,8 @@ mod tests {
 
     #[test]
     fn prorate_interest_conserving_sums_to_realized_interest() {
-        let shares = prorate_interest_conserving(10_000, 300, SECONDS_PER_YEAR as u64, &[5_000, 5_000]);
+        let shares =
+            prorate_interest_conserving(10_000, 300, SECONDS_PER_YEAR as u64, &[5_000, 5_000]);
         let realized = prorate_interest(10_000, 300, SECONDS_PER_YEAR as u64, Rounding::Floor);
         assert_eq!(shares.iter().copied().sum::<u128>(), realized);
         assert_eq!(shares, vec![realized / 2, realized - realized / 2]);
@@ -1069,8 +1070,12 @@ mod tests {
 
     #[test]
     fn prorate_interest_conserving_three_way_sums_exactly() {
-        let shares =
-            prorate_interest_conserving(1_000_000, 1_000, SECONDS_PER_YEAR as u64, &[1_000, 2_000, 7_000]);
+        let shares = prorate_interest_conserving(
+            1_000_000,
+            1_000,
+            SECONDS_PER_YEAR as u64,
+            &[1_000, 2_000, 7_000],
+        );
         let sum: u128 = shares.iter().copied().sum();
         let realized = prorate_interest(1_000_000, 1_000, SECONDS_PER_YEAR as u64, Rounding::Floor);
         assert_eq!(sum, realized);

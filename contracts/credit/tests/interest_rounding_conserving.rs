@@ -15,7 +15,9 @@
 //! (`0`, `u128::MAX`), duplicate/idempotent calls, and invalid inputs
 //! (empty weight set panics).
 
-use creditra_credit::math_utils::{prorate_interest_conserving, split_conserving, Rounding, SECONDS_PER_YEAR};
+use creditra_credit::math_utils::{
+    prorate_interest_conserving, split_conserving, Rounding, SECONDS_PER_YEAR,
+};
 
 /// Helper: assert a slice sums to `total`.
 fn assert_conserves(parts: &[u128], total: u128) {
@@ -43,7 +45,10 @@ fn success_large_total_exact_sum() {
     let parts = split_conserving(total, &[1_111, 2_222, 3_333, 4_444]);
     assert_conserves(&parts, total);
     // determinism: identical output on a second call
-    assert_eq!(parts, split_conserving(total, &[1_111, 2_222, 3_333, 4_444]));
+    assert_eq!(
+        parts,
+        split_conserving(total, &[1_111, 2_222, 3_333, 4_444])
+    );
 }
 
 #[test]
@@ -136,8 +141,7 @@ fn prorate_interest_conserving_sums_to_realized_interest() {
         SECONDS_PER_YEAR as u64,
         Rounding::Floor,
     );
-    let shares =
-        prorate_interest_conserving(10_000, 300, SECONDS_PER_YEAR as u64, &[5_000, 5_000]);
+    let shares = prorate_interest_conserving(10_000, 300, SECONDS_PER_YEAR as u64, &[5_000, 5_000]);
     assert_eq!(shares.iter().copied().sum::<u128>(), realized);
     assert_eq!(shares[0] + shares[1], realized);
 }

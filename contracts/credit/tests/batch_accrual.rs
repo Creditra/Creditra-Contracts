@@ -5,8 +5,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use creditra_credit::events::InterestAccruedEvent;
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{token::StellarAssetClient, Address, Env, Symbol, TryFromVal, TryIntoVal, Vec};
 
 fn setup_env() -> (Env, Address, CreditClient<'static>) {

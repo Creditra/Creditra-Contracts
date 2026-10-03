@@ -13,7 +13,12 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # Host-side per-entrypoint budget instrumentation (tests, examples, CI gas regression).
-instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
+instrument = ["dep:serde", "dep:serde_json", "dep:gateway-auction", "soroban-sdk/testutils"]
+# Re-enables the O(N) conservation recomputation on the "hot" accumulator
+# paths for integration tests and invariant harnesses (Issue #1269).
+# Never enable this in a production/WASM build: the full scan is O(credit-line
+# count) and would reintroduce the DoS it was removed to fix.
+invariants = []
 
 [dependencies]
 # `alloc` provides the WASM global allocator required because math_utils uses
@@ -21,6 +26,10 @@ instrument = ["dep:serde", "dep:serde_json", "soroban-sdk/testutils"]
 soroban-sdk = { workspace = true, features = ["alloc"] }
 serde = { version = "1.0", optional = true, default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", optional = true, default-features = false }
+# Host-only auction harness used by `src/instrument.rs` under the `instrument`
+# feature. Declared as an optional normal dependency (not only a dev-dependency)
+# because `instrument.rs` is part of the library crate.
+gateway-auction = { path = "../../gateway-contract/contracts/auction_contract", optional = true }
 
 [[example]]
 name = "budget_baseline"

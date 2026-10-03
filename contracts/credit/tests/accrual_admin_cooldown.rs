@@ -44,7 +44,7 @@ fn accrual_admin_cooldown_rejects_second_action_until_boundary() {
     let result = client.try_reinstate_credit_line(&borrower, &CreditStatus::Active);
     assert_eq!(
         result.err().unwrap().unwrap(),
-        ContractError::AdminCooldownActive.into()
+        ContractError::RiskAdminCooldownActive.into()
     );
 
     set_timestamp(&env, START_TS + COOLDOWN_SECONDS + 1);

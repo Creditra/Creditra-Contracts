@@ -80,7 +80,10 @@ fn test_persistent_key_written_and_read() {
         .get(&(Symbol::new(&env, "Balance"), user))
         .unwrap();
 
-    assert_eq!(balance, 1000, "Persistent Balance should round-trip correctly");
+    assert_eq!(
+        balance, 1000,
+        "Persistent Balance should round-trip correctly"
+    );
 }
 
 #[test]
@@ -94,7 +97,7 @@ fn test_persistent_key_bumped_on_access() {
     // Simulate the bump that should happen on every read
     const THRESHOLD: u32 = 259_200;
     const BUMP: u32 = 518_400;
-    env.storage().persistent().bump(&key, THRESHOLD, BUMP);
+    env.storage().persistent().extend_ttl(&key, THRESHOLD, BUMP);
 
     let score: u32 = env.storage().persistent().get(&key).unwrap();
     assert_eq!(score, 750);
@@ -143,7 +146,9 @@ fn test_auction_state_in_temporary_storage() {
     // Write auction state with a short TTL
     env.storage().temporary().set(&key, &true); // simplified: bool as proxy for AuctionData
     const AUCTION_TTL: u32 = 17_280;
-    env.storage().temporary().bump(&key, AUCTION_TTL, AUCTION_TTL);
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, AUCTION_TTL, AUCTION_TTL);
 
     let active: bool = env.storage().temporary().get(&key).unwrap();
     assert!(active, "Auction state should be readable within TTL");

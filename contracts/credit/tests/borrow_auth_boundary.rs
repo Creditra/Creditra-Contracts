@@ -15,7 +15,6 @@
 //! |-------------------------------|-----------------|----------------|------------------|
 //! | `draw_credit`                 | borrower        | 1              | 1 (token transfer)|
 //! | `repay_credit`                | borrower        | 1              | 1 (token transfer)|
-//! | `repay_and_release_collateral`| borrower        | 1              | 2 (token + collateral)|
 //! | `get_borrow_state`            | none (read-only)| 0             | —                |
 //!
 //! # Rules
@@ -121,34 +120,6 @@ fn repay_credit_auth_snapshot() {
     );
 }
 
-#[test]
-fn repay_and_release_collateral_auth_snapshot() {
-    let env = Env::default();
-    let (client, _contract_id, _admin, borrower) = setup_with_token(&env);
-    
-    // Deposit collateral first
-    let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
-    let collateral_address = token_id.address();
-    token::StellarAssetClient::new(&env, &collateral_address).mint(&borrower, &5_000_i128);
-    client.deposit_collateral(&borrower, &5_000_i128);
-    
-    // Draw credit
-    client.draw_credit(&borrower, &1_000_i128);
-
-    client.repay_and_release_collateral(&borrower, &500_i128);
-
-    let auths = env.auths();
-    assert_eq!(
-        auths.len(),
-        1,
-        "repay_and_release_collateral must record exactly one authorization"
-    );
-    assert_eq!(
-        auths[0].0, borrower,
-        "repay_and_release_collateral must be authorized by the borrower"
-    );
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Section 2 — Negative: entrypoint reverts with zero signers mocked
 // ═══════════════════════════════════════════════════════════════════════════
@@ -167,14 +138,6 @@ fn repay_credit_reverts_without_auth() {
     let env = Env::default();
     let (client, _contract_id, _token_address, _admin, borrower) = setup_no_mock(&env);
     client.repay_credit(&borrower, &500_i128);
-}
-
-#[test]
-#[should_panic]
-fn repay_and_release_collateral_reverts_without_auth() {
-    let env = Env::default();
-    let (client, _contract_id, _token_address, _admin, borrower) = setup_no_mock(&env);
-    client.repay_and_release_collateral(&borrower, &500_i128);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -219,26 +182,6 @@ fn repay_credit_wrong_signer_reverts() {
             },
         }])
         .repay_credit(&borrower, &500_i128);
-}
-
-#[test]
-#[should_panic]
-fn repay_and_release_collateral_wrong_signer_reverts() {
-    let env = Env::default();
-    let (client, contract_id, _token_address, _admin, borrower) = setup_no_mock(&env);
-    let attacker = Address::generate(&env);
-
-    client
-        .mock_auths(&[MockAuth {
-            address: &attacker,
-            invoke: &MockAuthInvoke {
-                contract: &contract_id,
-                fn_name: "repay_and_release_collateral",
-                args: (borrower.clone(), 500_i128).into_val(&env),
-                sub_invokes: &[],
-            },
-        }])
-        .repay_and_release_collateral(&borrower, &500_i128);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

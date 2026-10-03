@@ -4,9 +4,9 @@
 use creditra_credit::events::{BorrowLifecycleEvent, BorrowLifecyclePhase, DebtForgivenEvent};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
-    testutils::{Address as _, Events},
+    testutils::{Address as _, Events, Ledger},
     token::StellarAssetClient,
-    Address, Env, IntoVal, Symbol,
+    Address, Env, IntoVal, Symbol, TryIntoVal,
 };
 
 fn setup(env: &Env) -> (CreditClient, Address, Address, Address) {
@@ -82,10 +82,12 @@ fn repay_credit_emits_borrow_lifecycle_repaid() {
     client.repay_credit(&borrower, &500);
 
     let events = find_borrow_lifecycle_events(&env);
-    let repaid_events: soroban_sdk::Vec<BorrowLifecycleEvent> = events
-        .iter()
-        .filter(|e| matches!(e.phase, BorrowLifecyclePhase::Repaid))
-        .collect();
+    let mut repaid_events: soroban_sdk::Vec<BorrowLifecycleEvent> = soroban_sdk::Vec::new(&env);
+    for e in events.iter() {
+        if matches!(e.phase, BorrowLifecyclePhase::Repaid) {
+            repaid_events.push_back(e);
+        }
+    }
 
     assert!(
         !repaid_events.is_empty(),
@@ -131,10 +133,12 @@ fn forgive_debt_emits_debt_forgiven_and_lifecycle_events() {
 
     // Check BorrowLifecycleEvent with DebtForgiven phase.
     let lc_events = find_borrow_lifecycle_events(&env);
-    let forgiven_lc: soroban_sdk::Vec<BorrowLifecycleEvent> = lc_events
-        .iter()
-        .filter(|e| matches!(e.phase, BorrowLifecyclePhase::DebtForgiven))
-        .collect();
+    let mut forgiven_lc: soroban_sdk::Vec<BorrowLifecycleEvent> = soroban_sdk::Vec::new(&env);
+    for e in lc_events.iter() {
+        if matches!(e.phase, BorrowLifecyclePhase::DebtForgiven) {
+            forgiven_lc.push_back(e);
+        }
+    }
     assert!(
         !forgiven_lc.is_empty(),
         "expected DebtForgiven lifecycle event"

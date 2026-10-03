@@ -105,7 +105,7 @@ fn accrual_v7_error_discriminants_are_pinned() {
     assert_eq!(ContractError::DrawExceedsMaxAmount as u32, 17);
     assert_eq!(ContractError::RepayExceedsMaxAmount as u32, 28);
     assert_eq!(ContractError::UtilizationNotZero as u32, 10);
-//     assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
+    //     assert_eq!(ContractError::LimitDecreaseRequiresRepayment as u32, 13);
 
     // Risk → rate/score clamp paths that execute with accrual head
     assert_eq!(ContractError::RateTooHigh as u32, 8);
@@ -184,10 +184,8 @@ fn accrual_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::DrawExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::RepayExceedsMaxAmount.category(), Limit);
     assert_eq!(ContractError::UtilizationNotZero.category(), Limit);
-    assert_eq!(
-//         ContractError::LimitDecreaseRequiresRepayment.category(),
-        Limit
-    );
+    // `LimitDecreaseRequiresRepayment` was removed (discriminant 13 reserved),
+    // so it is no longer part of the Limit category surface.
 
     // Auth / Reentrancy / Misc buckets
     assert_eq!(ContractError::Unauthorized.category(), Auth);
@@ -206,7 +204,7 @@ fn accrual_v7_category_mappings_are_pinned() {
 fn accrual_v7_subset_has_no_duplicate_discriminants() {
     use std::collections::HashSet;
 
-    let codes: Vec<u32> = vec![
+    let codes: std::vec::Vec<u32> = std::vec![
         ContractError::Overflow as u32,
         ContractError::InvalidAmount as u32,
         ContractError::TimestampRegression as u32,
@@ -236,7 +234,7 @@ fn accrual_v7_subset_has_no_duplicate_discriminants() {
         ContractError::DrawExceedsMaxAmount as u32,
         ContractError::RepayExceedsMaxAmount as u32,
         ContractError::UtilizationNotZero as u32,
-//         ContractError::LimitDecreaseRequiresRepayment as u32,
+        //         ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::RateTooHigh as u32,
         ContractError::ScoreTooHigh as u32,
         ContractError::DrawCooldownActive as u32,
@@ -295,7 +293,7 @@ fn accrual_v7_subset_variant_count_is_known() {
         ContractError::DrawExceedsMaxAmount as u32,
         ContractError::RepayExceedsMaxAmount as u32,
         ContractError::UtilizationNotZero as u32,
-//         ContractError::LimitDecreaseRequiresRepayment as u32,
+        //         ContractError::LimitDecreaseRequiresRepayment as u32,
         ContractError::RateTooHigh as u32,
         ContractError::ScoreTooHigh as u32,
         ContractError::DrawCooldownActive as u32,
@@ -400,7 +398,8 @@ mod integration {
         let (env, contract_id, admin, _token) = setup_with_token(0_i128);
         let client = CreditClient::new(&env, &contract_id);
 
-        client.pause_protocol(&admin);
+        client.set_protocol_paused(&true);
+        let _ = &admin;
 
         let borrowers: Vec<Address> = Vec::new(&env);
 

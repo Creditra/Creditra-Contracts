@@ -454,7 +454,11 @@ fn default_retry_is_deterministically_stale() {
     // First call: valid Active→Defaulted.
     client.default_credit_line(&borrower);
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Defaulted, "first default must succeed");
+    assert_eq!(
+        line.status,
+        CreditStatus::Defaulted,
+        "first default must succeed"
+    );
 
     advance(&env, 1);
 
@@ -477,7 +481,11 @@ fn suspend_retry_is_deterministically_stale() {
     // First call: valid Active→Suspended.
     client.suspend_credit_line(&borrower);
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Suspended, "first suspend must succeed");
+    assert_eq!(
+        line.status,
+        CreditStatus::Suspended,
+        "first suspend must succeed"
+    );
 
     advance(&env, 1);
 
@@ -501,7 +509,11 @@ fn close_retry_is_deterministically_stale() {
     // First call: valid Active→Closed (util=0, borrower self-close).
     client.close_credit_line(&borrower, &borrower);
     let line = client.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.status, CreditStatus::Closed, "first close must succeed");
+    assert_eq!(
+        line.status,
+        CreditStatus::Closed,
+        "first close must succeed"
+    );
 
     advance(&env, 1);
 

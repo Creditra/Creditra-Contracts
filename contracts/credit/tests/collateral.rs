@@ -381,14 +381,15 @@ fn setup_no_token(env: &Env) -> (CreditClient, Address, Address) {
 fn seed_debt(env: &Env, contract_id: &Address, borrower: &Address, utilized: i128) {
     client_open_line_minimal(env, contract_id, borrower);
     env.as_contract(contract_id, || {
-        let key = creditra_credit::storage::DataKey::CreditLine(borrower.clone());
+        // Credit lines are stored directly under the borrower address key, not
+        // behind a `DataKey` variant.
         let mut line: creditra_credit::types::CreditLineData = env
             .storage()
             .persistent()
-            .get(&key)
+            .get(borrower)
             .expect("credit line must exist after open");
         line.utilized_amount = utilized;
-        env.storage().persistent().set(&key, &line);
+        env.storage().persistent().set(borrower, &line);
     });
 }
 

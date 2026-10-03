@@ -32,7 +32,7 @@
 
 use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     token, Address, Env,
 };
 
@@ -658,7 +658,7 @@ mod edge_cases {
     #[test]
     fn multi_installment_late_fee_charges_only_overdue() {
         let ctx = setup();
-        
+
         let amount_per_period: i128 = 1_000;
         let period_seconds: u64 = 30 * 86_400; // 30d
         let first_due = T0 + period_seconds;
@@ -679,15 +679,15 @@ mod edge_cases {
 
         let elapsed_secs = 95 * 86_400;
         let accrued = floor_interest(DRAW_AMOUNT, elapsed_secs);
-        
+
         // Repay exactly 4 installments of principal + accrued interest
         let repay = accrued + 4 * amount_per_period;
         fund_repayment(&ctx, repay);
-        
+
         let treasury_before = ctx.client().get_protocol_summary().treasury_balance;
         ctx.client().repay_credit(&ctx.borrower, &repay);
         let treasury_after = ctx.client().get_protocol_summary().treasury_balance;
-        
+
         // 3 installments are overdue (30d, 60d, 90d < 95d), 4th is at 120d (not overdue)
         assert_eq!(
             treasury_after - treasury_before,
@@ -701,21 +701,26 @@ mod edge_cases {
             first_due + 4 * period_seconds,
             "next_due_ts should advance by exactly 4 periods"
         );
-        
+
         // Assert events
         use soroban_sdk::TryIntoVal;
         let mut late_fee_events = std::vec::Vec::new();
         for (_, topics, data) in ctx.env.events().all().into_iter() {
             if topics.len() == 2 {
-                let topic0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&ctx.env).unwrap();
-                let topic1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&ctx.env).unwrap();
-                if topic0 == soroban_sdk::symbol_short!("credit") && topic1 == soroban_sdk::symbol_short!("late_fee") {
-                    let event: creditra_credit::events::LateFeeChargedEvent = data.try_into_val(&ctx.env).unwrap();
+                let topic0: soroban_sdk::Symbol =
+                    topics.get(0).unwrap().try_into_val(&ctx.env).unwrap();
+                let topic1: soroban_sdk::Symbol =
+                    topics.get(1).unwrap().try_into_val(&ctx.env).unwrap();
+                if topic0 == soroban_sdk::symbol_short!("credit")
+                    && topic1 == soroban_sdk::symbol_short!("late_fee")
+                {
+                    let event: creditra_credit::events::LateFeeChargedEvent =
+                        data.try_into_val(&ctx.env).unwrap();
                     late_fee_events.push(event);
                 }
             }
         }
-        
+
         assert_eq!(late_fee_events.len(), 3);
         assert_eq!(late_fee_events[0].installment_index, 1);
         assert_eq!(late_fee_events[1].installment_index, 2);
@@ -725,7 +730,7 @@ mod edge_cases {
     #[test]
     fn interest_only_repay_charges_nothing() {
         let ctx = setup();
-        
+
         let amount_per_period: i128 = 1_000;
         let period_seconds: u64 = 30 * 86_400; // 30d
         let first_due = T0 + period_seconds;
@@ -746,25 +751,23 @@ mod edge_cases {
 
         let elapsed_secs = 95 * 86_400;
         let accrued = floor_interest(DRAW_AMOUNT, elapsed_secs);
-        
+
         // Repay exactly the accrued interest (interest-only)
         let repay = accrued;
         fund_repayment(&ctx, repay);
-        
+
         let treasury_before = ctx.client().get_protocol_summary().treasury_balance;
         ctx.client().repay_credit(&ctx.borrower, &repay);
         let treasury_after = ctx.client().get_protocol_summary().treasury_balance;
-        
+
         assert_eq!(
-            treasury_after,
-            treasury_before,
+            treasury_after, treasury_before,
             "no late fees should be charged for interest-only repayment"
         );
 
         let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
         assert_eq!(
-            schedule.next_due_ts,
-            first_due,
+            schedule.next_due_ts, first_due,
             "next_due_ts should not advance"
         );
     }
