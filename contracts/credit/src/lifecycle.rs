@@ -76,6 +76,10 @@
 //!   - Key: `(Symbol("liq_seen"), borrower, settlement_id)`
 //!   - Value: `bool` (presence = settled; replay reverts
 //!     `ContractError::AlreadyInitialized = 14`)
+//!   - TTL refreshed on write and on the replay-check read via
+//!     [`crate::storage::bump_settlement_marker_ttl`], keeping the marker
+//!     aligned with the credit-line entry so replay protection never lapses
+//!     via archival.
 //! - **Credit-limit bounds**: Instance storage (`MinCreditLimit`,
 //!   `MaxCreditLimit`).
 //! - **Repayment schedule**: Persistent storage
@@ -110,7 +114,7 @@ use crate::events::{
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
     add_treasury_balance as storage_add_treasury_balance,
-    assert_not_paused, assert_ts_monotonic, bump_credit_line_ttl,
+    assert_not_paused, assert_ts_monotonic, bump_settlement_marker_ttl,
     clear_repayment_schedule, get_credit_line,
     get_late_fee_flat as storage_get_late_fee_flat,
     get_repayment_schedule, persist_credit_line,
@@ -347,6 +351,13 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address, target: CreditStat
 /// # Panics
 /// - `ContractError::CreditLineNotFound` if no credit line exists for `borrower`.
 /// - `ContractError::CreditLineClosed` if the credit line is `Closed`.
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read. The bump therefore happens even when
+/// the admin clears the grace period (`0`) or the `Closed` guard reverts, so
+/// this admin-only path can never be the interaction that lets an active
+/// borrower's entry drift toward archival.
 pub fn set_per_borrower_liquidation_grace(
     env: &Env,
     borrower: Address,
@@ -355,10 +366,7 @@ pub fn set_per_borrower_liquidation_grace(
     assert_not_paused(env);
     require_admin_auth(env);
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line: CreditLineData = get_credit_line(env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
 
     if stored_line.status == CreditStatus::Closed {
@@ -435,6 +443,12 @@ pub fn open_credit_line(
 
     let existing_line = get_credit_line(&env, &borrower);
 
+    let mut previous_utilized = 0;
+    let mut previous_status = None;
+    let mut utilized_amount = 0;
+    let mut accrued_interest = 0;
+    let mut last_accrual_ts = env.ledger().timestamp();
+
     if let Some(existing) = existing_line.as_ref() {
         if existing.status == CreditStatus::Active {
             env.panic_with_error(ContractError::AlreadyInitialized);
@@ -448,6 +462,15 @@ pub fn open_credit_line(
         if existing.status == CreditStatus::Defaulted {
             crate::storage::decrement_pending_auction_count(&env);
         }
+
+        previous_status = Some(existing.status);
+        previous_utilized = existing.utilized_amount;
+
+        if existing.status != CreditStatus::Closed {
+            utilized_amount = existing.utilized_amount;
+            accrued_interest = existing.accrued_interest;
+            last_accrual_ts = existing.last_accrual_ts;
+        }
     }
     // Re-opening any existing non-Active line is admin-gated: auth is enforced
     // by the `lib.rs` wrapper (`require_admin_auth`), not re-checked here — a
@@ -455,23 +478,19 @@ pub fn open_credit_line(
     // invocation is rejected by the Soroban auth frame as
     // `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
 
-    let previous_utilized = existing_line
-        .map(|existing| existing.utilized_amount)
-        .unwrap_or(0);
-
     let credit_line = CreditLineData {
         borrower: borrower.clone(),
         credit_limit,
-        utilized_amount: 0,
+        utilized_amount,
         interest_rate_bps,
         risk_score,
         status: CreditStatus::Active,
         last_rate_update_ts: 0,
-        accrued_interest: 0,
-        last_accrual_ts: env.ledger().timestamp(),
+        accrued_interest,
+        last_accrual_ts,
         suspension_ts: 0,
     };
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, None);
+    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, previous_status);
     clear_repayment_schedule(&env, &borrower);
 
     publish_credit_line_event(
@@ -854,10 +873,7 @@ pub fn close_credit_lines_batch(env: Env, borrowers: Vec<Address>) {
 pub fn default_credit_line(env: Env, borrower: Address) {
     assert_not_paused(&env);
     // Admin auth enforced by the `lib.rs` wrapper (see `suspend_credit_line`).
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line: CreditLineData = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
 
@@ -938,23 +954,72 @@ pub fn default_credit_line(env: Env, borrower: Address) {
     publish_default_liquidation_requested_event(&env, &borrower, credit_line.utilized_amount);
 }
 
-/// Apply auction liquidation proceeds to a defaulted credit line (admin only).
+/// Allocate a repayment amount across accrued interest and principal.
+///
+/// Splits `amount` interest-first: `accrued_interest` is reduced first,
+/// then the remainder reduces `utilized_amount` (principal). Returns the
+/// `(interest_repaid, principal_repaid)` breakdown.
+///
+/// The amount is clamped to `credit_line.utilized_amount` to prevent
+/// over-repayment. This preserves the `accrued_interest <= utilized_amount`
+/// invariant because reducing `accrued_interest` first ensures it never
+/// exceeds the remaining `utilized_amount`.
+pub fn allocate_recovery(credit_line: &mut CreditLineData, amount: i128) -> (i128, i128) {
+    let effective_repay = if amount > credit_line.utilized_amount {
+        credit_line.utilized_amount
+    } else {
+        amount
+    };
+
+    let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+    let principal_repaid = effective_repay - interest_repaid;
+
+    credit_line.accrued_interest -= interest_repaid;
+    credit_line.utilized_amount -= effective_repay;
+
+    (interest_repaid, principal_repaid)
+}
+
+/// Forgive outstanding debt without transferring tokens (admin only).
 ///
 /// Reduces `accrued_interest` first, then `utilized_amount`, by `amount`
 /// (clamped to the outstanding balance). No token movement occurs — this is
 /// pure accounting relief, e.g. for negotiated settlements handled off-chain.
+///
+/// # Restrictions (Issue #1283)
+/// - Reverts with [`ContractError::CreditLineClosed`] when the credit line
+///   status is [`CreditStatus::Closed`]. Forgiving a terminal record would
+///   mutate a closed line and emit misleading events.
+/// - Reverts with [`ContractError::InvalidAmount`] when there is no
+///   outstanding debt to forgive (`utilized_amount == 0` after accrual).
+/// - All arithmetic uses `checked_sub` to comply with the checked-math
+///   policy; reverts with [`ContractError::Overflow`] on underflow.
+///
+/// # Parameters
+/// - `borrower`: Borrower whose outstanding debt is being written off.
+/// - `amount`: Gross amount to forgive. Capped internally to `utilized_amount`.
+///
+/// # Events
+/// Emits [`DebtForgivenEvent`] and [`BorrowLifecycleEvent`] on success.
+///
+/// # Authorization
+/// Admin only. Enforced by the `lib.rs` wrapper (`require_admin_auth`); not
+/// re-checked here because a second `require_auth` for the already-authorized
+/// admin address within one invocation is rejected by the Soroban auth frame as
+/// `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
+///
+/// # Storage
+/// Loads the credit line via [`crate::storage::get_credit_line`], which bumps
+/// the entry's persistent TTL on read, before any mutation of the debt
+/// buckets.
 pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     assert_not_paused(&env);
-    require_admin_auth(&env);
 
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    let stored_line: CreditLineData = env
-        .storage()
-        .persistent()
-        .get(&borrower)
+    let stored_line: CreditLineData = get_credit_line(&env, &borrower)
         .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
     let previous_utilized = stored_line.utilized_amount;
     let previous_status = stored_line.status;
@@ -962,11 +1027,33 @@ pub fn forgive_debt(env: Env, borrower: Address, amount: i128) {
     // Apply interest accrual before any mutation.
     let mut credit_line = crate::accrual::apply_accrual(&env, stored_line);
 
+    // Issue #1283: reject Closed lines — forgiving a terminal record mutates
+    // a closed line and emits misleading events, contradicting the invariant
+    // that Closed is a terminal, immutable state.
+    if credit_line.status == CreditStatus::Closed {
+        env.panic_with_error(ContractError::CreditLineClosed);
+    }
+
+    // Issue #1283: reject zero-debt lines — there is nothing to forgive, so
+    // emitting a DebtForgivenEvent with amount_forgiven == 0 would be
+    // misleading. Callers must check utilization before invoking forgive_debt.
+    if credit_line.utilized_amount == 0 {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
     let forgive_amount = amount.min(credit_line.utilized_amount);
     let interest_forgiven = forgive_amount.min(credit_line.accrued_interest);
 
-    credit_line.accrued_interest -= interest_forgiven;
-    credit_line.utilized_amount -= forgive_amount;
+    // Issue #1283: use checked_sub to comply with the checked-math policy;
+    // underflow is a logic error and must revert rather than wrap.
+    credit_line.accrued_interest = credit_line
+        .accrued_interest
+        .checked_sub(interest_forgiven)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    credit_line.utilized_amount = credit_line
+        .utilized_amount
+        .checked_sub(forgive_amount)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
     persist_credit_line(
         &env,
@@ -1068,6 +1155,7 @@ pub fn settle_default_liquidation(
 
     // Step 3: Replay protection (gate before credit line reads)
     let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    bump_settlement_marker_ttl(&env, &settlement_key);
     if env.storage().persistent().has(&settlement_key) {
         env.panic_with_error(ContractError::AlreadyInitialized);
     }
@@ -1107,10 +1195,8 @@ pub fn settle_default_liquidation(
     }
 
     // Step 8: State mutation (after all validation succeeds)
-    credit_line.utilized_amount = credit_line
-        .utilized_amount
-        .checked_sub(recovered_amount)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+    let (interest_recovered, principal_recovered) =
+        allocate_recovery(&mut credit_line, recovered_amount);
 
     let previous_status = credit_line.status;
     if credit_line.utilized_amount == 0 {
@@ -1137,6 +1223,7 @@ pub fn settle_default_liquidation(
 
     // Step 9: Replay protection & oracle price recording
     env.storage().persistent().set(&settlement_key, &true);
+    bump_settlement_marker_ttl(&env, &settlement_key);
     if let Some(price) = oracle_result.price() {
         crate::oracle_validation::record_accepted_oracle_price(&env, price);
     }
@@ -1162,19 +1249,14 @@ pub fn settle_default_liquidation(
             borrower,
             settlement_id,
             recovered_amount,
+            interest_recovered,
+            principal_recovered,
             remaining_utilized_amount: credit_line.utilized_amount,
             status: credit_line.status,
             close_factor_bps,
         },
     );
 }
-
-/// Forgive outstanding debt without transferring tokens (admin only).
-///
-/// This is an accounting-only write-off path intended for explicit admin debt
-/// relief or off-chain settlements that have already been handled elsewhere.
-/// The forgiven amount is capped to the current `utilized_amount`.
-
 
 // ── reinstate_credit_line ─────────────────────────────────────────────────────
 
@@ -1268,6 +1350,13 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 
 /// Set or replace a borrower's installment repayment schedule (admin only).
 ///
+/// Replacing a schedule resets `next_due_ts` to `first_due_ts`; it does not
+/// preserve the previous schedule's due date. Rescheduling an overdue line
+/// into the future therefore clears its delinquent status until the new due
+/// date and grace period have passed. Closed lines may also be rescheduled,
+/// although [`crate::query::is_delinquent`] always returns `false` for them.
+/// Setting or replacing a schedule emits no event.
+///
 /// # Parameters
 /// - `borrower`: Borrower whose credit line schedule is being configured.
 /// - `amount_per_period`: Required principal repayment amount per installment; must be positive.
@@ -1282,6 +1371,12 @@ pub fn reinstate_credit_line(env: Env, borrower: Address, target_status: CreditS
 /// # Authorization
 /// Requires admin authorization because the schedule controls delinquency and
 /// due-date state for the borrower.
+///
+/// # Storage
+/// The existence check reads through [`crate::storage::get_credit_line`], so
+/// the credit-line entry's persistent TTL is bumped on read; the schedule
+/// entry itself is bumped by
+/// [`crate::storage::set_repayment_schedule`] on write.
 pub fn set_repayment_schedule(
     env: &Env,
     borrower: Address,
@@ -1296,7 +1391,7 @@ pub fn set_repayment_schedule(
         env.panic_with_error(ContractError::InvalidAmount);
     }
 
-    if !env.storage().persistent().has(&borrower) {
+    if get_credit_line(env, &borrower).is_none() {
         env.panic_with_error(ContractError::CreditLineNotFound);
     }
 
@@ -1306,28 +1401,11 @@ pub fn set_repayment_schedule(
         next_due_ts: first_due_ts,
     };
     storage_set_repayment_schedule(env, &borrower, &schedule);
-    // Setting a schedule is an interaction with the credit line, so keep the
-    // credit-line entry live as well (the schedule entry is bumped by the
-    // storage setter itself).
-    bump_credit_line_ttl(env, &borrower);
+    // The credit-line entry is bumped by `get_credit_line` above and the
+    // schedule entry is bumped by the storage setter itself, so this path
+    // refreshes every persistent key it touches.
 }
 
-/// Advance a borrower's installment schedule after a repayment.
-///
-/// `effective_repay` is the amount actually applied to the debt after capping
-/// an overpayment to the outstanding balance. `interest_repaid` is the portion
-/// of that amount that was allocated to accrued interest. Only the principal
-/// portion of a repayment can satisfy installment obligations:
-///
-/// ```text
-/// principal_repaid  = effective_repay - interest_repaid
-/// installments_paid = floor(principal_repaid / amount_per_period)
-/// next_due_ts       = next_due_ts + installments_paid * period_seconds
-/// ```
-///
-/// Interest-only repayments and partial principal installments do not move the
-/// due date. Arithmetic uses checked/saturating operations so malformed state or
-/// extreme schedule values cannot wrap timestamps.
 /// Deterministically allocate a repayment across the debt components.
 ///
 /// `utilized_amount` is treated as the total debt bucket and `accrued_interest`
@@ -1349,55 +1427,152 @@ pub fn allocate_repayment(
     (effective_repay, interest_repaid, principal_repaid)
 }
 
+/// Number of already-due installments covered by a repayment that settles
+/// `installments_paid` whole installments.
+///
+/// This reproduces exactly the set the previous per-installment loop walked:
+///
+/// ```text
+/// count = #{ i in 0..installments_paid : now > next_due_ts + i * period_seconds }
+/// ```
+///
+/// Since `period_seconds > 0`, that condition is equivalent to
+/// `i * period_seconds < now - next_due_ts`, so the count is
+/// `ceil((now - next_due_ts) / period_seconds)`, clamped to `installments_paid`
+/// — the old loop's natural upper bound and its defensive cap.
+///
+/// The strict `>` comparison matters: a due date exactly equal to `now` is *not*
+/// overdue, so `elapsed / period_seconds + 1` would over-count at exact period
+/// boundaries. The ceiling is computed as `((elapsed - 1) / period_seconds) + 1`
+/// to avoid the `elapsed + period_seconds - 1` form, whose addition could
+/// overflow `u64`.
+///
+/// Returns `0` when nothing is due or the schedule is degenerate.
+fn overdue_installment_count(
+    now: u64,
+    next_due_ts: u64,
+    period_seconds: u64,
+    installments_paid: u64,
+) -> u64 {
+    if installments_paid == 0 || period_seconds == 0 || now <= next_due_ts {
+        return 0;
+    }
+    let elapsed = now - next_due_ts; // > 0
+    let overdue = ((elapsed - 1) / period_seconds) + 1;
+    overdue.min(installments_paid)
+}
+
+/// Advance a borrower's installment schedule after a repayment.
+///
+/// `effective_repay` is the amount actually applied to the debt after capping
+/// an overpayment to the outstanding balance. `interest_repaid` is the portion
+/// of that amount that was allocated to accrued interest. Only the principal
+/// portion of a repayment can satisfy installment obligations:
+///
+/// ```text
+/// principal_repaid  = effective_repay - interest_repaid
+/// installments_paid = floor(principal_repaid / amount_per_period)
+/// next_due_ts       = next_due_ts + installments_paid * period_seconds
+/// ```
+///
+/// Interest-only repayments and partial principal installments do not move the
+/// due date. Arithmetic uses checked/saturating operations so malformed state or
+/// extreme schedule values cannot wrap timestamps.
+///
+/// # Late-fee surcharge
+///
+/// When a flat late fee is configured, the number of overdue installments
+/// covered by the repayment is derived **arithmetically** (see
+/// [`overdue_installment_count`]) rather than by iterating once per
+/// installment. The fee for every overdue installment is charged to the
+/// treasury in a single write and reported in a single
+/// [`crate::events::LateFeeChargedEvent`], so the work done here is O(1)
+/// regardless of `installments_paid`.
 pub fn advance_repayment_schedule_after_repay(
     env: &Env,
     borrower: &Address,
     effective_repay: i128,
     interest_repaid: i128,
-) {
+) -> i128 {
     let principal_repaid = match effective_repay.checked_sub(interest_repaid) {
         Some(principal) if principal > 0 => principal,
-        _ => return,
+        _ => return 0,
     };
 
     let Some(mut schedule) = get_repayment_schedule(env, borrower) else {
-        return;
+        return 0;
     };
 
     if schedule.amount_per_period <= 0 || schedule.period_seconds == 0 {
-        return;
+        return 0;
     }
 
     let installments_paid = (principal_repaid / schedule.amount_per_period) as u64;
     if installments_paid == 0 {
-        return;
+        return 0;
     }
 
-    // ── Late-fee surcharge ──────────────────────────────────────────────────
-    let late_fee = crate::storage::get_late_fee_flat(env);
-    if late_fee > 0 {
+    // Total late fee owed by the borrower for this repayment. It is returned to
+    // the caller (`repay_credit`), which pulls it from the borrower and accrues
+    // it as a protocol fee, so no phantom treasury credit is created here.
+    let mut total_late_fee: i128 = 0;
+
+    // ── Late-fee surcharge (O(1), aggregated) ───────────────────────────────
+    //
+    // The overdue count is computed arithmetically. The previous implementation
+    // looped `0..installments_paid`, performing a treasury write and emitting a
+    // `LateFeeChargedEvent` for every overdue installment; a large repayment
+    // against a tiny `amount_per_period` (e.g. 10^12 installments) therefore
+    // did millions of storage writes and event publishes and could exceed the
+    // CPU budget. Charging the aggregate once performs a single write and emits
+    // a single event while accruing the same total fee.
+    //
+    // A structured `LateFeeConfig` supersedes both legacy keys (#1224):
+    // `Flat` charges its configured amount per overdue installment, while
+    // `AprBased` charges nothing here because its surcharge is applied to
+    // interest in `apply_accrual`. Only an absent config falls back to the
+    // legacy `LateFeeFlat` amount.
+    let config = crate::storage::get_late_fee_config(env);
+    let per_installment_fee = match config {
+        Some(cfg) => crate::penalties::compute_late_fee(cfg, 1)
+            .unwrap_or_else(|err| env.panic_with_error(err)),
+        None => crate::storage::get_late_fee_flat(env),
+    };
+    if per_installment_fee > 0 {
         let now = env.ledger().timestamp();
-        for i in 0_u64..installments_paid {
-            let due_ts = schedule
-                .next_due_ts
-                .saturating_add(i.saturating_mul(schedule.period_seconds));
-            if now > due_ts {
-                crate::storage::add_treasury_balance(env, late_fee);
-                crate::events::publish_late_fee_charged_event(
-                    env,
-                    crate::events::LateFeeChargedEvent {
-                        borrower: borrower.clone(),
-                        fee: late_fee,
-                        installment_index: i.saturating_add(1),
-                    },
-                );
-            }
+        let overdue = overdue_installment_count(
+            now,
+            schedule.next_due_ts,
+            schedule.period_seconds,
+            installments_paid,
+        );
+        if overdue > 0 {
+            // `checked_mul` reverts with `Overflow` once the aggregate fee
+            // exceeds `i128`, matching the old per-installment loop.
+            let aggregate_fee = per_installment_fee
+                .checked_mul(overdue as i128)
+                .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
+            total_late_fee = aggregate_fee;
+            // One event per repayment: `fee` is the aggregate for every overdue
+            // installment and `installment_index` is the highest (most recent)
+            // installment charged, preserving the 1-based index space the old
+            // per-installment events used.
+            crate::events::publish_late_fee_charged_event(
+                env,
+                crate::events::LateFeeChargedEvent {
+                    borrower: borrower.clone(),
+                    fee: aggregate_fee,
+                    installment_index: overdue,
+                },
+            );
         }
     }
 
     let advance_seconds = installments_paid.saturating_mul(schedule.period_seconds);
     schedule.next_due_ts = schedule.next_due_ts.saturating_add(advance_seconds);
     storage_set_repayment_schedule(env, borrower, &schedule);
+
+    total_late_fee
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2108,5 +2283,244 @@ mod installment {
             &5_000,
             &None,
         );
+    }
+}
+
+#[cfg(test)]
+mod forgive {
+    use crate::types::CreditStatus;
+    use crate::Credit;
+    use crate::CreditClient;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::token::StellarAssetClient;
+    use soroban_sdk::{Address, Env};
+
+    /// Shared setup: deploy the contract, open a credit line with 1_000_000
+    /// limit, and draw 500_000 so there is outstanding debt to forgive.
+    fn setup(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        env.mock_all_auths();
+        let admin = Address::generate(env);
+        let borrower = Address::generate(env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(env, &contract_id);
+        client.init(&admin);
+        // `draw_credit` needs a liquidity token with reserve funds and a
+        // collateral position covering the 150 % default ratio.
+        let token = env
+            .register_stellar_asset_contract_v2(Address::generate(env))
+            .address();
+        client.set_liquidity_token(&token);
+        let sac = StellarAssetClient::new(env, &token);
+        sac.mint(&contract_id, &1_000_000_i128);
+        sac.mint(&borrower, &1_000_000_i128);
+        client.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &50_u32);
+        client.deposit_collateral(&borrower, &1_000_000_i128);
+        // Draw so there is outstanding principal to forgive.
+        client.draw_credit(&borrower, &500_000_i128);
+        (client, admin, borrower)
+    }
+
+    // ── happy-path ────────────────────────────────────────────────────────────
+
+    /// Partial forgiveness: utilized_amount drops by the forgiven amount.
+    #[test]
+    fn forgive_partial_reduces_utilized_amount() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        let before = client.get_credit_line(&borrower).unwrap();
+        let initial_utilized = before.utilized_amount;
+
+        client.forgive_debt(&borrower, &100_000_i128);
+
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(after.utilized_amount, initial_utilized - 100_000);
+    }
+
+    /// Full forgiveness (amount == utilized_amount) drives utilized_amount to 0.
+    #[test]
+    fn forgive_full_amount_drives_utilized_to_zero() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        let full = line.utilized_amount;
+
+        client.forgive_debt(&borrower, &full);
+
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(after.utilized_amount, 0);
+    }
+
+    /// Overshoot: forgive_amount is capped at utilized_amount, not at the
+    /// requested amount. utilized_amount ends at 0.
+    #[test]
+    fn forgive_excess_capped_to_utilized_amount() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        let overshoot = line.utilized_amount + 999_999_i128;
+
+        client.forgive_debt(&borrower, &overshoot);
+
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(after.utilized_amount, 0);
+    }
+
+    /// Interest is forgiven first: accrued_interest decreases before principal.
+    #[test]
+    fn forgive_reduces_accrued_interest_first() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        // Advance time so accrual builds up some interest.
+        env.ledger().set_timestamp(31_536_000); // ~1 year
+
+        let line_before = client.get_credit_line(&borrower).unwrap();
+        // After accrual the line will have accrued_interest > 0.
+        // Forgive a small amount that is <= accrued_interest.
+        let small_forgive = 1_000_i128;
+
+        client.forgive_debt(&borrower, &small_forgive);
+
+        let line_after = client.get_credit_line(&borrower).unwrap();
+        // accrued_interest decreases by at most small_forgive.
+        assert!(line_after.accrued_interest <= line_before.accrued_interest);
+        // utilized_amount also drops.
+        assert!(line_after.utilized_amount < line_before.utilized_amount);
+    }
+
+    /// Credit line status is preserved after forgiveness (Active stays Active).
+    #[test]
+    fn forgive_does_not_change_status() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        client.forgive_debt(&borrower, &1_000_i128);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(line.status, CreditStatus::Active);
+    }
+
+    /// forgive_debt works on a Defaulted credit line (the primary use-case).
+    #[test]
+    fn forgive_defaulted_line_succeeds() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        client.default_credit_line(&borrower);
+
+        let before = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(before.status, CreditStatus::Defaulted);
+
+        client.forgive_debt(&borrower, &100_000_i128);
+
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert!(after.utilized_amount < before.utilized_amount);
+        assert_eq!(after.status, CreditStatus::Defaulted);
+    }
+
+    /// forgive_debt works on a Suspended credit line.
+    #[test]
+    fn forgive_suspended_line_succeeds() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        client.suspend_credit_line(&borrower);
+
+        let before = client.get_credit_line(&borrower).unwrap();
+        assert_eq!(before.status, CreditStatus::Suspended);
+
+        client.forgive_debt(&borrower, &50_000_i128);
+
+        let after = client.get_credit_line(&borrower).unwrap();
+        assert!(after.utilized_amount < before.utilized_amount);
+    }
+
+    // ── Issue #1283: Closed-line guard ────────────────────────────────────────
+
+    /// Forgiving a Closed line must revert with CreditLineClosed (code 4).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #4)")]
+    fn forgive_closed_line_reverts_with_credit_line_closed() {
+        let env = Env::default();
+        let (client, admin, borrower) = setup(&env);
+
+        // Close the line (admin path, which is unconditional).
+        client.close_credit_line(&borrower, &admin);
+
+        // Must revert — cannot forgive a closed (terminal) line.
+        client.forgive_debt(&borrower, &1_000_i128);
+    }
+
+    // ── Issue #1283: zero-debt guard ──────────────────────────────────────────
+
+    /// Forgiving a line with zero outstanding debt must revert with
+    /// InvalidAmount (code 5) — there is nothing to forgive.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn forgive_zero_debt_line_reverts_with_invalid_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        // Open without drawing — utilized_amount == 0.
+        client.open_credit_line(&borrower, &1_000_000_i128, &500_u32, &50_u32);
+
+        // Must revert — nothing to forgive.
+        client.forgive_debt(&borrower, &1_000_i128);
+    }
+
+    /// After full forgiveness (utilized_amount == 0) a second call also reverts.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn forgive_after_full_forgiveness_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+
+        let line = client.get_credit_line(&borrower).unwrap();
+        // First call: forgive everything.
+        client.forgive_debt(&borrower, &line.utilized_amount);
+
+        // Second call on now-zero-debt line must revert.
+        client.forgive_debt(&borrower, &1_i128);
+    }
+
+    // ── pre-existing guards (must still pass) ─────────────────────────────────
+
+    /// Passing amount == 0 reverts with InvalidAmount (existing guard).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn forgive_zero_amount_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.forgive_debt(&borrower, &0_i128);
+    }
+
+    /// Passing a negative amount reverts with InvalidAmount (existing guard).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn forgive_negative_amount_reverts() {
+        let env = Env::default();
+        let (client, _admin, borrower) = setup(&env);
+        client.forgive_debt(&borrower, &-1_i128);
+    }
+
+    /// Forgiving a non-existent credit line reverts with CreditLineNotFound (code 3).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn forgive_unknown_borrower_reverts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let unknown = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+        client.init(&admin);
+        client.forgive_debt(&unknown, &1_000_i128);
     }
 }

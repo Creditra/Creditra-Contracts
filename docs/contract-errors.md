@@ -1,3 +1,11 @@
-# Contract Errors
+# Moved: `ContractError` reference
 
-This document has been consolidated into [ERROR_CODES.md](ERROR_CODES.md). Please refer to it for the latest error codes.
+This file is now a redirect stub. The canonical error reference is
+**[`docs/errors.md`](./errors.md)**.
+
+It previously carried a second copy of the credit contract's `ContractError`
+table plus a `ContractErrorCategory` summary. Both now live on the canonical
+page, published once.
+
+The source of truth is
+[`ContractError`](../contracts/credit/src/types.rs). Do not re-add a table here.

@@ -5,6 +5,9 @@ on:
     branches: [main, master, develop]
   pull_request:
     branches: [main, master, develop]
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -74,6 +77,13 @@ jobs:
       - name: Validate generated contract interfaces
         run: scripts/validate_schemas.sh
 
+      # `docs/errors.md` is the single canonical error reference. This keeps it
+      # from drifting from `contracts/credit/src/types.rs`, which would hand SDK
+      # consumers a code the contract cannot emit. Stdlib-only Python, so it
+      # needs no toolchain beyond the runner.
+      - name: Verify canonical error reference
+        run: python3 scripts/list_contract_errors.py --check
+
       # The reproducible-build guard scripts are the enforcement layer for the
       # pinned-toolchain policy. Run their own test suites so a regression in
       # the guards themselves fails CI, not just a regression in the contracts.
@@ -83,6 +93,25 @@ jobs:
           set -euo pipefail
           scripts/test_check_toolchain.sh
           scripts/test_check_wasm_size.sh
+
+      # Ensure the root lockfile resolves cleanly without package collisions
+      # (e.g. duplicate workspace paths causing duplicate package entries).
+      - name: Validate root lockfile metadata
+        run: cargo metadata --locked --format-version 1
+
+      - name: Prevent stale rustdoc placeholders
+        run: |
+          set -euo pipefail
+          stale="$(find contracts \( -path '*/tests/*' -o -name '*_tests.rs' -o -name 'test_*.rs' \) -prune -o -type f -name '*.rs' -exec grep -nH 'Not yet implemented' {} + || true)"
+          if [[ -n "$stale" ]]; then
+            echo "$stale"
+            echo "::error::Found stale 'Not yet implemented' placeholder in non-test Rust code"
+            exit 1
+          fi
+
+      # Every document must stay discoverable from docs/INDEX.md.
+      - name: Check documentation index
+        run: scripts/check_docs_index.sh
 
       - name: Print toolchain versions
         run: |
@@ -126,20 +155,89 @@ jobs:
 
       # Enforce the artifact size budget with the same scanner the guard tests
       # exercise (scripts/check-wasm-size.sh), so CI and local policy checks
-      # share one implementation. Threshold is unchanged at 614,400 bytes.
-      - name: Verify WASM artifact
-        env:
-          THRESHOLD_BYTES: "614400"
-          WASM_DIR: contracts/creditra-credit/target/wasm32-unknown-unknown/release
-        run: scripts/check-wasm-size.sh --check-only
+      # share one implementation. Threshold is 51,200 bytes (50 KB).
+      - name: Verify WASM artifact size budget
+        run: scripts/check-wasm-size.sh
+
+      - name: Verify WASM artifact baseline
+        run: scripts/check-wasm-baseline.sh
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: creditra-credit-wasm
-          path: contracts/creditra-credit/target/wasm32-unknown-unknown/release/creditra_credit.wasm
+          path: target/wasm32-unknown-unknown/release/creditra_credit.wasm
           if-no-files-found: error
 
+  soroban-workspace:
+    name: Soroban workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read pinned toolchain channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n1)"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not read the pinned channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache root Cargo workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: soroban-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            soroban-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
+
+      - name: Verify reproducible-build policy
+        run: scripts/check-toolchain.sh --verify-active
+
+      - name: Check workspace formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run workspace clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run workspace tests
+        if: always()
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Build Soroban WASM workspace
+        if: always()
+        run: scripts/build_wasm.sh
+
+      - name: Upload Soroban WASM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soroban-workspace-wasm
+          path: target/wasm32-unknown-unknown/release/*.wasm
+          if-no-files-found: error
+
+  fuzz:
+    name: Fuzz nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      CARGO_TERM_COLOR: always
   # Line-coverage floor. Kept as its own job so it is a distinct, independently
   # gateable required check: a coverage regression reads as a coverage failure
   # instead of hiding inside the contract job.
@@ -171,6 +269,66 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build all fuzz targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in \
+            contracts/accrual/fuzz/Cargo.toml \
+            contracts/borrow/fuzz/Cargo.toml \
+            contracts/collateral/fuzz/Cargo.toml \
+            contracts/credit/fuzz/Cargo.toml \
+            contracts/lifecycle/fuzz/Cargo.toml \
+            contracts/risk/fuzz/Cargo.toml
+          do
+            echo "::group::Building $(dirname "$manifest")"
+            cargo fuzz build --manifest-path "$manifest"
+            echo "::endgroup::"
+          done
+
+      - name: Run fuzz targets with bounded time budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+
+          run_target() {
+            local manifest="$1"
+            local target="$2"
+            local dir
+            dir="$(dirname "$manifest")"
+            echo "::group::Running $dir::$target"
+            if ! cargo fuzz run --manifest-path "$manifest" "$target" -- -max_total_time=60; then
+              echo "::error::Fuzz target $dir::$target failed or produced a crash."
+              failed=1
+            fi
+            echo "::endgroup::"
+          }
+
+          run_target contracts/accrual/fuzz/Cargo.toml main
+          run_target contracts/borrow/fuzz/Cargo.toml main
+          run_target contracts/collateral/fuzz/Cargo.toml main
+          run_target contracts/credit/fuzz/Cargo.toml oracle_deviation
+          run_target contracts/credit/fuzz/Cargo.toml prorate_interest_snapshot
+          run_target contracts/lifecycle/fuzz/Cargo.toml lifecycle
+          run_target contracts/risk/fuzz/Cargo.toml main
+
+          exit "$failed"
+
+      - name: Upload fuzz crashes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            contracts/**/fuzz/artifacts/**
+            contracts/**/fuzz/crash-*/*
+          if-no-files-found: ignore
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy, llvm-tools
 
@@ -184,13 +342,21 @@ jobs:
       - name: Verify reproducible-build policy
         run: scripts/check-toolchain.sh --verify-active --lock contracts/creditra-credit/Cargo.lock
 
-      # This step is the floor. `cargo llvm-cov` writes the HTML report first and
-      # then exits non-zero when measured line coverage is below
-      # MIN_LINE_COVERAGE, so the job fails the workflow while the report below
-      # is still produced for inspection.
+      # Run coverage instrumentation and generate the HTML report unconditionally.
+      # Separating report generation from the floor check ensures the HTML
+      # artifact is always available for inspection, even when the floor is
+      # breached or a test fails.
       - name: Measure line coverage
         working-directory: contracts/creditra-credit
-        run: cargo llvm-cov --all-targets --html --fail-under-lines "$MIN_LINE_COVERAGE"
+        run: cargo llvm-cov --all-targets --html
+
+      # Enforce the floor as a separate step so the HTML report produced above
+      # is always uploaded regardless of whether this step passes or fails.
+      # `if: always()` keeps this step running even when a previous step failed.
+      - name: Check coverage floor
+        if: always()
+        working-directory: contracts/creditra-credit
+        run: cargo llvm-cov report --fail-under-lines "$MIN_LINE_COVERAGE"
 
       # `if: always()` is deliberate: the report is most valuable when the floor
       # was breached, and a failing step would otherwise skip the upload and the
@@ -203,8 +369,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -d target/llvm-cov/html ]]; then
-            echo "::error::No coverage report was produced; the measurement step failed before writing one."
-            exit 1
+            echo "::warning::No coverage report was produced; the measurement step failed before writing one."
+            exit 0
           fi
           cargo llvm-cov report --json > "$REPORT_JSON"
           pct="$(jq -r '.data[0].totals.lines.percent' "$REPORT_JSON")"
@@ -235,5 +401,5 @@ jobs:
         with:
           name: coverage-report
           path: contracts/creditra-credit/target/llvm-cov/html
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14

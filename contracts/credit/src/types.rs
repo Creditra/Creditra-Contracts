@@ -8,15 +8,14 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 54-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 64-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
-//!   [`ContractErrorCategory`] via [`ContractError::category`]. See
-//!   [`docs/contract-errors.md`](../../../docs/contract-errors.md) for the
-//!   flat code table and
-//!   [`docs/error-taxonomy.md`](../../../docs/error-taxonomy.md) for the
-//!   categorized reference with recovery hints.
-//! - [`CreditStatus`] — 5-variant state-machine label (Active=0,
-//!   Suspended=1, Defaulted=2, Closed=3, Restricted=4). See
+//!   [`ContractErrorCategory`] via [`ContractError::category`]. The published
+//!   code table lives in exactly one place — [`docs/errors.md`](../../../docs/errors.md) —
+//!   and a CI test fails if it drifts from this enum.
+//! - [`CreditStatus`] — 6-variant state-machine label (Active=0,
+//!   Suspended=1, Defaulted=2, Closed=3, Restricted=4, SelfSuspended=5).
+//!   See
 //!   [`docs/state-machine.md`](../../../docs/state-machine.md) for the
 //!   transition graph.
 //! - [`CreditLineData`] — the per-borrower record (limit, utilized, rate,
@@ -101,12 +100,17 @@ pub enum CreditStatus {
 /// appended at the end with the next available integer.
 ///
 /// # Category
-/// Use [ContractError::category] to map any error to its
-/// [ContractErrorCategory] for client-side grouping. See
-/// [docs/ERROR_CODES.md](../../../docs/ERROR_CODES.md) for the
-/// categorized reference with recovery actions.
-// export = false: ContractError has grown past the 50-case limit the
-// Soroban contract-spec XDR format (SCSpecUdtUnionV0.cases<50>) allows for an
+/// Use [`ContractError::category`] to map any error to its
+/// [`ContractErrorCategory`] for client-side grouping.
+///
+/// # Discriminant table
+/// The code, variant, category, trigger condition, and SDK recovery for every
+/// variant are published in exactly one place:
+/// [`docs/errors.md`](../../../docs/errors.md). That page is the canonical
+/// reference; `tests/error_discriminants.rs` fails if it drifts from this
+/// enum, so no second table is duplicated here.
+// `export = false`: `ContractError` has grown past the 50-case limit the
+// Soroban contract-spec XDR format (`SCSpecUdtUnionV0.cases<50>`) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
 // discriminants (see `tests/error_discriminants.rs`); only the spec entry is
 // skipped. Mirrors the same decision already applied to DataKey.
@@ -249,13 +253,24 @@ ecovered_amount or
     /// A fee-configuration change was rejected because at least one liquidation
     /// auction is currently active (Issue #1169).
     ///
-    /// Fee parameters � protocol fee, treasury/bounty fee-share split, penalty
-    /// surcharge, and flat / structured late fees � are frozen while any
+    /// Fee parameters � protocol fee, treasury/bounty fee-share split, penalty
+    /// surcharge, and flat / structured late fees � are frozen while any
     /// defaulted credit line has an in-flight liquidation auction, so that the
     /// economics of an ongoing auction and its eventual settlement are
     /// deterministic. The block lifts when the last active auction exits the
     /// Defaulted pipeline (full settlement, reinstate, force-close, or reopen).
     AuctionActive = 63,
+    /// No VRF commitment exists for the borrower whose score is being verified.
+    MissingVrfCommitment = 64,
+    /// The treasury balance fell below the pending withdrawal snapshot.
+    InsufficientTreasuryBalance = 65,
+    /// Draw would exceed the per-borrower absolute exposure cap.
+    ///
+    /// Triggered when `utilized_amount + draw_amount > max_borrower_exposure` for
+    /// the given borrower. Distinct from [`ExposureCapExceeded`] (31), which guards
+    /// the global protocol-wide cap. The cap is cleared by passing `0` to
+    /// `set_borrower_exposure_cap`; when absent the check is skipped entirely.
+    BorrowerExposureCapExceeded = 66,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -326,7 +341,8 @@ impl ContractError {
             | Self::DrawExceedsMaxAmount
             | Self::RepayExceedsMaxAmount
             | Self::DrawReversalWindowExpired
-            | Self::CloseFactorAboveMax => Limit,
+            | Self::CloseFactorAboveMax
+            | Self::BorrowerExposureCapExceeded => Limit,
 
             Self::MissingLiquidityToken
             | Self::MissingLiquiditySource
@@ -335,6 +351,7 @@ impl ContractError {
             | Self::InsufficientRepaymentAllowance
             | Self::InsufficientRepaymentBalance
             | Self::TreasuryNotSet
+            | Self::InsufficientTreasuryBalance
             | Self::ExposureCapExceeded
             | Self::BountyNotSet => Liquidity,
 
@@ -369,7 +386,8 @@ impl ContractError {
             | Self::TreasuryProposalExists
             | Self::OriginalDrawNotFound
             | Self::AttestationBatchNotFound
-            | Self::InvalidAttestation => Misc,
+            | Self::InvalidAttestation
+            | Self::MissingVrfCommitment => Misc,
 
             // Cross-contract handshake errors — guard is always cleared before
             // these are emitted so the settlement path is safe to retry.
@@ -622,6 +640,8 @@ pub enum FreezeReason {
     OperationalMaintenance = 3,
     /// Borrower-initiated voluntary draw pause.
     BorrowerRequest = 4,
+    /// Admin-initiated freeze for general administrative purposes.
+    AdminAction = 5,
 }
 
 /// Aggregated, single-call read-only view of a borrower's full credit-line state.
@@ -860,3 +880,37 @@ pub struct PauseReason {
     pub actor: soroban_sdk::Address,
 }
 
+/// Full collateral state snapshot for a borrower, returned by `get_collateral_state`.
+///
+/// All fields are read-only; no authentication is required to call the view.
+///
+/// # `health_factor_bps` vs [`CreditLineSnapshot::health_factor_bps`]
+///
+/// This field reports the **raw** collateral-to-debt ratio
+/// (`balance * 10_000 / utilized_amount`), i.e. the amount of collateral
+/// backing each unit of debt. The protocol-wide floor `min_ratio_bps` is
+/// reported next to it rather than folded into it, because `0` there means
+/// "no floor configured" and folding a disabled floor into the factor would
+/// misreport a perfectly healthy zero-collateral line as liquidatable.
+///
+/// The **min-ratio-aware** factor used by keepers — the one that reads
+/// `10_000` exactly at the liquidation threshold — is exposed by
+/// `get_health_factor` and mirrored in
+/// [`CreditLineSnapshot::health_factor_bps`].
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralState {
+    /// Borrower whose collateral is described.
+    pub borrower: soroban_sdk::Address,
+    /// Current collateral balance held by the contract for this borrower.
+    pub balance: i128,
+    /// Protocol-wide minimum collateral ratio in basis points (default 15 000 = 150 %).
+    /// Zero means the ratio check is disabled.
+    pub min_ratio_bps: u32,
+    /// Configured collateral token address, or `None` when not yet set.
+    pub collateral_token: Option<soroban_sdk::Address>,
+    /// Health factor expressed in basis points: `balance * 10_000 / utilized_amount`.
+    /// A value at or above `min_ratio_bps` indicates adequate collateralization.
+    /// `u32::MAX` when `utilized_amount == 0` (no outstanding debt).
+    pub health_factor_bps: u32,
+}

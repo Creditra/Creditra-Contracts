@@ -377,6 +377,51 @@ Function aborts with:
 - **No bids**: highest bidder is `None`; all claim attempts fail with `NotWinner`.
 - **Double claim**: second successful claimant attempt is blocked by `AlreadyClaimed`.
 
+## Settlement Handshake
+
+For liquidation auctions, the auction contract performs a settlement handshake with the credit contract. This ensures that the proceeds from the auction are properly routed and accounted for against the defaulted credit line.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Default as Credit Contract (Default)
+    participant Orchestrator as Off-chain Orchestrator
+    participant Auction as Auction Contract
+    participant Winner as Bidder (Winner)
+
+    Default->>Orchestrator: emit credit/liq_req
+    Orchestrator->>Auction: init_auction (with settlement_id as auction_id)
+    Winner->>Auction: place_bid
+    Orchestrator->>Auction: close_auction
+    
+    Orchestrator->>Auction: settle_default_liquidation(auction_id, credit_contract, borrower)
+    Auction->>Default: (Emits LIQ_SETL/auction signal)
+    
+    Winner->>Auction: claim_auction(auction_id)
+    Auction->>Auction: Transfer proceeds to factory (credit contract)
+    Auction->>Winner: (Winner claims the auctioned asset)
+```
+
+### Required Configuration
+
+To successfully wire a new auction to the credit contract:
+1. **Factory configuration:** The auction's `factory` MUST be set to the exact address of the credit contract.
+2. **Auction ID:** The `auction_id` created in the auction contract MUST match the `settlement_id` used by the credit contract for that borrower.
+3. **Proceeds routing:** When `claim_auction` is called by the winning bidder, the auction contract transfers the `recovered_amount` (the winning bid) directly to the registered `factory` (credit contract).
+4. **Winner claiming:** `claim_auction` allows the winning bidder to release the underlying asset to themselves after the proceeds are securely forwarded to the credit contract.
+
+### Failure Modes and Error Mapping
+
+If the handshake is improperly configured, the following errors may occur (preventing `AuctionCallFailed` issues):
+
+| Condition | `AuctionError` |
+|-----------|----------------|
+| `credit_contract` passed to `settle_default_liquidation` does not match the configured `factory` | `Unauthorized` |
+| `factory` was never set on the auction contract | `NoFactoryContract` |
+| `settle_default_liquidation` called before `close_auction` | `NotClosed` |
+| `settle_default_liquidation` called twice for the same `auction_id` | `AlreadySettled` |
+
 ## Error Propagation (Issue #609)
 
 All contract-defined failure paths in `src/lib.rs` use `env.panic_with_error(AuctionError::…)`

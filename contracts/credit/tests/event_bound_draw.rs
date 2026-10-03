@@ -21,7 +21,7 @@
 //! The per-draw cap `MAX_EVENTS_PER_DRAW = 4` accommodates all legitimate
 //! combinations while remaining tight enough for indexers.
 //!
-//! See [`docs/EVENTS_CATALOG.md`](../../docs/EVENTS_CATALOG.md) for the
+//! See [`docs/EVENT_CATALOG.md`](../../docs/EVENT_CATALOG.md) for the
 //! canonical event catalog.
 
 use creditra_credit::types::CreditStatus;
