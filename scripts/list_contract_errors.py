@@ -18,66 +18,69 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import pathlib
-import re
 import sys
+import re
+import pathlib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TYPES_RS = REPO_ROOT / "contracts" / "credit" / "src" / "types.rs"
 CANONICAL_DOC = REPO_ROOT / "docs" / "errors.md"
 
-# Match lines like `    Unauthorized = 1,` inside `pub enum ContractError`.
-VARIANT_RE = re.compile(r"^\s*(?P<name>[A-Za-z][A-Za-z0-9]*)\s*=\s*(?P<code>\d+)\s*,")
-
-
-def parse_variants(source: str, enum_name: str) -> list[tuple[int, str]]:
+def parse_enum(source: str, enum_name: str) -> list[tuple[int, str, str]]:
+    """Returns list of (code, name, description)."""
     enum_open = re.search(rf"pub\s+enum\s+{enum_name}\s*\{{", source)
     if not enum_open:
         raise SystemExit(f"{enum_name} enum not found in types.rs")
-
+    
     body_start = enum_open.end()
-    # Match braces to find the enum body.
     depth = 1
     i = body_start
     while i < len(source) and depth > 0:
         ch = source[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
+        if ch == "{": depth += 1
+        elif ch == "}": depth -= 1
         i += 1
-
+    
     body = source[body_start : i - 1]
-    variants: list[tuple[int, str]] = []
+    
+    variants = []
+    # Parse lines. A variant might be preceded by `///` comments.
+    desc_lines = []
     for line in body.splitlines():
-        m = VARIANT_RE.match(line)
-        if m:
-            variants.append((int(m.group("code")), m.group("name")))
+        line = line.strip()
+        if line.startswith("///"):
+            desc = line.lstrip("/").strip()
+            if desc:
+                desc_lines.append(desc)
+        elif line.startswith("//"):
+            pass
+        else:
+            m = re.match(r"^([A-Za-z][A-Za-z0-9]*)\s*=\s*(\d+)\s*,", line)
+            if m:
+                name = m.group(1)
+                code = int(m.group(2))
+                desc = " ".join(desc_lines) if desc_lines else ""
+                variants.append((code, name, desc))
+                desc_lines = []
+            else:
+                if not line:
+                    desc_lines = []
+    
     variants.sort()
     return variants
 
-
-def extract_category_mapping(source: str) -> dict[str, list[tuple[int, str]]]:
-    """Extract the category→variants mapping from the `category()` method body."""
-    # Find the start of category()
-    fn_start = re.search(
-        r"pub fn category\s*\(&self\)\s*->\s*ContractErrorCategory\s*\{",
-        source,
-    )
+def extract_category_mapping(source: str) -> dict[str, str]:
+    """Extract variant -> category name from category()."""
+    fn_start = re.search(r"pub fn category\s*\(&self\)\s*->\s*ContractErrorCategory\s*\{", source)
     if not fn_start:
         raise SystemExit("category() method not found in types.rs")
-
-    # Extract the full method body by counting brace depth
+    
     i = fn_start.end()
     depth = 1
     while i < len(source) and depth > 0:
-        if source[i] == "{":
-            depth += 1
-        elif source[i] == "}":
-            depth -= 1
+        if source[i] == "{": depth += 1
+        elif source[i] == "}": depth -= 1
         i += 1
-    # body is everything inside the outer braces
     body = source[fn_start.end() : i - 1]
 
     categories: dict[str, list[tuple[int, str]]] = {}
@@ -97,14 +100,8 @@ def extract_category_mapping(source: str) -> dict[str, list[tuple[int, str]]]:
         if cat not in categories:
             categories[cat] = []
         for v in re.findall(r"Self::(\w+)", m.group("variants")):
-            code = error_variants.get(v)
-            if code is not None:
-                categories[cat].append((code, v))
-
-    for cat in categories:
-        categories[cat].sort()
-    return categories
-
+            mapping[v] = cat
+    return mapping
 
 def doc_section(doc: str, heading: str) -> str:
     """Body of a `## <heading>` section, up to the next `---` rule."""
@@ -225,6 +222,5 @@ def main(argv: list[str]) -> int:
     print(f"\n{len(variants)} variants")
     return 0
 
-
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    sys.exit(main())

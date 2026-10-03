@@ -123,6 +123,11 @@ jobs:
         working-directory: contracts/creditra-credit
         run: cargo fmt -- --check
 
+      - name: Verify error codes documentation
+        run: |
+          python3 scripts/list_contract_errors.py > generated_table.md
+          diff -u docs/ERROR_CODES.md generated_table.md
+
       - name: Run clippy
         working-directory: contracts/creditra-credit
         run: cargo clippy $CARGOFLAGS --all-targets -- -D warnings
