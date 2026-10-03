@@ -108,7 +108,7 @@ pub enum CreditStatus {
 // export = false: ContractError has grown past the 50-case limit the
 // Soroban contract-spec XDR format (SCSpecUdtUnionV0.cases<50>) allows for an
 // exported type spec. Errors still surface to clients with their pinned numeric
-// discriminants (see 	ests/error_discriminants.rs); only the spec entry is
+// discriminants (see `tests/error_discriminants.rs`); only the spec entry is
 // skipped. Mirrors the same decision already applied to DataKey.
 #[soroban_sdk::contracterror(export = false)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -242,7 +242,8 @@ pub enum ContractError {
     /// The cross-contract auction CPI call failed or returned an unexpected value.
     ///
     /// No credit-line state was mutated. The reentrancy guard has been cleared.
-    /// The settlement is safe to retry with a corrected ecovered_amount or
+    /// The settlement is safe to retry with a corrected 
+ecovered_amount or
     /// after the auction contract issue is resolved.
     AuctionCallFailed = 62,
     /// A fee-configuration change was rejected because at least one liquidation

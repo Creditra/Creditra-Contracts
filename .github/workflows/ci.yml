@@ -88,7 +88,9 @@ jobs:
         run: |
           rustc --version
           cargo --version
-          rustup target list --installed      - name: Check formatting
+          rustup target list --installed
+
+      - name: Check formatting
         working-directory: contracts/creditra-credit
         run: cargo fmt -- --check
 
