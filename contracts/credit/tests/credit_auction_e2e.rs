@@ -102,7 +102,7 @@ fn run_auction_to_settlement(
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &None,
         &None,
     );
     auction.place_bid(settlement_id, &bidder, &first_bid);
@@ -236,7 +236,7 @@ fn e2e_atomic_settlement_with_configured_auction() {
         &0_u32,
         &None,
         &None,
-        &DutchAuctionDecay::None,
+        &None,
         &None,
     );
     auction.place_bid(

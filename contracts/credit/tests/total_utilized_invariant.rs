@@ -193,6 +193,9 @@ fn valid_operations(status: CreditStatus, utilized_amount: i128) -> std::vec::Ve
         CreditStatus::Restricted => {
             ops.push(Operation::Reopen);
         }
+        CreditStatus::SelfSuspended => {
+            ops.push(Operation::Reopen);
+        }
     }
 
     if status != CreditStatus::Closed && utilized_amount > 0 {

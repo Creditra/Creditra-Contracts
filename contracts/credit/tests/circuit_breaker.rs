@@ -12,7 +12,7 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Events};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────

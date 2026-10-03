@@ -174,7 +174,10 @@ fn repayment_schedule_present_when_set() {
 
     let snap = client.get_credit_line_snapshot(&borrower).expect("Some");
     assert_eq!(snap.repayment_schedule.len(), 1);
-    let sched = snap.repayment_schedule.get(0).expect("schedule must be present");
+    let sched = snap
+        .repayment_schedule
+        .get(0)
+        .expect("schedule must be present");
 
     assert_eq!(sched.amount_per_period, 500);
     assert_eq!(sched.period_seconds, 86_400);

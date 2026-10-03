@@ -172,7 +172,10 @@ fn valid_ops(status: CreditStatus, utilized: i128, limit: i128) -> std::vec::Vec
             }
             ops.push(Op::Default);
         }
-        CreditStatus::Suspended | CreditStatus::Defaulted | CreditStatus::Restricted => {
+        CreditStatus::Suspended
+        | CreditStatus::SelfSuspended
+        | CreditStatus::Defaulted
+        | CreditStatus::Restricted => {
             ops.push(Op::Default);
         }
         CreditStatus::Closed => {}

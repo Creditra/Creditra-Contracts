@@ -322,13 +322,7 @@ fn settlement_quorum_fresh_price_accepted() {
     let borrower = open_and_default(&client, &env, &contract_id, 500);
 
     // Settlement with None (quorum mode uses stored price)
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "s1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &10_000_u32, &None);
 
     assert_eq!(
         client.get_credit_line(&borrower).unwrap().status,
@@ -377,24 +371,12 @@ fn settlement_replay_attempt_fails() {
     let settlement_id = sid(&env, "s1");
 
     // First settlement succeeds
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &settlement_id,
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
 
     // Replaying the same `(borrower, settlement_id)` pair is rejected by the
     // replay guard, which runs before the credit-line read, so the closed line
     // cannot mask the expected `AlreadyInitialized` (#14).
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &settlement_id,
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &settlement_id, &10_000_u32, &None);
 }
 
 #[test]
@@ -404,13 +386,7 @@ fn settlement_new_settlement_id_allowed() {
 
     // First borrower, first settlement
     let b1 = open_and_default(&client, &env, &contract_id, 200);
-    client.settle_default_liquidation(
-        &b1,
-        &200_i128,
-        &sid(&env, "s1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&b1, &200_i128, &sid(&env, "s1"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&b1).unwrap().status,
         CreditStatus::Closed
@@ -418,13 +394,7 @@ fn settlement_new_settlement_id_allowed() {
 
     // Second borrower with different settlement_id — allowed
     let b2 = open_and_default(&client, &env, &contract_id, 300);
-    client.settle_default_liquidation(
-        &b2,
-        &300_i128,
-        &sid(&env, "s2"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&b2, &300_i128, &sid(&env, "s2"), &10_000_u32, &None);
     assert_eq!(
         client.get_credit_line(&b2).unwrap().status,
         CreditStatus::Closed
@@ -440,13 +410,7 @@ fn settlement_partial_close_factor() {
     let borrower = open_and_default(&client, &env, &contract_id, 1_000);
 
     // Settle 50% (close_factor_bps = 5_000)
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "s1"),
-        &5_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &5_000_u32, &None);
 
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 500); // 1000 - 500
@@ -460,37 +424,19 @@ fn settlement_multiple_close_factors() {
     let borrower = open_and_default(&client, &env, &contract_id, 1_000);
 
     // First settlement: recover 300 (close_factor ~30%)
-    client.settle_default_liquidation(
-        &borrower,
-        &300_i128,
-        &sid(&env, "s1"),
-        &3_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &300_i128, &sid(&env, "s1"), &3_000_u32, &None);
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 700);
 
     // Second settlement: recover 400 more (close_factor ~58% of remaining).
     // `max_recoverable` floors `utilized * close_factor / 10_000`, so 5_700
     // would only allow 399 of the 700 still outstanding.
-    client.settle_default_liquidation(
-        &borrower,
-        &400_i128,
-        &sid(&env, "s2"),
-        &5_800_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &400_i128, &sid(&env, "s2"), &5_800_u32, &None);
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 300);
 
     // Third settlement: recover all remaining
-    client.settle_default_liquidation(
-        &borrower,
-        &300_i128,
-        &sid(&env, "s3"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &300_i128, &sid(&env, "s3"), &10_000_u32, &None);
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 0);
     assert_eq!(line.status, CreditStatus::Closed);
@@ -505,13 +451,7 @@ fn settlement_recovered_amount_equals_max_recoverable() {
     let borrower = open_and_default(&client, &env, &contract_id, 1_000);
 
     // Recover exactly max_recoverable = 1000 * 5000 / 10_000 = 500
-    client.settle_default_liquidation(
-        &borrower,
-        &500_i128,
-        &sid(&env, "s1"),
-        &5_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &500_i128, &sid(&env, "s1"), &5_000_u32, &None);
     let line = client.get_credit_line(&borrower).unwrap();
     assert_eq!(line.utilized_amount, 500);
 }
@@ -524,13 +464,7 @@ fn settlement_recovered_amount_exceeds_max_recoverable() {
     let borrower = open_and_default(&client, &env, &contract_id, 1_000);
 
     // Try to recover 600 when max is 500 (5000 bps of 1000)
-    client.settle_default_liquidation(
-        &borrower,
-        &600_i128,
-        &sid(&env, "s1"),
-        &5_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &600_i128, &sid(&env, "s1"), &5_000_u32, &None);
 }
 
 #[test]
@@ -540,13 +474,7 @@ fn settlement_zero_recovered_amount_fails() {
     let (client, contract_id, _) = setup(&env);
     let borrower = open_and_default(&client, &env, &contract_id, 500);
 
-    client.settle_default_liquidation(
-        &borrower,
-        &0_i128,
-        &sid(&env, "s1"),
-        &10_000_u32,
-        &None,
-    );
+    client.settle_default_liquidation(&borrower, &0_i128, &sid(&env, "s1"), &10_000_u32, &None);
 }
 
 #[test]

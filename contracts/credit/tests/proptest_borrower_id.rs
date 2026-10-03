@@ -36,7 +36,7 @@
 //! - [`crate::storage::DataKey::CreditLineBorrowerById`]
 //! - Issue #583
 
-use creditra_credit::test_helpers::{
+use creditra_credit::storage::{
     ensure_credit_line_id, get_borrower_by_credit_line_id, get_credit_line_id,
 };
 use proptest::prelude::*;

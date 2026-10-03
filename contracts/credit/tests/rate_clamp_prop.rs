@@ -284,6 +284,12 @@ fn invalid_min_rate_above_cap_is_safely_clamped() {
     };
 
     let result = compute_rate_from_score(&cfg, 100);
-    assert_eq!(result, MAX_INTEREST_RATE_BPS, "formula should cap at 10_000 bps");
-    assert!(result <= MAX_INTEREST_RATE_BPS, "result must never exceed the protocol cap");
+    assert_eq!(
+        result, MAX_INTEREST_RATE_BPS,
+        "formula should cap at 10_000 bps"
+    );
+    assert!(
+        result <= MAX_INTEREST_RATE_BPS,
+        "result must never exceed the protocol cap"
+    );
 }

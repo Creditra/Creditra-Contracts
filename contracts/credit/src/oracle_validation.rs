@@ -51,8 +51,8 @@ use crate::events::publish_oracle_price_accepted_event;
 use crate::math_utils::compute_deviation_bps;
 use crate::oracles;
 use crate::storage::{
-    get_oracle_config, get_oracle_last_price, get_oracle_last_price_ts, set_oracle_last_price,
-    get_oracle_quorum_config, get_oracle_quorum_price, get_oracle_quorum_price_ts,
+    get_oracle_config, get_oracle_last_price, get_oracle_last_price_ts, get_oracle_quorum_config,
+    get_oracle_quorum_price, get_oracle_quorum_price_ts, set_oracle_last_price,
 };
 use crate::types::{ContractError, OracleConfig, OracleQuorumConfig};
 use soroban_sdk::Env;

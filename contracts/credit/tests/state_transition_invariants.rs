@@ -469,6 +469,9 @@ fn run_transition(
         CreditStatus::Closed => {
             client.close_credit_line(&borrower, admin);
         }
+        CreditStatus::SelfSuspended => {
+            client.self_suspend_credit_line(&borrower);
+        }
         CreditStatus::Restricted => {
             panic!("Restricted setup not supported in this harness");
         }
@@ -488,6 +491,7 @@ fn run_transition(
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match (tc.from, tc.to) {
             (_, CreditStatus::Suspended) => client.suspend_credit_line(&borrower),
+            (_, CreditStatus::SelfSuspended) => client.self_suspend_credit_line(&borrower),
             (_, CreditStatus::Defaulted) => client.default_credit_line(&borrower),
             (_, CreditStatus::Closed) => client.close_credit_line(&borrower, &closer),
             (_, CreditStatus::Active) => {

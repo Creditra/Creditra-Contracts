@@ -357,7 +357,9 @@ mod tests {
 
         client.commit_attestation_batch(&borrower, &root, &3);
 
-        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
+        let batch = client
+            .get_attestation_batch(&borrower)
+            .expect("batch should exist");
         assert_eq!(batch.merkle_root, root);
         assert_eq!(batch.count, 3);
     }
@@ -373,7 +375,9 @@ mod tests {
         client.commit_attestation_batch(&borrower, &root1, &1);
         client.commit_attestation_batch(&borrower, &root2, &2);
 
-        let batch = client.get_attestation_batch(&borrower).expect("batch should exist");
+        let batch = client
+            .get_attestation_batch(&borrower)
+            .expect("batch should exist");
         assert_eq!(batch.merkle_root, root2);
         assert_eq!(batch.count, 2);
     }
@@ -500,8 +504,12 @@ mod tests {
 
             for level in self.levels.iter().take(self.levels.len() - 1) {
                 let is_right_node = current_idx % 2 == 1;
-                let sibling_idx = if is_right_node { current_idx - 1 } else { current_idx + 1 };
-                
+                let sibling_idx = if is_right_node {
+                    current_idx - 1
+                } else {
+                    current_idx + 1
+                };
+
                 if sibling_idx < level.len() {
                     proof.push(level[sibling_idx].clone());
                 }
@@ -531,14 +539,17 @@ mod tests {
             let proof = tree.proof(&env, i);
             assert!(
                 client.verify_attestation_proof(&borrower, &leaves[i], &proof),
-                "Failed to verify leaf {} for tree size {}", i, size
+                "Failed to verify leaf {} for tree size {}",
+                i,
+                size
             );
 
             // Tampered leaf should fail
             let tampered_leaf = leaf(&env, 0xFF);
             assert!(
                 !client.verify_attestation_proof(&borrower, &tampered_leaf, &proof),
-                "Tampered leaf verified for tree size {}", size
+                "Tampered leaf verified for tree size {}",
+                size
             );
 
             // Tampered proof should fail (only if proof is not empty)
@@ -549,10 +560,11 @@ mod tests {
                 }
                 tampered_proof_vec[0] = leaf(&env, 0xFF);
                 let tampered_proof = Vec::from_slice(&env, &tampered_proof_vec);
-                
+
                 assert!(
                     !client.verify_attestation_proof(&borrower, &leaves[i], &tampered_proof),
-                    "Tampered proof verified for tree size {}", size
+                    "Tampered proof verified for tree size {}",
+                    size
                 );
             }
         }

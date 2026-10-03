@@ -83,12 +83,10 @@ fn test_draw_reversal_boundary_3600_and_3601() {
         .env
         .ledger()
         .set_timestamp(setup.draw_ts + DRAW_REVERSAL_WINDOW_SECS);
-    let res_exact = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &100i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let res_exact =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &100i128, &setup.draw_ts, &reason_code);
     assert!(
         res_exact.is_ok(),
         "Reversal at exactly {}s should succeed",
@@ -100,12 +98,10 @@ fn test_draw_reversal_boundary_3600_and_3601() {
         .env
         .ledger()
         .set_timestamp(setup.draw_ts + DRAW_REVERSAL_WINDOW_SECS + 1);
-    let res_expired = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &100i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let res_expired =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &100i128, &setup.draw_ts, &reason_code);
     assert!(
         res_expired.is_err(),
         "Reversal at {}s must fail due to window expiry",
@@ -119,30 +115,26 @@ fn test_cumulative_partial_reversals_and_overlimit() {
     let reason_code = 0u32;
 
     // First partial reversal (600 out of 1000).
-    let res1 = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &600i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let res1 =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &600i128, &setup.draw_ts, &reason_code);
     assert!(res1.is_ok(), "First partial reversal of 600 should succeed");
 
     // Second partial reversal (remaining 400 out of 1000).
-    let res2 = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &400i128,
-        &setup.draw_ts,
-        &reason_code,
+    let res2 =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &400i128, &setup.draw_ts, &reason_code);
+    assert!(
+        res2.is_ok(),
+        "Second partial reversal of 400 should succeed"
     );
-    assert!(res2.is_ok(), "Second partial reversal of 400 should succeed");
 
     // Exceeding original draw amount -> must fail with OverLimit.
-    let res3 = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &1i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let res3 = setup
+        .client
+        .try_reverse_draw(&setup.borrower, &1i128, &setup.draw_ts, &reason_code);
     assert!(
         res3.is_err(),
         "Reversing beyond original draw amount must fail"
@@ -155,12 +147,10 @@ fn test_total_utilized_conserved_and_paused_protocol() {
     let reason_code = 0u32;
 
     let initial_utilized = setup.client.get_total_utilized();
-    let res = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &500i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let res =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &500i128, &setup.draw_ts, &reason_code);
 
     assert!(res.is_ok(), "Reversal of 500 should succeed");
     assert_eq!(
@@ -172,12 +162,10 @@ fn test_total_utilized_conserved_and_paused_protocol() {
     // Pause protocol as admin.
     setup.client.set_protocol_paused(&true);
 
-    let paused_res = setup.client.try_reverse_draw(
-        &setup.borrower,
-        &100i128,
-        &setup.draw_ts,
-        &reason_code,
-    );
+    let paused_res =
+        setup
+            .client
+            .try_reverse_draw(&setup.borrower, &100i128, &setup.draw_ts, &reason_code);
     assert!(
         paused_res.is_err(),
         "Paused protocol must reject reverse_draw calls"

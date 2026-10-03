@@ -43,10 +43,6 @@ fn prepare_repay<'a>(
     asset.mint(contract_id, &draw_amount);
     client.draw_credit(borrower, &draw_amount);
 
-    // Widen bounds to accommodate the requested fee_bps
-    if fee_bps > 1000 {
-        client.set_protocol_fee_bounds(&0_u32, &fee_bps);
-    }
     client.set_protocol_fee_bps(&fee_bps);
 
     env.ledger()
@@ -165,12 +161,21 @@ fn setup_for_withdraw() -> (Env, Address, Address, Address, Address, Address, Ad
     client.set_liquidity_source(&reserve);
     client.set_treasury(&admin, &treasury);
 
-    (env, contract_id, token_address, borrower, reserve, treasury, admin)
+    (
+        env,
+        contract_id,
+        token_address,
+        borrower,
+        reserve,
+        treasury,
+        admin,
+    )
 }
 
 #[test]
 fn withdraw_treasury_success_moves_exactly_accrued_balance() {
-    let (env, contract_id, token_address, borrower, _reserve, treasury, admin) = setup_for_withdraw();
+    let (env, contract_id, token_address, borrower, _reserve, treasury, admin) =
+        setup_for_withdraw();
     let client = prepare_repay(
         &env,
         &contract_id,
@@ -182,7 +187,7 @@ fn withdraw_treasury_success_moves_exactly_accrued_balance() {
         1_000,
     );
     let token_client = token::Client::new(&env, &token_address);
-    
+
     client.repay_credit(&borrower, &1_100);
     let accrued = client.get_protocol_summary().treasury_balance;
     assert_eq!(accrued, 110);
@@ -193,16 +198,23 @@ fn withdraw_treasury_success_moves_exactly_accrued_balance() {
     client.withdraw_treasury(&admin);
 
     assert_eq!(client.get_protocol_summary().treasury_balance, 0);
-    assert_eq!(token_client.balance(&contract_id), contract_balance_before - accrued);
-    assert_eq!(token_client.balance(&treasury), treasury_balance_before + accrued);
+    assert_eq!(
+        token_client.balance(&contract_id),
+        contract_balance_before - accrued
+    );
+    assert_eq!(
+        token_client.balance(&treasury),
+        treasury_balance_before + accrued
+    );
 }
 
 #[test]
 fn withdraw_treasury_zero_balance_returns_without_transfer() {
-    let (env, contract_id, token_address, _borrower, _reserve, treasury, admin) = setup_for_withdraw();
+    let (env, contract_id, token_address, _borrower, _reserve, treasury, admin) =
+        setup_for_withdraw();
     let client = CreditClient::new(&env, &contract_id);
     let token_client = token::Client::new(&env, &token_address);
-    
+
     assert_eq!(client.get_protocol_summary().treasury_balance, 0);
     let contract_balance_before = token_client.balance(&contract_id);
     let treasury_balance_before = token_client.balance(&treasury);
@@ -237,9 +249,12 @@ fn withdraw_treasury_missing_token_reverts() {
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
     client.set_treasury(&admin, &treasury);
-    
+
     env.as_contract(&contract_id, || {
-        env.storage().instance().set(&soroban_sdk::Symbol::new(&env, "TreasuryBalance"), &100_i128);
+        env.storage().instance().set(
+            &soroban_sdk::Symbol::new(&env, "TreasuryBalance"),
+            &100_i128,
+        );
     });
 
     client.withdraw_treasury(&admin);
@@ -253,7 +268,7 @@ fn withdraw_treasury_non_admin_reverts() {
     let contract_id = env.register(Credit, ());
     let client = CreditClient::new(&env, &contract_id);
     client.init(&admin);
-    
+
     let non_admin = Address::generate(&env);
     client.withdraw_treasury(&non_admin);
 }

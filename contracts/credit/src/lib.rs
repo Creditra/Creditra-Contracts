@@ -101,17 +101,22 @@ mod accrual_tests;
 mod amount_validation_tests;
 mod attestation;
 mod auth;
-mod borrow;
-pub mod penalties;
-#[cfg(test)]
-mod penalties_tests;
+pub mod borrow;
 mod collateral;
 #[path = "../../collateral/src/admin.rs"]
 mod collateral_admin;
 mod config;
+/// Off-chain cross-chain liquidation hook. Self-gated to non-WASM hosts; the
+/// module file carries `#![cfg(not(target_arch = "wasm32"))]` so declaring it
+/// here never affects the contract artifact.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cross_chain;
 pub mod events;
 mod fees;
 mod freeze;
+pub mod penalties;
+#[cfg(test)]
+mod penalties_tests;
 // Public: `Auction::get_version` returns `handshake::ProtocolVersion`, so any
 // external auction contract implementing the handshake CPI — including the
 // mock auctions used by the settlement tests — must be able to name the type.
@@ -145,34 +150,33 @@ pub mod storage;
 pub mod types;
 mod views;
 
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
-use crate::auth::{require_admin, require_admin_auth, require_admin_auth_with_argument};
 use crate::attestation::AttestationBatch;
+use crate::auth::{require_admin, require_admin_auth, require_admin_auth_with_argument};
 use crate::events::{
     publish_admin_rotation_accepted, publish_admin_rotation_proposed,
-    publish_borrow_lifecycle_event, publish_borrower_blocked_event,
-    publish_borrower_frozen_event, publish_close_factor_bps_set_event,
-    publish_contract_upgraded_event, publish_credit_line_event,
+    publish_borrow_lifecycle_event, publish_borrower_blocked_event, publish_borrower_frozen_event,
+    publish_close_factor_bps_set_event, publish_contract_upgraded_event, publish_credit_line_event,
     publish_draw_reversed_event, publish_drawn_event, publish_interest_accrued_event,
-    publish_oracle_config_set_event,
-    publish_oracle_quorum_config_set_event, publish_oracle_quorum_price_set_event,
-    publish_paused_event, publish_protocol_fee_bounds_set_event,
-    publish_protocol_fee_bps_set_event, publish_rate_formula_config_event,
-    publish_repayment_event, publish_token_rescued_event,
+    publish_oracle_config_set_event, publish_oracle_quorum_config_set_event,
+    publish_oracle_quorum_price_set_event, publish_paused_event,
+    publish_protocol_fee_bounds_set_event, publish_protocol_fee_bps_set_event,
+    publish_rate_formula_config_event, publish_repayment_event, publish_token_rescued_event,
     publish_treasury_withdrawal_executed, publish_treasury_withdrawal_proposed,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent,
-    CreditLineEvent, DrawReversedEvent, DrawnEvent, InterestAccruedEvent,
-    RepaymentEvent, TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
+    BorrowLifecycleEvent, BorrowLifecyclePhase, ContractUpgradedEvent, CreditLineEvent,
+    DrawReversedEvent, DrawnEvent, InterestAccruedEvent, RepaymentEvent,
+    TreasuryWithdrawalExecutedEvent, TreasuryWithdrawalProposedEvent,
 };
 use crate::math_utils::{mul_div, safe_mul_div, Rounding};
+use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::penalties::LateFeeConfig;
 use crate::storage::{
-    admin_key, assert_not_paused, clear_borrower_frozen,
-    clear_pending_treasury_withdrawal, enforce_freeze_cooldown, enter_reentrancy_guard, get_borrower_by_credit_line_id,
+    admin_key, assert_not_paused, clear_borrower_frozen, clear_pending_treasury_withdrawal,
+    enforce_freeze_cooldown, enter_reentrancy_guard, get_borrower_by_credit_line_id,
     get_borrower_frozen_until, get_credit_line as storage_get_credit_line,
+    get_draw_audit as storage_get_draw_audit,
+    get_draw_reversed_amount as storage_get_draw_reversed_amount,
     get_last_draw_ts as storage_get_last_draw_ts, get_oracle_config, get_oracle_quorum_config,
     get_pending_treasury_withdrawal, get_utilization_cap_bps as storage_get_utilization_cap_bps,
     is_borrower_blocked as storage_is_borrower_blocked,
@@ -180,20 +184,17 @@ use crate::storage::{
     proposed_at_key, rate_cfg_key, rate_formula_key, record_freeze_timestamp_if_cooldown,
     set_borrower_blocked as storage_set_borrower_blocked, set_borrower_frozen_until,
     set_borrower_unblocked, set_draw_reversed_amount as storage_set_draw_reversed_amount,
-    set_max_borrower_exposure as storage_set_max_borrower_exposure,
-    set_last_draw_ts as storage_set_last_draw_ts, set_oracle_config, set_oracle_quorum_config,
-    set_pending_treasury_withdrawal,
-    set_utilization_cap_bps as storage_set_utilization_cap_bps,
-    get_draw_audit as storage_get_draw_audit,
-    get_draw_reversed_amount as storage_get_draw_reversed_amount, DataKey,
-    MAX_ENUMERATION_LIMIT,
+    set_last_draw_ts as storage_set_last_draw_ts,
+    set_max_borrower_exposure as storage_set_max_borrower_exposure, set_oracle_config,
+    set_oracle_quorum_config, set_pending_treasury_withdrawal,
+    set_utilization_cap_bps as storage_set_utilization_cap_bps, DataKey, MAX_ENUMERATION_LIMIT,
 };
-use crate::oracles::{resolve_quorum_price, MAX_ORACLE_FEEDS};
 use crate::types::{
-    BorrowCapabilities, ContractError, CreditLineData, CreditLineSnapshot, CreditLinesPage,
-    CreditStatus, GracePeriodConfig, GraceWaiverMode, LifecycleCapabilities, OracleConfig,
-    OracleQuorumConfig, ProofOfReserve, ProtocolConfig, ProtocolSummary, ProtocolSummaryView,
-    QueryCapabilities, RateChangeConfig, RateFormulaConfig, TreasuryWithdrawalProposal,
+    BorrowCapabilities, BorrowStateSnapshot, ConservationCheckPage, ContractError, CreditLineData,
+    CreditLineSnapshot, CreditLinesPage, CreditStatus, GracePeriodConfig, GraceWaiverMode,
+    LifecycleCapabilities, OracleConfig, OracleQuorumConfig, ProofOfReserve, ProtocolConfig,
+    ProtocolSummary, ProtocolSummaryView, QueryCapabilities, RateChangeConfig, RateFormulaConfig,
+    TreasuryWithdrawalProposal,
 };
 
 #[cfg(test)]
@@ -209,7 +210,6 @@ mod views_tests;
 #[cfg(kani)]
 #[path = "../proofs/prorate_interest.rs"]
 mod prorate_interest_proofs;
-
 
 pub const CONTRACT_API_VERSION: (u32, u32, u32) = (1, 0, 0);
 
@@ -487,10 +487,8 @@ impl Credit {
             }
         }
 
-        let stored_line: CreditLineData =
-            storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
+        let stored_line: CreditLineData = storage_get_credit_line(&env, &borrower)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
         let previous_utilized = stored_line.utilized_amount;
 
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
@@ -519,9 +517,7 @@ impl Credit {
         let updated_utilized = credit_line
             .utilized_amount
             .checked_add(amount)
-            .unwrap_or_else(|| {
-                env.panic_with_error(ContractError::Overflow)
-            });
+            .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow));
 
         if updated_utilized > credit_line.credit_limit {
             env.panic_with_error(ContractError::OverLimit);
@@ -544,18 +540,15 @@ impl Credit {
 
         // Enforce per-borrower utilization cap if configured.
         if let Some(cap_bps) = storage_get_utilization_cap_bps(&env, &borrower) {
-            let credit_limit_u128 = u128::try_from(credit_line.credit_limit).unwrap_or_else(|_| {
-                env.panic_with_error(ContractError::Overflow)
-            });
+            let credit_limit_u128 = u128::try_from(credit_line.credit_limit)
+                .unwrap_or_else(|_| env.panic_with_error(ContractError::Overflow));
             let cap_amount = i128::try_from(mul_div(
                 credit_limit_u128,
                 cap_bps as u128,
                 10_000,
                 Rounding::Floor,
             ))
-            .unwrap_or_else(|_| {
-                env.panic_with_error(ContractError::Overflow)
-            });
+            .unwrap_or_else(|_| env.panic_with_error(ContractError::Overflow));
             if updated_utilized > cap_amount {
                 env.panic_with_error(ContractError::OverLimit);
             }
@@ -564,7 +557,9 @@ impl Credit {
         // Per-borrower absolute exposure cap: block draws that would push this
         // borrower's utilization above their configured cap, independent of the
         // credit limit and the global protocol cap.
-        if let Err(e) = crate::limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized) {
+        if let Err(e) =
+            crate::limits::check_borrower_exposure_cap(&env, &borrower, updated_utilized)
+        {
             env.panic_with_error(e);
         }
 
@@ -595,16 +590,12 @@ impl Credit {
             .storage()
             .instance()
             .get(&DataKey::LiquidityToken)
-            .unwrap_or_else(|| {
-                env.panic_with_error(ContractError::MissingLiquidityToken)
-            });
+            .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquidityToken));
         let reserve_address: Address = env
             .storage()
             .instance()
             .get(&DataKey::LiquiditySource)
-            .unwrap_or_else(|| {
-                env.panic_with_error(ContractError::MissingLiquiditySource)
-            });
+            .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquiditySource));
 
         let token_client = token::Client::new(&env, &token_address);
         let reserve_balance = token_client.balance(&reserve_address);
@@ -687,10 +678,8 @@ impl Credit {
             }
         }
 
-        let stored_line: CreditLineData =
-            storage_get_credit_line(&env, &borrower).unwrap_or_else(|| {
-                env.panic_with_error(ContractError::CreditLineNotFound)
-            });
+        let stored_line: CreditLineData = storage_get_credit_line(&env, &borrower)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
         let previous_utilized = stored_line.utilized_amount;
 
         let mut credit_line = accrual::apply_accrual(&env, stored_line);
@@ -737,11 +726,9 @@ impl Credit {
             let fee_bps: u32 = crate::storage::get_protocol_fee_bps(&env).unwrap_or(0);
             let mut fee: i128 = 0;
             if fee_bps > 0 && interest_repaid > 0 {
-                fee = crate::math_utils::apply_bps(
-                    interest_repaid as u128,
-                    fee_bps,
-                    Rounding::Floor,
-                ) as i128;
+                fee =
+                    crate::math_utils::apply_bps(interest_repaid as u128, fee_bps, Rounding::Floor)
+                        as i128;
             }
 
             // Clamp the fee to what is actually being repaid so that
@@ -752,12 +739,7 @@ impl Credit {
             // Transfer fee portion into contract (treasury accumulator), then
             // transfer remaining amount into the reserve.
             if fee > 0 {
-                token_client.transfer_from(
-                    &contract_address,
-                    &borrower,
-                    &contract_address,
-                    &fee,
-                );
+                token_client.transfer_from(&contract_address, &borrower, &contract_address, &fee);
                 crate::fees::accrue_protocol_fee(&env, &borrower, fee);
             }
 
@@ -791,9 +773,15 @@ impl Credit {
             previous_utilized,
             Some(previous_status),
         );
-        let late_fee_total = lifecycle::advance_repayment_schedule_after_repay(&env, &borrower, effective_repay, interest_repaid);
+        let late_fee_total = lifecycle::advance_repayment_schedule_after_repay(
+            &env,
+            &borrower,
+            effective_repay,
+            interest_repaid,
+        );
         if late_fee_total > 0 {
-            let maybe_token: Option<Address> = env.storage().instance().get(&DataKey::LiquidityToken);
+            let maybe_token: Option<Address> =
+                env.storage().instance().get(&DataKey::LiquidityToken);
             if let Some(token_address) = maybe_token {
                 let token_client = token::Client::new(&env, &token_address);
                 let contract_address = env.current_contract_address();
@@ -829,7 +817,6 @@ impl Credit {
                 timestamp: env.ledger().timestamp(),
             },
         );
-
     }
 
     pub fn update_risk_parameters(
@@ -1070,11 +1057,7 @@ impl Credit {
     /// - `env`: Soroban environment.
     /// - `borrower`: Borrower address to configure.
     /// - `grace_period_seconds`: Grace period duration in seconds. Pass `0` to remove.
-    pub fn set_borrower_liq_grace(
-        env: Env,
-        borrower: Address,
-        grace_period_seconds: u64,
-    ) {
+    pub fn set_borrower_liq_grace(env: Env, borrower: Address, grace_period_seconds: u64) {
         lifecycle::set_per_borrower_liquidation_grace(&env, borrower, grace_period_seconds);
     }
 
@@ -1277,10 +1260,37 @@ impl Credit {
     pub fn set_protocol_fee_bps(env: Env, bps: u32) {
         require_admin_auth(&env);
         crate::storage::assert_no_active_auctions(&env);
-        if bps > MAX_PROTOCOL_FEE_BPS {
+        let min_bps = crate::storage::get_min_protocol_fee_bps(&env);
+        let max_bps = crate::storage::get_max_protocol_fee_bps(&env);
+        if bps < min_bps || bps > max_bps {
             env.panic_with_error(crate::types::ContractError::Overflow);
         }
         crate::storage::set_protocol_fee_bps(&env, bps);
+    }
+
+    /// Set the allowed protocol-fee range in basis points (admin only).
+    ///
+    /// Enforces `min_bps <= max_bps` and `max_bps <= MAX_PROTOCOL_FEE_BPS`
+    /// (the hard 10% cap). The current fee is **not** retroactively validated
+    /// against a narrowed range; only subsequent `set_protocol_fee_bps` calls
+    /// are. Emits `("credit", "fee_bounds")`.
+    pub fn set_protocol_fee_bounds(env: Env, min_bps: u32, max_bps: u32) {
+        require_admin_auth(&env);
+        crate::storage::assert_no_active_auctions(&env);
+        if min_bps > max_bps || max_bps > MAX_PROTOCOL_FEE_BPS {
+            env.panic_with_error(crate::types::ContractError::Overflow);
+        }
+        crate::storage::set_min_protocol_fee_bps(&env, min_bps);
+        crate::storage::set_max_protocol_fee_bps(&env, max_bps);
+        publish_protocol_fee_bounds_set_event(&env, min_bps, max_bps);
+    }
+
+    /// Return the configured protocol-fee bounds as `(min_bps, max_bps)`.
+    pub fn get_protocol_fee_bounds(env: Env) -> (u32, u32) {
+        (
+            crate::storage::get_min_protocol_fee_bps(&env),
+            crate::storage::get_max_protocol_fee_bps(&env),
+        )
     }
 
     /// Get configured protocol fee in basis points, if set.
@@ -1552,7 +1562,11 @@ impl Credit {
     ///     let page2 = client.get_credit_lines_paginated(Some(cursor), 10);
     /// }
     /// ```
-    pub fn get_credit_lines_paginated(env: Env, cursor: Option<u32>, limit: u32) -> CreditLinesPage {
+    pub fn get_credit_lines_paginated(
+        env: Env,
+        cursor: Option<u32>,
+        limit: u32,
+    ) -> CreditLinesPage {
         views::get_credit_lines_paginated(env, cursor, limit)
     }
 
@@ -1635,10 +1649,7 @@ impl Credit {
     ///
     /// # Returns
     /// [`crate::types::CollateralState`] — see field docs for semantics.
-    pub fn get_collateral_state(
-        env: Env,
-        borrower: Address,
-    ) -> crate::types::CollateralState {
+    pub fn get_collateral_state(env: Env, borrower: Address) -> crate::types::CollateralState {
         crate::collateral::get_collateral_state(&env, &borrower)
     }
 
@@ -1944,6 +1955,84 @@ impl Credit {
         out
     }
 
+    /// Admin/keeper: verify the global `TotalUtilized` and `TotalCollateral`
+    /// accumulators against a bounded page of live credit lines (Issue #1269).
+    ///
+    /// # What
+    ///
+    /// The hot accumulator paths (`adjust_total_utilized` /
+    /// `adjust_total_collateral`) intentionally perform only an O(1) checked
+    /// delta on every draw, repay, accrual and collateral move. This entrypoint
+    /// restores the ability to prove the stronger global invariant
+    /// `TotalUtilized == Σ utilized_amount` (and the collateral analogue)
+    /// without paying an O(N) scan in production: an admin or keeper walks the
+    /// stable credit-line id index in pages and aggregates the sums.
+    ///
+    /// # How to interpret the result
+    ///
+    /// Accumulate `scanned`, `utilized_sum` and `collateral_sum` across pages,
+    /// passing `next_cursor` back as the next `cursor`. Once `next_cursor` is
+    /// `None` the walk is complete, and `utilized_sum` /
+    /// `collateral_sum` must equal `stored_total_utilized` /
+    /// `stored_total_collateral`. A mismatch is protocol-corruption evidence:
+    /// it means an accumulator drifted, or an indexed credit-line entry is
+    /// missing/archived. Skipped ids and archived entries contribute nothing,
+    /// which is exactly how the former full-scan assertion detected drift.
+    ///
+    /// # Parameters
+    ///
+    /// - `cursor`: exclusive cursor over the stable numeric id. `None` starts
+    ///   at the first id. Pass `None` for the first call.
+    /// - `limit`: page size, silently capped at [`MAX_ENUMERATION_LIMIT`]
+    ///   (100) to keep each call within Soroban's CPU / read-entry budget.
+    ///   `0` is a no-op that returns the cursor unchanged.
+    ///
+    /// # Authorization
+    ///
+    /// Admin only ([`require_admin_auth`]). Although read-only, the scan is
+    /// deliberately gated so an unprivileged caller cannot use it as a
+    /// read-amplification / DoS vector.
+    ///
+    /// # Failure modes
+    ///
+    /// This view never panics on drift — it reports raw sums and lets the
+    /// keeper decide. It only reverts on missing admin auth, on `i128` overflow
+    /// while summing (`ContractError::Overflow`), or on a storage read failure
+    /// propagated by the host.
+    pub fn verify_conservation(env: Env, cursor: Option<u32>, limit: u32) -> ConservationCheckPage {
+        require_admin_auth(&env);
+
+        let page_limit = limit.min(MAX_ENUMERATION_LIMIT);
+        let (next_cursor, scanned, utilized_sum, collateral_sum) =
+            crate::storage::recompute_conservation_page(&env, cursor, page_limit);
+
+        ConservationCheckPage {
+            next_cursor,
+            scanned,
+            utilized_sum,
+            collateral_sum,
+            stored_total_utilized: crate::storage::get_total_utilized(&env),
+            stored_total_collateral: crate::storage::get_total_collateral(&env),
+        }
+    }
+
+    /// Return a compact, read-only snapshot of `borrower`'s credit line.
+    ///
+    /// Aggregates the credit line, collateral balance, computed health factor
+    /// and delinquency flag into a single query for indexers / dashboards.
+    /// Returns `None` for an unknown borrower.
+    pub fn get_credit_line_snapshot(env: Env, borrower: Address) -> Option<CreditLineSnapshot> {
+        views::get_credit_line_snapshot(env, borrower)
+    }
+
+    /// Return the aggregate borrow state for `borrower` in one read-only call.
+    ///
+    /// Includes the credit line (if any), collateral balance, and the
+    /// amount-independent borrow capabilities. No authentication required.
+    pub fn get_borrow_state(env: Env, borrower: Address) -> BorrowStateSnapshot {
+        views::get_borrow_state(env, borrower)
+    }
+
     pub fn suspend_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
         enforce_accrual_admin_cooldown(&env, &borrower);
@@ -2230,6 +2319,19 @@ impl Credit {
         get_oracle_config(&env)
     }
 
+    /// Return the last accepted oracle price, if any.
+    ///
+    /// `None` before the first successful oracle submission. Read together
+    /// with [`Self::get_oracle_last_price_ts`] to interpret staleness.
+    pub fn get_oracle_last_price(env: Env) -> Option<i128> {
+        crate::storage::get_oracle_last_price(&env)
+    }
+
+    /// Return the ledger timestamp of the last accepted oracle price, if any.
+    pub fn get_oracle_last_price_ts(env: Env) -> Option<u64> {
+        crate::storage::get_oracle_last_price_ts(&env)
+    }
+
     // ── Multi-oracle quorum admin ─────────────────────────────────────────────
 
     /// Configure the multi-oracle quorum parameters (admin only).
@@ -2281,7 +2383,12 @@ impl Credit {
                 max_age_seconds,
             },
         );
-        publish_oracle_quorum_config_set_event(&env, min_quorum_k, max_deviation_bps, max_age_seconds);
+        publish_oracle_quorum_config_set_event(
+            &env,
+            min_quorum_k,
+            max_deviation_bps,
+            max_age_seconds,
+        );
     }
 
     /// Return the current multi-oracle quorum configuration, if set.
@@ -2316,9 +2423,8 @@ impl Credit {
         assert_not_paused(&env);
         require_admin_auth(&env);
 
-        let qcfg = get_oracle_quorum_config(&env).unwrap_or_else(|| {
-            env.panic_with_error(ContractError::OraclePriceInvalid)
-        });
+        let qcfg = get_oracle_quorum_config(&env)
+            .unwrap_or_else(|| env.panic_with_error(ContractError::OraclePriceInvalid));
 
         if prices.len() > oracles::MAX_ORACLE_FEEDS {
             env.panic_with_error(ContractError::OraclePriceInvalid);
@@ -2691,6 +2797,27 @@ impl Credit {
     /// - Panics with auth error if the caller is not the configured admin.
     pub fn unfreeze_draws(env: Env) {
         freeze::unfreeze_draws(env)
+    }
+
+    /// Set the minimum interval between admin freeze/unfreeze actions (admin only).
+    ///
+    /// While set, every freeze/unfreeze entrypoint enforces that at least
+    /// `seconds` have elapsed since the previous such action, reverting with
+    /// [`ContractError::FreezeCooldownActive`] otherwise. Passing `0` disables
+    /// the cooldown and clears any stored value.
+    ///
+    /// # Authorization
+    /// Requires administrative privileges (`require_admin_auth`).
+    pub fn set_freeze_cooldown(env: Env, seconds: u64) {
+        require_admin_auth(&env);
+        crate::storage::set_freeze_cooldown_seconds(&env, seconds);
+    }
+
+    /// Return the configured freeze cooldown in seconds, if set.
+    ///
+    /// Returns `None` when the cooldown is disabled (never set, or set to `0`).
+    pub fn get_freeze_cooldown(env: Env) -> Option<u64> {
+        crate::storage::get_freeze_cooldown_seconds(&env)
     }
 
     /// Returns `true` when draws are globally frozen.
@@ -4928,7 +5055,7 @@ mod test_mock_liquidity_token_extended {
         assert_eq!(cfg.rate_change_min_interval, 3600);
     }
 
-// ── Collateral risk weight tests ─────────────────────────────────────────────
+    // ── Collateral risk weight tests ─────────────────────────────────────────────
 
     #[test]
     #[should_panic(expected = "Error(Contract, #8)")]
@@ -6754,7 +6881,11 @@ mod test_max_draw_amount {
             client.draw_credit(&borrower, &1_000);
 
             let hf = client.get_health_factor(&borrower);
-            assert!(hf >= 12_000, "expected healthy buffer (hf >= 12_000), got {}", hf);
+            assert!(
+                hf >= 12_000,
+                "expected healthy buffer (hf >= 12_000), got {}",
+                hf
+            );
 
             // default_credit_line is an administrative transition and does not check health factor;
             // it succeeds without revert despite the healthy collateral ratio.
@@ -6794,7 +6925,6 @@ mod test_max_draw_amount {
         }
     }
 }
-
 
 /// Regression coverage for the draw-side blocklist enforcement (#1215).
 ///
@@ -6923,7 +7053,6 @@ mod test_issue_1215_blocklist_draw {
     }
 }
 
-
 /// Regression coverage for the repay-side liquidity token requirement (#1221).
 ///
 /// `repay_credit` used to skip the token transfer entirely when
@@ -6974,7 +7103,10 @@ mod test_issue_1221_repay_requires_liquidity_token {
         seed_debt(&env, &contract_id, &borrower, 500);
 
         let outcome = client.try_repay_credit(&borrower, &200_i128);
-        assert_eq!(outcome, Err(Ok(ContractError::MissingLiquidityToken.into())));
+        assert_eq!(
+            outcome,
+            Err(Ok(ContractError::MissingLiquidityToken.into()))
+        );
 
         assert_eq!(
             client.get_credit_line(&borrower).unwrap().utilized_amount,

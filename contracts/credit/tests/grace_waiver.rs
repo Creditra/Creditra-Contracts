@@ -511,7 +511,10 @@ fn straddle_grace_end_full_waiver() {
     client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
-    assert_eq!(evt.waived_amount, 3170, "waived amount is full rate for 10s");
+    assert_eq!(
+        evt.waived_amount, 3170,
+        "waived amount is full rate for 10s"
+    );
 }
 
 #[test]
@@ -533,7 +536,10 @@ fn straddle_grace_end_reduced_rate() {
     client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
-    assert_eq!(evt.waived_amount, 2536, "waived amount is difference for 10s");
+    assert_eq!(
+        evt.waived_amount, 2536,
+        "waived amount is difference for 10s"
+    );
 }
 
 #[test]
@@ -546,7 +552,7 @@ fn boundary_now_equals_grace_end() {
     client.set_grace_period_config(&grace_g, &GraceWaiverMode::FullWaiver, &0_u32);
 
     let grace_end = 1 + grace_g;
-    
+
     env.ledger().set_timestamp(grace_end - 10);
     client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
     let _ = env.events().all();
@@ -555,6 +561,8 @@ fn boundary_now_equals_grace_end() {
     client.update_risk_parameters(&borrower, &100_000_000_000, &1000, &50);
 
     let evt = find_grace_waiver_event(&env).expect("Event must be emitted");
-    assert_eq!(evt.waived_amount, 3170, "waived amount is exactly full rate for 10s");
+    assert_eq!(
+        evt.waived_amount, 3170,
+        "waived amount is exactly full rate for 10s"
+    );
 }
-

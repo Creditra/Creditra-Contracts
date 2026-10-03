@@ -325,10 +325,7 @@ pub fn publish_default_liquidation_requested_event(
     );
 }
 
-pub fn publish_default_liquidation_settled_event(
-    env: &Env,
-    event: DefaultLiquidationSettledEvent,
-) {
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "liq_setl")),
         event,
@@ -341,7 +338,8 @@ pub fn publish_paused_event(env: &Env, paused: bool) {
     } else {
         Symbol::new(env, "unpaused")
     };
-    env.events().publish((symbol_short!("credit"), topic), paused);
+    env.events()
+        .publish((symbol_short!("credit"), topic), paused);
 }
 
 /// Publish a borrower blocked/unblocked event.
@@ -588,8 +586,6 @@ pub fn publish_grace_waiver_receipt_event(
     publish_grace_waiver_applied_event(env, borrower, waived_amount, mode);
 }
 
-
-
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -783,8 +779,10 @@ pub struct CreditLineFreezeEvent {
 }
 
 pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
-    env.events()
-        .publish((symbol_short!("credit"), Symbol::new(env, "col_prel")), event);
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "col_prel")),
+        event,
+    );
 }
 
 pub fn publish_credit_line_freeze_event(
@@ -812,13 +810,16 @@ pub fn publish_protocol_fee_bounds_set_event(env: &Env, min_bps: u32, max_bps: u
 }
 
 pub fn publish_protocol_fee_bps_set_event(env: &Env, bps: u32) {
-    env.events().publish(
-        (symbol_short!("credit"), Symbol::new(env, "fee_bps")),
-        bps,
-    );
+    env.events()
+        .publish((symbol_short!("credit"), Symbol::new(env, "fee_bps")), bps);
 }
 
-pub fn publish_oracle_quorum_config_set_event(env: &Env, min_quorum_k: u32, max_deviation_bps: u32, max_age_seconds: u64) {
+pub fn publish_oracle_quorum_config_set_event(
+    env: &Env,
+    min_quorum_k: u32,
+    max_deviation_bps: u32,
+    max_age_seconds: u64,
+) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "orc_qcfg")),
         (min_quorum_k, max_deviation_bps, max_age_seconds),
@@ -932,4 +933,3 @@ pub fn publish_oracle_value_reported_event(env: &Env, oracle: &Address, value: u
         },
     );
 }
-

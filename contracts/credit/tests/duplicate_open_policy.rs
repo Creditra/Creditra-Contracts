@@ -94,6 +94,9 @@ mod test_helpers {
             CreditStatus::Suspended => {
                 client.suspend_credit_line(&borrower);
             }
+            CreditStatus::SelfSuspended => {
+                client.self_suspend_credit_line(&borrower);
+            }
             CreditStatus::Defaulted => {
                 client.default_credit_line(&borrower);
             }

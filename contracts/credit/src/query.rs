@@ -217,8 +217,7 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     //   health_bps == 10_000  ⟺  collateral == required_collateral
     //   health_bps  < 10_000  ⟺  collateral  < required_collateral (liquidatable)
     //   health_bps  > 10_000  ⟺  collateral  > required_collateral (healthy)
-    let required =
-        crate::collateral::required_collateral(&env, utilized, min_ratio_bps);
+    let required = crate::collateral::required_collateral(&env, utilized, min_ratio_bps);
 
     if required == 0 {
         // Pathological: utilized > 0 but ceiling rounds to 0 (impossible with
@@ -231,10 +230,7 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
     let collateral_u128 = collateral.max(0) as u128;
     let required_u128 = required.max(0) as u128;
 
-    let health_bps = collateral_u128
-        .checked_mul(10_000)
-        .unwrap_or(u128::MAX)
-        / required_u128;
+    let health_bps = collateral_u128.checked_mul(10_000).unwrap_or(u128::MAX) / required_u128;
 
     // Clamp to u32 range.  Values beyond u32::MAX are theoretically possible
     // with extreme collateral-to-debt ratios but serve the same keeper

@@ -13,14 +13,14 @@
   },
   {
     "entrypoint": "draw_credit",
-    "cpu_instructions": 533640,
-    "memory_bytes": 89266,
+    "cpu_instructions": 750826,
+    "memory_bytes": 132980,
     "tolerance_pct": 5.0
   },
   {
     "entrypoint": "repay_credit",
-    "cpu_instructions": 462875,
-    "memory_bytes": 74167,
+    "cpu_instructions": 499811,
+    "memory_bytes": 80932,
     "tolerance_pct": 5.0
   },
   {

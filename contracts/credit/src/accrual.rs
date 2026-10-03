@@ -160,7 +160,6 @@ use soroban_sdk::{Address, Env, Vec};
 /// assert!(updated_line.utilized_amount >= original_utilized);
 /// ```
 pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
-
     let now = env.ledger().timestamp();
 
     // Do nothing if ledger time has not advanced.
@@ -291,9 +290,11 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                     };
 
                     // Calculate waived amount for grace waiver event
-                    let full_rate_interest =
-                        prorate(line.utilized_amount as u128, effective_rate_bps, in_window_secs)
-                            as i128;
+                    let full_rate_interest = prorate(
+                        line.utilized_amount as u128,
+                        effective_rate_bps,
+                        in_window_secs,
+                    ) as i128;
 
                     let actual_interest = match cfg.waiver_mode {
                         GraceWaiverMode::FullWaiver => 0,
@@ -314,8 +315,11 @@ pub fn apply_accrual(env: &Env, mut line: CreditLineData) -> CreditLineData {
                         );
                     }
 
-                    let post_window =
-                        prorate(line.utilized_amount as u128, effective_rate_bps, post_window_secs);
+                    let post_window = prorate(
+                        line.utilized_amount as u128,
+                        effective_rate_bps,
+                        post_window_secs,
+                    );
                     in_window
                         .checked_add(post_window)
                         .unwrap_or_else(|| env.panic_with_error(ContractError::Overflow))
@@ -454,7 +458,6 @@ pub(crate) fn accrue_all_except(env: &Env, excluded: &Address) {
 /// accrue_batch(&env, borrowers);
 /// ```
 pub fn accrue_batch(env: &Env, borrowers: Vec<Address>) {
-
     for borrower in borrowers.iter() {
         if let Some(stored_line) = get_credit_line(env, &borrower) {
             if stored_line.status == CreditStatus::Active && stored_line.utilized_amount > 0 {

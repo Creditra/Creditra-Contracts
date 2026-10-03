@@ -4,8 +4,8 @@
 
 use creditra_credit::types::CreditStatus;
 use creditra_credit::{Credit, CreditClient};
-use gateway_auction::{Auction, AuctionClient, AuctionMode, AuctionError};
-use soroban_sdk::testutils::{Address as _, Events as _};
+use gateway_auction::{Auction, AuctionClient, AuctionError, AuctionMode};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::{token, Address, Env, Symbol};
 
 const CREDIT_LIMIT: i128 = 10_000;
@@ -41,7 +41,7 @@ fn setup_test(env: &Env, draw_amount: i128) -> Deployment {
 
     let auction = AuctionClient::new(env, &auction_id);
     auction.set_factory_contract(&credit_id);
-    
+
     // Set bid_token in auction contract
     env.as_contract(&auction_id, || {
         env.storage()
@@ -60,18 +60,23 @@ fn setup_test(env: &Env, draw_amount: i128) -> Deployment {
         credit_id,
         auction_id,
         borrower,
-        token_id,
+        token_id: token_id.address(),
     }
 }
 
-fn get_total_balance(env: &Env, token_id: &Address, deployment: &Deployment, bidder: &Address) -> i128 {
+fn get_total_balance(
+    env: &Env,
+    token_id: &Address,
+    deployment: &Deployment,
+    bidder: &Address,
+) -> i128 {
     let token_client = token::Client::new(env, token_id);
-    
+
     let credit_balance = token_client.balance(&deployment.credit_id);
     let borrower_balance = token_client.balance(&deployment.borrower);
     let auction_balance = token_client.balance(&deployment.auction_id);
     let bidder_balance = token_client.balance(bidder);
-    
+
     credit_balance + borrower_balance + auction_balance + bidder_balance
 }
 
@@ -112,15 +117,13 @@ fn test_conservation_under_full_liquidation() {
 
     // Settle default liquidation via credit contract
     let credit = CreditClient::new(&env, &deployment.credit_id);
-    credit.settle_default_liquidation(
-        &deployment.borrower,
-        &1_500,
-        &settlement_id,
-        &None,
-    );
+    credit.settle_default_liquidation(&deployment.borrower, &1_500, &settlement_id, &0_u32, &None);
 
     let final_total = get_total_balance(&env, &deployment.token_id, &deployment, &bidder);
-    assert_eq!(initial_total, final_total, "Balances not conserved after default liquidation");
+    assert_eq!(
+        initial_total, final_total,
+        "Balances not conserved after default liquidation"
+    );
 
     // Verify bidder paid, credit contract received the funds
     let token_client = token::Client::new(&env, &deployment.token_id);
@@ -166,15 +169,13 @@ fn test_conservation_under_partial_liquidation() {
 
     // Settle default liquidation via credit contract
     let credit = CreditClient::new(&env, &deployment.credit_id);
-    credit.settle_default_liquidation(
-        &deployment.borrower,
-        &800,
-        &settlement_id,
-        &None,
-    );
+    credit.settle_default_liquidation(&deployment.borrower, &800, &settlement_id, &0_u32, &None);
 
     let final_total = get_total_balance(&env, &deployment.token_id, &deployment, &bidder);
-    assert_eq!(initial_total, final_total, "Balances not conserved after partial liquidation");
+    assert_eq!(
+        initial_total, final_total,
+        "Balances not conserved after partial liquidation"
+    );
 
     let token_client = token::Client::new(&env, &deployment.token_id);
     assert_eq!(token_client.balance(&deployment.auction_id), 0);
@@ -216,16 +217,11 @@ fn test_claim_settled_liquidation_is_prevented() {
 
     // Settle default liquidation
     let credit = CreditClient::new(&env, &deployment.credit_id);
-    credit.settle_default_liquidation(
-        &deployment.borrower,
-        &1_000,
-        &settlement_id,
-        &None,
-    );
+    credit.settle_default_liquidation(&deployment.borrower, &1_000, &settlement_id, &0_u32, &None);
 
     // Winner attempts to claim the auction - should fail because it has already been settled via default liquidation
     let res = env.as_contract(&deployment.auction_id, || {
-        soroban_sdk::std::panic::catch_unwind(soroban_sdk::std::panic::AssertUnwindSafe(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             auction.claim_auction(&settlement_id);
         }))
     });
@@ -267,12 +263,7 @@ fn test_multiple_partial_settlements_funds_conserved() {
     auction.close_auction(&settlement_id_1);
 
     let credit = CreditClient::new(&env, &deployment.credit_id);
-    credit.settle_default_liquidation(
-        &deployment.borrower,
-        &400,
-        &settlement_id_1,
-        &None,
-    );
+    credit.settle_default_liquidation(&deployment.borrower, &400, &settlement_id_1, &0_u32, &None);
 
     // Second settlement
     let settlement_id_2 = Symbol::new(&env, "multi_2");
@@ -296,13 +287,11 @@ fn test_multiple_partial_settlements_funds_conserved() {
     env.ledger().set_timestamp(end_time_2);
     auction.close_auction(&settlement_id_2);
 
-    credit.settle_default_liquidation(
-        &deployment.borrower,
-        &500,
-        &settlement_id_2,
-        &None,
-    );
+    credit.settle_default_liquidation(&deployment.borrower, &500, &settlement_id_2, &0_u32, &None);
 
     let final_total = get_total_balance(&env, &deployment.token_id, &deployment, &bidder);
-    assert_eq!(initial_total, final_total, "Balances not conserved after multiple partial liquidations");
+    assert_eq!(
+        initial_total, final_total,
+        "Balances not conserved after multiple partial liquidations"
+    );
 }

@@ -33,9 +33,8 @@
 use creditra_credit::types::{ContractError, CreditStatus};
 use creditra_credit::{Credit, CreditClient};
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
-    testutils::Address as _,
-    token, Address, Env, Symbol,
+    contract, contractimpl, contracttype, symbol_short, testutils::Address as _, token, Address,
+    Env, Symbol,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,12 +143,7 @@ fn setup_defaulted(utilized: i128) -> (Env, Address, Address) {
     c.set_liquidity_token(&tok);
     token::StellarAssetClient::new(&env, &tok).mint(&cid, &10_000_000_i128);
     token::StellarAssetClient::new(&env, &tok).mint(&borrower, &10_000_000_i128);
-    token::Client::new(&env, &tok).approve(
-        &borrower,
-        &cid,
-        &10_000_000_i128,
-        &1_000_000_u32,
-    );
+    token::Client::new(&env, &tok).approve(&borrower, &cid, &10_000_000_i128, &1_000_000_u32);
 
     c.open_credit_line(&borrower, &1_000_000, &500_u32, &50_u32);
     if utilized > 0 {
@@ -184,15 +178,24 @@ fn ok_cfg(amount: i128) -> MockCfg {
 }
 
 fn bad_version_cfg(amount: i128) -> MockCfg {
-    MockCfg { version_major: 99, ..ok_cfg(amount) }
+    MockCfg {
+        version_major: 99,
+        ..ok_cfg(amount)
+    }
 }
 
 fn panic_get_version_cfg(amount: i128) -> MockCfg {
-    MockCfg { panic_on_get_version: true, ..ok_cfg(amount) }
+    MockCfg {
+        panic_on_get_version: true,
+        ..ok_cfg(amount)
+    }
 }
 
 fn panic_settle_cfg(amount: i128) -> MockCfg {
-    MockCfg { panic_on_settle: true, ..ok_cfg(amount) }
+    MockCfg {
+        panic_on_settle: true,
+        ..ok_cfg(amount)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,7 +215,9 @@ fn guard_cleared_on_version_mismatch() {
     // Must fail with IncompatibleVersion (60)
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &500, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::IncompatibleVersion.into()
     );
 
@@ -223,8 +228,11 @@ fn guard_cleared_on_version_mismatch() {
 
     // Retry must NOT see Reentrancy — guard was cleared
     let s2 = Symbol::new(&env, "vmm2");
-    let r2 = c.try_settle_default_liquidation(&borrower, &500, &s2, &10_000, &None)
-        .err().unwrap().unwrap();
+    let r2 = c
+        .try_settle_default_liquidation(&borrower, &500, &s2, &10_000, &None)
+        .err()
+        .unwrap()
+        .unwrap();
     assert_ne!(
         r2,
         ContractError::Reentrancy.into(),
@@ -244,7 +252,9 @@ fn guard_cleared_on_get_version_cpi_panic() {
 
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &400, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::AuctionCallFailed.into()
     );
 
@@ -253,9 +263,16 @@ fn guard_cleared_on_get_version_cpi_panic() {
 
     // Retry must not see Reentrancy
     let s2 = Symbol::new(&env, "gvp2");
-    let r2 = c.try_settle_default_liquidation(&borrower, &400, &s2, &10_000, &None)
-        .err().unwrap().unwrap();
-    assert_ne!(r2, ContractError::Reentrancy.into(), "guard leaked after get_version CPI panic");
+    let r2 = c
+        .try_settle_default_liquidation(&borrower, &400, &s2, &10_000, &None)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        r2,
+        ContractError::Reentrancy.into(),
+        "guard leaked after get_version CPI panic"
+    );
 }
 
 /// When settle_default_liquidation CPI panics, AuctionCallFailed must be
@@ -270,7 +287,9 @@ fn guard_cleared_on_settle_cpi_panic() {
 
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &300, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::AuctionCallFailed.into()
     );
 
@@ -278,9 +297,16 @@ fn guard_cleared_on_settle_cpi_panic() {
     assert_eq!(line.utilized_amount, 600);
 
     let s2 = Symbol::new(&env, "scp2");
-    let r2 = c.try_settle_default_liquidation(&borrower, &300, &s2, &10_000, &None)
-        .err().unwrap().unwrap();
-    assert_ne!(r2, ContractError::Reentrancy.into(), "guard leaked after settle CPI panic");
+    let r2 = c
+        .try_settle_default_liquidation(&borrower, &300, &s2, &10_000, &None)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        r2,
+        ContractError::Reentrancy.into(),
+        "guard leaked after settle CPI panic"
+    );
 }
 
 /// When auction returns a different amount than recovered_amount,
@@ -295,7 +321,9 @@ fn guard_cleared_on_amount_mismatch() {
 
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &300, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::AuctionCallFailed.into()
     );
 
@@ -303,9 +331,16 @@ fn guard_cleared_on_amount_mismatch() {
     assert_eq!(line.utilized_amount, 500);
 
     let s2 = Symbol::new(&env, "amm2");
-    let r2 = c.try_settle_default_liquidation(&borrower, &300, &s2, &10_000, &None)
-        .err().unwrap().unwrap();
-    assert_ne!(r2, ContractError::Reentrancy.into(), "guard leaked after amount mismatch");
+    let r2 = c
+        .try_settle_default_liquidation(&borrower, &300, &s2, &10_000, &None)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        r2,
+        ContractError::Reentrancy.into(),
+        "guard leaked after amount mismatch"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,7 +358,9 @@ fn retry_succeeds_after_version_mismatch() {
     let s1 = Symbol::new(&env, "rvmf1");
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &400, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::IncompatibleVersion.into()
     );
 
@@ -337,7 +374,10 @@ fn retry_succeeds_after_version_mismatch() {
         .expect("no contract error");
 
     let line = c.get_credit_line(&borrower).unwrap();
-    assert_eq!(line.utilized_amount, 600, "utilized must decrease after successful retry");
+    assert_eq!(
+        line.utilized_amount, 600,
+        "utilized must decrease after successful retry"
+    );
     assert_eq!(line.status, CreditStatus::Defaulted);
 }
 
@@ -351,7 +391,9 @@ fn retry_succeeds_after_settle_cpi_failure() {
     let s1 = Symbol::new(&env, "rscf1");
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &500, &s1, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::AuctionCallFailed.into()
     );
 
@@ -392,14 +434,19 @@ fn replay_blocked_after_partial_success() {
     // Replay with identical settlement_id must fail
     assert_eq!(
         c.try_settle_default_liquidation(&borrower, &300, &sid, &10_000, &None)
-            .err().unwrap().unwrap(),
+            .err()
+            .unwrap()
+            .unwrap(),
         ContractError::AlreadyInitialized.into(),
         "replay must be rejected with AlreadyInitialized"
     );
 
     // State must be unchanged from after the first call
     let after2 = c.get_credit_line(&borrower).unwrap();
-    assert_eq!(after2.utilized_amount, 700, "replay must not double-apply accounting");
+    assert_eq!(
+        after2.utilized_amount, 700,
+        "replay must not double-apply accounting"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -469,8 +516,11 @@ fn multiple_sequential_failures_then_success() {
 
     for i in 0..3_u32 {
         let sid = Symbol::new(&env, &format!("msfs{i}"));
-        let r = c.try_settle_default_liquidation(&borrower, &300, &sid, &10_000, &None)
-            .err().unwrap().unwrap();
+        let r = c
+            .try_settle_default_liquidation(&borrower, &300, &sid, &10_000, &None)
+            .err()
+            .unwrap()
+            .unwrap();
         assert_eq!(r, ContractError::IncompatibleVersion.into());
     }
 

@@ -31,7 +31,13 @@ use soroban_sdk::{
     token, Address, Env,
 };
 
-use std::{collections::HashMap, path::Path};
+// This module is host-only (see the `cfg` above) and is compiled inside a
+// `#![no_std]` library crate, so it must pull the host `std` crate in and name
+// the prelude items it relies on explicitly.
+extern crate std;
+use std::string::{String, ToString};
+use std::vec::Vec;
+use std::{collections::HashMap, eprintln, format, path::Path};
 
 /// Relative path (from the `creditra-credit` crate root) to the pinned snapshot.
 pub const SNAPSHOT_REL_PATH: &str = "../.gas-baseline.json";
@@ -53,6 +59,7 @@ pub mod entrypoint {
     pub const SET_CREDIT_LIMIT_BOUNDS: &str = "set_credit_limit_bounds";
     pub const SET_UTILIZATION_CAP: &str = "set_utilization_cap";
     pub const DEPOSIT_COLLATERAL: &str = "deposit_collateral";
+    pub const PARTIAL_RELEASE_COLLATERAL: &str = "partial_release_collateral";
     pub const WITHDRAW_COLLATERAL: &str = "withdraw_collateral";
     pub const ACCRUE_BATCH: &str = "accrue_batch";
     pub const FREEZE_DRAWS: &str = "freeze_draws";
@@ -272,13 +279,13 @@ pub fn setup_auction_harness() -> (
 
     let auction_id = env.register(gateway_auction::Auction, ());
     let auction = gateway_auction::AuctionClient::new(&env, &auction_id);
-    
+
     // Fund the auction contract for refunds
     token.mint(&auction_id, &1_000_000_000_i128);
 
     // Set factory to admin
     auction.set_factory_contract(&admin);
-    
+
     // Set bid_token manually since we can't call init_auction without it being set indirectly if needed
     env.as_contract(&auction_id, || {
         env.storage()

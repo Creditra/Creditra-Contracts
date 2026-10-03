@@ -98,7 +98,7 @@ fn setup() -> Ctx {
     credit.set_liquidity_source(&admin);
 
     // Allow the contract to pull from the liquidity source.
-    soroban_sdk::token::Client::new(&env, &token.address).approve(
+    soroban_sdk::token::Client::new(&env, &token_id).approve(
         &admin,
         &credit.address,
         &10_000_000_i128,
@@ -110,17 +110,12 @@ fn setup() -> Ctx {
     credit.draw_credit(&borrower, &DRAW_AMOUNT);
 
     // Configure a 6-period repayment schedule (first due at T0 + PERIOD).
-    credit.set_repayment_schedule(
-        &borrower,
-        &AMOUNT_PER_PERIOD,
-        &PERIOD,
-        &(T0 + PERIOD),
-    );
+    credit.set_repayment_schedule(&borrower, &AMOUNT_PER_PERIOD, &PERIOD, &(T0 + PERIOD));
 
     Ctx {
         env,
         credit,
-        token,
+        token: sac,
         admin,
         borrower,
     }

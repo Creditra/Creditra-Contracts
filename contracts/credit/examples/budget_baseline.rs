@@ -294,7 +294,7 @@ fn main() {
             &0_u32,
             &None,
             &None,
-            &gateway_auction::DutchAuctionDecay::None,
+            &None,
             &None,
         );
         let sample = BudgetSample::measure(&env, || {
@@ -321,7 +321,7 @@ fn main() {
             &0_u32,
             &None,
             &None,
-            &gateway_auction::DutchAuctionDecay::None,
+            &None,
             &None,
         );
         auction.place_bid(&auction_id, &bidder1, &100_i128);
@@ -349,12 +349,12 @@ fn main() {
             &0_u32,
             &None,
             &None,
-            &gateway_auction::DutchAuctionDecay::None,
+            &None,
             &None,
         );
         auction.place_bid(&auction_id, &bidder1, &100_i128);
         auction.close_auction(&auction_id);
-        
+
         let borrower = Address::generate(&env);
         let sample = BudgetSample::measure(&env, || {
             auction.settle_default_liquidation(&auction_id, &admin, &borrower);

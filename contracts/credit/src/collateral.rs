@@ -459,9 +459,8 @@ pub fn partial_release_collateral(env: &Env, borrower: &Address, amount: i128) {
     };
 
     // ── 6. Token transfer ──────────────────────────────────────────────────
-    let token_addr = get_collateral_token(env).unwrap_or_else(|| {
-        env.panic_with_error(ContractError::MissingLiquidityToken)
-    });
+    let token_addr = get_collateral_token(env)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingLiquidityToken));
     let token_client = token::Client::new(env, &token_addr);
     let contract_addr = env.current_contract_address();
     token_client.transfer(&contract_addr, borrower, &amount);
@@ -593,7 +592,12 @@ pub fn deposit_collateral_token(env: &Env, borrower: &Address, token_addr: &Addr
 ///
 /// Zero-debt borrowers (no credit line, or `utilized_amount == 0`) withdraw
 /// freely — the floor only protects outstanding utilization.
-pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Address, amount: i128) {
+pub fn withdraw_collateral_token(
+    env: &Env,
+    borrower: &Address,
+    token_addr: &Address,
+    amount: i128,
+) {
     if amount <= 0 {
         env.panic_with_error(ContractError::InvalidAmount);
     }

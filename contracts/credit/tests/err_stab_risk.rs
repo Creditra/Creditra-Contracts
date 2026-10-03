@@ -48,7 +48,7 @@ fn risk_v7_error_discriminants_are_pinned() {
     assert_eq!(ContractError::CreditLineDefaulted as u32, 21);
 
     // Cooldown → borrow admin cooldown
-    assert_eq!(ContractError::AdminCooldownActive as u32, 54);
+    assert_eq!(ContractError::RiskAdminCooldownActive as u32, 54);
 
     // Exposure → limit decrease overflow
     assert_eq!(ContractError::ExposureCapExceeded as u32, 31);
@@ -76,7 +76,7 @@ fn risk_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::ScoreTooHigh.category(), Risk);
     assert_eq!(ContractError::Paused.category(), Risk);
     assert_eq!(ContractError::DrawCooldownActive.category(), Risk);
-    assert_eq!(ContractError::AdminCooldownActive.category(), Risk);
+    assert_eq!(ContractError::RiskAdminCooldownActive.category(), Risk);
 
     // Lifecycle bucket (2)
     assert_eq!(ContractError::CreditLineNotFound.category(), Lifecycle);
@@ -85,7 +85,7 @@ fn risk_v7_category_mappings_are_pinned() {
     assert_eq!(ContractError::CreditLineDefaulted.category(), Lifecycle);
 }
 
-// Snapshot: JSON file stores variant→code mapping 
+// Snapshot: JSON file stores variant→code mapping
 
 fn snapshot_path() -> PathBuf {
     // Resolve relative to CARGO_MANIFEST_DIR so the path works regardless of cwd.
@@ -97,20 +97,44 @@ fn current_risk_snapshot() -> BTreeMap<String, u32> {
     let mut map = BTreeMap::new();
     map.insert("Unauthorized".into(), ContractError::Unauthorized as u32);
     map.insert("NotAdmin".into(), ContractError::NotAdmin as u32);
-    map.insert("CreditLineNotFound".into(), ContractError::CreditLineNotFound as u32);
-    map.insert("CreditLineClosed".into(), ContractError::CreditLineClosed as u32);
+    map.insert(
+        "CreditLineNotFound".into(),
+        ContractError::CreditLineNotFound as u32,
+    );
+    map.insert(
+        "CreditLineClosed".into(),
+        ContractError::CreditLineClosed as u32,
+    );
     map.insert("InvalidAmount".into(), ContractError::InvalidAmount as u32);
     map.insert("NegativeLimit".into(), ContractError::NegativeLimit as u32);
     map.insert("RateTooHigh".into(), ContractError::RateTooHigh as u32);
     map.insert("ScoreTooHigh".into(), ContractError::ScoreTooHigh as u32);
     map.insert("Overflow".into(), ContractError::Overflow as u32);
     map.insert("Paused".into(), ContractError::Paused as u32);
-    map.insert("CreditLineSuspended".into(), ContractError::CreditLineSuspended as u32);
-    map.insert("CreditLineDefaulted".into(), ContractError::CreditLineDefaulted as u32);
-    map.insert("AdminNotInitialized".into(), ContractError::AdminNotInitialized as u32);
-    map.insert("TimestampRegression".into(), ContractError::TimestampRegression as u32);
-    map.insert("LimitOutOfBounds".into(), ContractError::LimitOutOfBounds as u32);
-    map.insert("AdminCooldownActive".into(), ContractError::AdminCooldownActive as u32);
+    map.insert(
+        "CreditLineSuspended".into(),
+        ContractError::CreditLineSuspended as u32,
+    );
+    map.insert(
+        "CreditLineDefaulted".into(),
+        ContractError::CreditLineDefaulted as u32,
+    );
+    map.insert(
+        "AdminNotInitialized".into(),
+        ContractError::AdminNotInitialized as u32,
+    );
+    map.insert(
+        "TimestampRegression".into(),
+        ContractError::TimestampRegression as u32,
+    );
+    map.insert(
+        "LimitOutOfBounds".into(),
+        ContractError::LimitOutOfBounds as u32,
+    );
+    map.insert(
+        "AdminCooldownActive".into(),
+        ContractError::RiskAdminCooldownActive as u32,
+    );
     map
 }
 
@@ -136,7 +160,12 @@ fn parse_snapshot(raw: &str) -> BTreeMap<String, u32> {
         let mut parts = line.splitn(2, ": ");
         let name_raw = parts.next().unwrap_or("").trim();
         let name = name_raw.trim_matches('"');
-        let code: u32 = parts.next().unwrap_or("0").trim().parse().unwrap_or(u32::MAX);
+        let code: u32 = parts
+            .next()
+            .unwrap_or("0")
+            .trim()
+            .parse()
+            .unwrap_or(u32::MAX);
         if !name.is_empty() {
             map.insert(name.to_string(), code);
         }
@@ -151,8 +180,7 @@ fn risk_error_snapshot_matches() {
 
     if std::env::var("UPDATE_SNAPSHOT").is_ok() {
         let json = serialize_snapshot(&current);
-        std::fs::write(&path, json.as_bytes())
-            .expect("write snapshot");
+        std::fs::write(&path, json.as_bytes()).expect("write snapshot");
         return;
     }
 
@@ -182,29 +210,26 @@ fn risk_v7_subset_variant_count_is_known() {
     assert_eq!(current_risk_snapshot().len(), 16);
 }
 
-//  Integration: runtime error paths 
+//  Integration: runtime error paths
 
 #[cfg(test)]
 mod integration {
     use super::*;
 
-    fn setup() -> (Env, CreditClient<'_>, Address) {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let admin = Address::generate(&env);
+    fn setup(env: &Env) -> (CreditClient<'_>, Address) {
+        let admin = Address::generate(env);
         let contract_id = env.register(Credit, ());
-        let client = CreditClient::new(&env, &contract_id);
+        let client = CreditClient::new(env, &contract_id);
         client.init(&admin);
 
-        (env, client, admin)
+        (client, admin)
     }
 
-    fn setup_with_borrower() -> (Env, CreditClient<'_>, Address, Address) {
-        let (env, client, admin) = setup();
-        let borrower = Address::generate(&env);
+    fn setup_with_borrower(env: &Env) -> (CreditClient<'_>, Address, Address) {
+        let (client, admin) = setup(env);
+        let borrower = Address::generate(env);
         client.open_credit_line(&borrower, &1000_i128, &500_u32, &50_u32);
-        (env, client, admin, borrower)
+        (client, admin, borrower)
     }
 
     fn extract_error_str(payload: &Box<dyn std::any::Any + Send>) -> String {
@@ -220,7 +245,10 @@ mod integration {
     // Test 1: update_risk_parameters on non-existent line → CreditLineNotFound (3)
     #[test]
     fn risk_update_nonexistent_line_reverts_with_code_3() {
-        let (env, client, _admin) = setup();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin) = setup(&env);
         let borrower = Address::generate(&env);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -238,7 +266,10 @@ mod integration {
     // Test 2: negative credit limit → NegativeLimit (7)
     #[test]
     fn risk_update_negative_limit_reverts_with_code_7() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.update_risk_parameters(&borrower, &-1_i128, &500_u32, &50_u32);
@@ -255,7 +286,10 @@ mod integration {
     // Test 3: excessive risk score → ScoreTooHigh (9)
     #[test]
     fn risk_update_excessive_score_reverts_with_code_9() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.update_risk_parameters(&borrower, &1000_i128, &500_u32, &101_u32);
@@ -272,7 +306,10 @@ mod integration {
     // Test 4: excessive rate → RateTooHigh (8)
     #[test]
     fn risk_update_excessive_rate_reverts_with_code_8() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.update_risk_parameters(&borrower, &1000_i128, &10_001_u32, &50_u32);
@@ -289,7 +326,10 @@ mod integration {
     // Test 5: paused protocol → Paused (18)
     #[test]
     fn risk_update_while_paused_reverts_with_code_18() {
-        let (env, client, admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, admin, borrower) = setup_with_borrower(&env);
         client.set_protocol_paused(&true);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -307,7 +347,10 @@ mod integration {
     // Test 6: rate change exceeds cap → RateTooHigh (8)
     #[test]
     fn risk_update_excessive_rate_change_reverts_with_code_8() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
         client.set_rate_change_limits(&50_u32, &0_u64);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -346,7 +389,10 @@ mod integration {
     // Test 8: determinism — same risk error twice returns same code
     #[test]
     fn risk_error_discriminant_is_deterministic() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
 
         for run in 1..=2 {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -366,7 +412,10 @@ mod integration {
     // Test 9: limit decrease below utilization → restricted (no error)
     #[test]
     fn risk_limit_decrease_below_utilization_transitions_to_restricted() {
-        let (env, client, _admin, borrower) = setup_with_borrower();
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, _admin, borrower) = setup_with_borrower(&env);
 
         let token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token_address = token_id.address();
@@ -379,9 +428,6 @@ mod integration {
         client.update_risk_parameters(&borrower, &300_i128, &500_u32, &50_u32);
 
         let line = client.get_credit_line(&borrower).unwrap();
-        assert_eq!(
-            line.credit_limit, 300,
-            "credit limit should be 300"
-        );
+        assert_eq!(line.credit_limit, 300, "credit limit should be 300");
     }
 }

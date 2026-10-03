@@ -26,7 +26,7 @@
 use soroban_sdk::testutils::Ledger as _;
 
 use proptest::prelude::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::testutils::{Address as _, Events, Ledger};
 use soroban_sdk::{symbol_short, token, Address, Env, Symbol, TryFromVal};
 
 use creditra_credit::{Credit, CreditClient};
@@ -348,11 +348,13 @@ proptest! {
             outstanding -= effective_repay;
 
             let schedule = ctx.client().get_repayment_schedule(&ctx.borrower).unwrap();
-            prop_assert_eq!(
-                schedule.next_due_ts,
-                expected_due,
-                "amount_per_period={amount_per_period}, period_seconds={period_seconds}, elapsed_seconds={elapsed_seconds}, requested_repay={requested_repay}, effective_repay={effective_repay}, interest_repaid={interest_repaid}, principal_repaid={principal_repaid}, outstanding={outstanding}",
+            // Build the diagnostic message eagerly: proptest's `prop_assert_eq!`
+            // macro expands the literal through `concat!`, which does not resolve
+            // inline format captures.
+            let detail = format!(
+                "amount_per_period={amount_per_period}, period_seconds={period_seconds}, elapsed_seconds={elapsed_seconds}, requested_repay={requested_repay}, effective_repay={effective_repay}, interest_repaid={interest_repaid}, principal_repaid={principal_repaid}, outstanding={outstanding}"
             );
+            prop_assert_eq!(schedule.next_due_ts, expected_due, "{}", detail);
         }
     }
 }

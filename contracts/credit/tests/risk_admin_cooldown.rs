@@ -111,8 +111,7 @@ fn cooldown_blocks_immediate_successive_update() {
 
     // Second update at t=1001 (< 1 hour since last) should fail.
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
     assert!(result.is_err(), "should fail during cooldown");
     let err = result.err().unwrap();
     assert_eq!(
@@ -136,8 +135,7 @@ fn cooldown_elapses_correctly() {
 
     // Still within cooldown at t=3000 (< 1000 + 3600 = 4600).
     env.ledger().with_mut(|li| li.timestamp = 3000);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
     assert!(result.is_err(), "should still be in cooldown at t=3000");
 
     // Cooldown elapsed at t=4600 (1000 + 3600).
@@ -163,8 +161,7 @@ fn cooldown_is_per_borrower_not_global() {
 
     // Update borrower2 at t=1001 — must NOT be blocked (cooldown is per-borrower).
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
+    let result = client.try_update_risk_parameters(&borrower2, &10_000_i128, &600_u32, &80_u32);
     assert!(
         result.is_ok(),
         "cooldown is per-borrower: updating borrower2 should not be blocked by borrower1's cooldown"
@@ -189,8 +186,7 @@ fn cooldown_blocks_same_borrower_within_window() {
 
     // Updating borrower1 again at t=1001 must still be blocked.
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower1, &10_000_i128, &700_u32, &85_u32);
+    let result = client.try_update_risk_parameters(&borrower1, &10_000_i128, &700_u32, &85_u32);
     assert!(
         result.is_err(),
         "same borrower should still be blocked within the cooldown window"
@@ -227,9 +223,11 @@ fn cooldown_independent_windows_per_borrower() {
     // t=4600: borrower1 cooldown elapsed (1000+3600), borrower2 still locked (2000+3600=5600).
     env.ledger().with_mut(|li| li.timestamp = 4600);
     client.update_risk_parameters(&borrower1, &10_000_i128, &700_u32, &85_u32);
-    let result =
-        client.try_update_risk_parameters(&borrower2, &10_000_i128, &700_u32, &85_u32);
-    assert!(result.is_err(), "borrower2 cooldown not yet elapsed at t=4600");
+    let result = client.try_update_risk_parameters(&borrower2, &10_000_i128, &700_u32, &85_u32);
+    assert!(
+        result.is_err(),
+        "borrower2 cooldown not yet elapsed at t=4600"
+    );
 
     // t=5600: borrower2 cooldown elapsed.
     env.ledger().with_mut(|li| li.timestamp = 5600);
@@ -314,12 +312,8 @@ fn cooldown_blocks_even_after_unpause() {
     client.set_protocol_paused(&false);
 
     env.ledger().with_mut(|li| li.timestamp = 1001);
-    let result =
-        client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
-    assert!(
-        result.is_err(),
-        "cooldown should survive pause/unpause"
-    );
+    let result = client.try_update_risk_parameters(&borrower, &10_000_i128, &700_u32, &90_u32);
+    assert!(result.is_err(), "cooldown should survive pause/unpause");
 }
 
 // ── first action always succeeds ─────────────────────────────────────────────

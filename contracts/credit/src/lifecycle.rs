@@ -105,19 +105,16 @@
 
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{
-    publish_borrow_lifecycle_event, publish_credit_line_event,
-    publish_debt_forgiven_event, publish_default_liquidation_requested_event,
-    publish_default_liquidation_settled_event, publish_late_fee_charged_event,
-    BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent, DebtForgivenEvent,
-    DefaultLiquidationSettledEvent, LateFeeChargedEvent,
+    publish_borrow_lifecycle_event, publish_credit_line_event, publish_debt_forgiven_event,
+    publish_default_liquidation_requested_event, publish_default_liquidation_settled_event,
+    publish_late_fee_charged_event, BorrowLifecycleEvent, BorrowLifecyclePhase, CreditLineEvent,
+    DebtForgivenEvent, DefaultLiquidationSettledEvent, LateFeeChargedEvent,
 };
 use crate::risk::{MAX_INTEREST_RATE_BPS, MAX_RISK_SCORE};
 use crate::storage::{
-    add_treasury_balance as storage_add_treasury_balance,
-    assert_not_paused, assert_ts_monotonic, bump_settlement_marker_ttl,
-    clear_repayment_schedule, get_credit_line,
-    get_late_fee_flat as storage_get_late_fee_flat,
-    get_repayment_schedule, persist_credit_line,
+    add_treasury_balance as storage_add_treasury_balance, assert_not_paused, assert_ts_monotonic,
+    bump_settlement_marker_ttl, clear_repayment_schedule, get_credit_line,
+    get_late_fee_flat as storage_get_late_fee_flat, get_repayment_schedule, persist_credit_line,
     set_late_fee_flat as storage_set_late_fee_flat,
     set_repayment_schedule as storage_set_repayment_schedule, CREDIT_LINE_TTL_EXTEND_TO,
     CREDIT_LINE_TTL_THRESHOLD,
@@ -125,8 +122,15 @@ use crate::storage::{
 use crate::types::{ContractError, CreditLineData, CreditStatus, RepaymentSchedule};
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
-fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> (Symbol, Address, Symbol) {
-    (symbol_short!("liq_seen"), borrower.clone(), settlement_id.clone())
+fn liquidation_settlement_key(
+    borrower: &Address,
+    settlement_id: &Symbol,
+) -> (Symbol, Address, Symbol) {
+    (
+        symbol_short!("liq_seen"),
+        borrower.clone(),
+        settlement_id.clone(),
+    )
 }
 
 /// Guard helper: assert that a state transition is valid given the current status.
@@ -358,11 +362,7 @@ fn suspend_credit_line_internal(env: &Env, borrower: Address, target: CreditStat
 /// the admin clears the grace period (`0`) or the `Closed` guard reverts, so
 /// this admin-only path can never be the interaction that lets an active
 /// borrower's entry drift toward archival.
-pub fn set_per_borrower_liquidation_grace(
-    env: &Env,
-    borrower: Address,
-    grace_period_seconds: u64,
-) {
+pub fn set_per_borrower_liquidation_grace(env: &Env, borrower: Address, grace_period_seconds: u64) {
     assert_not_paused(env);
     require_admin_auth(env);
 
@@ -380,8 +380,6 @@ pub fn set_per_borrower_liquidation_grace(
 pub fn get_per_borrower_liquidation_grace(env: &Env, borrower: Address) -> u64 {
     crate::storage::get_per_borrower_liquidation_grace(env, &borrower)
 }
-
-
 
 /// Set the flat late fee per missed installment (admin only).
 ///
@@ -490,7 +488,13 @@ pub fn open_credit_line(
         last_accrual_ts,
         suspension_ts: 0,
     };
-    persist_credit_line(&env, &borrower, &credit_line, previous_utilized, previous_status);
+    persist_credit_line(
+        &env,
+        &borrower,
+        &credit_line,
+        previous_utilized,
+        previous_status,
+    );
     clear_repayment_schedule(&env, &borrower);
 
     publish_credit_line_event(
@@ -596,8 +600,8 @@ pub fn unsuspend_credit_line(env: Env, borrower: Address) {
     // Guard: Suspended|SelfSuspended → Active.
     //   - Active → Active (stale) handled via StaleStateTransition.
     //   - Defaulted/Closed/Restricted → wrong state errors.
-    let is_suspended =
-        credit_line.status == CreditStatus::Suspended || credit_line.status == CreditStatus::SelfSuspended;
+    let is_suspended = credit_line.status == CreditStatus::Suspended
+        || credit_line.status == CreditStatus::SelfSuspended;
     if !is_suspended {
         require_valid_transition(
             &env,
@@ -1161,10 +1165,8 @@ pub fn settle_default_liquidation(
     }
 
     // Step 4: Oracle validation (BEFORE any state mutation)
-    let oracle_result = crate::oracle_validation::validate_settlement_oracle_price(
-        &env,
-        oracle_price,
-    );
+    let oracle_result =
+        crate::oracle_validation::validate_settlement_oracle_price(&env, oracle_price);
 
     // Step 5: Credit line read & accrual
     // Bump TTL on read: this is a hot accrual read path, so an active
@@ -1970,10 +1972,7 @@ mod installment {
         let after = client.get_credit_line(&borrower).unwrap();
         assert_eq!(after.status, CreditStatus::Defaulted); // Still defaulted, not fully liquidated
         assert!(after.utilized_amount < before.utilized_amount);
-        assert_eq!(
-            after.utilized_amount,
-            before.utilized_amount - recovered
-        );
+        assert_eq!(after.utilized_amount, before.utilized_amount - recovered);
     }
 
     /// Partial liquidation with close_factor_bps = 10_000 fully closes the line.
@@ -2145,13 +2144,7 @@ mod installment {
         let settlement_id = Symbol::new(&env, "settle_replay");
 
         // First settlement succeeds
-        client.settle_default_liquidation(
-            &borrower,
-            &50_000,
-            &settlement_id,
-            &5_000,
-            &None,
-        );
+        client.settle_default_liquidation(&borrower, &50_000, &settlement_id, &5_000, &None);
 
         // Second settlement with same (borrower, settlement_id) should fail
         client.settle_default_liquidation(
@@ -2276,13 +2269,7 @@ mod installment {
         // No default call - line is still Active
 
         let settlement_id = Symbol::new(&env, "settle_active");
-        client.settle_default_liquidation(
-            &borrower,
-            &50_000,
-            &settlement_id,
-            &5_000,
-            &None,
-        );
+        client.settle_default_liquidation(&borrower, &50_000, &settlement_id, &5_000, &None);
     }
 }
 

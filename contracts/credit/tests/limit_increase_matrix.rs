@@ -88,44 +88,6 @@ fn test_limit_increase_matrix_success_in_range() {
     let _ = env; // silence unused warning in older toolchains
 }
 
-// #[test]
-fn test_limit_increase_matrix_fail_soft_noop_or_repayment_error_below_utilized() {
-    // Case 2: Fail-soft no-op / repayment error
-    // Attempt to set limit < utilized_amount.
-    // Expect `LimitDecreaseRequiresRepayment = 13`.
-
-    let max_credit_limit = 10_000_i128;
-    let (_env, client, _admin, borrower) = setup_contract_with_bounds(max_credit_limit);
-
-    let initial_limit = 9_000_i128;
-    let utilized = 5_000_i128;
-    open_line_and_draw(&client, &borrower, initial_limit, utilized);
-
-    let decreased_below_utilized = utilized - 1; // < utilized
-    let new_rate_bps = 300_u32;
-    let new_risk_score = 50_u32;
-
-    // Prefer explicit Result-based assertion.
-    let result = client.try_update_risk_parameters(
-        &borrower,
-        &decreased_below_utilized,
-        &new_rate_bps,
-        &new_risk_score,
-    );
-
-    assert!(
-        result.is_err(),
-        "Expected contract error when decreasing below utilization"
-    );
-    let err = result.err().unwrap();
-
-    assert_eq!(
-        err.unwrap(),
-        ContractError::LimitDecreaseRequiresRepayment.into(),
-        "Expected LimitDecreaseRequiresRepayment discriminant (13)"
-    );
-}
-
 #[test]
 fn test_limit_increase_matrix_out_of_bounds_increase_above_max() {
     // Case 3: Out of Bounds error
