@@ -465,6 +465,8 @@ pub enum CollateralEventKind {
     PartiallyReleased = 2,
     /// Collateral tokens released internally as part of an atomic repay+release flow.
     Released = 3,
+    /// Collateral tokens seized during default liquidation settlement.
+    Seized = 4,
 }
 
 /// Persisted state for the global draw-freeze switch ([`crate::storage::DataKey::DrawsFrozen`]).

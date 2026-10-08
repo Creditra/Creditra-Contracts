@@ -495,6 +495,19 @@ pub fn publish_collateral_withdrawn_event(env: &Env, event: CollateralWithdrawnE
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("col_wit")), event);
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollateralSeizedEvent {
+    pub borrower: Address,
+    pub amount: i128,
+    pub remaining_collateral: i128,
+}
+
+pub fn publish_collateral_seized_event(env: &Env, event: CollateralSeizedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("col_szd")), event);
+}
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TokenRescuedEvent {

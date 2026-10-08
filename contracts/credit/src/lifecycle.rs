@@ -1198,6 +1198,31 @@ pub fn settle_default_liquidation(
     let (interest_recovered, principal_recovered) =
         allocate_recovery(&mut credit_line, recovered_amount);
 
+    // Collateral seizure on default settlement (Issue #1228)
+    let cur_collateral = crate::storage::get_collateral_balance(&env, &borrower);
+    if cur_collateral > 0 {
+        let seize_amount = cur_collateral.min(recovered_amount);
+        let remaining_collateral = cur_collateral - seize_amount;
+        crate::storage::set_collateral_balance(&env, &borrower, remaining_collateral);
+
+        crate::events::publish_collateral_seized_event(
+            &env,
+            crate::events::CollateralSeizedEvent {
+                borrower: borrower.clone(),
+                amount: seize_amount,
+                remaining_collateral,
+            },
+        );
+        crate::events::publish_collateral_lifecycle_event(
+            &env,
+            &borrower,
+            crate::types::CollateralEventKind::Seized,
+            None,
+            seize_amount,
+            remaining_collateral,
+        );
+    }
+
     let previous_status = credit_line.status;
     if credit_line.utilized_amount == 0 {
         credit_line.status = CreditStatus::Closed;
