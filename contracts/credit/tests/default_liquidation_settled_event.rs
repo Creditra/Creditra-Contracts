@@ -432,3 +432,37 @@ fn settle_on_nonexistent_line_panics() {
     }));
     assert!(result.is_err());
 }
+
+#[test]
+fn test_settle_default_liquidation_seizes_collateral_and_blocks_withdrawal() {
+    let (env, admin, borrower, token_address) = setup_defaulted_line(2_000_i128);
+    let client = CreditClient::new(&env, &env.register(Credit, ()));
+    client.init(&admin);
+    client.set_liquidity_token(&token_address);
+
+    // Deposit 5,000 collateral
+    client.deposit_collateral(&borrower, &5_000_i128);
+    assert_eq!(client.get_collateral(&borrower), 5_000_i128);
+
+    // Defaulted line: withdraw_collateral must revert
+    let withdraw_res = catch_unwind(AssertUnwindSafe(|| {
+        client.withdraw_collateral(&borrower, &500_i128);
+    }));
+    assert!(withdraw_res.is_err());
+
+    // Settle default liquidation for 2,000 debt
+    let settlement_id = Symbol::new(&env, "settle_szd");
+    client.settle_default_liquidation(
+        &borrower,
+        &2_000_i128,
+        &settlement_id,
+        &10_000_u32,
+        &None,
+    );
+
+    // Assert debt is cleared and collateral is reduced to 3,000
+    let line = client.get_credit_line(&borrower).unwrap();
+    assert_eq!(line.utilized_amount, 0);
+    assert_eq!(client.get_collateral(&borrower), 3_000_i128);
+}
+
