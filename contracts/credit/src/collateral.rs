@@ -54,7 +54,7 @@ use crate::storage::{
     get_min_collateral_ratio_bps, is_collateral_token_allowed, set_collateral_balance,
     set_collateral_balance_for_token,
 };
-use crate::types::{CollateralEventKind, CollateralState, ContractError};
+use crate::types::{CollateralEventKind, CollateralState, ContractError, CreditStatus};
 use soroban_sdk::{token, Address, Env};
 
 /// Compute the minimum collateral required for a given `utilized` amount and
@@ -250,6 +250,9 @@ pub fn withdraw_collateral(env: &Env, borrower: &Address, amount: i128) {
     // The released amount is removed at its own risk weight (Floor), which can
     // only make the remaining value smaller and therefore the check stricter.
     if let Some(credit_line) = get_credit_line(env, borrower) {
+        if credit_line.status == CreditStatus::Defaulted {
+            env.panic_with_error(ContractError::CreditLineDefaulted);
+        }
         if credit_line.utilized_amount > 0 {
             let effective_after = effective_collateral_value(env, borrower)
                 .checked_sub(weighted_collateral_value(
@@ -612,6 +615,9 @@ pub fn withdraw_collateral_token(env: &Env, borrower: &Address, token_addr: &Add
     // borrower's combined effective collateral and require the remainder to still
     // cover the configured floor on the outstanding utilization.
     if let Some(credit_line) = get_credit_line(env, borrower) {
+        if credit_line.status == CreditStatus::Defaulted {
+            env.panic_with_error(ContractError::CreditLineDefaulted);
+        }
         if credit_line.utilized_amount > 0 {
             let effective_after = effective_collateral_value(env, borrower)
                 .checked_sub(weighted_collateral_value(
