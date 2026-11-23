@@ -268,10 +268,16 @@ pub fn update_risk_parameters(
         env.panic_with_error(ContractError::ScoreTooHigh);
     }
 
-    // Verify VRF commitment if score is changing
+    // Verify the score against the borrower's commitment. Once an oracle key is
+    // configured, the commitment must also carry an oracle proof so a legacy
+    // unverified value cannot seed a score change.
     if risk_score != credit_line.risk_score {
         if let Some(_commitment) = crate::scoring::get_vrf_commitment(&env, &borrower) {
-            // VRF commitment exists - verify the score matches
+            if crate::scoring::get_vrf_oracle_public_key(&env).is_some()
+                && !crate::scoring::is_vrf_commitment_verified(&env, &borrower)
+            {
+                env.panic_with_error(ContractError::VrfProofRequired);
+            }
             if !crate::scoring::verify_vrf_commitment(&env, &borrower, risk_score) {
                 env.panic_with_error(ContractError::Unauthorized);
             }

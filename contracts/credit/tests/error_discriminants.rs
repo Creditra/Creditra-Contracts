@@ -80,6 +80,9 @@ fn error_discriminants_are_stable() {
     assert_eq!(ContractError::InsufficientTreasuryBalance as u32, 65);
     // Appended in Issue #1413 — per-borrower absolute exposure cap.
     assert_eq!(ContractError::BorrowerExposureCapExceeded as u32, 66);
+    // Appended in Issue #1447 — on-chain VRF oracle proof verification.
+    assert_eq!(ContractError::VrfProofRequired as u32, 67);
+    assert_eq!(ContractError::VrfOracleNotConfigured as u32, 68);
 }
 
 /// Verify no two variants share the same discriminant.
@@ -148,6 +151,8 @@ fn no_duplicate_discriminants() {
         ContractError::MissingVrfCommitment as u32,
         ContractError::InsufficientTreasuryBalance as u32,
         ContractError::BorrowerExposureCapExceeded as u32,
+        ContractError::VrfProofRequired as u32,
+        ContractError::VrfOracleNotConfigured as u32,
     ];
 
     let unique: HashSet<u32> = codes.iter().cloned().collect();
@@ -161,7 +166,7 @@ fn no_duplicate_discriminants() {
 /// Verify the total variant count matches expectations.
 #[test]
 fn variant_count_is_known() {
-    const EXPECTED_VARIANT_COUNT: usize = 64;
+    const EXPECTED_VARIANT_COUNT: usize = 66;
 
     let codes = [
         ContractError::Unauthorized as u32,
@@ -229,6 +234,8 @@ fn variant_count_is_known() {
         ContractError::MissingVrfCommitment as u32,
         ContractError::InsufficientTreasuryBalance as u32,
         ContractError::BorrowerExposureCapExceeded as u32,
+        ContractError::VrfProofRequired as u32,
+        ContractError::VrfOracleNotConfigured as u32,
     ];
 
     assert_eq!(
@@ -488,6 +495,14 @@ fn category_mappings_are_stable() {
         ContractError::OracleNotFound.category(),
         ContractErrorCategory::Oracle
     );
+    assert_eq!(
+        ContractError::VrfProofRequired.category(),
+        ContractErrorCategory::Oracle
+    );
+    assert_eq!(
+        ContractError::VrfOracleNotConfigured.category(),
+        ContractErrorCategory::Oracle
+    );
     // Collateral
     assert_eq!(
         ContractError::CollateralRatioBelowMinimum.category(),
@@ -653,6 +668,8 @@ fn all_contract_errors() -> Vec<ContractError> {
         ContractError::MissingVrfCommitment,
         ContractError::InsufficientTreasuryBalance,
         ContractError::BorrowerExposureCapExceeded,
+        ContractError::VrfProofRequired,
+        ContractError::VrfOracleNotConfigured,
     ]
 }
 
@@ -896,6 +913,8 @@ fn every_variant_has_known_category() {
         ContractError::MissingVrfCommitment.category(),
         ContractError::InsufficientTreasuryBalance.category(),
         ContractError::BorrowerExposureCapExceeded.category(),
+        ContractError::VrfProofRequired.category(),
+        ContractError::VrfOracleNotConfigured.category(),
     ];
 
     let mut sorted: Vec<ContractErrorCategory> = all_variants.clone();
@@ -906,7 +925,7 @@ fn every_variant_has_known_category() {
         12,
         "Not all 12 categories are covered by variant mappings"
     );
-    assert_eq!(all_variants.len(), 64, "Expected 64 ContractError variants");
+    assert_eq!(all_variants.len(), 66, "Expected 66 ContractError variants");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

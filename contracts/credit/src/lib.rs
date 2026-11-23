@@ -968,13 +968,13 @@ impl Credit {
         storage_get_utilization_cap_bps(&env, &borrower)
     }
 
-    /// Publish an admin score pre-commitment for a borrower (admin only).
+    /// Publish a legacy, unverified score pre-commitment (admin only).
     ///
-    /// Stores a 32-byte hash; while it exists, `update_risk_parameters` accepts
-    /// only a score equal to `sum(bytes) % 101` of that hash. The admin supplies
-    /// both the hash and the score, and **no VRF proof is verified** — this is a
-    /// pre-commitment / change-detection mechanism, not proof of randomness.
-    /// See the `scoring` module docs for the full trust assumptions and caveats.
+    /// Stores a 32-byte value; while it exists, `update_risk_parameters` accepts
+    /// only a score equal to `sum(bytes) % 101` of that value. No proof is
+    /// checked, so the admin can choose a value that reduces to any score. This
+    /// path is kept for ABI compatibility but is rejected once a VRF oracle key
+    /// is configured; use [`Credit::commit_vrf_output_verified`] instead.
     ///
     /// # Parameters
     /// - `borrower`: Address of the borrower whose score is being pre-committed.
@@ -983,6 +983,7 @@ impl Credit {
     /// # Errors
     /// - Reverts if protocol is paused.
     /// - Reverts if caller is not admin.
+    /// - Reverts with `VrfProofRequired` if an oracle key is configured.
     /// - Reverts if a commitment already exists for this borrower.
     pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32>) {
         scoring::commit_vrf_output(env, borrower, commitment_hash)
@@ -1014,6 +1015,70 @@ impl Credit {
     /// The pre-commitment data, or `None` if no commitment exists.
     pub fn get_vrf_commitment(env: Env, borrower: Address) -> Option<scoring::VrfCommitment> {
         scoring::get_vrf_commitment(&env, &borrower)
+    }
+
+    /// Configure or rotate the trusted VRF oracle Ed25519 public key (admin only).
+    ///
+    /// The key authenticates outputs submitted through
+    /// [`Credit::commit_vrf_output_verified`]. It cannot be removed: once set,
+    /// the legacy unverified commit path stays closed. Rotating the key
+    /// invalidates existing verified commitments until they are cleared and
+    /// re-committed under the new key.
+    ///
+    /// # Parameters
+    /// - `public_key`: 32-byte Ed25519 public key of the VRF oracle.
+    ///
+    /// # Errors
+    /// - Reverts if protocol is paused.
+    /// - Reverts if caller is not admin.
+    /// - Reverts with `InvalidAmount` for an all-zero key.
+    pub fn set_vrf_oracle_public_key(env: Env, public_key: BytesN<32>) {
+        scoring::set_vrf_oracle_public_key(env, public_key)
+    }
+
+    /// Get the configured VRF oracle public key, if any.
+    pub fn get_vrf_oracle_public_key(env: Env) -> Option<BytesN<32>> {
+        scoring::get_vrf_oracle_public_key(&env)
+    }
+
+    /// Commit an oracle-attested VRF output (permissionless).
+    ///
+    /// Verifies a 64-byte Ed25519 proof over a message binding this contract,
+    /// `borrower`, and `output`, using the configured oracle key, then stores
+    /// the commitment. The revealed score must reduce to `output`; the admin
+    /// cannot substitute a value of their own once an oracle key is configured.
+    /// Any caller may submit a valid proof.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower whose score is being committed.
+    /// - `output`: 32-byte oracle output.
+    /// - `proof`: 64-byte Ed25519 signature over the proof message.
+    ///
+    /// # Errors
+    /// - Reverts if protocol is paused.
+    /// - Reverts with `VrfOracleNotConfigured` if no oracle key is set.
+    /// - Reverts with `InvalidAmount` if a commitment already exists.
+    /// - Reverts with the host Ed25519 error if the proof is invalid.
+    pub fn commit_vrf_output_verified(
+        env: Env,
+        borrower: Address,
+        output: BytesN<32>,
+        proof: BytesN<64>,
+    ) {
+        scoring::commit_vrf_output_verified(env, borrower, output, proof)
+    }
+
+    /// Get the oracle attestation backing a borrower's commitment, if any.
+    pub fn get_vrf_verification(env: Env, borrower: Address) -> Option<scoring::VrfVerification> {
+        scoring::get_vrf_verification(&env, &borrower)
+    }
+
+    /// Return whether a borrower's commitment is backed by an oracle proof.
+    ///
+    /// The proof must have been verified under the currently configured oracle
+    /// key. Returns `false` for legacy commitments and after a key rotation.
+    pub fn is_vrf_commitment_verified(env: Env, borrower: Address) -> bool {
+        scoring::is_vrf_commitment_verified(&env, &borrower)
     }
 
     // ── Grace period policy ───────────────────────────────────────────────────
