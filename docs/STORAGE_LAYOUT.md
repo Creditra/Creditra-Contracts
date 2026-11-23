@@ -140,6 +140,7 @@ instance storage.
 | `FreezeCooldownSeconds` | `u64` | `set_freeze_cooldown_seconds` |
 | `LastFreezeTimestamp` | `u64` | `record_freeze_timestamp_if_cooldown` |
 | `CollateralTokenAllowlist` | `Vec<Address>` | `set_collateral_token_allowlist` |
+| `DelinquencyGraceSeconds` | `u64` | `set_delinquency_grace_seconds` |
 
 ### 2b. Persistent Storage Variants
 

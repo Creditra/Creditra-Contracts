@@ -1,7 +1,4 @@
-use crate::storage::grace_period_key;
-use crate::types::{
-    CreditLineData, CreditStatus, GracePeriodConfig, ProtocolSummary, RepaymentSchedule,
-};
+use crate::types::{CreditLineData, CreditStatus, ProtocolSummary, RepaymentSchedule};
 use soroban_sdk::{Address, Env};
 
 /// Return the credit line for `borrower`, or `None` if no line exists.
@@ -253,9 +250,12 @@ pub fn get_health_factor(env: Env, borrower: Address) -> u32 {
 /// - The line is `Closed` or has zero outstanding principal.
 /// - The line has no configured [`RepaymentSchedule`].
 ///
-/// The grace window is determined by the global [`GracePeriodConfig`]. When no
-/// config is set, `grace_seconds` defaults to `0`, so any timestamp strictly
-/// greater than `next_due_ts` is treated as delinquent. The comparison uses
+/// The grace window is the dedicated delinquency grace configured through
+/// `set_delinquency_grace_seconds`. Until that key is written, it falls back to
+/// the suspension grace window from [`crate::types::GracePeriodConfig`], which
+/// preserves the boundary used before the two policies were split. When neither
+/// is set, `grace_seconds` defaults to `0`, so any timestamp strictly greater
+/// than `next_due_ts` is treated as delinquent. The comparison uses
 /// `saturating_add` to ensure timestamps near `u64::MAX` do not wrap.
 pub fn is_delinquent(env: Env, borrower: Address) -> bool {
     let Some(line) = get_credit_line(env.clone(), borrower.clone()) else {
@@ -270,9 +270,7 @@ pub fn is_delinquent(env: Env, borrower: Address) -> bool {
         return false;
     };
 
-    let grace_cfg: Option<GracePeriodConfig> =
-        env.storage().instance().get(&grace_period_key(&env));
-    let grace_seconds = grace_cfg.map(|cfg| cfg.grace_period_seconds).unwrap_or(0);
+    let grace_seconds = crate::storage::get_delinquency_grace_seconds(&env);
     let delinquent_after = schedule.next_due_ts.saturating_add(grace_seconds);
 
     env.ledger().timestamp() > delinquent_after

@@ -298,6 +298,7 @@ emits `("credit","rate_form")` with `true`.
 | `set_credit_limit_bounds(min, max)`                                                 | `lib.rs:862`       | `MinCreditLimit`, `MaxCreditLimit`                  | `min >= 0`, `max >= min`.                                                                         |
 | `set_repayment_schedule(borrower, amount_per_period, period_seconds, first_due_ts)` | `lifecycle.rs:182` | `DataKey::RepaymentSchedule(borrower)` (Persistent) | `amount_per_period` is principal-only; interest repayments do not advance `next_due_ts`. All > 0. |
 | `set_grace_period_config(grace_period_seconds, waiver_mode, reduced_rate_bps)`      | `lib.rs:646`       | `Symbol("grace_cfg")` (Instance)                    | `reduced_rate <= 10000`.                                                                          |
+| `set_delinquency_grace_seconds(seconds)`                                            | `lib.rs`           | `DataKey::DelinquencyGraceSeconds` (Instance)       | Independent of `grace_cfg`; falls back to it while unset. `0` disables the grace window.           |
 
 ### 2.6 Collateral
 
@@ -536,6 +537,7 @@ table is also reflected in `docs/storage-layout.md`.)
 | `MinCreditLimit`                   | Instance   | Lower bound on new lines                |
 | `MaxCreditLimit`                   | Instance   | Upper bound on new lines                |
 | `PenaltySurchargeBps`              | Instance   | Delinquency surcharge                   |
+| `DelinquencyGraceSeconds`          | Instance   | Installment grace before delinquency; falls back to `grace_cfg` while unset |
 | `AuctionContract`                  | Instance   | Auction hook address                    |
 | `MaxTotalExposure`                 | Instance   | Global exposure cap                     |
 | `ProtocolFeeBps`                   | Instance   | Fee on interest portion                 |

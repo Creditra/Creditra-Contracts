@@ -1064,6 +1064,38 @@ impl Credit {
         crate::storage::get_grace_period_config(&env)
     }
 
+    /// Set the installment grace window used by `is_delinquent` (admin only).
+    ///
+    /// This is independent of the suspension grace in
+    /// [`Self::set_grace_period_config`]: tuning borrower relief for suspended
+    /// lines no longer moves the point at which scheduled borrowers become
+    /// delinquent and start paying the penalty surcharge.
+    ///
+    /// Until this setter is called, `is_delinquent` falls back to the
+    /// suspension grace window so existing deployments keep their current
+    /// delinquency boundary. Once set, the value is authoritative; pass `0` to
+    /// make a missed due date delinquent immediately.
+    ///
+    /// # Parameters
+    /// - `seconds`: Grace window added to `next_due_ts`. Must fit in `u64`;
+    ///   no upper bound is enforced because the comparison saturates.
+    ///
+    /// # Errors
+    /// - Reverts if caller is not the contract admin.
+    pub fn set_delinquency_grace_seconds(env: Env, seconds: u64) {
+        require_admin_auth(&env);
+        crate::storage::set_delinquency_grace_seconds(&env, seconds);
+    }
+
+    /// Return the effective installment grace window in seconds.
+    ///
+    /// Mirrors the value used by [`Self::is_delinquent`]: the dedicated
+    /// delinquency grace when set, otherwise the suspension grace from
+    /// [`Self::get_grace_period_config`], otherwise `0`.
+    pub fn get_delinquency_grace_seconds(env: Env) -> u64 {
+        crate::storage::get_delinquency_grace_seconds(&env)
+    }
+
     /// Set or update the per-borrower liquidation grace period in seconds (admin only).
     ///
     /// # Arguments

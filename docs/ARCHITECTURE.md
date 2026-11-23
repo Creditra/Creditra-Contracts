@@ -282,6 +282,7 @@ flowchart TB
         I8["rate_cfg / rate_form / grace_cfg"]
         I9["OracleConfig / OracleLastPrice / OracleLastPriceTs"]
         I10["AuctionContract / CreditLineCount / TotalUtilized / SchemaVersion"]
+        I11["DelinquencyGraceSeconds"]
     end
 
     subgraph Persistent["Persistent storage (per-key TTL)"]
