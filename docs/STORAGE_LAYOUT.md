@@ -131,6 +131,7 @@ instance storage.
 | `OracleConfig` | `OracleConfig` | `set_oracle_config` |
 | `OracleLastPrice` | `i128` | `set_oracle_last_price` (atomic pair) |
 | `OracleLastPriceTs` | `u64` | `set_oracle_last_price` (atomic pair) |
+| `VrfOraclePublicKey` | `BytesN<32>` | `set_vrf_oracle_public_key` (configure or rotate) |
 | `OracleQuorumConfig` | `OracleQuorumConfig` | `set_oracle_quorum_config` |
 | `OracleQuorumPrice` | `i128` | `set_oracle_quorum_price` (atomic pair) |
 | `OracleQuorumPriceTs` | `u64` | `set_oracle_quorum_price` (atomic pair) |
@@ -161,7 +162,8 @@ below.
 | `RateFloorBps(Address)` | `u32` | ✅ `bump_persistent_ttl` on read & write | `set_borrower_rate_floor` |
 | `RateCeilingBps(Address)` | `u32` | ✅ `bump_persistent_ttl` on read & write | `set_borrower_rate_ceiling` |
 | `RepaymentSchedule(Address)` | `RepaymentSchedule` | ✅ `bump_persistent_ttl` (implicit via `storage::set_repayment_schedule`) | `set_repayment_schedule`, `advance_repayment_schedule_after_repay` |
-| `VrfCommitment(Address)` | `BytesN<32>` | ⚠️ No explicit bump | VRF-related admin entrypoints |
+| `VrfCommitment(Address)` | `VrfCommitment` | ✅ `bump_vrf_commitment_ttl` on read & write | `commit_vrf_output`, `commit_vrf_output_verified`, `clear_vrf_commitment` |
+| `VrfVerification(Address)` | `VrfVerification` | ✅ `bump_vrf_verification_ttl` on read & write | `commit_vrf_output_verified`, `clear_vrf_commitment` |
 | `CollateralBalance(Address)` | `i128` | ✅ `bump_persistent_ttl` on read & write | `deposit_collateral`, `withdraw_collateral`, `partial_release_collateral` |
 | `CollateralBalanceV2(Address, Address)` | `i128` (per-token) | ✅ `bump_persistent_ttl` on read & write | Multi-collateral deposit/withdraw entrypoints |
 | `DrawAudit(DrawAuditKey)` | `i128` | ⚠️ No explicit bump — relies on co-bump via credit-line entry | `draw_credit` (write), `reverse_draw` (read) |

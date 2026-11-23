@@ -1,92 +1,158 @@
 // SPDX-License-Identifier: MIT
 
-//! Admin score pre-commitment hooks (the `Vrf` naming is legacy).
+//! VRF output commitments and on-chain oracle proof verification.
 //!
 //! # What
 //!
-//! [`commit_vrf_output`] lets the admin publish a 32-byte hash for a borrower.
-//! Once a commitment exists, `update_risk_parameters` accepts only a score that
-//! equals the deterministic reduction of that hash
-//! ([`derive_score_from_hash`], `sum(bytes) % 101`), checked by
-//! [`verify_vrf_commitment`].
+//! Scores are committed through one of two paths:
+//!
+//! 1. **Verified (recommended).** [`commit_vrf_output_verified`] accepts a
+//!    32-byte oracle output and a 64-byte Ed25519 proof. The contract rebuilds
+//!    a domain-separated message binding the contract address, the borrower,
+//!    and the output, verifies it against the configured VRF oracle public key
+//!    with the host's Ed25519 verifier, and only then stores the commitment.
+//!    `update_risk_parameters` derives the accepted score from that verified
+//!    output ([`derive_score_from_hash`], `sum(bytes) % 101`).
+//! 2. **Legacy pre-commitment.** [`commit_vrf_output`] stores a 32-byte value
+//!    supplied by the admin, with no proof. It is kept for ABI compatibility
+//!    but is rejected once an oracle key is configured
+//!    ([`ContractError::VrfProofRequired`]), and
+//!    `update_risk_parameters` rejects score changes that rely on it.
+//!
+//! The oracle key is managed with [`set_vrf_oracle_public_key`] (admin only).
+//!
+//! # Proof message
+//!
+//! The signed message is the concatenation of Soroban XDR values:
+//!
+//! ```text
+//! b"CreditraVRF/v1"
+//! || ScVal::Address(contract_id).to_xdr()
+//! || ScVal::Address(borrower).to_xdr()
+//! || ScVal::Bytes(output).to_xdr()
+//! ```
+//!
+//! Binding the contract address prevents a proof for one deployment from being
+//! replayed on another; binding the borrower prevents cross-borrower replay;
+//! binding the output ties the signature to the exact 32 bytes that seed the
+//! score. [`vrf_proof_message`] exposes the encoding so off-chain signers can
+//! reproduce it byte-for-byte.
 //!
 //! # What this is *not*
 //!
-//! Despite the `Vrf`-prefixed names (kept for ABI and storage compatibility),
-//! **no VRF proof is verified on-chain and the protocol generates no
-//! randomness**:
-//!
-//! - The admin supplies the hash *and* the score that must match it. The
-//!   contract cannot distinguish a genuine VRF output from arbitrary bytes the
-//!   admin chose.
-//! - [`derive_score_from_hash`] is public and deterministic, so for any target
-//!   score in `[0, 100]` a matching hash is trivial to construct (for example,
-//!   the hash `[s, 0, .., 0]` reduces to `s`).
-//! - The commitment is therefore a **pre-commitment / change-detection** device,
-//!   not a source of unpredictability: it lets an observer detect a score that
-//!   does not match the previously published hash, but it does not stop the
-//!   admin from choosing a favourable hash up front.
+//! The contract does not run a VRF. It authenticates the output of an oracle
+//! that is trusted to run one. [`derive_score_from_hash`] is a public,
+//! deterministic, lossy reduction: it is not a hash and has no preimage
+//! resistance. What the verified path adds is that the 32 bytes must carry a
+//! valid oracle signature over this contract, this borrower, and this output,
+//! so the admin cannot substitute a hash of their choosing.
 //!
 //! # Trust assumptions
 //!
-//! The (weaker) guarantee above holds only if **all** of the following are true.
-//! None of them is enforced on-chain:
+//! The guarantee holds only while all of the following hold:
 //!
-//! 1. The committed hash really is the output of a VRF whose seed and proof the
-//!    admin could not control or predict when choosing it.
-//! 2. The admin commits *before* learning the information the score is meant to
-//!    be independent of, and does not grind candidate hashes off-chain.
-//! 3. [`clear_vrf_commitment`] (admin-only) is used as an exceptional recovery
-//!    path, not a routine way to reset the commitment.
-//! 4. Integrators present the commitment as *advisory* evidence of a
-//!    pre-committed score, never as cryptographic proof of fairness.
+//! 1. **The oracle key is independent.** The key set with
+//!    [`set_vrf_oracle_public_key`] belongs to an oracle whose signing policy is
+//!    not controlled by the same party that sets scores. An admin who can
+//!    rotate the key to one they control can forge outputs, so production
+//!    deployments should place the admin role behind a governance contract or
+//!    multisig with a timelock.
+//! 2. **The oracle signs once per cycle.** The message binds the borrower and
+//!    output but carries no epoch or freshness deadline, so the oracle must not
+//!    sign competing outputs for the same borrower. If it does, whoever submits
+//!    first (verified commits are permissionless) selects the output.
+//! 3. **The oracle is live.** If the oracle stops signing, verified score
+//!    changes are impossible. `clear_vrf_commitment` and
+//!    `update_risk_parameters` remain usable without a commitment, and the
+//!    legacy path is only blocked while an oracle key is configured.
+//! 4. **Key rotation is deliberate.** [`is_vrf_commitment_verified`] requires
+//!    the recorded proof to use the *currently* configured key, so rotating the
+//!    key invalidates existing verified commitments until they are cleared and
+//!    re-committed. This is intentional: it lets governance revoke a
+//!    compromised key.
 //!
-//! Commitments are also optional: when no commitment exists,
-//! `update_risk_parameters` skips the score check entirely, so the mechanism
-//! cannot constrain an admin who simply never commits.
+//! Commitments are optional: when no commitment exists,
+//! `update_risk_parameters` skips the score check entirely (issue #1240 tracks
+//! making them mandatory).
+//!
+//! # Failure modes
+//!
+//! An invalid proof makes [`commit_vrf_output_verified`] revert with the
+//! Soroban host's Ed25519 verification error
+//! (`ScErrorType::Crypto` / `ScErrorCode::InvalidInput`, message
+//! `"failed ED25519 verification"`). The contract cannot catch host crypto
+//! errors, so this is the dedicated failure for a bad signature; the
+//! contract-level errors [`ContractError::VrfOracleNotConfigured`] and
+//! [`ContractError::VrfProofRequired`] cover the configuration and legacy-path
+//! cases.
 //!
 //! # Follow-ups
 //!
-//! On-chain verification of an actual VRF proof (or of an authenticated oracle
-//! output) is not implemented; see issue #1447
-//! (<https://github.com/Creditra/Creditra-Contracts/issues/1447>). The score
-//! distribution of [`derive_score_from_hash`] is measured by the fixed-seed
-//! test in `contracts/credit/tests/vrf_commitment.rs` (issue #1329).
+//! The score distribution of [`derive_score_from_hash`] is measured by the
+//! fixed-seed test in `contracts/credit/tests/vrf_commitment.rs` (issue #1329).
 
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused, bump_vrf_commitment_ttl, DataKey};
+use crate::events::{
+    publish_vrf_commitment_verified_event, publish_vrf_oracle_key_set_event,
+    VrfCommitmentVerifiedEvent, VrfOracleKeySetEvent,
+};
+use crate::storage::{
+    assert_not_paused, bump_vrf_commitment_ttl, bump_vrf_verification_ttl,
+    get_vrf_oracle_public_key as read_vrf_oracle_public_key,
+    set_vrf_oracle_public_key as store_vrf_oracle_public_key, DataKey,
+};
 use crate::types::ContractError;
-use soroban_sdk::{Address, BytesN, Env};
+use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{Address, Bytes, BytesN, Env};
 
-/// Length of the pre-commitment hash in bytes (32).
+/// Domain separator prefixed to every signed VRF proof message.
+pub const VRF_PROOF_DOMAIN: &[u8] = b"CreditraVRF/v1";
+
+/// Length of the oracle output / commitment value in bytes (32).
 pub const VRF_COMMITMENT_HASH_LEN: u32 = 32;
+
+/// Length of an Ed25519 proof in bytes (64).
+pub const VRF_PROOF_LEN: u32 = 64;
 
 /// Score pre-commitment stored per borrower.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[soroban_sdk::contracttype]
 pub struct VrfCommitment {
-    /// Admin-supplied 32-byte value that the revealed score must reduce to.
+    /// 32-byte value that the revealed score must reduce to.
+    ///
+    /// For a verified commitment this is the oracle output whose Ed25519 proof
+    /// was checked at commit time. For a legacy commitment it is the
+    /// unauthenticated value supplied by the admin.
     pub commitment_hash: BytesN<32>,
     /// Ledger timestamp when the commitment was made.
     pub committed_at: u64,
 }
 
-/// Commit to a 32-byte hash that a future score must reduce to (admin only).
+/// Oracle attestation backing a verified VRF commitment.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[soroban_sdk::contracttype]
+pub struct VrfVerification {
+    /// The oracle output that was verified.
+    pub output: BytesN<32>,
+    /// Oracle public key that signed the proof message.
+    pub oracle_public_key: BytesN<32>,
+    /// Ledger timestamp when the proof was verified.
+    pub verified_at: u64,
+}
+
+/// Commit to a 32-byte value with no proof (legacy, admin only).
 ///
-/// # What it guarantees
-/// Once stored, `update_risk_parameters` accepts only a score equal to
-/// [`derive_score_from_hash`] of this hash, until the commitment is cleared.
-/// Off-chain observers can therefore detect a score that does not match the
-/// previously published hash.
+/// This is the original pre-commitment path. It stores an unauthenticated
+/// 32-byte value that the revealed score must reduce to. Because
+/// [`derive_score_from_hash`] is public, an admin can construct a value that
+/// reduces to any desired score, so this path provides change detection only.
 ///
-/// # What it does *not* guarantee
-/// No VRF proof is verified and the stored hash is not authenticated as a VRF
-/// output — the admin chooses it. Because [`derive_score_from_hash`] is public,
-/// the admin can pick a hash whose reduction is any desired score. This is a
-/// pre-commitment, not proof of randomness; see the module docs for the trust
-/// assumptions.
+/// Prefer [`commit_vrf_output_verified`]. Once a VRF oracle public key is
+/// configured with [`set_vrf_oracle_public_key`], this entrypoint reverts with
+/// [`ContractError::VrfProofRequired`] so an unverified commitment cannot
+/// shadow the verified path.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
@@ -102,12 +168,16 @@ pub struct VrfCommitment {
 /// # Errors
 /// - Panics with [`ContractError::Paused`] if the protocol is paused.
 /// - Panics with auth error if the caller is not the configured admin.
+/// - Panics with [`ContractError::VrfProofRequired`] if an oracle key is configured.
 /// - Panics with [`ContractError::InvalidAmount`] if a commitment already exists for this borrower.
 pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32>) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
-    // Check if a commitment already exists
+    if read_vrf_oracle_public_key(&env).is_some() {
+        env.panic_with_error(ContractError::VrfProofRequired);
+    }
+
     let key = DataKey::VrfCommitment(borrower.clone());
     if env.storage().persistent().has(&key) {
         env.panic_with_error(ContractError::InvalidAmount);
@@ -122,12 +192,186 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     bump_vrf_commitment_ttl(&env, &borrower);
 }
 
-/// Return whether `risk_score` equals the reduction of the committed hash.
+/// Configure or rotate the trusted VRF oracle Ed25519 public key (admin only).
+///
+/// The key authenticates oracle outputs submitted through
+/// [`commit_vrf_output_verified`]. It is stored in instance storage and cannot
+/// be removed: once set, the legacy unverified path stays closed.
+///
+/// Rotating the key invalidates existing verified commitments, because
+/// [`is_vrf_commitment_verified`] requires the recorded proof to use the current
+/// key. See the module docs for the trust model around key management.
+///
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `public_key`: 32-byte Ed25519 public key of the VRF oracle.
+///
+/// # Authorization
+/// Requires administrative privileges.
+///
+/// # Errors
+/// - Panics with [`ContractError::Paused`] if the protocol is paused.
+/// - Panics with auth error if the caller is not the configured admin.
+/// - Panics with [`ContractError::InvalidAmount`] for an all-zero key.
+pub fn set_vrf_oracle_public_key(env: Env, public_key: BytesN<32>) {
+    assert_not_paused(&env);
+    require_admin_auth(&env);
+
+    if is_zero_public_key(&public_key) {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    store_vrf_oracle_public_key(&env, &public_key);
+    publish_vrf_oracle_key_set_event(
+        &env,
+        VrfOracleKeySetEvent {
+            oracle_public_key: public_key,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Return the configured VRF oracle public key, if any.
+pub fn get_vrf_oracle_public_key(env: &Env) -> Option<BytesN<32>> {
+    read_vrf_oracle_public_key(env)
+}
+
+/// Build the domain-separated message the oracle signs for `(borrower, output)`.
+///
+/// The encoding is `VRF_PROOF_DOMAIN` followed by the Soroban XDR encoding of
+/// the contract address, the borrower address, and the output bytes, in that
+/// order. Off-chain signers must reproduce these bytes exactly.
+pub fn vrf_proof_message(env: &Env, borrower: &Address, output: &BytesN<32>) -> Bytes {
+    let mut message = Bytes::from_slice(env, VRF_PROOF_DOMAIN);
+    message.append(&env.current_contract_address().to_xdr(env));
+    message.append(&borrower.clone().to_xdr(env));
+    message.append(&output.clone().to_xdr(env));
+    message
+}
+
+/// Verify an oracle proof and store the resulting commitment (permissionless).
+///
+/// Anyone may submit a valid oracle-signed output: the proof is the
+/// authorization, so the admin is not a gatekeeper for verified commitments.
+/// The signature must cover this contract, `borrower`, and `output`; see
+/// [`vrf_proof_message`].
+///
+/// An invalid proof reverts with the Soroban host's Ed25519 verification error
+/// (`ScErrorType::Crypto` / `ScErrorCode::InvalidInput`).
+///
+/// # Parameters
+/// - `env`: The Soroban environment.
+/// - `borrower`: Address of the borrower whose score is being committed.
+/// - `output`: 32-byte oracle output from which the score is derived.
+/// - `proof`: 64-byte Ed25519 signature over the proof message.
+///
+/// # Storage
+/// Writes `DataKey::VrfCommitment(Address)` and `DataKey::VrfVerification(Address)`
+/// in persistent storage.
+///
+/// # Errors
+/// - Panics with [`ContractError::Paused`] if the protocol is paused.
+/// - Panics with [`ContractError::VrfOracleNotConfigured`] if no oracle key is set.
+/// - Panics with [`ContractError::InvalidAmount`] if a commitment already exists.
+/// - Reverts with the host Ed25519 error if the proof is invalid.
+pub fn commit_vrf_output_verified(
+    env: Env,
+    borrower: Address,
+    output: BytesN<32>,
+    proof: BytesN<64>,
+) {
+    assert_not_paused(&env);
+
+    let commitment_key = DataKey::VrfCommitment(borrower.clone());
+    if env.storage().persistent().has(&commitment_key) {
+        env.panic_with_error(ContractError::InvalidAmount);
+    }
+
+    let oracle_public_key = read_vrf_oracle_public_key(&env)
+        .unwrap_or_else(|| env.panic_with_error(ContractError::VrfOracleNotConfigured));
+
+    let message = vrf_proof_message(&env, &borrower, &output);
+    env.crypto()
+        .ed25519_verify(&oracle_public_key, &message, &proof);
+
+    let now = env.ledger().timestamp();
+    env.storage().persistent().set(
+        &commitment_key,
+        &VrfCommitment {
+            commitment_hash: output.clone(),
+            committed_at: now,
+        },
+    );
+    bump_vrf_commitment_ttl(&env, &borrower);
+
+    env.storage().persistent().set(
+        &DataKey::VrfVerification(borrower.clone()),
+        &VrfVerification {
+            output: output.clone(),
+            oracle_public_key: oracle_public_key.clone(),
+            verified_at: now,
+        },
+    );
+    bump_vrf_verification_ttl(&env, &borrower);
+
+    publish_vrf_commitment_verified_event(
+        &env,
+        VrfCommitmentVerifiedEvent {
+            borrower,
+            output,
+            oracle_public_key,
+            timestamp: now,
+        },
+    );
+}
+
+/// Return the oracle attestation backing a borrower's commitment, if any.
+pub fn get_vrf_verification(env: &Env, borrower: &Address) -> Option<VrfVerification> {
+    let key = DataKey::VrfVerification(borrower.clone());
+    if env.storage().persistent().has(&key) {
+        bump_vrf_verification_ttl(env, borrower);
+        env.storage().persistent().get(&key)
+    } else {
+        None
+    }
+}
+
+/// Return whether the borrower's commitment is backed by an oracle proof.
+///
+/// The recorded output must equal the stored commitment and the proof must have
+/// been verified under the currently configured oracle key. A legacy commitment
+/// or a commitment verified before a key rotation returns `false`.
+pub fn is_vrf_commitment_verified(env: &Env, borrower: &Address) -> bool {
+    let Some(commitment) = get_vrf_commitment(env, borrower) else {
+        return false;
+    };
+    let Some(verification) = get_vrf_verification(env, borrower) else {
+        return false;
+    };
+    let Some(current_key) = read_vrf_oracle_public_key(env) else {
+        return false;
+    };
+
+    verification.output == commitment.commitment_hash
+        && verification.oracle_public_key == current_key
+}
+
+fn is_zero_public_key(public_key: &BytesN<32>) -> bool {
+    for i in 0u32..VRF_COMMITMENT_HASH_LEN {
+        if public_key.get(i) != Some(0) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Return whether `risk_score` equals the reduction of the committed value.
 ///
 /// # What "verify" means here
 /// This is an equality check against [`derive_score_from_hash`] of the stored
-/// 32 bytes. It does **not** verify a VRF proof and does **not** establish that
-/// the stored hash came from a VRF — see the module docs.
+/// 32 bytes. It does **not** inspect a proof. Pair it with
+/// [`is_vrf_commitment_verified`] when the caller needs to know that the stored
+/// value was oracle-attested.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
@@ -173,10 +417,12 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
 ///
 /// # Distribution
 ///
-/// The score is approximately uniform over `[0, 100]`, but not because the
-/// byte sum is: the sum of 32 uniform bytes is bell-shaped (mean 4080,
-/// standard deviation ~418), and folding that shape modulo 101 averages it
-/// out because the deviation is more than four times the modulus.
+/// The score is approximately uniform over `[0, 100]`, but not exactly. The
+/// sum of 32 uniform bytes is bell-shaped (mean 4080, standard deviation
+/// ~418), and `8161 = 101 * 80 + 81` leaves a small modulo bias (~1.25%).
+/// Folding the bell shape modulo 101 still averages most of it out because the
+/// deviation is more than four times the modulus, so the fixed-seed chi-square
+/// test below does not reject uniformity.
 ///
 /// This is measured rather than assumed. The fixed-seed distribution test in
 /// `contracts/credit/tests/vrf_commitment.rs`
@@ -224,12 +470,12 @@ pub fn derive_score_from_hash_test_helper(hash: &BytesN<32>) -> u32 {
 
 /// Clear the score pre-commitment for a borrower (admin only).
 ///
-/// Removes the commitment so `update_risk_parameters` stops checking the score
-/// against a previously published hash until a new commitment is made. This is
-/// intended as an exceptional recovery path (for example, when the
-/// off-chain score process has to be restarted). Because it is admin-only and
-/// resets the check, routine use would defeat the change-detection property;
-/// see the module docs for trust assumptions.
+/// Removes the commitment and its oracle attestation so
+/// `update_risk_parameters` stops checking the score until a new commitment is
+/// made. This is intended as an exceptional recovery path (for example, when
+/// the off-chain score process has to be restarted, or to re-commit after a
+/// key rotation). Because it is admin-only and resets the check, routine use
+/// would defeat the change-detection property; see the module docs.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
@@ -239,7 +485,7 @@ pub fn derive_score_from_hash_test_helper(hash: &BytesN<32>) -> u32 {
 /// Requires administrative privileges.
 ///
 /// # Storage
-/// Removes the commitment from `DataKey::VrfCommitment(Address)`.
+/// Removes `DataKey::VrfCommitment(Address)` and `DataKey::VrfVerification(Address)`.
 ///
 /// # Errors
 /// - Panics with [`ContractError::Paused`] if the protocol is paused.
@@ -248,8 +494,12 @@ pub fn clear_vrf_commitment(env: Env, borrower: Address) {
     assert_not_paused(&env);
     require_admin_auth(&env);
 
-    let key = DataKey::VrfCommitment(borrower.clone());
-    env.storage().persistent().remove(&key);
+    env.storage()
+        .persistent()
+        .remove(&DataKey::VrfCommitment(borrower.clone()));
+    env.storage()
+        .persistent()
+        .remove(&DataKey::VrfVerification(borrower.clone()));
 }
 
 /// Get the VRF commitment for a borrower (if it exists).

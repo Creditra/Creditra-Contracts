@@ -8,7 +8,7 @@
 //!
 //! ABI-stable types that cross the contract boundary:
 //!
-//! - [`ContractError`] — 64-variant `#[repr(u32)]` error enum (discriminants
+//! - [`ContractError`] — 66-variant `#[repr(u32)]` error enum (discriminants
 //!   pinned by `tests/error_discriminants.rs`). Each variant maps to a stable
 //!   [`ContractErrorCategory`] via [`ContractError::category`]. The published
 //!   code table lives in exactly one place — [`docs/errors.md`](../../../docs/errors.md) —
@@ -220,6 +220,19 @@ pub enum ContractError {
     /// the global protocol-wide cap. The cap is cleared by passing `0` to
     /// `set_borrower_exposure_cap`; when absent the check is skipped entirely.
     BorrowerExposureCapExceeded = 66,
+    /// A VRF commitment must be backed by an oracle proof.
+    ///
+    /// Returned by the legacy `commit_vrf_output` entrypoint once an oracle
+    /// public key is configured, and by `update_risk_parameters` when the
+    /// borrower's commitment was written through that legacy path. Configure
+    /// the oracle key with `set_vrf_oracle_public_key` and re-commit through
+    /// `commit_vrf_output_verified` (Issue #1447).
+    VrfProofRequired = 67,
+    /// Proof verification was requested but no VRF oracle public key is set.
+    ///
+    /// Call `set_vrf_oracle_public_key` before `commit_vrf_output_verified`
+    /// (Issue #1447).
+    VrfOracleNotConfigured = 68,
 }
 
 /// Stable category grouping for [`ContractError`] variants.
@@ -314,7 +327,9 @@ impl ContractError {
             | Self::OraclePriceStale
             | Self::OraclePriceDeviation
             | Self::OracleQuorumNotMet
-            | Self::OracleNotFound => Oracle,
+            | Self::OracleNotFound
+            | Self::VrfProofRequired
+            | Self::VrfOracleNotConfigured => Oracle,
 
             Self::CollateralRatioBelowMinimum
             | Self::InsufficientCollateralBalance

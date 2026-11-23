@@ -10,15 +10,13 @@
 use creditra_credit::scoring::VrfCommitment;
 use creditra_credit::storage::{DataKey, LEDGER_BUMP_AMOUNT, LEDGER_BUMP_THRESHOLD};
 use creditra_credit::types::ContractError;
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::testutils::storage::Persistent as _;
 use soroban_sdk::testutils::{Address as _, BytesN as _, Ledger};
 use soroban_sdk::{Address, BytesN, Env};
 
-fn create_test_contract(env: &Env) -> creditra_credit::ContractClient {
-    creditra_credit::ContractClient::new(
-        env,
-        &env.register(creditra_credit::Credit, ()),
-    )
+fn create_test_contract(env: &Env) -> creditra_credit::CreditClient<'_> {
+    creditra_credit::CreditClient::new(env, &env.register(creditra_credit::Credit, ()))
 }
 
 fn setup_contract<'a>(env: &'a Env, admin: &Address) -> creditra_credit::CreditClient<'a> {
@@ -581,5 +579,446 @@ fn test_derive_score_distribution_uniformity_result_with_fixed_seed() {
     assert!(
         bucket_counts.iter().all(|count| *count > 0),
         "all five score bands must be reachable: {bucket_counts:?}"
+    );
+}
+
+// ── Oracle proof verification (Issue #1447) ─────────────────────────────────
+
+const ORACLE_SEED: [u8; 32] = [7u8; 32];
+
+fn oracle_signing_key() -> SigningKey {
+    SigningKey::from_bytes(&ORACLE_SEED)
+}
+
+fn oracle_public_key(env: &Env, key: &SigningKey) -> BytesN<32> {
+    BytesN::from_array(env, &key.verifying_key().to_bytes())
+}
+
+fn message_for(
+    env: &Env,
+    contract_id: &Address,
+    borrower: &Address,
+    output: &BytesN<32>,
+) -> std::vec::Vec<u8> {
+    env.as_contract(contract_id, || {
+        creditra_credit::scoring::vrf_proof_message(env, borrower, output).to_alloc_vec()
+    })
+}
+
+fn proof_for(
+    env: &Env,
+    contract_id: &Address,
+    borrower: &Address,
+    output: &BytesN<32>,
+    key: &SigningKey,
+) -> BytesN<64> {
+    let message = message_for(env, contract_id, borrower, output);
+    BytesN::from_array(env, &key.sign(&message).to_bytes())
+}
+
+fn panic_text(result: std::thread::Result<()>) -> String {
+    let error = result.expect_err("expected the call to revert");
+    if let Some(message) = error.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = error.downcast_ref::<&str>() {
+        message.to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn verified_setup<'a>(env: &'a Env) -> (creditra_credit::CreditClient<'a>, Address, Address) {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let borrower = Address::generate(env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let client = creditra_credit::CreditClient::new(env, &contract_id);
+    client.init(&admin);
+    env.ledger().set_timestamp(1);
+    client.set_vrf_oracle_public_key(&oracle_public_key(env, &oracle_signing_key()));
+    (client, contract_id, borrower)
+}
+
+#[test]
+fn test_commit_vrf_output_verified_happy_path() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+
+    let commitment = client
+        .get_vrf_commitment(&borrower)
+        .expect("commitment should be stored");
+    assert_eq!(commitment.commitment_hash, output);
+
+    let verification = client
+        .get_vrf_verification(&borrower)
+        .expect("verification should be stored");
+    assert_eq!(verification.output, output);
+    assert_eq!(
+        verification.oracle_public_key,
+        oracle_public_key(&env, &oracle_signing_key())
+    );
+    assert!(verification.verified_at > 0);
+    assert!(client.is_vrf_commitment_verified(&borrower));
+    assert_eq!(
+        creditra_credit::scoring::derive_score_from_hash_test_helper(&output),
+        3 * 32 % 101
+    );
+}
+
+#[test]
+fn test_commit_vrf_output_verified_rejects_wrong_signature() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[4u8; 32]);
+    let attacker = SigningKey::from_bytes(&[9u8; 32]);
+    let proof = proof_for(&env, &contract_id, &borrower, &output, &attacker);
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("failed ED25519 verification"),
+        "expected host ED25519 error, got: {message}"
+    );
+    assert!(client.get_vrf_commitment(&borrower).is_none());
+}
+
+#[test]
+fn test_commit_vrf_output_verified_rejects_replayed_borrower() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let other_borrower = Address::generate(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[5u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &other_borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("failed ED25519 verification"),
+        "expected borrower binding to reject the proof, got: {message}"
+    );
+}
+
+#[test]
+fn test_commit_vrf_output_verified_rejects_replayed_contract() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let other_contract = env.register(creditra_credit::Credit, ());
+    let output: BytesN<32> = BytesN::from_array(&env, &[6u8; 32]);
+    let proof = proof_for(
+        &env,
+        &other_contract,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("failed ED25519 verification"),
+        "expected contract binding to reject the proof, got: {message}"
+    );
+    assert_ne!(contract_id, other_contract);
+}
+
+#[test]
+fn test_commit_vrf_output_verified_requires_oracle_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let client = creditra_credit::CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let output: BytesN<32> = BytesN::from_array(&env, &[7u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("#68"),
+        "expected VrfOracleNotConfigured (#68), got: {message}"
+    );
+}
+
+#[test]
+fn test_commit_vrf_output_verified_twice_fails() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[8u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("#5"),
+        "expected InvalidAmount (#5), got: {message}"
+    );
+}
+
+#[test]
+fn test_legacy_commit_is_rejected_once_oracle_key_is_set() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let client = creditra_credit::CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let legacy: BytesN<32> = BytesN::from_array(&env, &[9u8; 32]);
+    client.commit_vrf_output(&borrower, &legacy);
+    client.set_vrf_oracle_public_key(&oracle_public_key(&env, &oracle_signing_key()));
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output(&borrower, &legacy);
+        },
+    )));
+    assert!(
+        message.contains("#67"),
+        "expected VrfProofRequired (#67), got: {message}"
+    );
+}
+
+#[test]
+fn test_update_risk_parameters_rejects_unverified_commitment_with_oracle_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let client = creditra_credit::CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let legacy: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+    client.commit_vrf_output(&borrower, &legacy);
+    env.ledger().set_timestamp(1);
+    client.open_credit_line(&borrower, &10_000_i128, &500_u32, &70_u32);
+    client.set_vrf_oracle_public_key(&oracle_public_key(&env, &oracle_signing_key()));
+
+    let score = creditra_credit::scoring::derive_score_from_hash_test_helper(&legacy);
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.update_risk_parameters(&borrower, &10_000_i128, &500_u32, &score);
+        },
+    )));
+    assert!(
+        message.contains("#67"),
+        "expected VrfProofRequired (#67), got: {message}"
+    );
+}
+
+#[test]
+fn test_update_risk_parameters_accepts_verified_score_and_rejects_mismatch() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    env.ledger().set_timestamp(1);
+    client.open_credit_line(&borrower, &10_000_i128, &500_u32, &70_u32);
+
+    let output: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+
+    let score = creditra_credit::scoring::derive_score_from_hash_test_helper(&output);
+    assert_ne!(score, 70);
+    client.update_risk_parameters(&borrower, &10_000_i128, &500_u32, &score);
+    assert_eq!(client.get_credit_line(&borrower).unwrap().risk_score, score);
+
+    let wrong_score = (score + 1) % 101;
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.update_risk_parameters(&borrower, &10_000_i128, &500_u32, &wrong_score);
+        },
+    )));
+    assert!(
+        message.contains("#1"),
+        "expected Unauthorized (#1) for a mismatched score, got: {message}"
+    );
+}
+
+#[test]
+fn test_key_rotation_invalidates_existing_verification() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    env.ledger().set_timestamp(1);
+    client.open_credit_line(&borrower, &10_000_i128, &500_u32, &70_u32);
+
+    let output: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+    assert!(client.is_vrf_commitment_verified(&borrower));
+
+    let rotated = SigningKey::from_bytes(&[11u8; 32]);
+    client.set_vrf_oracle_public_key(&oracle_public_key(&env, &rotated));
+    assert!(!client.is_vrf_commitment_verified(&borrower));
+
+    let score = creditra_credit::scoring::derive_score_from_hash_test_helper(&output);
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.update_risk_parameters(&borrower, &10_000_i128, &500_u32, &score);
+        },
+    )));
+    assert!(
+        message.contains("#67"),
+        "expected VrfProofRequired (#67) after rotation, got: {message}"
+    );
+
+    // Clearing lets the borrower re-commit under the new key.
+    client.clear_vrf_commitment(&borrower);
+    assert!(!client.is_vrf_commitment_verified(&borrower));
+    let new_proof = proof_for(&env, &contract_id, &borrower, &output, &rotated);
+    client.commit_vrf_output_verified(&borrower, &output, &new_proof);
+    client.update_risk_parameters(&borrower, &10_000_i128, &500_u32, &score);
+    assert_eq!(client.get_credit_line(&borrower).unwrap().risk_score, score);
+}
+
+#[test]
+fn test_clear_vrf_commitment_removes_verification() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[4u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+
+    client.clear_vrf_commitment(&borrower);
+
+    assert!(client.get_vrf_commitment(&borrower).is_none());
+    assert!(client.get_vrf_verification(&borrower).is_none());
+    assert!(!client.is_vrf_commitment_verified(&borrower));
+}
+
+#[test]
+fn test_verification_ttl_is_bumped_on_read() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[5u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.commit_vrf_output_verified(&borrower, &output, &proof);
+
+    let key = DataKey::VrfVerification(borrower.clone());
+    let ttl_after_write = ttl_for_key(&env, &contract_id, &key);
+    assert!(ttl_after_write >= LEDGER_BUMP_AMOUNT);
+
+    let target_remaining = LEDGER_BUMP_THRESHOLD.saturating_sub(1);
+    advance_ledgers(&env, ttl_after_write.saturating_sub(target_remaining));
+
+    assert!(client.is_vrf_commitment_verified(&borrower));
+    let ttl_after_read = ttl_for_key(&env, &contract_id, &key);
+    assert!(ttl_after_read >= LEDGER_BUMP_AMOUNT);
+}
+
+#[test]
+fn test_commit_vrf_output_verified_is_paused_gated() {
+    let env = Env::default();
+    let (client, contract_id, borrower) = verified_setup(&env);
+    let output: BytesN<32> = BytesN::from_array(&env, &[6u8; 32]);
+    let proof = proof_for(
+        &env,
+        &contract_id,
+        &borrower,
+        &output,
+        &oracle_signing_key(),
+    );
+    client.set_protocol_paused(&true);
+
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.commit_vrf_output_verified(&borrower, &output, &proof);
+        },
+    )));
+    assert!(
+        message.contains("#18"),
+        "expected Paused (#18), got: {message}"
+    );
+}
+
+#[test]
+fn test_set_vrf_oracle_public_key_rejects_zero_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(creditra_credit::Credit, ());
+    let client = creditra_credit::CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let zero: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+    let message = panic_text(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            client.set_vrf_oracle_public_key(&zero);
+        },
+    )));
+    assert!(
+        message.contains("#5"),
+        "expected InvalidAmount (#5), got: {message}"
     );
 }

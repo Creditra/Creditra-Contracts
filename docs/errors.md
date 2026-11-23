@@ -64,7 +64,7 @@ discriminants — only the generated spec entry is skipped.
 
 ## Error Code Table
 
-64 variants. `Category` is the value returned by
+66 variants. `Category` is the value returned by
 [`ContractError::category()`](../contracts/credit/src/types.rs).
 
 | Code | Variant | Category | When it occurs | SDK recovery |
@@ -133,6 +133,15 @@ discriminants — only the generated spec entry is skipped.
 | `64` | `MissingVrfCommitment` | Misc | Score verification ran without a prior VRF commitment for the borrower. | Commit the borrower's VRF output before verifying the score. |
 | `65` | `InsufficientTreasuryBalance` | Liquidity | `execute_treasury_withdrawal` ran when the tracked treasury balance was below the proposal snapshot. | Wait until accrued fees cover the proposal, or propose a smaller withdrawal once it clears. |
 | `66` | `BorrowerExposureCapExceeded` | Limit | `draw_credit` would push this borrower above the cap set via `set_borrower_exposure_cap`. | Draw less, repay first, or have the admin raise or clear the cap. |
+| `67` | `VrfProofRequired` | Oracle | The legacy unverified `commit_vrf_output` path was used, or a score change relied on an unverified commitment, while a VRF oracle key is configured. | Re-commit through `commit_vrf_output_verified` with an oracle-signed proof. |
+| `68` | `VrfOracleNotConfigured` | Oracle | `commit_vrf_output_verified` ran before `set_vrf_oracle_public_key` configured the oracle key. | Admin must set the VRF oracle public key first. |
+
+> **Ed25519 proof failure is a host error, not a `ContractError`.** When the
+> oracle proof passed to `commit_vrf_output_verified` does not verify, the
+> transaction reverts with `ScErrorType::Crypto` / `ScErrorCode::InvalidInput`
+> (`"failed ED25519 verification"`). The contract cannot catch host crypto
+> errors, so this is the dedicated failure for an invalid signature; codes
+> `67` and `68` cover the configuration and legacy-path cases.
 
 ---
 
@@ -150,13 +159,13 @@ hard-coding code ranges.
 | `4`  | Limit | 7 | `OverLimit`, `UtilizationNotZero`, `DrawExceedsMaxAmount`, `RepayExceedsMaxAmount`, `CloseFactorAboveMax`, `DrawReversalWindowExpired`, `BorrowerExposureCapExceeded` |
 | `5`  | Liquidity | 10 | `MissingLiquidityToken`, `MissingLiquiditySource`, `InsufficientLiquidityReserve`, `LiquidityTokenCallFailed`, `InsufficientRepaymentAllowance`, `InsufficientRepaymentBalance`, `TreasuryNotSet`, `ExposureCapExceeded`, `BountyNotSet`, `InsufficientTreasuryBalance` |
 | `6`  | Risk | 5 | `RateTooHigh`, `ScoreTooHigh`, `Paused`, `DrawCooldownActive`, `RiskAdminCooldownActive` |
-| `7`  | Oracle | 5 | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound` |
+| `7`  | Oracle | 7 | `OraclePriceInvalid`, `OraclePriceStale`, `OraclePriceDeviation`, `OracleQuorumNotMet`, `OracleNotFound`, `VrfProofRequired`, `VrfOracleNotConfigured` |
 | `8`  | Collateral | 3 | `CollateralRatioBelowMinimum`, `InsufficientCollateralBalance`, `AdminCollateralCooldownActive` |
 | `9`  | Block | 5 | `BorrowerBlocked`, `DrawsFrozen`, `BorrowerFrozen`, `CreditLineFrozen`, `FreezeCooldownActive` |
 | `10` | Reentrancy | 1 | `Reentrancy` |
 | `11` | Misc | 9 | `CreditLineNotFound`, `AdminAcceptTooEarly`, `NoPendingTreasuryWithdrawal`, `TreasuryTimelockActive`, `TreasuryProposalExists`, `OriginalDrawNotFound`, `AttestationBatchNotFound`, `InvalidAttestation`, `MissingVrfCommitment` |
 | `12` | Handshake | 2 | `IncompatibleVersion`, `AuctionCallFailed` |
-| | **Total** | **64** | |
+| | **Total** | **66** | |
 
 ### Category-level recovery
 

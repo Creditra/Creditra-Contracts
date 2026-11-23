@@ -4,7 +4,7 @@
 //!
 //! # What
 //!
-//! Defines the [`DataKey`] enum (30 variants) and provides typed getters /
+//! Defines the [`DataKey`] enum and provides typed getters /
 //! setters for every persistent and instance storage slot in the credit
 //! contract. Also owns the reentrancy guard, pause flag, monotonic-timestamp
 //! assertion, and the per-borrower id ↔ address mapping used by enumeration.
@@ -77,7 +77,7 @@ use crate::types::{
     ContractError, CreditLineData, CreditStatus, DrawsFreezeState, GracePeriodConfig,
     OracleQuorumConfig, RepaymentSchedule, TreasuryWithdrawalProposal,
 };
-use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol};
 
 /// Validates that a storage key encoding is canonical and does not contain
 /// duplicated or ambiguous byte representations that could lead to collisions.
@@ -110,12 +110,12 @@ pub fn validate_storage_key_encoding(env: &Env, key_bytes: &Bytes) {
 ///   `BountyAddress`, `BountyBalance`,
 ///   `TotalCollateral`,
 ///   `MinCollateralRatioBps`, `OracleConfig`, `OracleLastPrice`,
-///   `OracleLastPriceTs`).
+///   `OracleLastPriceTs`, `VrfOraclePublicKey`).
 /// - **Persistent storage** for per-borrower / per-timestamp data
 ///   (`CreditLineIdByBorrower`, `CreditLineBorrowerById`, `LastDrawTs`,
 ///   `BlockedBorrower`, `FrozenBorrower`, `UtilizationCapBps`, `RateFloorBps`,
 ///   `RepaymentSchedule`, `CollateralBalance`, `DrawAudit`,
-///   `DrawReversedAmount`).
+///   `DrawReversedAmount`, `VrfCommitment`, `VrfVerification`).
 ///
 /// Helper functions in this module always pick the correct tier; callers
 /// outside this module should never hit the storage API directly with these
@@ -306,6 +306,10 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Per-borrower record of an oracle-attested VRF output (Issue #1447).
+    VrfVerification(Address),
+    /// Ed25519 public key of the trusted VRF oracle (Issue #1447).
+    VrfOraclePublicKey,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -382,6 +386,25 @@ pub fn bump_settlement_marker_ttl(env: &Env, key: &(Symbol, Address, Symbol)) {
 pub fn bump_vrf_commitment_ttl(env: &Env, borrower: &Address) {
     let key = DataKey::VrfCommitment(borrower.clone());
     bump_persistent_ttl(env, &key);
+}
+
+/// Refresh the persistent TTL for a borrower's verified VRF record.
+pub fn bump_vrf_verification_ttl(env: &Env, borrower: &Address) {
+    let key = DataKey::VrfVerification(borrower.clone());
+    bump_persistent_ttl(env, &key);
+}
+
+/// Store the trusted VRF oracle Ed25519 public key in instance storage.
+pub fn set_vrf_oracle_public_key(env: &Env, public_key: &BytesN<32>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::VrfOraclePublicKey, public_key);
+    bump_instance_ttl(env);
+}
+
+/// Return the configured VRF oracle Ed25519 public key, if any.
+pub fn get_vrf_oracle_public_key(env: &Env) -> Option<BytesN<32>> {
+    env.storage().instance().get(&DataKey::VrfOraclePublicKey)
 }
 
 /// Refresh the persistent TTL for an active credit-line freeze record.

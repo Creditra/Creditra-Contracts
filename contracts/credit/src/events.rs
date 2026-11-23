@@ -42,7 +42,7 @@
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
 //! per-entrypoint event-emission table.
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, Symbol};
 
 use crate::types::CreditStatus;
 
@@ -933,3 +933,32 @@ pub fn publish_oracle_value_reported_event(env: &Env, oracle: &Address, value: u
     );
 }
 
+/// Emitted when the admin configures or rotates the VRF oracle public key.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VrfOracleKeySetEvent {
+    pub oracle_public_key: BytesN<32>,
+    pub timestamp: u64,
+}
+
+/// Emitted when a borrower's commitment is verified against an oracle proof.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VrfCommitmentVerifiedEvent {
+    pub borrower: Address,
+    pub output: BytesN<32>,
+    pub oracle_public_key: BytesN<32>,
+    pub timestamp: u64,
+}
+
+/// Publish a VRF oracle key set event.
+pub fn publish_vrf_oracle_key_set_event(env: &Env, event: VrfOracleKeySetEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("vrf_key")), event);
+}
+
+/// Publish a verified VRF commitment event.
+pub fn publish_vrf_commitment_verified_event(env: &Env, event: VrfCommitmentVerifiedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("vrf_ver")), event);
+}

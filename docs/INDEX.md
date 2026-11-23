@@ -55,7 +55,7 @@ Read in this order:
 
 1. [`docs/PROTOCOL_SPEC.md`](./PROTOCOL_SPEC.md) — every entrypoint with exact
    signature, validation order, error returns, storage tiers.
-2. [`docs/errors.md`](./errors.md) — **canonical** error reference: 64 codes,
+2. [`docs/errors.md`](./errors.md) — **canonical** error reference: 66 codes,
    category, trigger, and SDK recovery per variant.
 3. [`docs/state-machine.md`](./state-machine.md) — authoritative
    `CreditStatus` transition table.
