@@ -306,6 +306,12 @@ pub enum DataKey {
     CollateralTokenAllowlist,
     /// Per-borrower committed attestation batch.
     AttestationBatch(Address),
+    /// Installment-delinquency grace window in seconds.
+    ///
+    /// Independent of [`crate::types::GracePeriodConfig`], which governs the
+    /// interest waiver on suspended lines. When unset, delinquency falls back
+    /// to `grace_period_seconds` so existing deployments keep their boundary.
+    DelinquencyGraceSeconds,
 }
 
 /// Maximum number of credit lines returned per page.
@@ -958,6 +964,33 @@ pub fn paused_key(env: &Env) -> Symbol {
 /// Instance storage key for the grace period configuration.
 pub fn grace_period_key(env: &Env) -> Symbol {
     Symbol::new(env, "grace_cfg")
+}
+
+/// Effective installment grace in seconds used by delinquency checks.
+///
+/// Reads [`DataKey::DelinquencyGraceSeconds`] and falls back to the suspension
+/// grace window from [`get_grace_period_config`] when it has never been
+/// written, so deployments upgrading from a single-grace build keep their
+/// existing delinquency boundary. An explicit `0` disables the grace window
+/// without falling back.
+pub fn get_delinquency_grace_seconds(env: &Env) -> u64 {
+    if let Some(seconds) = env
+        .storage()
+        .instance()
+        .get::<_, u64>(&DataKey::DelinquencyGraceSeconds)
+    {
+        return seconds;
+    }
+    get_grace_period_config(env)
+        .map(|cfg| cfg.grace_period_seconds)
+        .unwrap_or(0)
+}
+
+/// Store the installment-delinquency grace period in instance storage.
+pub fn set_delinquency_grace_seconds(env: &Env, seconds: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::DelinquencyGraceSeconds, &seconds);
 }
 
 /// Assert reentrancy guard is not set; set it for the duration of the call.

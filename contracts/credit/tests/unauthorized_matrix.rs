@@ -26,6 +26,7 @@
 //! | `set_rate_formula_config`   | admin                  |
 //! | `clear_rate_formula_config` | admin                  |
 //! | `set_grace_period_config`   | admin                  |
+//! | `set_delinquency_grace_seconds` | admin              |
 //! | `set_protocol_paused`       | admin                  |
 //! | `freeze_draws`              | admin                  |
 //! | `unfreeze_draws`            | admin                  |
@@ -334,6 +335,14 @@ fn set_grace_period_config_unauthorized() {
         &creditra_credit::types::GraceWaiverMode::FullWaiver,
         &0_u32,
     );
+}
+
+#[test]
+#[should_panic]
+fn set_delinquency_grace_seconds_unauthorized() {
+    let env = Env::default();
+    let (client, _, _, _) = setup(&env);
+    client.set_delinquency_grace_seconds(&60_u64);
 }
 
 // ── Protocol pause ──────────────────────────────────────────────────────────
