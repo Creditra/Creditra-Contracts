@@ -462,6 +462,12 @@ pub fn open_credit_line(
         if existing.status == CreditStatus::Defaulted {
             crate::storage::decrement_pending_auction_count(&env);
         }
+    }
+    // Re-opening any existing non-Active line is admin-gated: auth is enforced
+    // by the `lib.rs` wrapper (`require_admin_auth`), not re-checked here — a
+    // second `require_auth` for the already-authorized admin address within one
+    // invocation is rejected by the Soroban auth frame as
+    // `Error(Auth, ExistingValue)` (same convention as `suspend_credit_line`).
 
         previous_status = Some(existing.status);
         previous_utilized = existing.utilized_amount;
