@@ -271,6 +271,115 @@ fn fee_configs_allowed_after_reopen_of_defaulted_line() {
     assert_all_fee_configs_persisted(&client);
 }
 
+#[test]
+fn pending_auction_count_tracks_partial_full_reopen_and_force_close() {
+    let env = Env::default();
+    let (client, admin, borrower1, contract_id, token_address) = setup(&env);
+    let borrower2 = Address::generate(&env);
+    let asset = token::StellarAssetClient::new(&env, &token_address);
+
+    assert_eq!(client.get_pending_auction_count(), 0);
+
+    // Borrower 1 follows default → partial → partial → full while borrower 2
+    // independently enters Defaulted in the middle of that sequence.
+    open_draw_and_default(&env, &client, &borrower1, &contract_id, &token_address);
+    assert_eq!(client.get_pending_auction_count(), 1);
+
+    client.settle_default_liquidation(
+        &borrower1,
+        &200_i128,
+        &Symbol::new(&env, "b1_partial1"),
+        &10_000_u32,
+        &None,
+    );
+    assert_eq!(client.get_pending_auction_count(), 1);
+    assert_eq!(
+        client.get_credit_line(&borrower1).unwrap().status,
+        CreditStatus::Defaulted
+    );
+    assert_fee_configs_rejected(&client);
+
+    asset.mint(&borrower2, &2_000_i128);
+    asset.mint(&contract_id, &1_000_i128);
+    client.open_credit_line(&borrower2, &1_000_i128, &500_u32, &50_u32);
+    client.deposit_collateral(&borrower2, &2_000_i128);
+    client.draw_credit(&borrower2, &800_i128);
+    client.default_credit_line(&borrower2);
+    assert_eq!(client.get_pending_auction_count(), 2);
+    assert_eq!(
+        client.get_credit_line(&borrower1).unwrap().status,
+        CreditStatus::Defaulted
+    );
+    assert_eq!(
+        client.get_credit_line(&borrower2).unwrap().status,
+        CreditStatus::Defaulted
+    );
+    assert_fee_configs_rejected(&client);
+
+    client.settle_default_liquidation(
+        &borrower1,
+        &200_i128,
+        &Symbol::new(&env, "b1_partial2"),
+        &10_000_u32,
+        &None,
+    );
+    assert_eq!(client.get_pending_auction_count(), 2);
+    assert_eq!(
+        client.get_credit_line(&borrower1).unwrap().status,
+        CreditStatus::Defaulted
+    );
+
+    // The final recovery for borrower 1 removes only its own pending auction.
+    client.settle_default_liquidation(
+        &borrower1,
+        &400_i128,
+        &Symbol::new(&env, "b1_full"),
+        &10_000_u32,
+        &None,
+    );
+    assert_eq!(client.get_pending_auction_count(), 1);
+    assert_eq!(
+        client.get_credit_line(&borrower1).unwrap().status,
+        CreditStatus::Closed
+    );
+    assert_eq!(
+        client.get_credit_line(&borrower2).unwrap().status,
+        CreditStatus::Defaulted
+    );
+    assert_fee_configs_rejected(&client);
+
+    // Reopening borrower 2 exits Defaulted and releases the final auction.
+    client.open_credit_line(&borrower2, &1_000_i128, &500_u32, &50_u32);
+    assert_eq!(client.get_pending_auction_count(), 0);
+    assert_eq!(
+        client.get_credit_line(&borrower2).unwrap().status,
+        CreditStatus::Active
+    );
+    set_all_fee_configs(&client);
+    assert_all_fee_configs_persisted(&client);
+
+    // Reborrow and default again so the admin force-close transition is also
+    // verified with an outstanding line and a nonzero counter.
+    asset.mint(&contract_id, &1_000_i128);
+    client.draw_credit(&borrower2, &800_i128);
+    client.default_credit_line(&borrower2);
+    assert_eq!(client.get_pending_auction_count(), 1);
+    assert_eq!(
+        client.get_credit_line(&borrower2).unwrap().status,
+        CreditStatus::Defaulted
+    );
+    assert_fee_configs_rejected(&client);
+
+    client.close_credit_line(&borrower2, &admin);
+    assert_eq!(client.get_pending_auction_count(), 0);
+    assert_eq!(
+        client.get_credit_line(&borrower2).unwrap().status,
+        CreditStatus::Closed
+    );
+    set_all_fee_configs(&client);
+    assert_all_fee_configs_persisted(&client);
+}
+
 // ── Concurrency / retry safety ───────────────────────────────────────────────
 
 #[test]

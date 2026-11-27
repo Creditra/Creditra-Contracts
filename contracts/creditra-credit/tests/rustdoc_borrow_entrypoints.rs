@@ -332,6 +332,8 @@ mod repay_draw_tests {
         let msg = QueryMsg::DrawAuditTrail {
             credit_line_id: cl_id,
             draw_id: Some(draw_id),
+            start_after: None,
+            limit: None,
         };
         let raw = query(deps.as_ref(), query_env, msg).unwrap();
         let trails: Vec<creditra_credit::msg::DrawAuditTrailResponse> = from_json(&raw).unwrap();
@@ -392,6 +394,8 @@ mod add_audit_memo_tests {
         let msg = QueryMsg::DrawAuditTrail {
             credit_line_id: cl_id,
             draw_id: Some(draw_id),
+            start_after: None,
+            limit: None,
         };
         let raw = query(deps.as_ref(), query_env, msg).unwrap();
         let trails: Vec<creditra_credit::msg::DrawAuditTrailResponse> = from_json(&raw).unwrap();

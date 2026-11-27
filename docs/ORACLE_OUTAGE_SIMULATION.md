@@ -1,5 +1,40 @@
 # Multi-Oracle Outage Simulation & Recovery Guidelines (`creditra-credit`)
 
+> **Redirect — the canonical oracle reference is now
+> [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md).**
+>
+> This page covers the quorum-of-K mechanism only. The contract has **three**
+> distinct oracle mechanisms, and this page does not mention the other two or how
+> they interact:
+>
+> - **Single-price circuit breaker** (`set_oracle_config`) — bypassed entirely once
+>   the quorum config is set.
+> - **Quorum-of-K submission** (`set_oracle_quorum_config`, `submit_oracle_prices`)
+>   — the subject of this page, and the one that takes precedence at settlement.
+> - **Weighted-median registry** (`add_oracle`, `report_value`, `get_median_value`)
+>   — **does not gate settlement at all**; its outage modes are invisible to
+>   `settle_default_liquidation`.
+>
+> [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md) is the canonical page: it
+> documents all three, gives the precedence table derived from
+> `contracts/credit/src/oracle_validation.rs`, lists the staleness rule and failure
+> codes for each, and is where outage triage should start.
+>
+> **Staleness caveat specific to this page.** The `is_price_stale` / stale-price
+> material below describes the outage model, but note that the contract enforces
+> quorum staleness only in `validate_quorum_mode` at settlement time. Read the
+> authoritative rules in `docs/oracle-mechanisms.md` before relying on this page for
+> exact behaviour.
+>
+> **Stale paths in this page.** The entry-point names below use CosmWasm-style
+> PascalCase (`SetOracleQuorumConfig`, `SubmitOraclePrices`, `ExecuteMsg::…`,
+> `config.owner`) and the e2e test link points at a legacy
+> `contracts/creditra-credit/` CosmWasm crate and a hard-coded `file:///c:/Users/…`
+> path. The live Soroban crate is `contracts/credit/`, where the entry-points are
+> snake_case (`set_oracle_quorum_config`, `submit_oracle_prices`) and authorization
+> goes through `require_admin_auth`. This page is preserved as-is; treat the
+> canonical reference as correct where the two disagree.
+
 ## Overview
 
 The CosmWasm `creditra-credit` smart contract implements a quorum-of-K sliding window price resolution algorithm (`oracles::resolve_quorum_price`) to combine $N$ independent price feeds into a single canonical price record (`OraclePriceRecord`).

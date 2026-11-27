@@ -1,5 +1,7 @@
 # Freeze auth boundary tests
 
+**Notice:** This is a test/indexer support crate for the Creditra protocol. It is **not a deployable smart contract**.
+
 Per-entrypoint authentication boundary coverage for every freeze-related
 entrypoint on `creditra-credit` (issue #835 / buffer2 #15).
 

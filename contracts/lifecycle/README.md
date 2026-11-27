@@ -1,5 +1,7 @@
 # Lifecycle capabilities view (v7)
 
+**Notice:** This is a test/indexer support crate for the Creditra protocol. It is **not a deployable smart contract**.
+
 Read-only bitmap reporting which lifecycle transitions are currently
 permitted for a borrower's credit line, so off-chain clients can pre-flight
 a transition without simulating a reverting call.

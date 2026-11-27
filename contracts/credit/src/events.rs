@@ -17,7 +17,7 @@
 //! single-element `("blk_chg",)` topic for borrower blocklist changes.
 //!
 //! **Canonical schema and versioning policy:**
-//! See [`docs/events-schema.md`](../../../docs/events-schema.md) for the full
+//! See [`docs/EVENT_CATALOG.md`](../../../docs/EVENT_CATALOG.md) for the full
 //! authoritative event catalog, topic versions, and payload field orders.
 //!
 //! # How
@@ -37,7 +37,7 @@
 //! with a version suffix (e.g., `("credit","drawn_v2")`).
 //!
 //! See [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for the
-//! end-to-end event topology, [`docs/events-schema.md`](../../../docs/events-schema.md)
+//! end-to-end event topology, [`docs/EVENT_CATALOG.md`](../../../docs/EVENT_CATALOG.md)
 //! for the canonical catalog and versioning rules, and
 //! [`docs/PROTOCOL_SPEC.md`](../../../docs/PROTOCOL_SPEC.md) for the
 //! per-entrypoint event-emission table.
@@ -135,6 +135,8 @@ pub struct DefaultLiquidationSettledEvent {
     pub borrower: Address,
     pub settlement_id: Symbol,
     pub recovered_amount: i128,
+    pub interest_recovered: i128,
+    pub principal_recovered: i128,
     pub remaining_utilized_amount: i128,
     pub status: CreditStatus,
     pub close_factor_bps: u32,
@@ -573,6 +575,19 @@ pub fn publish_grace_waiver_applied_event(
     );
 }
 
+/// Public alias for `GraceWaiverAppliedEvent` — used by the events catalog and tests.
+pub type GraceWaiverReceiptEvent = GraceWaiverAppliedEvent;
+
+/// Publish a grace waiver receipt event (alias for `publish_grace_waiver_applied_event`).
+pub fn publish_grace_waiver_receipt_event(
+    env: &Env,
+    borrower: &Address,
+    waived_amount: i128,
+    mode: crate::types::GraceWaiverMode,
+) {
+    publish_grace_waiver_applied_event(env, borrower, waived_amount, mode);
+}
+
 
 
 /// Emitted when a treasury withdrawal is proposed via `propose_treasury_withdrawal`.
@@ -603,6 +618,8 @@ pub struct TreasuryWithdrawalExecutedEvent {
     pub executor: Address,
     /// Ledger timestamp at execution.
     pub executed_at: u64,
+    /// Fees accrued after the proposal, still accounted for by the treasury.
+    pub remaining_balance: i128,
 }
 
 /// Publish a treasury withdrawal proposed event.
@@ -761,6 +778,8 @@ pub struct CreditLineFreezeEvent {
     pub borrower: Address,
     pub frozen: bool,
     pub reason: crate::types::FreezeReason,
+    /// Ledger sequence at time of change (for off-chain indexers).
+    pub ledger: u32,
 }
 
 pub fn publish_collateral_partial_released_event(env: &Env, event: CollateralPartialReleasedEvent) {
@@ -780,6 +799,7 @@ pub fn publish_credit_line_freeze_event(
             borrower: borrower.clone(),
             frozen,
             reason,
+            ledger: env.ledger().sequence(),
         },
     );
 }
@@ -809,6 +829,107 @@ pub fn publish_oracle_quorum_price_set_event(env: &Env, price: i128, quorum_k: u
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "orc_qprc")),
         (price, quorum_k, ts),
+    );
+}
+
+// ── Oracle registry events ────────────────────────────────────────────────────
+
+/// Emitted when an oracle is added to the registry or its weight is updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleAddedEvent {
+    pub oracle: Address,
+    pub weight: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when an oracle is removed from the registry.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleRemovedEvent {
+    pub oracle: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when the quorum threshold is set or updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleQuorumThresholdSetEvent {
+    pub threshold: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when the reporting window is set or updated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleReportingWindowSetEvent {
+    pub window_seconds: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when an oracle reports a price value.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleValueReportedEvent {
+    pub oracle: Address,
+    pub value: u128,
+    pub timestamp: u64,
+}
+
+/// Publish an oracle added event.
+pub fn publish_oracle_added_event(env: &Env, oracle: &Address, weight: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_add")),
+        OracleAddedEvent {
+            oracle: oracle.clone(),
+            weight,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Publish an oracle removed event.
+pub fn publish_oracle_removed_event(env: &Env, oracle: &Address) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_rmv")),
+        OracleRemovedEvent {
+            oracle: oracle.clone(),
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Publish an oracle quorum threshold set event.
+pub fn publish_oracle_quorum_threshold_set_event(env: &Env, threshold: u32) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_qthrs")),
+        OracleQuorumThresholdSetEvent {
+            threshold,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Publish an oracle reporting window set event.
+pub fn publish_oracle_reporting_window_set_event(env: &Env, window_seconds: u64) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_win")),
+        OracleReportingWindowSetEvent {
+            window_seconds,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Publish an oracle value reported event.
+pub fn publish_oracle_value_reported_event(env: &Env, oracle: &Address, value: u128) {
+    env.events().publish(
+        (symbol_short!("credit"), Symbol::new(env, "orc_rpt")),
+        OracleValueReportedEvent {
+            oracle: oracle.clone(),
+            value,
+            timestamp: env.ledger().timestamp(),
+        },
     );
 }
 

@@ -141,7 +141,9 @@ pub fn get_draws_freeze_reason(env: &Env) -> Option<FreezeReason> {
 /// # Events
 /// Emits [`CreditLineFreezeEvent`] on `("credit", "line_frz")` with `frozen = true`.
 pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
-    require_admin_auth(&env);
+    // Admin auth is enforced by the `lib.rs` wrapper and intentionally not
+    // re-checked here: a second `require_auth()` for the same admin within one
+    // invocation aborts with `Error(Auth, ExistingValue)`.
     enforce_freeze_cooldown(&env);
     if get_credit_line(&env, &borrower).is_none() {
         env.panic_with_error(ContractError::CreditLineNotFound);
@@ -160,7 +162,7 @@ pub fn freeze_credit_line(env: Env, borrower: Address, reason: FreezeReason) {
 /// # Events
 /// Emits [`CreditLineFreezeEvent`] with `frozen = false` when a freeze record existed.
 pub fn unfreeze_credit_line(env: Env, borrower: Address) {
-    require_admin_auth(&env);
+    // Admin auth is enforced by the `lib.rs` wrapper; see `freeze_credit_line`.
     enforce_freeze_cooldown(&env);
     let key = DataKey::CreditLineFreeze(borrower.clone());
     let Some(reason) = env

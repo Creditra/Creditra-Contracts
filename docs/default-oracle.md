@@ -1,5 +1,29 @@
 # Default Oracle Design (Stellar/Soroban)
 
+> **Redirect — the price-oracle reference now lives in
+> [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md).**
+>
+> This page has been superseded as a general oracle reference. The contract
+> implements **three** distinct oracle mechanisms today, and only two of them gate
+> `settle_default_liquidation`:
+>
+> | Mechanism | Entry-points | Gates settlement? |
+> |---|---|---|
+> | Single-price circuit breaker | `set_oracle_config` | Yes, unless the quorum config is set |
+> | Quorum-of-K submission | `set_oracle_quorum_config`, `submit_oracle_prices` | Yes, takes precedence |
+> | Weighted-median registry | `add_oracle`, `report_value`, `get_median_value` | **No** |
+>
+> [`docs/oracle-mechanisms.md`](./oracle-mechanisms.md) is the canonical page for
+> all three: the precedence table, staleness rules per mechanism, and every failure
+> code. Read it first.
+>
+> **Scope note.** What remains on this page is *not* a partial version of that
+> reference. The staged default-signal attestation oracle described below is a
+> **fourth, separate, and still unimplemented** design — it carries signed
+> envelopes and a signer registry rather than prices, and has no entry-points in
+> the contract. It is retained here as a design note. For how the implemented
+> price mechanisms actually behave, use `docs/oracle-mechanisms.md`.
+
 ## Goal
 
 Define how verified default signals can trigger or assist `default_credit_line` while avoiding blind trust in unbounded external calls.

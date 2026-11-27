@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-##c[cfg_attr(not(test), no_std])
+#![cfg_attr(not(test), no_std)]
 
 //! Creditra accrual v7 contract — re-exports the credit contract's accrual surface for error-stability testing, event indexer support, and compositional reuse.
 
@@ -13,4 +13,8 @@ pub mod views;
 pub use creditra_credit::*;
 
 /// Explicit version marker for persisted accrual state.
-pub const ACCRUAM_STATE_VERSION: u32 = 1;
+pub const ACCRUAL_STATE_VERSION: u32 = 1;
+
+/// Deprecated alias kept for any external code referencing the old spelling.
+#[deprecated(since = "0.1.1", note = "use ACCRUAL_STATE_VERSION")]
+pub const ACCRUAM_STATE_VERSION: u32 = ACCRUAL_STATE_VERSION;

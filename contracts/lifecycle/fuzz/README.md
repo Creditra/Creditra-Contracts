@@ -14,8 +14,18 @@ This directory contains the `cargo-fuzz` target for testing the Creditra credit-
 4. **Overflow safety**: `utilized_amount`, `accrued_interest`, and `credit_limit` remain non-negative and bounded.
 5. **Compile-time discriminant pins**: Pins all lifecycle-relevant `ContractError` discriminants at compile time.
 
-## Running the Fuzzer
+## Running the Fuzzer Locally
 
 ```bash
-cargo fuzz run --manifest-path contracts/lifecycle/fuzz/Cargo.toml lifecycle -- -max_total_time=60
+# Install the nightly toolchain and cargo-fuzz once.
+rustup toolchain install nightly
+cargo +nightly install cargo-fuzz --locked
+
+# Build every fuzz target before running it.
+cargo +nightly fuzz build --manifest-path contracts/lifecycle/fuzz/Cargo.toml
+
+# Run the lifecycle fuzz target for a fixed time budget.
+cargo +nightly fuzz run --manifest-path contracts/lifecycle/fuzz/Cargo.toml lifecycle -- -max_total_time=60
 ```
+
+The generated crashes are written under the fuzz target's `artifacts/` directory, which is also where the CI job uploads any findings.

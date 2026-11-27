@@ -1,61 +1,97 @@
 // SPDX-License-Identifier: MIT
 
-//! VRF commitment hooks for credit score derivation.
+//! Admin score pre-commitment hooks (the `Vrf` naming is legacy).
 //!
 //! # What
 //!
-//! Provides a commitment scheme to prevent ex-post manipulation of credit scores.
-//! Before a risk score can be updated, a VRF output must be committed to, and the
-//! final score must be derived from that committed VRF output.
+//! [`commit_vrf_output`] lets the admin publish a 32-byte hash for a borrower.
+//! Once a commitment exists, `update_risk_parameters` accepts only a score that
+//! equals the deterministic reduction of that hash
+//! ([`derive_score_from_hash`], `sum(bytes) % 101`), checked by
+//! [`verify_vrf_commitment`].
 //!
-//! # How
+//! # What this is *not*
 //!
-//! The commitment scheme works in two phases:
+//! Despite the `Vrf`-prefixed names (kept for ABI and storage compatibility),
+//! **no VRF proof is verified on-chain and the protocol generates no
+//! randomness**:
 //!
-//! 1. **Commit phase** — `commit_vrf_output` stores a hash of the VRF output
-//!    for a borrower. This creates a binding commitment that cannot be changed
-//!    once set.
-//! 2. **Reveal phase** — When `update_risk_parameters` is called, the contract
-//!    verifies that the provided score matches the committed VRF output via
-//!    `verify_vrf_commitment`.
+//! - The admin supplies the hash *and* the score that must match it. The
+//!   contract cannot distinguish a genuine VRF output from arbitrary bytes the
+//!   admin chose.
+//! - [`derive_score_from_hash`] is public and deterministic, so for any target
+//!   score in `[0, 100]` a matching hash is trivial to construct (for example,
+//!   the hash `[s, 0, .., 0]` reduces to `s`).
+//! - The commitment is therefore a **pre-commitment / change-detection** device,
+//!   not a source of unpredictability: it lets an observer detect a score that
+//!   does not match the previously published hash, but it does not stop the
+//!   admin from choosing a favourable hash up front.
 //!
-//! # Why
+//! # Trust assumptions
 //!
-//! Without VRF commitments, an admin could potentially manipulate risk scores
-//! after seeing market conditions or borrower behavior. By committing to a VRF
-//! output first, the score becomes cryptographically bound to an unpredictable
-//! value that was chosen before any sensitive information was known.
+//! The (weaker) guarantee above holds only if **all** of the following are true.
+//! None of them is enforced on-chain:
+//!
+//! 1. The committed hash really is the output of a VRF whose seed and proof the
+//!    admin could not control or predict when choosing it.
+//! 2. The admin commits *before* learning the information the score is meant to
+//!    be independent of, and does not grind candidate hashes off-chain.
+//! 3. [`clear_vrf_commitment`] (admin-only) is used as an exceptional recovery
+//!    path, not a routine way to reset the commitment.
+//! 4. Integrators present the commitment as *advisory* evidence of a
+//!    pre-committed score, never as cryptographic proof of fairness.
+//!
+//! Commitments are also optional: when no commitment exists,
+//! `update_risk_parameters` skips the score check entirely, so the mechanism
+//! cannot constrain an admin who simply never commits.
+//!
+//! # Follow-ups
+//!
+//! On-chain verification of an actual VRF proof (or of an authenticated oracle
+//! output) is not implemented; see issue #1447
+//! (<https://github.com/Creditra/Creditra-Contracts/issues/1447>). The score
+//! distribution of [`derive_score_from_hash`] is measured by the fixed-seed
+//! test in `contracts/credit/tests/vrf_commitment.rs` (issue #1329).
 
 #![warn(missing_docs)]
 
 use crate::auth::require_admin_auth;
-use crate::storage::{assert_not_paused, bump_credit_line_ttl, DataKey};
+use crate::storage::{assert_not_paused, bump_vrf_commitment_ttl, DataKey};
 use crate::types::ContractError;
 use soroban_sdk::{Address, BytesN, Env};
 
-/// Length of the VRF commitment hash in bytes (256-bit hash).
+/// Length of the pre-commitment hash in bytes (32).
 pub const VRF_COMMITMENT_HASH_LEN: u32 = 32;
 
-/// VRF commitment data stored per borrower.
+/// Score pre-commitment stored per borrower.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[soroban_sdk::contracttype]
 pub struct VrfCommitment {
-    /// Hash of the VRF output (commitment).
+    /// Admin-supplied 32-byte value that the revealed score must reduce to.
     pub commitment_hash: BytesN<32>,
     /// Ledger timestamp when the commitment was made.
     pub committed_at: u64,
 }
 
-/// Commit to a VRF output for a borrower's credit score derivation.
+/// Commit to a 32-byte hash that a future score must reduce to (admin only).
 ///
-/// This function stores a hash of the VRF output, creating a binding commitment
-/// that prevents ex-post manipulation of the credit score. The commitment must
-/// be set before `update_risk_parameters` can be called with a new score.
+/// # What it guarantees
+/// Once stored, `update_risk_parameters` accepts only a score equal to
+/// [`derive_score_from_hash`] of this hash, until the commitment is cleared.
+/// Off-chain observers can therefore detect a score that does not match the
+/// previously published hash.
+///
+/// # What it does *not* guarantee
+/// No VRF proof is verified and the stored hash is not authenticated as a VRF
+/// output — the admin chooses it. Because [`derive_score_from_hash`] is public,
+/// the admin can pick a hash whose reduction is any desired score. This is a
+/// pre-commitment, not proof of randomness; see the module docs for the trust
+/// assumptions.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
-/// - `borrower`: Address of the borrower whose score will be derived from this VRF.
-/// - `commitment_hash`: 256-bit hash of the VRF output (e.g., SHA-256 of the VRF output).
+/// - `borrower`: Address of the borrower whose score is being pre-committed.
+/// - `commitment_hash`: 32-byte value that the revealed score must reduce to.
 ///
 /// # Authorization
 /// Requires administrative privileges.
@@ -83,43 +119,44 @@ pub fn commit_vrf_output(env: Env, borrower: Address, commitment_hash: BytesN<32
     };
 
     env.storage().persistent().set(&key, &commitment);
-    env.storage().persistent().set(&key, &commitment);
-    bump_credit_line_ttl(&env, &borrower);
+    bump_vrf_commitment_ttl(&env, &borrower);
 }
 
-/// Verify that a risk score matches the committed VRF output.
+/// Return whether `risk_score` equals the reduction of the committed hash.
 ///
-/// This function checks that the provided score is cryptographically derived
-/// from the previously committed VRF output. It uses a deterministic mapping
-/// from the VRF hash to a score in the range [0, 100].
+/// # What "verify" means here
+/// This is an equality check against [`derive_score_from_hash`] of the stored
+/// 32 bytes. It does **not** verify a VRF proof and does **not** establish that
+/// the stored hash came from a VRF — see the module docs.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
 /// - `borrower`: Address of the borrower.
-/// - `risk_score`: The risk score to verify (0-100).
+/// - `risk_score`: The risk score to compare (0-100).
 ///
 /// # Returns
-/// `true` if the score matches the committed VRF output, `false` otherwise.
+/// `true` if `risk_score` equals the derived score, `false` otherwise.
 ///
 /// # Errors
-/// - Panics with [`ContractError::CreditLineNotFound`] if no commitment exists.
+/// - Panics with [`ContractError::MissingVrfCommitment`] if no commitment exists.
 ///
 /// # Score derivation
-/// The score is derived from the commitment hash using a deterministic formula:
 /// ```text
 /// score = (hash_bytes[0] + hash_bytes[1] + ... + hash_bytes[31]) % 101
 /// ```
-/// This ensures the score is uniformly distributed in [0, 100] while being
-/// cryptographically bound to the VRF output.
+/// The reduction is deterministic but carries no cryptographic binding. Its
+/// distribution is characterised — and measured — for
+/// [`derive_score_from_hash`]; see the `# Distribution` section there and the
+/// fixed-seed distribution test in `contracts/credit/tests/vrf_commitment.rs`.
 pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> bool {
     let key = DataKey::VrfCommitment(borrower.clone());
     let commitment: VrfCommitment = env
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+        .unwrap_or_else(|| env.panic_with_error(ContractError::MissingVrfCommitment));
 
-    bump_credit_line_ttl(env, borrower);
+    bump_vrf_commitment_ttl(env, borrower);
 
     // Derive expected score from commitment hash
     let expected_score = derive_score_from_hash(&commitment.commitment_hash);
@@ -127,24 +164,44 @@ pub fn verify_vrf_commitment(env: &Env, borrower: &Address, risk_score: u32) -> 
     expected_score == risk_score
 }
 
-/// Derive a risk score (0-100) from a VRF commitment hash.
-///
-/// This is a deterministic, non-invertible function that maps a 256-bit hash
-/// to a score in the range [0, 100]. The function is designed to be:
-/// - Uniform: Each score has approximately equal probability
-/// - Deterministic: Same hash always produces same score
-/// - Non-invertible: Cannot recover the hash from the score
-///
-/// # Parameters
-/// - `hash`: The 256-bit VRF commitment hash.
-///
-/// # Returns
-/// A risk score in the range [0, 100].
+/// Reduce a 32-byte commitment hash to a score in `[0, 100]`.
 ///
 /// # Formula
 /// ```text
-/// score = (sum of all bytes) % 101
+/// score = (sum of all 32 bytes) % 101
 /// ```
+///
+/// # Distribution
+///
+/// The score is approximately uniform over `[0, 100]`, but not because the
+/// byte sum is: the sum of 32 uniform bytes is bell-shaped (mean 4080,
+/// standard deviation ~418), and folding that shape modulo 101 averages it
+/// out because the deviation is more than four times the modulus.
+///
+/// This is measured rather than assumed. The fixed-seed distribution test in
+/// `contracts/credit/tests/vrf_commitment.rs`
+/// (`test_derive_score_distribution_uniformity_result_with_fixed_seed`) draws
+/// 20 000 hashes, verifies the byte sum really is bell-shaped, and applies a
+/// chi-square goodness-of-fit test against the uniform hypothesis, which it
+/// does not reject. Boundary hashes are pinned by
+/// `test_derive_score_boundary_hashes_are_pinned` in the same file.
+///
+/// Those tests reach this private helper through
+/// [`derive_score_from_hash_test_helper`].
+///
+/// # Properties
+/// - **Deterministic**: the same hash always maps to the same score.
+/// - **Public and cheap**: there is no secret input, so anyone can compute it.
+/// - **Not a cryptographic function**: this is a lossy reduction with no
+///   preimage resistance. Many hashes collapse to the same score, and a hash
+///   reducing to any chosen score is trivial to construct. It must not be
+///   described as "cryptographically bound" or "non-invertible".
+///
+/// # Parameters
+/// - `hash`: The 32-byte commitment hash.
+///
+/// # Returns
+/// A risk score in the range `[0, 100]`.
 fn derive_score_from_hash(hash: &BytesN<32>) -> u32 {
     let mut sum: u32 = 0;
     for i in 0u32..32 {
@@ -165,11 +222,14 @@ pub fn derive_score_from_hash_test_helper(hash: &BytesN<32>) -> u32 {
     derive_score_from_hash(hash)
 }
 
-/// Clear the VRF commitment for a borrower (admin only).
+/// Clear the score pre-commitment for a borrower (admin only).
 ///
-/// This function removes the VRF commitment, allowing a new commitment to be
-/// made. This is intended for cases where the VRF process needs to be restarted
-/// (e.g., VRF failure, timeout).
+/// Removes the commitment so `update_risk_parameters` stops checking the score
+/// against a previously published hash until a new commitment is made. This is
+/// intended as an exceptional recovery path (for example, when the
+/// off-chain score process has to be restarted). Because it is admin-only and
+/// resets the check, routine use would defeat the change-detection property;
+/// see the module docs for trust assumptions.
 ///
 /// # Parameters
 /// - `env`: The Soroban environment.
@@ -203,7 +263,7 @@ pub fn clear_vrf_commitment(env: Env, borrower: Address) {
 pub fn get_vrf_commitment(env: &Env, borrower: &Address) -> Option<VrfCommitment> {
     let key = DataKey::VrfCommitment(borrower.clone());
     if env.storage().persistent().has(&key) {
-        bump_credit_line_ttl(env, borrower);
+        bump_vrf_commitment_ttl(env, borrower);
         env.storage().persistent().get(&key)
     } else {
         None

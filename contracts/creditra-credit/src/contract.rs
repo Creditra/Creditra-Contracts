@@ -43,14 +43,6 @@ use crate::views;
 ///
 /// Returns `StdError::GenericErr` / `AddrParseErr` variant if `msg.owner`
 /// is not a valid bech32 address for the target chain.
-///
-/// # @notice
-/// Deploy-only entrypoint.  Re-calling after instantiation is rejected by
-/// the CosmWasm runtime with a wasm-level error before this body runs.
-///
-/// # @dev
-/// Storage layout: owner lives in singleton Item `CONFIG`; per-draw maps are
-/// keyed by `(credit_line_id, draw_id, audit_seq)` tuples.
 #[entry_point]
 pub fn instantiate(
     deps: DepsMut,
@@ -98,16 +90,6 @@ pub fn instantiate(
 /// values); no submessages are dispatched in v7.  On failure a stable
 /// [`ContractError`] discriminant is returned — see [`crate::error`] for
 /// the ABI-stable ordering.
-///
-/// # @notice
-/// Only the variants listed above are supported in v7.  Sending a variant
-/// not in the table is a Rust-level compile error for callers (schema-based
-/// clients will never generate an unknown tag).
-///
-/// # @dev
-/// Each inner helper is intentionally exposed as a free `pub fn` so it can
-/// be unit-tested in isolation without constructing an [`ExecuteMsg`] enum;
-/// the single `match` statement here is the sole point of dispatch.
 #[entry_point]
 pub fn execute(
     deps: DepsMut,
@@ -236,18 +218,6 @@ pub fn execute(
 /// | `StdError::ParseErr` / `ContractError::Std(_)` | `collateral_amount` or `credit_amount` is not a valid `Uint128` |
 /// | `StdError::AddrParseErr` / `ContractError::Std(_)` | `borrower` is not a valid bech32 address |
 /// | `StdError::SerializeErr` / `StdError::StorageErr` | underlying `cw-storage-plus` I/O failure |
-///
-/// # @notice
-/// Credit lines are **immutable once created** in v7 — there is no
-/// `UpdateCreditLine` execute variant.  To adjust a line the admin must
-/// open a new line with corrected parameters and migrate the borrower
-/// off-chain.
-///
-/// # @dev
-/// Storage writes are sequenced (counter → line → reverse lookup) so that a
-/// partially-failed write never leaves orphan state: if `BORROWER_TO_ID`
-/// fails to persist the line itself still exists and can be recovered via
-/// `enumerate credit_lines`.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_create_credit_line(
     deps: DepsMut,
@@ -344,17 +314,6 @@ pub fn execute_create_credit_line(
 /// | [`ContractError::OverLimit`] | `outstanding + amount` would exceed `credit_line.credit_amount` |
 /// | `StdError::ParseErr` / `ContractError::Std(_)` | `amount` is not a valid `Uint128` |
 /// | Storage I/O errors | propagated from `cw-storage-plus` |
-///
-/// # @notice
-/// Utilization is the sum of unrepaid draw amounts on the line. A draw that
-/// would push that sum strictly above `credit_amount` is rejected before any
-/// `DRAWS` / audit write. Drawing exactly up to `credit_amount` is allowed.
-///
-/// # @dev
-/// The draw audit trail is initialized with a single `DrawCreated`
-/// entry at sequence `0`.  Every subsequent audit mutation appends;
-/// sequence numbers are therefore a monotonic counter of audit events
-/// per draw.
 pub fn execute_create_draw(
     deps: DepsMut,
     env: Env,
@@ -477,18 +436,6 @@ pub fn execute_create_draw(
 /// [`Uint128::multiply_ratio`] (lossless integer cross-multiplication
 /// before division).  When `fee_bps` is unset or zero the fee branch is
 /// skipped entirely — no `protocol_fee_skimmed` attribute is emitted.
-///
-/// # @notice
-/// Idempotency: re-calling `execute_repay_draw` on an already-repaid
-/// draw succeeds but charges the protocol fee **again** — frontends
-/// should check `Draw.repaid` via the audit trail query before invoking.
-///
-/// # @dev
-/// The `DepsMut` is copied via `.branch()` for fee accrual so that a
-/// failure in the fee sub-system does **not** prevent the repayment
-/// flag from being persisted (the user's debt should clear even if the
-/// treasury accounting temporarily misbehaves; the fee under-accrual is
-/// a detectable bookkeeping delta repaired off-chain).
 pub fn execute_repay_draw(
     mut deps: DepsMut,
     env: Env,
@@ -584,16 +531,6 @@ pub fn execute_repay_draw(
 /// |---|---|
 /// | [`ContractError::Unauthorized`] | `info.sender != CONFIG.owner` |
 /// | [`ContractError::DrawNotFound`] | `(credit_line_id, draw_id)` does not exist |
-///
-/// # @notice
-/// Memos are **immutable once written**.  To correct a typo the admin
-/// must append a second memo with the correction; the full ordered
-/// trail remains visible to auditors via [`query_draw_audit_trail`].
-///
-/// # @dev
-/// The `by` field on the audit entry captures the admin's address so
-/// indexers can attribute notes to specific signers in a multi-sig
-/// setup.
 pub fn execute_add_audit_memo(
     deps: DepsMut,
     env: Env,
@@ -660,16 +597,6 @@ pub fn execute_add_audit_memo(
 /// |---|---|
 /// | [`ContractError::Unauthorized`] | `info.sender != CONFIG.owner` |
 /// | Errors from [`handshake::set_protocol_version`] | propagated on storage I/O failure |
-///
-/// # @notice
-/// Bumping `major` is a front-page announcement — every downstream
-/// client that keys off the handshake value will detect a breaking
-/// change.  Prefer a `minor` bump for additive changes.
-///
-/// # @dev
-/// The `handshake` module is shared between `creditra-credit` and the
-/// outer contracts; updating the version here is visible to every
-/// re-export site via the `pub use creditra_credit::*` glob.
 pub fn execute_update_protocol_version(
     deps: DepsMut,
     info: MessageInfo,
@@ -1009,26 +936,16 @@ fn append_audit_entry(
 /// returned (note: contract-level [`ContractError`] values from the view
 /// helpers are **not** ABI-stable through the query boundary — they are
 /// stringified via `.to_string()` into `StdError::GenericErr`).
-///
-/// # @notice
-/// Callers SHOULD prefer the direct pub view helpers
-/// ([`views::query_draw_audit_trail`] et al.) when composing from within
-/// another Rust contract; the query endpoint is for off-chain consumers
-/// and CW20-style cross-contract `WasmQuery` calls.
-///
-/// # @dev
-/// The three inline reads (`GetOracleQuorumConfig`, `GetOraclePrice`,
-/// `GetLateFeeConfig`) are trivial `may_load` calls and are intentionally
-/// expanded here rather than routed through sub-modules to keep the
-/// dispatch table a single match block for auditability.
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::DrawAuditTrail {
             credit_line_id,
             draw_id,
+            start_after,
+            limit,
         } => {
-            let resp = views::query_draw_audit_trail(deps, credit_line_id, draw_id)
+            let resp = views::query_draw_audit_trail(deps, credit_line_id, draw_id, start_after, limit)
                 .map_err(|e| StdError::generic_err(e.to_string()))?;
             to_json_binary(&resp)
         }

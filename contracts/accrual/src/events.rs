@@ -28,7 +28,7 @@
 //!
 //! # See also
 //! - [`creditra_credit::events`] — the credit contract's event definitions.
-//! - [`docs/EVENTS_CATALOG.md`](../../../docs/EVENTS_CATALOG.md) — canonical event catalog.
+//! - [`docs/EVENT_CATALOG.md`](../../../docs/EVENT_CATALOG.md) — canonical event catalog.
 
 use soroban_sdk::{contracttype, symbol_short, Address, Env};
 

@@ -25,10 +25,11 @@
 //!
 //! # Backward compatibility
 //!
-//! `AprBased(AprFeeConfig { surcharge_bps: 0 })` is a no-op (zero fee),
-//! matching the pre-604 default.  Any existing `PenaltySurchargeBps` storage
-//! value is unaffected; callers that only use the legacy `PenaltySurchargeBps`
-//! key continue to work without change.
+//! `AprBased(AprFeeConfig { surcharge_bps: 0 })` is a no-op (zero fee).
+//! When a structured config exists, it overrides both legacy fee keys:
+//! `Flat` disables the legacy APR surcharge, and `AprBased` disables the
+//! legacy flat fee and replaces the legacy APR bps. Removing the config
+//! restores both legacy settings without changing their stored values.
 //!
 //! # API change summary (issue #604)
 //!
@@ -115,8 +116,8 @@ pub enum LateFeeConfig {
     Flat(FlatFeeConfig),
     /// Additive APR surcharge applied to delinquent lines during accrual.
     ///
-    /// This preserves the existing `PenaltySurchargeBps` behaviour.
-    /// `surcharge_bps` must be in `0..=10_000`.
+    /// Uses the existing delinquent-accrual path, overriding the legacy
+    /// `PenaltySurchargeBps` value. `surcharge_bps` must be in `0..=10_000`.
     AprBased(AprFeeConfig),
 }
 

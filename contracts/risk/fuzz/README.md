@@ -15,8 +15,18 @@ This directory contains the `cargo-fuzz` target for testing the Creditra Risk Ad
 5. **Overflow Safety**: All timestamp and cooldown math uses overflow-safe arithmetic without panicking.
 6. **No Unwraps**: Production call paths do not panic unexpectedly on arbitrary fuzz inputs.
 
-## Running the Fuzzer
+## Running the Fuzzer Locally
 
 ```bash
-cargo fuzz run --manifest-path contracts/risk/fuzz/Cargo.toml main -- -max_total_time=60
+# Install the nightly toolchain and cargo-fuzz once.
+rustup toolchain install nightly
+cargo +nightly install cargo-fuzz --locked
+
+# Build every fuzz target before running it.
+cargo +nightly fuzz build --manifest-path contracts/risk/fuzz/Cargo.toml
+
+# Run the risk fuzz target for a fixed time budget.
+cargo +nightly fuzz run --manifest-path contracts/risk/fuzz/Cargo.toml main -- -max_total_time=60
 ```
+
+The generated crashes are written under the fuzz target's `artifacts/` directory, which is also where the CI job uploads any findings.

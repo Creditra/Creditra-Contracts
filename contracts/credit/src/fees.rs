@@ -9,8 +9,12 @@
 //! - **Treasury** — withdrawable via `withdraw_treasury` to `TreasuryAddress`.
 //! - **Bounty pool** — withdrawable via `withdraw_bounty` to `BountyAddress`.
 //!
-//! The treasury share is computed with floor rounding; the bounty pool receives
-//! the remainder so no tokens are lost to integer division.
+//! The split is delegated to [`crate::math_utils::split_conserving`], which
+//! apportions by largest remainder: each side is floored and the leftover base
+//! unit (at most one) goes to the recipient with the larger fractional claim,
+//! ties broken by bucket order (treasury first). The two shares always sum
+//! exactly to `total_fee`, so no tokens are created or lost to integer
+//! division. See `docs/treasury.md` §3.
 
 use crate::math_utils::split_conserving;
 use soroban_sdk::{Address, Env};

@@ -6,7 +6,7 @@ description = "Creditra risk admin cooldown contract for GrantFox FWC26 campaign
 license = "MIT"
 keywords = ["soroban", "stellar", "risk", "admin", "cooldown"]
 categories = ["cryptography::cryptocurrencies", "finance", "no-std"]
-readme = "../../README.md"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -43,10 +43,10 @@
 //! | `set_penalty_surcharge_bps`  | admin (existing)        |
 //! | `update_risk_parameters`     | admin (existing)        |
 
-use creditra_credit::types::CreditStatus;
+use creditra_credit::types::{ContractError, CreditStatus};
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{token, Address, Env};
+use soroban_sdk::testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke};
+use soroban_sdk::{token, Address, Env, IntoVal};
 
 /// Positive-test environment: `mock_all_auths` enabled, token wired up,
 /// one credit line open for `borrower` in Active state.
@@ -109,6 +109,62 @@ fn setup_no_mock() -> (Env, CreditClient<'static>, Address, Address) {
     }
     // mock_all_auths is scoped: after the block, new invocations require real auth.
     (env, client, admin, borrower)
+}
+
+#[test]
+fn set_treasury_requires_one_configured_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(Credit, ());
+    let client = CreditClient::new(&env, &contract_id);
+    client.init(&admin);
+    let treasury = Address::generate(&env);
+
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_treasury",
+                args: (admin.clone(), treasury.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_treasury(&admin, &treasury);
+
+    let auths = env.auths();
+    assert_eq!(auths.len(), 1, "the entrypoint must request one auth");
+    assert_eq!(auths.last().unwrap().0, admin);
+    insta::assert_debug_snapshot!(auths.last().unwrap());
+}
+
+#[test]
+fn set_treasury_rejects_a_mismatched_admin_argument() {
+    let (env, client, _admin, _borrower) = setup();
+    let non_admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    let result = client.try_set_treasury(&non_admin, &treasury);
+
+    assert!(result.is_err(), "a non-admin argument must be rejected");
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::Unauthorized.into()
+    );
+}
+
+#[test]
+fn block_borrower_rejects_a_mismatched_admin_argument() {
+    let (env, client, _admin, borrower) = setup();
+    let non_admin = Address::generate(&env);
+
+    let result = client.try_block_borrower(&non_admin, &borrower);
+
+    assert!(result.is_err(), "a non-admin argument must be rejected");
+    assert_eq!(
+        result.err().unwrap().unwrap(),
+        ContractError::Unauthorized.into()
+    );
 }
 
 #[test]
@@ -402,4 +458,21 @@ fn settle_default_liquidation_without_admin_auth_panics() {
     }
     let settlement_id = Symbol::new(&env, "settle01");
     client.settle_default_liquidation(&borrower, &1_000_i128, &settlement_id, &10_000_u32, &None);
+}
+
+/// Regression for the unblock path (Issue #1281): `set_borrower_blocked(false)`
+/// used to bump the TTL of the key it had just removed, which reverts with
+/// `Storage(MissingValue)`. Unblocking must succeed and be idempotent.
+#[test]
+fn unblock_borrower_is_idempotent() {
+    let (env, client, admin, borrower) = setup();
+    client.block_borrower(&admin, &borrower);
+    assert!(client.is_borrower_blocked(&borrower));
+
+    client.unblock_borrower(&admin, &borrower);
+    assert!(!client.is_borrower_blocked(&borrower));
+
+    env.ledger().set_timestamp(10_000);
+    client.unblock_borrower(&admin, &borrower);
+    assert!(!client.is_borrower_blocked(&borrower));
 }

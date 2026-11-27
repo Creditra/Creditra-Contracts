@@ -8,7 +8,7 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 CHECK="$PWD/scripts/check-wasm-size.sh"
-THRESHOLD=102400
+THRESHOLD=51200
 
 run_check() {
     THRESHOLD_BYTES="$THRESHOLD" WASM_DIR="$ROOT" bash "$CHECK" --check-only

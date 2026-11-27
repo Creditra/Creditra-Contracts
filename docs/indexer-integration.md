@@ -9,7 +9,7 @@ This guide explains how indexers subscribe to Credit contract events and decode:
 - `DefaultLiquidationRequestedEvent`
 - `DefaultLiquidationSettledEvent`
 
-Source of truth for schemas: `docs/EVENTS_CATALOG.md`.
+Source of truth for schemas: [`docs/EVENT_CATALOG.md`](./EVENT_CATALOG.md).
 
 ---
 

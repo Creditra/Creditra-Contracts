@@ -104,10 +104,10 @@ fn variant_count_is_known() {
 ///
 /// If this test ever fails, the published collateral catalog has drifted
 /// out of sync with the canonical credit contract table, and SDK
-/// consumers matching against [`docs/ERROR_CODES.md`][1] would decode an
+/// consumers matching against [`docs/errors.md`][1] would decode an
 /// emitted error to the wrong variant.
 ///
-/// [1]: ../../../docs/ERROR_CODES.md
+/// [1]: ../../../docs/errors.md
 #[test]
 fn mirror_matches_canonical_credit_contract_error_table() {
     // The following are the canonical contracts/credit/src/types.rs
@@ -140,7 +140,7 @@ fn mirror_matches_canonical_credit_contract_error_table() {
 
 /// Verify the collateral-specific tier reserves codes `>= 100`. This is
 /// the second line of defence against future renumbering that would
-/// collide with the credit contract's `1..=49` range.
+/// collide with the credit contract's `1..=63` range.
 #[test]
 fn collateral_specific_tier_starts_at_or_above_one_hundred() {
     let codes = [

@@ -4,9 +4,10 @@
 //!
 //! # What
 //!
-//! Two tiny helpers — [`require_admin`] (read-only lookup) and
-//! [`require_admin_auth`] (lookup + `require_auth()`) — that gate every
-//! admin entrypoint in the contract.
+//! Three small helpers — [`require_admin`] (read-only lookup),
+//! [`require_admin_auth`] (lookup + `require_auth()`), and
+//! [`require_admin_auth_with_argument`] (argument equality check + one auth) —
+//! that gate admin entrypoints in the contract.
 //!
 //! # How
 //!
@@ -14,16 +15,17 @@
 //! panics with [`crate::types::ContractError::AdminNotInitialized`] if the
 //! slot is empty. `require_admin_auth` additionally invokes
 //! `admin.require_auth()`, which delegates to the Soroban host's
-//! authorization framework — the host verifies that the transaction is
-//! signed (or auth-entry attested) by the admin address before the
-//! function returns.
+//! authorization framework. Entry points retaining a caller-supplied `admin`
+//! argument use `require_admin_auth_with_argument`: it checks that the
+//! argument equals the stored admin, returns `Unauthorized` on mismatch, and
+//! authorizes the stored admin exactly once.
 //!
 //! # Why
 //!
-//! Concentrating auth here means every admin-gated entrypoint in
-//! [`crate::lib`] reads exactly one line — `require_admin_auth(&env)` —
-//! to enforce the auth policy. Adding a new admin-gated entrypoint is
-//! mechanical and cannot accidentally skip the check.
+//! Concentrating auth here means admin-gated entrypoints in [`crate::lib`]
+//! use one of these helpers rather than reimplementing authorization checks.
+//! Adding a new admin-gated entrypoint is mechanical and cannot accidentally
+//! skip the check or authorize an unvalidated admin argument.
 //!
 //! Admin rotation is two-step (`propose_admin` → `accept_admin` with a
 //! configurable delay) and is implemented in [`crate::lib`] rather than
@@ -72,6 +74,24 @@ pub fn require_admin(env: &Env) -> Address {
 /// - **Key**: `Symbol("admin")`
 pub fn require_admin_auth(env: &Env) -> Address {
     let admin = require_admin(env);
+    admin.require_auth();
+    admin
+}
+
+/// Require that the supplied admin argument is the configured admin and
+/// authorize that address exactly once.
+///
+/// Entrypoints that retain an `admin: Address` argument for API compatibility
+/// must not authorize the argument and then independently authorize the
+/// configured admin. Besides creating a duplicate auth requirement, that
+/// pattern can allow a mismatched argument to request authorization for an
+/// unrelated address. Compare first, return `Unauthorized` on mismatch, then
+/// authorize only the configured admin.
+pub fn require_admin_auth_with_argument(env: &Env, provided_admin: &Address) -> Address {
+    let admin = require_admin(env);
+    if provided_admin != &admin {
+        env.panic_with_error(crate::types::ContractError::Unauthorized);
+    }
     admin.require_auth();
     admin
 }

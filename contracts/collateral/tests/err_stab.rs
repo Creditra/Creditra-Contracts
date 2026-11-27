@@ -31,7 +31,7 @@
 //!   next available integer **and** add corresponding assertions here.
 //! - Mirror-tier codes MUST stay identical to the canonical
 //!   `ContractError` table in `contracts/credit/src/types.rs` /
-//!   [`docs/ERROR_CODES.md`](../../../docs/ERROR_CODES.md).
+//!   [`docs/errors.md`](../../../docs/errors.md).
 //!
 //! # See also
 //! - [`creditra_collateral::CollateralError`] — the published catalog.
@@ -79,7 +79,7 @@ fn collateral_v7_error_discriminants_are_pinned() {
 
 /// Mirror-tier codes must stay byte-identical to the canonical credit
 /// `ContractError` discriminants published in
-/// `contracts/credit/src/types.rs` / `docs/ERROR_CODES.md`.
+/// `contracts/credit/src/types.rs` / `docs/errors.md`.
 ///
 /// These constants are the documented canonical values. Pinning them here
 /// (rather than importing `creditra_credit`) keeps this suite buildable
@@ -174,7 +174,7 @@ fn collateral_v7_subset_variant_count_is_known() {
 }
 
 /// Collateral-specific tier must stay in the reserved `100+` namespace so it
-/// never collides with the credit contract's `1..=49` `ContractError` range.
+/// never collides with the credit contract's `1..=63` `ContractError` range.
 #[test]
 fn collateral_v7_specific_tier_stays_in_100_plus_namespace() {
     let codes = [

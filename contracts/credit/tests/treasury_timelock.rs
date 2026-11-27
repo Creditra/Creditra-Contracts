@@ -6,13 +6,14 @@
 //! - Proposal creation and stored field correctness
 //! - Authorization enforcement on both entrypoints
 //! - Timelock boundary: before / exactly-at / after 24 hours
-//! - Successful execution: funds transferred, balance cleared, proposal removed
+//! - Successful execution: snapshot transferred, newer fees retained, proposal removed
 //! - Replay prevention after execution
 //! - Edge cases: no proposal, duplicate proposal, zero-balance proposal
 
+use creditra_credit::events::TreasuryWithdrawalExecutedEvent;
 use creditra_credit::{Credit, CreditClient};
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{token, Address, Env};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
+use soroban_sdk::{token, Address, Env, TryFromVal};
 
 const TIMELOCK: u64 = 86_400; // 24 hours in seconds
 
@@ -26,7 +27,6 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
-    let reserve = Address::generate(&env);
     let treasury = Address::generate(&env);
 
     let contract_id = env.register(Credit, ());
@@ -37,13 +37,15 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
     let token_address = token_id.address();
 
     client.set_liquidity_token(&token_address);
-    client.set_liquidity_source(&reserve);
+    client.set_liquidity_source(&contract_id);
     client.set_treasury(&admin, &treasury);
     client.set_protocol_fee_bps(&1_000); // 10 % fee so repayments build a balance
 
     // Open a line, draw, advance time so interest accrues, then repay with fee.
     client.open_credit_line(&borrower, &10_000_i128, &1_000_u32, &50_u32);
     let asset = token::StellarAssetClient::new(&env, &token_address);
+    asset.mint(&borrower, &30_000_i128);
+    client.deposit_collateral(&borrower, &30_000_i128);
     asset.mint(&contract_id, &10_000_i128); // fund reserve
     client.draw_credit(&borrower, &10_000_i128);
 
@@ -51,7 +53,7 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
 
     let repay = 11_000_i128;
     asset.mint(&borrower, &repay);
-    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &u32::MAX);
+    token::Client::new(&env, &token_address).approve(&borrower, &contract_id, &repay, &6_000_000);
     client.repay_credit(&borrower, &repay);
 
     // Sanity: contract holds a treasury balance now.
@@ -64,6 +66,17 @@ fn setup_with_balance() -> (Env, Address, Address, Address) {
     (env, contract_id, token_address, treasury)
 }
 
+/// The configured admin. Admin entrypoints that take an `admin` argument
+/// require it to match the stored admin (`require_admin_auth_with_argument`).
+fn stored_admin(env: &Env, contract_id: &Address) -> Address {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .get(&creditra_credit::storage::admin_key(env))
+            .expect("admin initialized")
+    })
+}
+
 // ── Proposal tests ───────────────────────────────────────────────────────────
 
 #[test]
@@ -74,7 +87,7 @@ fn proposal_stores_correct_fields() {
     let now = 31_536_000_u64;
     env.ledger().with_mut(|l| l.timestamp = now);
 
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
     client.propose_treasury_withdrawal(&admin);
 
     let proposal = client
@@ -93,7 +106,7 @@ fn proposal_captures_current_treasury_balance() {
 
     let balance_before = client.get_protocol_summary().treasury_balance;
 
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
     client.propose_treasury_withdrawal(&admin);
 
     let proposal = client.get_pending_treasury_withdrawal().unwrap();
@@ -117,7 +130,7 @@ fn no_proposal_returns_none() {
 fn duplicate_proposal_is_rejected() {
     let (env, contract_id, _token, _treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     client.propose_treasury_withdrawal(&admin);
     client.propose_treasury_withdrawal(&admin); // must panic with TreasuryProposalExists
@@ -143,7 +156,7 @@ fn propose_requires_treasury_configured() {
 fn execute_before_timelock_is_rejected() {
     let (env, contract_id, _token, _treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     let now = 100_000_u64;
     env.ledger().with_mut(|l| l.timestamp = now);
@@ -158,7 +171,7 @@ fn execute_before_timelock_is_rejected() {
 fn execute_exactly_at_timelock_succeeds() {
     let (env, contract_id, token_address, treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     let now = 100_000_u64;
     env.ledger().with_mut(|l| l.timestamp = now);
@@ -176,7 +189,7 @@ fn execute_exactly_at_timelock_succeeds() {
 fn execute_after_timelock_succeeds() {
     let (env, contract_id, token_address, treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
     client.propose_treasury_withdrawal(&admin);
@@ -195,7 +208,7 @@ fn execute_after_timelock_succeeds() {
 fn execute_transfers_full_proposed_amount() {
     let (env, contract_id, token_address, treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     let expected = client.get_protocol_summary().treasury_balance;
 
@@ -213,7 +226,7 @@ fn execute_transfers_full_proposed_amount() {
 fn execute_clears_proposal_and_treasury_balance() {
     let (env, contract_id, _token, _treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
     client.propose_treasury_withdrawal(&admin);
@@ -228,11 +241,81 @@ fn execute_clears_proposal_and_treasury_balance() {
 }
 
 #[test]
+fn fees_accrued_after_proposal_remain_in_treasury_balance() {
+    let (env, contract_id, token_address, treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+    let proposed_at = env.ledger().timestamp();
+    client.propose_treasury_withdrawal(&admin);
+    let proposed_amount = client.get_pending_treasury_withdrawal().unwrap().amount;
+
+    // A second borrower repays with interest while the proposal is pending.
+    let borrower = Address::generate(&env);
+    client.open_credit_line(&borrower, &10_000_i128, &1_000_u32, &50_u32);
+    let asset = token::StellarAssetClient::new(&env, &token_address);
+    asset.mint(&borrower, &30_000_i128);
+    client.deposit_collateral(&borrower, &30_000_i128);
+    asset.mint(&contract_id, &10_000_i128);
+    client.draw_credit(&borrower, &10_000_i128);
+    env.ledger()
+        .with_mut(|l| l.timestamp = proposed_at + 31_536_000);
+    asset.mint(&borrower, &11_000_i128);
+    token::Client::new(&env, &token_address).approve(
+        &borrower,
+        &contract_id,
+        &11_000_i128,
+        &6_000_000,
+    );
+    client.repay_credit(&borrower, &11_000_i128);
+
+    let balance_at_execution = client.get_protocol_summary().treasury_balance;
+    assert!(balance_at_execution > proposed_amount);
+    client.execute_treasury_withdrawal(&admin);
+
+    let events = env.events().all();
+    let (_, _, data) = events.get(events.len() - 1).unwrap();
+    let executed = TreasuryWithdrawalExecutedEvent::try_from_val(&env, &data).unwrap();
+    assert_eq!(executed.amount, proposed_amount);
+    assert_eq!(
+        executed.remaining_balance,
+        balance_at_execution - proposed_amount
+    );
+    assert_eq!(
+        token::Client::new(&env, &token_address).balance(&treasury),
+        proposed_amount
+    );
+    assert_eq!(
+        client.get_protocol_summary().treasury_balance,
+        balance_at_execution - proposed_amount
+    );
+    assert!(client.get_pending_treasury_withdrawal().is_none());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #65)")] // InsufficientTreasuryBalance
+fn execution_reverts_if_balance_fell_below_snapshot() {
+    let (env, contract_id, _token_address, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+    let proposed_at = env.ledger().timestamp();
+    client.propose_treasury_withdrawal(&admin);
+
+    // `withdraw_treasury` is timelocked now, so simulate the recorded balance
+    // falling below the proposal snapshot directly in storage.
+    env.as_contract(&contract_id, || {
+        creditra_credit::storage::clear_treasury_balance(&env);
+    });
+    env.ledger()
+        .with_mut(|l| l.timestamp = proposed_at + TIMELOCK);
+    client.execute_treasury_withdrawal(&admin);
+}
+
+#[test]
 #[should_panic]
 fn replay_execution_is_rejected() {
     let (env, contract_id, _token, _treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
     client.propose_treasury_withdrawal(&admin);
@@ -289,7 +372,7 @@ fn zero_balance_proposal_executes_without_token_transfer() {
 fn new_proposal_allowed_after_execution() {
     let (env, contract_id, _token, _treasury) = setup_with_balance();
     let client = CreditClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
+    let admin = stored_admin(&env, &contract_id);
 
     env.ledger().with_mut(|l| l.timestamp = 100_000);
     client.propose_treasury_withdrawal(&admin);
@@ -300,4 +383,78 @@ fn new_proposal_allowed_after_execution() {
     env.ledger().with_mut(|l| l.timestamp = 200_000);
     client.propose_treasury_withdrawal(&admin); // must not panic
     assert!(client.get_pending_treasury_withdrawal().is_some());
+}
+
+// ── Instant sweep is gated behind the timelock (issue #1221) ────────────────
+
+/// `withdraw_treasury` must not sweep without a pending proposal.
+#[test]
+#[should_panic(expected = "Error(Contract, #42)")] // NoPendingTreasuryWithdrawal
+fn withdraw_treasury_without_proposal_reverts() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+
+    // No proposal was ever made — the legacy entrypoint must not move funds.
+    client.withdraw_treasury(&admin);
+}
+
+/// A pending but immature proposal is not enough either.
+#[test]
+#[should_panic(expected = "Error(Contract, #43)")] // TreasuryTimelockActive
+fn withdraw_treasury_before_timelock_reverts() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+
+    let now = 100_000_u64;
+    env.ledger().with_mut(|l| l.timestamp = now);
+    client.propose_treasury_withdrawal(&admin);
+
+    // One second before the unlock the sweep must still revert.
+    env.ledger().with_mut(|l| l.timestamp = now + TIMELOCK - 1);
+    client.withdraw_treasury(&admin);
+}
+
+/// Once matured, the legacy entrypoint performs the same single transfer as
+/// `execute_treasury_withdrawal` and consumes the proposal.
+#[test]
+fn withdraw_treasury_after_timelock_executes_the_matured_proposal() {
+    let (env, contract_id, token_address, treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+
+    let expected = client.get_protocol_summary().treasury_balance;
+    assert!(expected > 0, "setup must seed a treasury balance");
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000);
+    client.propose_treasury_withdrawal(&admin);
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
+    client.withdraw_treasury(&admin);
+
+    // Exactly the proposed amount reached the treasury address…
+    assert_eq!(
+        token::Client::new(&env, &token_address).balance(&treasury),
+        expected
+    );
+    // …the proposal is spent, and the on-chain accumulator is cleared.
+    assert!(client.get_pending_treasury_withdrawal().is_none());
+    assert_eq!(client.get_protocol_summary().treasury_balance, 0);
+}
+
+/// A second sweep after execution has nothing to execute.
+#[test]
+#[should_panic(expected = "Error(Contract, #42)")] // NoPendingTreasuryWithdrawal
+fn withdraw_treasury_cannot_be_replayed() {
+    let (env, contract_id, _token, _treasury) = setup_with_balance();
+    let client = CreditClient::new(&env, &contract_id);
+    let admin = stored_admin(&env, &contract_id);
+
+    env.ledger().with_mut(|l| l.timestamp = 100_000);
+    client.propose_treasury_withdrawal(&admin);
+    env.ledger().with_mut(|l| l.timestamp = 100_000 + TIMELOCK);
+    client.withdraw_treasury(&admin);
+
+    client.withdraw_treasury(&admin);
 }
